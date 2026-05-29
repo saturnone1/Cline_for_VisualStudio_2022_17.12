@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet
+packages/
+*.nupkg
+
+# VSIX output
+*.vsix
+
+# Rider / JetBrains
+.idea/
+
+# macOS
+.DS_Store
