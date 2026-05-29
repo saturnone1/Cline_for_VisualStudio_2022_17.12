@@ -1,26 +1,50 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
 
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <!-- WPF + C# project type GUIDs -->
+    <ProjectTypeGuids>{60DC8134-EBA5-43B8-BCC9-BB4BC16C2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <OutputType>Library</OutputType>
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>VsClineAgent</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- VSIX 생성 설정 -->
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
     <UseCodebase>true</UseCodebase>
-    <UseWPF>true</UseWPF>
     <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
     <IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
     <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
     <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
     <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
     <CreateVsixContainer>true</CreateVsixContainer>
-    <!-- SDK-style 프로젝트는 기본적으로 bin\Release\net472\ 에 출력하지만
-         VSSDK 빌드 도구는 bin\Release\ 를 기대하므로 TFM 서브폴더를 끔 -->
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <!-- NuGet 패키지 참조 -->
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.6.36389" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.6.2164" />
@@ -28,15 +52,67 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
-  <!-- net472 SDK-style 프로젝트에서 자동 포함되지 않는 BCL 어셈블리 -->
+  <!-- BCL + WPF 어셈블리 참조 -->
   <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Runtime.Serialization" />
-    <!-- OleMenuCommandService 베이스 클래스(MenuCommandService) 해결 -->
     <Reference Include="System.Design" />
+    <!-- WPF (UseWPF 대신 명시적 참조) -->
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
   </ItemGroup>
 
+  <!-- C# 소스 파일 -->
+  <ItemGroup>
+    <Compile Include="Agent\AgentController.cs" />
+    <Compile Include="Agent\AssistantMessage\AssistantMessageParser.cs" />
+    <Compile Include="Agent\AssistantMessage\AssistantMessageTypes.cs" />
+    <Compile Include="Agent\AssistantMessage\DiffApplier.cs" />
+    <Compile Include="Agent\LlmClient.cs" />
+    <Compile Include="Agent\Models\ChatMessage.cs" />
+    <Compile Include="Agent\Models\LlmModels.cs" />
+    <Compile Include="Agent\Prompts\FormatResponse.cs" />
+    <Compile Include="Agent\Prompts\SystemPrompt.cs" />
+    <Compile Include="Agent\Tools\AskFollowupQuestionTool.cs" />
+    <Compile Include="Agent\Tools\AttemptCompletionTool.cs" />
+    <Compile Include="Agent\Tools\ExecuteCommandTool.cs" />
+    <Compile Include="Agent\Tools\IAgentTool.cs" />
+    <Compile Include="Agent\Tools\ListCodeDefinitionsTool.cs" />
+    <Compile Include="Agent\Tools\ListFilesTool.cs" />
+    <Compile Include="Agent\Tools\ReadFileTool.cs" />
+    <Compile Include="Agent\Tools\ReplaceInFileTool.cs" />
+    <Compile Include="Agent\Tools\SearchFilesTool.cs" />
+    <Compile Include="Agent\Tools\ToolRegistry.cs" />
+    <Compile Include="Agent\Tools\ToolResult.cs" />
+    <Compile Include="Agent\Tools\WriteFileTool.cs" />
+    <Compile Include="Commands\OpenChatWindowCommand.cs" />
+    <Compile Include="Guids.cs" />
+    <Compile Include="Services\AgentSettings.cs" />
+    <Compile Include="Services\SettingsService.cs" />
+    <Compile Include="Services\VsEditorService.cs" />
+    <Compile Include="ToolWindows\ChatToolWindow.cs" />
+    <Compile Include="ToolWindows\ChatToolWindowControl.xaml.cs">
+      <DependentUpon>ChatToolWindowControl.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="VsClineAgentPackage.cs" />
+  </ItemGroup>
+
+  <!-- WPF XAML -->
+  <ItemGroup>
+    <Page Include="ToolWindows\ChatToolWindowControl.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <!-- VSCT (메뉴 커맨드) -->
   <ItemGroup>
     <VSCTCompile Include="VsClineAgentPackage.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
@@ -44,12 +120,14 @@
     </VSCTCompile>
   </ItemGroup>
 
+  <!-- VSIX 매니페스트 -->
   <ItemGroup>
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </None>
   </ItemGroup>
 
+  <!-- WebApp 콘텐츠 (VSIX에 포함) -->
   <ItemGroup>
     <Content Include="WebApp\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -57,14 +135,11 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup>
-    <Page Update="ToolWindows\ChatToolWindowControl.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Compile Update="ToolWindows\ChatToolWindowControl.xaml.cs">
-      <DependentUpon>ChatToolWindowControl.xaml</DependentUpon>
-    </Compile>
-  </ItemGroup>
-
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- WPF XAML 컴파일 타겟 -->
+  <Import Project="$(MSBuildToolsPath)\Microsoft.WinFX.targets"
+          Condition="Exists('$(MSBuildToolsPath)\Microsoft.WinFX.targets')" />
+  <!-- VSSDK 빌드 타겟: VS 설치 경로 또는 NuGet 패키지에서 임포트 -->
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
+          Condition="'$(VSToolsPath)' != '' And Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
 </Project>
