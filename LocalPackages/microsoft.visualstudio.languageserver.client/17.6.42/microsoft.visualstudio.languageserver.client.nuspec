@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.LanguageServer.Client</id>
+    <version>17.6.42</version>
+    <title>Microsoft.VisualStudio.LanguageServer.Client</title>
+    <authors>Microsoft</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">license.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vslsp</projectUrl>
+    <description>Visual Studio client side APIs for interacting with a Language Server Protocol enabled server.</description>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>Microsoft VisualStudio LanguageServer Language Server Client VSSDK</tags>
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.VisualStudio.CoreUtility" version="17.6.252" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.Logic" version="17.6.252" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities" version="17.6.35829" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Validation" version="17.6.11" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.26" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.ComponentModelHost" version="17.6.252" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.ImageCatalog" version="17.6.35829" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Interop" version="17.6.35829" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RpcContracts" version="17.6.13" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Telemetry" version="17.6.28" exclude="Build,Analyzers" />
+        <dependency id="Nerdbank.Streams" version="2.9.112" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.3" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.VisualStudio.CoreUtility" version="17.6.252" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.Logic" version="17.6.252" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities" version="17.6.35829" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Validation" version="17.6.11" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.26" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RpcContracts" version="17.6.13" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Telemetry" version="17.6.28" exclude="Build,Analyzers" />
+        <dependency id="Nerdbank.Streams" version="2.9.112" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.3" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>
