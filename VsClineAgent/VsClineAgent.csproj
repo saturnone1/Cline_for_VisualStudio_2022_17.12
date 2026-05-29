@@ -45,11 +45,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Page Include="ToolWindows\ChatToolWindowControl.xaml">
+    <Page Update="ToolWindows\ChatToolWindowControl.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Compile Include="ToolWindows\ChatToolWindowControl.xaml.cs">
+    <Compile Update="ToolWindows\ChatToolWindowControl.xaml.cs">
       <DependentUpon>ChatToolWindowControl.xaml</DependentUpon>
     </Compile>
   </ItemGroup>
