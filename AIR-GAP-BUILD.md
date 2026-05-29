@@ -79,11 +79,12 @@ VsClineAgent\
 3. **Build → Build Solution** (`Ctrl+Shift+B`)
 4. `VsClineAgent\bin\Release\VsClineAgent.vsix` 생성 확인
 
+> 만약 `bin\Release\` 에 없으면 `bin\Release\net472\VsClineAgent.vsix` 도 확인하세요.
+
 ### 방법 B: 명령줄
 ```powershell
 cd VsClineAgent
-dotnet restore VsClineAgent.sln --packages .\LocalPackages --no-cache
-msbuild VsClineAgent.sln /p:Configuration=Release
+msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPath=.\LocalPackages
 ```
 
 ---
