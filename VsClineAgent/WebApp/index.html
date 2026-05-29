@@ -1,84 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VS AI Agent</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-
-  <!-- Header -->
-  <div id="header">
-    <div id="status-indicator" class="idle" title="Agent status"></div>
-    <div id="header-title">AI Agent</div>
-    <button id="btn-stop" title="Stop agent">■</button>
-    <button id="btn-clear" title="Clear history">🗑</button>
-    <button id="btn-settings" title="Settings">⚙</button>
-  </div>
-
-  <!-- Context bar (workspace path) -->
-  <div id="context-bar"></div>
-
-  <!-- Settings panel -->
-  <div id="overlay"></div>
-  <div id="settings-panel">
-    <h3>Settings</h3>
-
-    <div class="setting-row">
-      <label class="setting-label" for="s-baseurl">LLM Base URL</label>
-      <input id="s-baseurl" class="setting-input" type="text"
-             placeholder="http://localhost:11434/v1" />
-    </div>
-    <div class="setting-row">
-      <label class="setting-label" for="s-model">Model Name</label>
-      <input id="s-model" class="setting-input" type="text"
-             placeholder="qwen3-coder:latest" />
-    </div>
-    <div class="setting-row">
-      <label class="setting-label" for="s-apikey">API Key (optional)</label>
-      <input id="s-apikey" class="setting-input" type="password"
-             placeholder="Leave empty for Ollama" />
-    </div>
-    <div class="setting-row">
-      <label class="setting-label" for="s-maxtokens">Max Tokens</label>
-      <input id="s-maxtokens" class="setting-input" type="number"
-             min="1024" max="131072" placeholder="8192" />
-    </div>
-    <div class="setting-row">
-      <label class="setting-label" for="s-temp">Temperature</label>
-      <input id="s-temp" class="setting-input" type="number"
-             min="0" max="2" step="0.05" placeholder="0.1" />
-    </div>
-    <div class="setting-row">
-      <label class="setting-checkbox">
-        <input id="s-autoapprove" type="checkbox" />
-        Auto-approve tool calls (skip confirmation)
-      </label>
-    </div>
-
-    <div class="settings-actions">
-      <button class="btn-save-settings" id="btn-save-settings">Save</button>
-    </div>
-  </div>
-
-  <!-- Chat messages -->
-  <div id="messages"></div>
-
-  <!-- Input area -->
-  <div id="input-area">
-    <div id="input-wrapper">
-      <textarea
-        id="input"
-        placeholder="Ask the agent to read, edit, or create code..."
-        rows="1"
-        spellcheck="false"
-      ></textarea>
-      <button id="btn-send">Send</button>
-    </div>
-    <div id="input-hint">Enter to send · Shift+Enter for newline</div>
-  </div>
-
-  <script src="app.js"></script>
-</body>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Cline Webview</title>
+		<script type="module" crossorigin src="./assets/index.js"></script>
+		<link rel="stylesheet" crossorigin href="./assets/index.css">
+	</head>
+	<body>
+		<div id="root"></div>
+	</body>
 </html>

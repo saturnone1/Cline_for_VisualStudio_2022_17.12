@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -6,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
+using VsClineAgent.Bridge;
 using VsClineAgent.Agent;
 using VsClineAgent.Services;
 
@@ -14,6 +16,7 @@ namespace VsClineAgent.ToolWindows
     public partial class ChatToolWindowControl : UserControl
     {
         private AgentController _agentController;
+        private VisualStudioClineBridge _bridge;
         private readonly SettingsService _settingsService;
         private readonly VsEditorService _editorService;
         private bool _webViewReady;
@@ -31,7 +34,7 @@ namespace VsClineAgent.ToolWindows
             try
             {
                 _agentController = new AgentController(_settingsService, _editorService);
-                _agentController.AgentEvent += OnAgentEvent;
+                _bridge = new VisualStudioClineBridge(_agentController, _settingsService, _editorService, SendToWebViewAsync);
 
                 SetStatus("Initializing WebView2...");
                 await InitializeWebViewAsync();
@@ -44,15 +47,44 @@ namespace VsClineAgent.ToolWindows
 
         private async Task InitializeWebViewAsync()
         {
+            var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+                ?? AppDomain.CurrentDomain.BaseDirectory;
+            var userDataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VsClineAgent", "WebView2Data");
+            string? browserExecutableFolder = null;
+
             try
             {
-                var userDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "VsClineAgent", "WebView2Data");
-
                 Directory.CreateDirectory(userDataFolder);
-                var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                browserExecutableFolder = FindBundledWebView2Runtime(assemblyDirectory);
+
+                if (!string.IsNullOrEmpty(browserExecutableFolder))
+                    SetStatus("Initializing WebView2 from bundled runtime...");
+
+                var env = await CoreWebView2Environment.CreateAsync(browserExecutableFolder, userDataFolder);
                 await webView.EnsureCoreWebView2Async(env);
+
+                await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
+(function () {
+    if (window.__vsClineAcquireVsCodeApi) {
+        return;
+    }
+
+    let vscodeState = {};
+    const api = {
+        postMessage: function (message) { window.chrome.webview.postMessage(message); },
+        setState: function (state) { vscodeState = state || {}; return vscodeState; },
+        getState: function () { return vscodeState; }
+    };
+
+    window.__vsClineAcquireVsCodeApi = api;
+    window.acquireVsCodeApi = function () { return api; };
+
+    window.chrome.webview.addEventListener('message', function (event) {
+        window.dispatchEvent(new MessageEvent('message', { data: event.data }));
+    });
+})();");
 
                 webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
                 webView.CoreWebView2.Settings.IsScriptEnabled = true;
@@ -61,7 +93,7 @@ namespace VsClineAgent.ToolWindows
                 webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
 
                 var htmlPath = Path.Combine(
-                    Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+                    assemblyDirectory,
                     "WebApp", "index.html");
 
                 if (File.Exists(htmlPath))
@@ -71,8 +103,68 @@ namespace VsClineAgent.ToolWindows
             }
             catch (Exception ex)
             {
-                ShowError($"WebView2 init failed:\n{ex.Message}\n\nInstall WebView2 Runtime from microsoft.com/edge/webview2");
+                ShowError(BuildWebView2InitializationError(ex, assemblyDirectory, browserExecutableFolder));
             }
+        }
+
+        private static string BuildWebView2InitializationError(
+            Exception ex,
+            string assemblyDirectory,
+            string? browserExecutableFolder)
+        {
+            var bundledRuntimeRoot = Path.Combine(assemblyDirectory, "WebView2Runtime");
+            var localRuntimeRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VsClineAgent",
+                "WebView2Runtime");
+
+            var detail = string.IsNullOrEmpty(browserExecutableFolder)
+                ? "No system WebView2 Runtime was found, and no bundled Fixed Version Runtime was detected."
+                : $"Bundled runtime was detected at:\n{browserExecutableFolder}";
+
+            return
+                $"WebView2 init failed:\n{ex.Message}\n\n{detail}\n\n" +
+                "For air-gapped use, extract a WebView2 Fixed Version Runtime so msedgewebview2.exe exists under one of these locations:\n" +
+                $"{bundledRuntimeRoot}\\<version>\\msedgewebview2.exe\n" +
+                $"{localRuntimeRoot}\\<version>\\msedgewebview2.exe";
+        }
+
+        private static string? FindBundledWebView2Runtime(string assemblyDirectory)
+        {
+            foreach (var candidateRoot in GetWebView2RuntimeCandidateRoots(assemblyDirectory))
+            {
+                var runtimeFolder = FindRuntimeFolder(candidateRoot);
+                if (!string.IsNullOrEmpty(runtimeFolder))
+                    return runtimeFolder;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string> GetWebView2RuntimeCandidateRoots(string assemblyDirectory)
+        {
+            yield return Path.Combine(assemblyDirectory, "WebView2Runtime");
+            yield return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VsClineAgent",
+                "WebView2Runtime");
+        }
+
+        private static string? FindRuntimeFolder(string candidateRoot)
+        {
+            if (string.IsNullOrWhiteSpace(candidateRoot) || !Directory.Exists(candidateRoot))
+                return null;
+
+            if (File.Exists(Path.Combine(candidateRoot, "msedgewebview2.exe")))
+                return candidateRoot;
+
+            foreach (var subDirectory in Directory.EnumerateDirectories(candidateRoot))
+            {
+                if (File.Exists(Path.Combine(subDirectory, "msedgewebview2.exe")))
+                    return subDirectory;
+            }
+
+            return null;
         }
 
         private async void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -83,91 +175,26 @@ namespace VsClineAgent.ToolWindows
                 return;
             }
 
-            _webViewReady = true;
-            Dispatcher.Invoke(() =>
-            {
-                loadingPanel.Visibility = Visibility.Collapsed;
-                webView.Visibility = Visibility.Visible;
-            });
+             _webViewReady = true;
+             await _bridge.InitializeAsync();
+             Dispatcher.Invoke(() =>
+             {
+                 loadingPanel.Visibility = Visibility.Collapsed;
+                 webView.Visibility = Visibility.Visible;
+             });
+         }
 
-            var settings = _settingsService.Load();
-            var workspaceRoot = await _editorService.GetSolutionRootAsync() ?? "";
-            var openFiles = await _editorService.GetOpenDocumentsAsync();
-
-            await SendToWebViewAsync(new { type = "init", settings, workspaceRoot, openFiles });
-        }
-
-        private async void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
-        {
-            try
-            {
-                var msg = JsonConvert.DeserializeObject<WebMessage>(e.WebMessageAsJson);
-                if (msg == null) return;
-
-                switch (msg.Type)
-                {
-                    case "sendMessage":
-                        if (msg.Content != null)
-                            _ = StartAgentTaskAsync(msg.Content);
-                        break;
-
-                    case "approveAction":
-                        _agentController?.SetApproval(true);
-                        break;
-
-                    case "rejectAction":
-                        _agentController?.SetApproval(false);
-                        break;
-
-                    case "userAnswer":
-                        _agentController?.SetUserInput(msg.Content ?? "");
-                        break;
-
-                    case "stopAgent":
-                        _agentController?.Stop();
-                        break;
-
-                    case "updateSettings":
-                        if (msg.Settings != null)
-                        {
-                            _settingsService.Save(msg.Settings);
-                            _agentController?.UpdateSettings();
-                        }
-                        break;
-
-                    case "getSettings":
-                        var s = _settingsService.Load();
-                        await SendToWebViewAsync(new { type = "settings", data = s });
-                        break;
-
-                    case "clearHistory":
-                        // StartTaskAsync resets history on each new task — nothing extra needed
-                        await SendToWebViewAsync(new { type = "historyCleared" });
-                        break;
-
-                    case "getWorkspaceContext":
-                        var root = await _editorService.GetSolutionRootAsync() ?? "";
-                        var files = await _editorService.GetOpenDocumentsAsync();
-                        await SendToWebViewAsync(new { type = "workspaceContext", root, openFiles = files });
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
+         private async void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+         {
+             try
+             {
+                 if (_bridge != null)
+                     await _bridge.HandleWebMessageAsync(e.WebMessageAsJson);
+             }
+             catch (Exception ex)
+             {
                 await SendToWebViewAsync(new { type = "error", message = ex.Message });
             }
-        }
-
-        private async Task StartAgentTaskAsync(string content)
-        {
-            var workspaceRoot = await _editorService.GetSolutionRootAsync() ?? "";
-            await _agentController.StartTaskAsync(content, workspaceRoot);
-        }
-
-        private async void OnAgentEvent(object sender, AgentEvent e)
-        {
-            if (!_webViewReady) return;
-            await SendToWebViewAsync(e.ToWebPayload());
         }
 
         public async Task SendToWebViewAsync(object payload)
@@ -180,8 +207,7 @@ namespace VsClineAgent.ToolWindows
                 {
                     try
                     {
-                        await webView.CoreWebView2.ExecuteScriptAsync(
-                            $"window.__agentBridge && window.__agentBridge.receive({json})");
+                        webView.CoreWebView2.PostWebMessageAsJson(json);
                     }
                     catch { }
                 });
@@ -203,14 +229,6 @@ namespace VsClineAgent.ToolWindows
                 errorText.Text = message;
                 errorText.Visibility = Visibility.Visible;
             });
-        }
-
-        private class WebMessage
-        {
-            [JsonProperty("type")]     public string Type { get; set; } = "";
-            [JsonProperty("content")]  public string Content { get; set; }
-            [JsonProperty("toolCallId")] public string ToolCallId { get; set; }
-            [JsonProperty("settings")] public AgentSettings Settings { get; set; }
         }
     }
 }
