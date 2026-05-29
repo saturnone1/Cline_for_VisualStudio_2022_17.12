@@ -24,6 +24,13 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
+  <!-- net472 SDK-style 프로젝트에서 자동 포함되지 않는 BCL 어셈블리 -->
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+
   <ItemGroup>
     <VSCTCompile Include="VsClineAgentPackage.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
