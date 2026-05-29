@@ -17,3 +17,7 @@ packages/
 
 # macOS
 .DS_Store
+
+# Local porting references and oversized offline runtime bundle
+.upstream-cline/
+VsClineAgent/WebView2Runtime/

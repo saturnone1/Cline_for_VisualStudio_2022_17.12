@@ -93,6 +93,7 @@
     <Compile Include="Agent\Tools\ToolResult.cs" />
     <Compile Include="Agent\Tools\WriteFileTool.cs" />
     <Compile Include="Commands\OpenChatWindowCommand.cs" />
+    <Compile Include="Bridge\VisualStudioClineBridge.cs" />
     <Compile Include="Guids.cs" />
     <Compile Include="Services\AgentSettings.cs" />
     <Compile Include="Services\SettingsService.cs" />
@@ -130,6 +131,14 @@
   <!-- WebApp 콘텐츠 (VSIX에 포함) -->
   <ItemGroup>
     <Content Include="WebApp\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
+  <!-- Air-gap deployment: optionally bundle a WebView2 Fixed Version Runtime -->
+  <ItemGroup Condition="Exists('WebView2Runtime')">
+    <Content Include="WebView2Runtime\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
