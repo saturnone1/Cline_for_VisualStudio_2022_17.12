@@ -29,6 +29,8 @@
     <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Runtime.Serialization" />
+    <!-- OleMenuCommandService 베이스 클래스(MenuCommandService) 해결 -->
+    <Reference Include="System.Design" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
 
 namespace VsClineAgent.Services
 {
@@ -97,31 +96,22 @@ namespace VsClineAgent.Services
             try
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var taskList = Package.GetGlobalService(typeof(SVsTaskList)) as IVsTaskList;
-                if (taskList == null) return result;
-
-                taskList.EnumTaskItems(out var enumItems);
-                if (enumItems == null) return result;
-
-                var items = new IVsTaskItem[1];
-                while (true)
+                var dte = GetDte();
+                if (dte == null) return result;
+                var errorItems = dte.ToolWindows.ErrorList.ErrorItems;
+                for (int i = 1; i <= errorItems.Count; i++)
                 {
-                    enumItems.Next(1, items, out uint fetched);
-                    if (fetched == 0) break;
-                    var item = items[0];
                     try
                     {
-                        item.get_Text(out var text);
-                        item.get_Document(out var doc);
-                        item.get_Line(out var line);
-                        item.get_Priority(out var priority);
+                        var item = errorItems.Item(i);
                         result.Add(new DiagnosticItem
                         {
-                            Message = text ?? "",
-                            File = doc ?? "",
-                            Line = line + 1,
-                            Severity = priority == VSTASKPRIORITY.TP_HIGH ? "Error"
-                                     : priority == VSTASKPRIORITY.TP_NORMAL ? "Warning" : "Info"
+                            Message = item.Description ?? "",
+                            File = item.FileName ?? "",
+                            Line = item.Line,
+                            Severity = item.ErrorLevel == EnvDTE80.vsBuildErrorLevel.vsBuildErrorLevelHigh ? "Error"
+                                     : item.ErrorLevel == EnvDTE80.vsBuildErrorLevel.vsBuildErrorLevelMedium ? "Warning"
+                                     : "Info"
                         });
                     }
                     catch { }
