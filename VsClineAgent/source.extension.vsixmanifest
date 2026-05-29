@@ -12,9 +12,9 @@
     <ProjectType>Other</ProjectType>
   </Metadata>
   <Installation>
-    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)" />
-    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0,18.0)" />
-    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,18.0)" />
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)" ProductArchitecture="amd64" />
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0,18.0)" ProductArchitecture="amd64" />
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,18.0)" ProductArchitecture="amd64" />
   </Installation>
   <Dependencies>
     <Dependency Id="Microsoft.Framework.NDP"
