@@ -15,6 +15,10 @@
     <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
     <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
     <CreateVsixContainer>true</CreateVsixContainer>
+    <!-- SDK-style 프로젝트는 기본적으로 bin\Release\net472\ 에 출력하지만
+         VSSDK 빌드 도구는 bin\Release\ 를 기대하므로 TFM 서브폴더를 끔 -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
