@@ -1,0 +1,218 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <assembly>
+    <name>Microsoft.VisualStudio.Web.BrowserLink.12.0</name>
+  </assembly>
+  <members>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction">
+      <summary>Représente une action pouvant être présentée sur le tableau de bord des liens de navigateur</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.#ctor(System.String,System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction})">
+      <summary>Initialise une instance de la classe BrowserLinkAction.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.#ctor(System.String,System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction},System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction})">
+      <summary>Initialise une instance de la classe BrowserLinkAction.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.ButtonText">
+      <summary>Texte d'option de menu</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Checked">
+      <summary>True si l'option doit s'afficher avec une coche dans le menu contextuel</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Enabled">
+      <summary>True si l'option doit être activée sur le menu contextuel</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.InvokeCallback">
+      <summary>Interne uniquement.Appelle le délégué de rappel.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.InvokeUpdateMenuItem">
+      <summary>Interne uniquement.Appelle le délégué d'option de menu de mise à jour.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Visible">
+      <summary>True si l'option doit être affichée sur le menu contextuel</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkCallbackAttribute">
+      <summary>Représente un attribut qui spécifie qu'une méthode est un rappel de lien de navigateur.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkCallbackAttribute.#ctor">
+      <summary>Initialise une nouvelle instance de la classe BrowserLinkCallback.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection">
+      <summary>Encapsule une connexion de lien de navigateur entre Visual Studio et un navigateur.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.AppName">
+      <summary>Nom complet du navigateur du client.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.ConnectionId">
+      <summary>Identifiant de connexion unique.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Extensions">
+      <summary>Extensions liées à cette connexion.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.ExtensionsCreated">
+      <summary>Déclenché une fois que les extensions de cette connexion ont été créées.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.InternalFireExtensionsCreated">
+      <summary>Déclenche un événement interne.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Log(System.String,System.Object[])">
+      <summary>Consigne un message dans la console de navigateur connectée.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Project">
+      <summary>Projet Visual Studio associé à cette connexion.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Properties">
+      <summary>Des propriétés peuvent être associées à cette connexion via ce dictionnaire.Les valeurs de propriété par défaut peuvent être trouvées à l'aide des clés de DefaultConnectionProperties.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Url">
+      <summary>URL cliente de cette connexion.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension">
+      <summary>Classe de base pour les extensions de lien de navigateur.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Actions">
+      <summary>Renvoie les actions présentées sur le tableau de bord des liens de navigateur</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Browsers">
+      <summary>Racine d'appel client.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Connections">
+      <summary>Racine des connexions.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Factories">
+      <summary>Racine des fabriques.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Name">
+      <summary>Nom de cette extension.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.OnConnected(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>Appelée lorsque la connexion donnée est établie.Exécute l'initialisation de l'extension ici.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.OnDisconnecting(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>Appelée lorsque la connexion donnée est annulée.Exécute le nettoyage de l'extension ici.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.PreInit(System.String,Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers,Microsoft.VisualStudio.Web.BrowserLink.IFactories,Microsoft.VisualStudio.Web.BrowserLink.IConnections)">
+      <summary>Interne uniquement.Initialise les propriétés d'extension avant de donner le contrôle à l'auteur de l'extension.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs">
+      <summary>Arguments d'événement utilisés lorsqu'une connexion est ajoutée ou supprimée.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs.Connection">
+      <summary>Connexion associée à cet événement.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1">
+      <summary>Objet événement d'extension extensible.</summary>
+      <typeparam name="T">Type à transmettre à l'événement extensible.</typeparam>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.#ctor"></member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.Dispatch(System.Object,`0)">
+      <summary>Répartit l'événement extensible.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.Event">
+      <summary>Gestionnaire d'événements pour cet événement extensible.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents">
+      <summary>Événements d'extension extensibles.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents.#ctor">
+      <summary>Construit cet objet.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents.Events">
+      <summary>Attribue les objets ExtensionEvent à ce dictionnaire.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory">
+      <summary>Crée des instances d'objets extension de lien de navigateur.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory.CreateExtensionInstance(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>Crée un objet BrowserLinkExtension lorsqu'une nouvelle connexion est établie.</summary>
+      <returns>Objet BrowserLinkExtension.</returns>
+      <param name="connection">Nouvelle connexion.</param>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory.GetScript">
+      <summary>Renvoie l'implémentation Javascript de cette extension.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService">
+      <summary>Objet service de lien de navigateur racine.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Connections">
+      <summary>Fournit l'accès à toutes les connexions clientes actuelles.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Factories">
+      <summary>Fournit l'accès à toutes les fabriques d'extensions chargées.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Messaging">
+      <summary>Fournit l'accès aux clients de connexion pour l'appel de méthode distant.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers">
+      <summary>Fournit l'accès aux clients de connexion pour l'appel de méthode distant.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.All">
+      <summary>Accède à tous les clients.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.AllExcept(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection[])">
+      <summary>Accède à tous les clients, sauf à ceux spécifiés.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.Client(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>Accède à un client sur une connexion spécifique.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.Clients(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection[])">
+      <summary>Accède aux clients des connexions spécifiées.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke">
+      <summary>Autorise l'appel de rappels d'extension de lien de navigateur Javascript.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke.Invoke(System.String,System.Object[])">
+      <summary>Appelle une méthode de rappel client.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke.InvokeAsync``1(System.String,System.Object[])">
+      <summary>Appelle une méthode de rappel client de manière asynchrone.</summary>
+      <returns>Renvoie une tâche qui se termine lorsque la valeur renvoyée est prête.Ce comportement est pris en charge uniquement sur les connexions uniques.</returns>
+      <param name="methodName">Nom de méthode à appeler.</param>
+      <param name="args">Arguments de l'appel de méthode.</param>
+      <typeparam name="TResult">Type de valeur renvoyée.</typeparam>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging">
+      <summary>Interface pour la messagerie entre VS et le navigateur.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging.Invoke(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection,System.String,System.Object[])">
+      <summary>Appelle une méthode Javascript distante.</summary>
+      <param name="connection">Connexion de navigateur pour l'appel.</param>
+      <param name="methodName">Nom de la méthode Javascript distante à appeler.</param>
+      <param name="args">Liste d'arguments pour la méthode Javascript distante.</param>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging.InvokeAsync``1(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection,System.String,System.Object[])">
+      <summary>Appelle de manière asynchrone une méthode Javascript distante.</summary>
+      <param name="connection">Connexion de navigateur pour l'appel.</param>
+      <param name="methodName">Nom de la méthode Javascript distante à appeler.</param>
+      <param name="args">Liste d'arguments pour la méthode Javascript distante.</param>
+      <typeparam name="TResult"></typeparam>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IConnections">
+      <summary>Racine des connexions de lien de navigateur.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Connected">
+      <summary>Déclenché lors d'une nouvelle connexion.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Connections">
+      <summary>Connexions actives.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.ConnectionsChanged">
+      <summary>Appelé après une connexion ou déconnexion.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Disconnected">
+      <summary>Déclenché en cas de déconnexion.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IFactories">
+      <summary>Fournit l'accès aux fabriques Browser linkExtension chargées.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IFactories.Events">
+      <summary>Fournit l'accès aux événements de lien de navigateur extensibles.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IFactories.Factories">
+      <summary>Collection de BrowserLinkExtensionFactory chargées.</summary>
+    </member>
+  </members>
+</doc>

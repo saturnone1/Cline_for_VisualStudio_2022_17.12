@@ -1,0 +1,218 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <assembly>
+    <name>Microsoft.VisualStudio.Web.BrowserLink.12.0</name>
+  </assembly>
+  <members>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction">
+      <summary>브라우저 링크 대시보드에 표시될 수 있는 작업을 나타냅니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.#ctor(System.String,System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction})">
+      <summary>BrowserLinkAction 클래스의 인스턴스를 초기화합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.#ctor(System.String,System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction},System.Action{Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction})">
+      <summary>BrowserLinkAction 클래스의 인스턴스를 초기화합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.ButtonText">
+      <summary>메뉴 항목 텍스트입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Checked">
+      <summary>항목이 확인 표시가 있는 상태로 상황에 맞는 메뉴에 표시되어야 하는 경우 true입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Enabled">
+      <summary>항목이 상황에 맞는 메뉴에 사용하도록 설정되어야 하는 경우 true입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.InvokeCallback">
+      <summary>내부용입니다.콜백 대리자를 호출합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.InvokeUpdateMenuItem">
+      <summary>내부용입니다.업데이트 메뉴 항목 대리자를 호출합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkAction.Visible">
+      <summary>항목이 상황에 맞는 메뉴에 표시되어야 하는 경우 true입니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkCallbackAttribute">
+      <summary>메서드가 브라우저 링크 콜백임을 지정하는 특성을 나타냅니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkCallbackAttribute.#ctor">
+      <summary>BrowserLinkCallback 클래스의 새 인스턴스를 초기화합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection">
+      <summary>Visual Studio와 브라우저 간의 브라우저 링크 연결을 캡슐화합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.AppName">
+      <summary>클라이언트 브라우저 표시 이름입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.ConnectionId">
+      <summary>고유 연결 식별자입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Extensions">
+      <summary>이 연결에 연결된 확장입니다.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.ExtensionsCreated">
+      <summary>이 연결에 대한 확장이 만들어진 후 발생합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.InternalFireExtensionsCreated">
+      <summary>내부 이벤트를 발생시킵니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Log(System.String,System.Object[])">
+      <summary>연결된 브라우저 콘솔에 메시지를 기록합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Project">
+      <summary>이 연결과 연관된 Visual Studio 프로젝트입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Properties">
+      <summary>속성은 이 사전을 통해 이 연결과 연관될 수 있습니다.기본 속성 값은 DefaultConnectionProperties의 키를 사용하여 찾을 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection.Url">
+      <summary>이 연결의 클라이언트 URL입니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension">
+      <summary>브라우저 링크 확장에 대한 기본 클래스입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Actions">
+      <summary>브라우저 링크 대시보드에 표시된 작업을 반환합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Browsers">
+      <summary>클라이언트 호출 루트입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Connections">
+      <summary>연결 루트입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Factories">
+      <summary>팩터리 루트입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.Name">
+      <summary>이 확장의 이름입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.OnConnected(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>지정된 연결이 연결되면 호출됩니다.여기서 확장 초기화를 수행합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.OnDisconnecting(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>지정된 연결이 끊어지면 호출됩니다.여기서 확장 정리를 수행합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkExtension.PreInit(System.String,Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers,Microsoft.VisualStudio.Web.BrowserLink.IFactories,Microsoft.VisualStudio.Web.BrowserLink.IConnections)">
+      <summary>내부용입니다.제어권을 확장 작성자에게 넘겨 주기 전에 확장 속성을 초기화합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs">
+      <summary>연결이 추가되거나 제거된 경우에 사용되는 이벤트 인수입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs.#ctor"></member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.ConnectionEventArgs.Connection">
+      <summary>이 이벤트와 연관된 연결입니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1">
+      <summary>확장 가능 확장 이벤트 개체입니다.</summary>
+      <typeparam name="T">확장 가능 이벤트로 전달할 유형입니다.</typeparam>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.#ctor"></member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.Dispatch(System.Object,`0)">
+      <summary>확장 가능 이벤트를 디스패치합니다.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvent`1.Event">
+      <summary>이 확장 가능 이벤트의 이벤트 처리기입니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents">
+      <summary>확장 가능 확장 이벤트입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents.#ctor">
+      <summary>이 개체를 생성합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.ExtensionEvents.Events">
+      <summary>이 사전에 ExtensionEvent 개체를 할당합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory">
+      <summary>브라우저 링크 확장 개체의 인스턴스를 만듭니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory.CreateExtensionInstance(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>새 연결이 설정되면 BrowserLinkExtension 개체를 만듭니다.</summary>
+      <returns>BrowserLinkExtension 개체입니다.</returns>
+      <param name="connection">새 연결입니다.</param>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkExtensionFactory.GetScript">
+      <summary>이 확장의 Javascript 구현을 반환합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService">
+      <summary>루트 브라우저 링크 서비스 개체입니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Connections">
+      <summary>모든 현재 클라이언트 연결에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Factories">
+      <summary>로드된 모든 확장 팩터리에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IBrowserLinkService.Messaging">
+      <summary>원격 메서드 호출을 위해 연결 클라이언트에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers">
+      <summary>원격 메서드 호출을 위해 연결 클라이언트에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.All">
+      <summary>모든 클라이언트에 액세스합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.AllExcept(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection[])">
+      <summary>지정된 클라이언트를 제외한 모든 클라이언트에 액세스합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.Client(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection)">
+      <summary>특정 연결에서 클라이언트에 액세스합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientBrowsers.Clients(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection[])">
+      <summary>지정된 연결의 클라이언트에 액세스합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke">
+      <summary>Javascript 브라우저 링크 확장 콜백 호출을 허용합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke.Invoke(System.String,System.Object[])">
+      <summary>클라이언트 콜백 메서드를 호출합니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientInvoke.InvokeAsync``1(System.String,System.Object[])">
+      <summary>클라이언트 콜백 메서드를 비동기적으로 호출합니다.</summary>
+      <returns>반환 값이 준비되면 완료되는 작업을 반환합니다.이는 단일 연결에서만 지원됩니다.</returns>
+      <param name="methodName">호출할 메서드 이름입니다.</param>
+      <param name="args">메서드 호출의 인수입니다.</param>
+      <typeparam name="TResult">반환 값의 유형입니다.</typeparam>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging">
+      <summary>VS에서 브라우저로의 메시징을 위한 인터페이스입니다.</summary>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging.Invoke(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection,System.String,System.Object[])">
+      <summary>원격 Javascript 메서드를 호출합니다.</summary>
+      <param name="connection">호출 대상 브라우저 연결입니다.</param>
+      <param name="methodName">호출할 원격 Javascript 메서드의 이름입니다.</param>
+      <param name="args">원격 Javascript 메서드의 인수 목록입니다.</param>
+    </member>
+    <member name="M:Microsoft.VisualStudio.Web.BrowserLink.IClientMessaging.InvokeAsync``1(Microsoft.VisualStudio.Web.BrowserLink.BrowserLinkConnection,System.String,System.Object[])">
+      <summary>원격 Javascript 메서드를 비동기적으로 호출합니다.</summary>
+      <param name="connection">호출 대상 브라우저 연결입니다.</param>
+      <param name="methodName">호출할 원격 Javascript 메서드의 이름입니다.</param>
+      <param name="args">원격 Javascript 메서드의 인수 목록입니다.</param>
+      <typeparam name="TResult"></typeparam>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IConnections">
+      <summary>브라우저 링크 연결 루트입니다.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Connected">
+      <summary>새 연결에서 발생합니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Connections">
+      <summary>활성 연결입니다.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.ConnectionsChanged">
+      <summary>연결되거나 연결이 끊어진 후 호출됩니다.</summary>
+    </member>
+    <member name="E:Microsoft.VisualStudio.Web.BrowserLink.IConnections.Disconnected">
+      <summary>연결이 끊어지면 발생합니다.</summary>
+    </member>
+    <member name="T:Microsoft.VisualStudio.Web.BrowserLink.IFactories">
+      <summary>로드된 브라우저 linkExtension 팩터리에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IFactories.Events">
+      <summary>확장 가능 브라우저 링크 이벤트에 액세스할 수 있습니다.</summary>
+    </member>
+    <member name="P:Microsoft.VisualStudio.Web.BrowserLink.IFactories.Factories">
+      <summary>로드된 BrowserLinkExtensionFactory의 컬렉션입니다.</summary>
+    </member>
+  </members>
+</doc>

@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VSSDK.BuildTools</id>
+    <version>17.6.2164</version>
+    <title>Microsoft.VSSDK.BuildTools</title>
+    <authors>Microsoft</authors>
+    <owners>Microsoft,VisualStudioExtensibility</owners>
+    <developmentDependency>true</developmentDependency>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">LICENSE.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+    <description>Contains targets and tools to enable the building of managed VSIX projects without VSSDK MSI installed. Only for VS 2015 and onwards.</description>
+    <summary>Contains targets and tools to enable the building of managed VSIX projects without VSSDK MSI installed. Only for VS 2015 and onwards.</summary>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>Microsoft Build Tasks BuildTasks Tools BuildTools VSSDK</tags>
+    <dependencies>
+      <group targetFramework=".NETFramework4.6">
+        <dependency id="Microsoft.VisualStudio.SDK.Analyzers" version="16.10.10" />
+        <dependency id="Microsoft.VsSDK.CompatibilityAnalyzer" version="17.6.2164" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

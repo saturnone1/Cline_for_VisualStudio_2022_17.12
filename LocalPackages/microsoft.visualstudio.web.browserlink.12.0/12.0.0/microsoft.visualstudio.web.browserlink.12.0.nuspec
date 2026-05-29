@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+    <metadata>
+        <id>Microsoft.VisualStudio.Web.BrowserLink.12.0</id>
+        <version>12.0.0</version>
+        <title>Microsoft.VisualStudio.BrowserLink.12.0 contracts assembly.</title>
+        <authors>Microsoft</authors>
+        <owners>Microsoft,aspnet</owners>
+        <licenseUrl>https://www.microsoft.com/web/webpi/eula/net_library_eula_enu.htm</licenseUrl>
+        <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+        <requireLicenseAcceptance>true</requireLicenseAcceptance>
+        <description>Microsoft.VisualStudio.BrowserLink.12.0 contracts assembly for Visual Studio.</description>
+        <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+        <language>en-US</language>
+        <tags>Microsoft VisualStudio BrowserLink</tags>
+    </metadata>
+</package>

@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>StreamJsonRpc</id>
+    <version>2.15.29</version>
+    <authors>Microsoft</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://github.com/Microsoft/vs-streamjsonrpc</projectUrl>
+    <description>A cross-platform .NETStandard library that implements the JSON-RPC wire protocol and can use System.IO.Stream, System.IO.Pipelines or WebSocket so you can use it with any transport.</description>
+    <releaseNotes>https://github.com/Microsoft/vs-streamjsonrpc/releases/tag/v2.15.29</releaseNotes>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>visualstudio stream json rpc jsonrpc</tags>
+    <repository type="git" url="https://github.com/microsoft/vs-streamjsonrpc" commit="a9ce0efde4cda87f3a227914f1ab54bbf7b4f4eb" />
+    <dependencies>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="MessagePack" version="2.5.108" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Bcl.AsyncInterfaces" version="7.0.0" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+        <dependency id="Nerdbank.Streams" version="2.9.112" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Diagnostics.DiagnosticSource" version="7.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.IO.Pipelines" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Threading.Tasks.Dataflow" version="7.0.0" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Microsoft.VisualStudio.Threading.Analyzers" version="17.6.40" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.1">
+        <dependency id="MessagePack" version="2.5.108" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Bcl.AsyncInterfaces" version="7.0.0" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+        <dependency id="Nerdbank.Streams" version="2.9.112" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Diagnostics.DiagnosticSource" version="7.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.IO.Pipelines" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Threading.Tasks.Dataflow" version="7.0.0" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Microsoft.VisualStudio.Threading.Analyzers" version="17.6.40" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

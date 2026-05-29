@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+    <metadata>
+        <id>Microsoft.VisualStudio.TaskRunnerExplorer.14.0</id>
+        <version>14.0.0</version>
+        <title>Microsoft.VisualStudio.TaskRunnerExplorer.14.0 contracts assembly.</title>
+        <authors>Microsoft</authors>
+        <owners>Microsoft,aspnet</owners>
+        <licenseUrl>https://www.microsoft.com/web/webpi/eula/net_library_eula_enu.htm</licenseUrl>
+        <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+        <requireLicenseAcceptance>true</requireLicenseAcceptance>
+        <description>Microsoft.VisualStudio.TaskRunnerExplorer.14.0 contracts assembly for Visual Studio.</description>
+        <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+        <language>en-US</language>
+        <tags>Microsoft VisualStudio TaskRunnerExplorer</tags>
+    </metadata>
+</package>

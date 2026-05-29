@@ -1,0 +1,80 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.Package.LanguageService.15.0</id>
+    <version>17.6.36389</version>
+    <authors>Microsoft</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">LICENSE.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+    <description>A member of the Visual Studio SDK</description>
+    <releaseNotes>https://go.microsoft.com/fwlink/?LinkID=746387</releaseNotes>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>Microsoft VisualStudio VSSDK SDK</tags>
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.VisualStudio.Shell.15.0" version="17.6.36389" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Shell.Framework" version="17.6.36389" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities" version="17.6.36389" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Interop" version="17.6.36389" exclude="Build,Analyzers" />
+        <dependency id="MessagePack" version="2.5.108" exclude="Build,Analyzers" />
+        <dependency id="MessagePack.Annotations" version="2.5.108" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Bcl.AsyncInterfaces" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Build.Framework" version="17.6.3" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.CodeAnalysis.BannedApiAnalyzers" version="3.3.2" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.IO.Redist" version="6.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.NET.StringTools" version="17.6.3" exclude="Compile,Build,Analyzers" />
+        <dependency id="Microsoft.ServiceHub.Analyzers" version="4.2.102" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.ServiceHub.Framework" version="4.2.102" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.ServiceHub.Resources" version="4.2.8" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.ComponentModelHost" version="17.6.268" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Composition" version="17.6.17" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Composition.Analyzers" version="17.6.17" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RemoteControl" version="16.3.52" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RpcContracts" version="17.6.13" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Sdk.Analyzers" version="16.10.10" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Setup.Configuration.Interop" version="3.6.2115" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Telemetry" version="17.6.46" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading.Analyzers" version="17.6.40" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities.Internal" version="16.3.42" exclude="Compile,Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Validation" version="17.6.11" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Win32.Registry" version="5.0.0" exclude="Build,Analyzers" />
+        <dependency id="Nerdbank.Streams" version="2.9.112" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.3" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.29" exclude="Build,Analyzers" />
+        <dependency id="System.Buffers" version="4.5.1" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.ComponentModel.Composition" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition.AttributedModel" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition.Convention" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition.Hosting" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition.Runtime" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Composition.TypedParts" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Diagnostics.DiagnosticSource" version="7.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.IO.Pipelines" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Memory" version="4.5.5" exclude="Build,Analyzers" />
+        <dependency id="System.Numerics.Vectors" version="4.5.0" exclude="Build,Analyzers" />
+        <dependency id="System.Reflection.Metadata" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Reflection.TypeExtensions" version="4.7.0" exclude="Build,Analyzers" />
+        <dependency id="System.Runtime.CompilerServices.Unsafe" version="6.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Security.AccessControl" version="6.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Security.Principal.Windows" version="5.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Text.Encodings.Web" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Text.Json" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Threading.AccessControl" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Threading.Tasks.Dataflow" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.Threading.Tasks.Extensions" version="4.5.4" exclude="Build,Analyzers" />
+        <dependency id="System.ValueTuple" version="4.5.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <frameworkAssemblies>
+      <frameworkAssembly assemblyName="netstandard" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Design" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Drawing.Design" targetFramework=".NETFramework4.7.2" />
+    </frameworkAssemblies>
+  </metadata>
+</package>

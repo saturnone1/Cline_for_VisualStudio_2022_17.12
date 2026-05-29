@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.ServiceHub.Framework</id>
+    <version>4.2.102</version>
+    <authors>Microsoft</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/microsoft/vs-servicehub</projectUrl>
+    <description>The distributed ServiceHub Framework.</description>
+    <releaseNotes>https://github.com/microsoft/vs-servicehub/releases/tag/v4.2.102</releaseNotes>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <repository type="git" url="https://github.com/microsoft/vs-servicehub" commit="701b9e4010c50cdc43cdfb7b2816dcd51e35cb25" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.ServiceHub.Analyzers" version="4.2.102" include="All" />
+        <dependency id="Microsoft.VisualStudio.Composition" version="17.4.16" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.26" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net6.0">
+        <dependency id="Microsoft.ServiceHub.Analyzers" version="4.2.102" include="All" />
+        <dependency id="Microsoft.VisualStudio.Composition" version="17.4.16" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.26" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.ServiceHub.Analyzers" version="4.2.102" include="All" />
+        <dependency id="Microsoft.VisualStudio.Composition" version="17.4.16" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.15.26" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="7.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.6.40" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

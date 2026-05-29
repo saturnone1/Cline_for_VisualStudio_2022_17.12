@@ -1,0 +1,325 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Microsoft.VisualStudio.Language.StandardClassification</name>
+    </assembly>
+    <members>
+        <member name="T:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService">
+            <summary>
+            Provides access to standard classifications.
+            </summary>
+            <remarks>This is a MEF Component, and should be imported with the following attribute:
+            [Import(typeof(IStandardClassificationService))]
+            </remarks>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.NaturalLanguage">
+            <summary>
+            Gets a classification type representing a natural language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.FormalLanguage">
+            <summary>
+            Gets a classification type representing a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Comment">
+            <summary>
+            Gets a classification type representing comments in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Identifier">
+            <summary>
+            Gets a classification type representing identifiers in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Keyword">
+            <summary>
+            Gets a classification type representing keywords in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.WhiteSpace">
+            <summary>
+            Gets a classification type representing whitespace in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Operator">
+            <summary>
+            Gets a classification type representing whitespace in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Literal">
+            <summary>
+            Gets a classification type representing literals in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.NumberLiteral">
+            <summary>
+            Gets a classification type representing numerical literals which derives from the literal classification type in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.StringLiteral">
+            <summary>
+            Gets a classification type representing string literals which derives from the literal classification type in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.CharacterLiteral">
+            <summary>
+            Gets a classification type representing character literals which derives from the literal classification type in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.Other">
+            <summary>
+            Gets a classification type representing anything in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.ExcludedCode">
+            <summary>
+            Gets a classification type representing blocks excluded by the preprocessor or other means in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.PreprocessorKeyword">
+            <summary>
+            Gets a classification type representing preprocessor keywords in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.SymbolDefinition">
+            <summary>
+            Gets a classification type representing the definition of a symbol in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.SymbolReference">
+            <summary>
+            Gets a classification type representing the reference to a symbol in a formal language.
+            </summary>
+        </member>
+        <member name="P:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService.BidirectionalTextControlCharacter">
+            <summary>
+            Gets a classification type representing the reference to a bidirectional text control character in a natural language.
+            </summary>
+        </member>
+        <member name="T:Microsoft.VisualStudio.Language.StandardClassification.LanguagePriority">
+            <summary>
+            Represents the built-in priorities for language classifications.
+            </summary>
+            <remarks>
+            <para>
+            The set of default classification types and format definitions provided by the <see cref="T:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService" /> define
+            natural language and formal language classification types. These classification types act as classification types upon which other
+            classification types are based.
+            </para>
+            <para>
+            Formal language classifications have higher priority than natural language classification types (and by definition all derivatives of
+            formal language classifications have higher priority than derivatives of the natural language classification types).
+            </para>
+            <para>
+            Both the formal and natural language classification types fall between the Priority.Default and Priority.High
+            generic priorities.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.LanguagePriority.NaturalLanguage">
+            <summary>
+            Priority for the natural language classification definitions.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.LanguagePriority.FormalLanguage">
+            <summary>
+            Priority for the formal language classificaiton definitions.
+            </summary>
+        </member>
+        <member name="T:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames">
+            <summary>
+            Defines a list of predefined classification type names.
+            </summary>
+            <remarks>
+            The classification type names defined herein are used by the <see cref="T:Microsoft.VisualStudio.Language.StandardClassification.IStandardClassificationService" /> to create the set of pre-existing classification types.
+            </remarks>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekBackground">
+            <summary>
+            Name of the classification type representing the background color of Peek adornments.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekBackgroundUnfocused">
+            <summary>
+            Name of the classification type representing the background color of Peek adornments when they do not have keyboard focus.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekFocusedBorder">
+            <summary>
+            Name of the classification type representing the border color when Peek is focused.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekHistorySelected">
+            <summary>
+            Name of the classification type representing the color of a history dot in Peek when it is currently selected.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekHistoryHovered">
+            <summary>
+            Name of the classification type representing the color of a history dot in Peek when the mouse is currently over it.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekLabelText">
+            <summary>
+            Name of the classification type representing the foreground color of peek error pages. This should match ToolWindowText color by default.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekHighlightedText">
+            <summary>
+            Name of the classification type representing the background color of peek highlights.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PeekHighlightedTextUnfocused">
+            <summary>
+            Name of the classification type representing the background color of peek highlights when the peek window is not currently focused.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Comment">
+            <summary>
+            Name of the classification type representing comments.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Identifier">
+            <summary>
+            Name of the classification type representing identifiers. In C# for instance, these would be variable names.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Keyword">
+            <summary>
+            Name of the classification type representing keywords. In C# for instance, foreach would be a keyword.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.WhiteSpace">
+            <summary>
+            Name of the classification type representing white space.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Punctuation">
+            <summary>
+            Name of the classification type representation a punctuation character.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Text">
+            <summary>
+            Name of the classification type representing plain text.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Operator">
+            <summary>
+            Name of the classification type representing operators. In C# for instance, + would be an operator.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Literal">
+            <summary>
+            Name of the classification type representing literals.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.MarkupAttribute">
+            <summary>
+            Name of the classification type representing markup attributes. Markup attributes are attributes in markup languages,
+            such as HTML, XML, and YAML.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.MarkupAttributeValue">
+            <summary>
+            Name of the classification type representing markup attribute values. Markup attribute values are values
+            of attributes in markup languages, such as HTML, XML, and YAML.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.MarkupNode">
+            <summary>
+            Name of the classification type representing markup nodes. Markup nodes are nodes in markup languages,
+            such as HTML, XML, and YAML.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Method">
+            <summary>
+            Name of the classification type representing methods.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.String">
+            <summary>
+            Name of the classification type representing strings.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Type">
+            <summary>
+            Name of the classification type representing types.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Character">
+            <summary>
+            Name of the classification type representing characters.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Number">
+            <summary>
+            Name of the classification type representing numbers.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.Other">
+            <summary>
+            Name of the classification type representing all other types of classifications.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.ExcludedCode">
+            <summary>
+            Name of the classification type representing items that are excluded via a preprocessor macro or other means.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.PreprocessorKeyword">
+            <summary>
+            Name of the classification type representing preprocessor keywords.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.SymbolDefinition">
+            <summary>
+            Name of the classification type representing definition of symbols.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.SymbolReference">
+            <summary>
+            Name of the classification type representing symbol references.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.BidirectionalTextControlCharacter">
+            <summary>
+            Name of the classification type representing visualization of control characters which change the text direction.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.NaturalLanguage">
+            <summary>
+            Name of the classification type representing a natural language classification. This classification type is intended to be used
+            as a base classification type for other classification types belonging to a set of natural language classifications.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.FormalLanguage">
+            <summary>
+            Name of the classification type representing a formal language. This classification type is intended to be used as a base
+            classification type for all classification types belonging to a set of formal language classifications. For example literals
+            and keywords.
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.BracePairLevelOne">
+            <summary>
+            Name of the classification type representing a brace pair. 
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.BracePairLevelTwo">
+            <summary>
+            Name of the classification type representing a brace pair. 
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.BracePairLevelThree">
+            <summary>
+            Name of the classification type representing a brace pair. 
+            </summary>
+        </member>
+        <member name="F:Microsoft.VisualStudio.Language.StandardClassification.PredefinedClassificationTypeNames.MismatchedBrace">
+            <summary>
+            Name of the classification type representing a brace with no matching pair. 
+            </summary>
+        </member>
+    </members>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" /><SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" /><Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" /><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" /></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256" /><DigestValue>Vnb0xun9w2HPm7rppUXbA7O2PmlINj6PW8RSRKTFMlU=</DigestValue></Reference></SignedInfo><SignatureValue>EQVKW6sLrLyYEunahTm6BwW8xuIGxf1aipwPHdS+VunqsStNTCPrUFZqE1ktlcDe6jmXsgf+xNFouBvNyWyeWkydy6xrsMSjMGa36gErIyXOWEt1VcF7CK8oBhq8W+fjWotI3gBWOD43rdfGj6RC2eN8KxYwWOKJVoqNIZtnGmTuQC6sJrPlwhU2t1xZYuqFK5M4gIm4BbXfFe0msAIjeBY/Hpo8YKwkIZDzGlfUihIU7Q2pI4l9ZaaDSlJWACCCOW/eDegqkv5WLZG1gkXF6jSI/x0RkHGRN/IvzStomjiZFDg+yk5NfN1sTZcFOm+JQ1kLdfM1j9AsZTfelW/UxA==</SignatureValue><KeyInfo><KeyValue><RSAKeyValue><Modulus>1Cj3ChlWunG6BkFNNzjW1CspeFqR+kNl6PXD90YV0zmugukx5bXdkX545VEBvjMKMvd4hphihDBf48jtl3YsDD+Nu4/dAvzzGP3eb2N9bMfrnbW4n+xgie4ydby83Y9vM1eK9BRhushL/rVDXpUyLBZpkm9BVIibVOK+bHwk4b4PHSPxfR4esTGaFbYvpG1ZWvoZRvG3+LNNFU8OLgGYYxkxQmBUcrSid/5rXoNqp8LxwzoFe0EnVeXVnXdPsc3LhtKoHd6AggIx/GZo5qMJB1HuHVJm3GX17IFpTn3OgxuyUvg3iWpNQ72m2pmKh4NQFHmdPrJKZMKysF0xcAUZbQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue></KeyValue><X509Data><X509Certificate>MIIGAzCCA+ugAwIBAgITMwAAA01OkaYaKLB4jwAAAAADTTANBgkqhkiG9w0BAQsFADB+MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSgwJgYDVQQDEx9NaWNyb3NvZnQgQ29kZSBTaWduaW5nIFBDQSAyMDExMB4XDTIzMDMxNjE4NDMyOFoXDTI0MDMxNDE4NDMyOFowdDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEeMBwGA1UEAxMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1Cj3ChlWunG6BkFNNzjW1CspeFqR+kNl6PXD90YV0zmugukx5bXdkX545VEBvjMKMvd4hphihDBf48jtl3YsDD+Nu4/dAvzzGP3eb2N9bMfrnbW4n+xgie4ydby83Y9vM1eK9BRhushL/rVDXpUyLBZpkm9BVIibVOK+bHwk4b4PHSPxfR4esTGaFbYvpG1ZWvoZRvG3+LNNFU8OLgGYYxkxQmBUcrSid/5rXoNqp8LxwzoFe0EnVeXVnXdPsc3LhtKoHd6AggIx/GZo5qMJB1HuHVJm3GX17IFpTn3OgxuyUvg3iWpNQ72m2pmKh4NQFHmdPrJKZMKysF0xcAUZbQIDAQABo4IBgjCCAX4wHwYDVR0lBBgwFgYKKwYBBAGCN0wIAQYIKwYBBQUHAwMwHQYDVR0OBBYEFCHdiJoNkqdOVOlyNOI5YtiqIS/vMFQGA1UdEQRNMEukSTBHMS0wKwYDVQQLEyRNaWNyb3NvZnQgSXJlbGFuZCBPcGVyYXRpb25zIExpbWl0ZWQxFjAUBgNVBAUTDTIzMDAxMis1MDA1MTcwHwYDVR0jBBgwFoAUSG5k5VAF04KqFzc3IrVtqMp1ApUwVAYDVR0fBE0wSzBJoEegRYZDaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljQ29kU2lnUENBMjAxMV8yMDExLTA3LTA4LmNybDBhBggrBgEFBQcBAQRVMFMwUQYIKwYBBQUHMAKGRWh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2lvcHMvY2VydHMvTWljQ29kU2lnUENBMjAxMV8yMDExLTA3LTA4LmNydDAMBgNVHRMBAf8EAjAAMA0GCSqGSIb3DQEBCwUAA4ICAQAjBE/Frsy6w8Hsbk1GXvb9sa1vFhlD0UFZsidW/wcymAWeWlOEL4eS82XvYzhMQ2FJSm/2O95aiCH1HBDv+lt2/u7dT/ZvTNcT62b+XH50goLqKDw6uK0Hv4gnTQ8B0+l2FusnrcUyTDqOLVA20ktGIma+zGm9sJI4DRWtI0RYXkvXWk0taCf8+WzZRop8atr/Gs0j/xnB/7fHk6x0H3Gsd1mzxC6BhyG68q0lGjgqYbJwjVKlDeRWxDJWreTLmPeKxjCZ6tSBHekvJ4CugvBPUlqRhDtzQ2tDZQFYqK6RnyNDWCG3cp8jgfOOmlgIzX4E4SHHc3VhbwJf+pLVlyxE5/Lv5WEMlhprpd8s/sNOqbiDw/aeCj4lgZAnrCgx71y609wWy2fHSqkjlfA7cyxQH3PagLDYhvBKGrYZbiQbG8hW6Xm2nSpRKxYnQF/ChLrJPIbR6okpDccnWpi/7Sn8d1f7wwKEBOfcrL+K96RPs3cnzGoq75BTTcO3D59ZBxnMMPXRUmNkMAMYTM5qDNBvjPmLwZwbucI38TazEYpUW8TOgo/YShYdGE8G2ujO857Rx6V93fp2m4xZv05zEUTjoCFyc2G8yimjtoNZFnshtkLbyEdeO85a20A+F9dAG60YPQqcFu8WMcsHs4/ojQHPkJhc0feHcyZBD1EgiT7ExQ==</X509Certificate><X509Certificate>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</X509Certificate><X509Certificate>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</X509Certificate></X509Data></KeyInfo><Object Id="ts-countersig"><X509Data><X509Certificate>MIIHJzCCBQ+gAwIBAgITMwAAAbP+Jc4pGxuKHAABAAABszANBgkqhkiG9w0BAQsFADB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDAeFw0yMjA5MjAyMDIyMDNaFw0yMzEyMTQyMDIyMDNaMIHSMQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMS0wKwYDVQQLEyRNaWNyb3NvZnQgSXJlbGFuZCBPcGVyYXRpb25zIExpbWl0ZWQxJjAkBgNVBAsTHVRoYWxlcyBUU1MgRVNOOjhENDEtNEJGNy1CM0I3MSUwIwYDVQQDExxNaWNyb3NvZnQgVGltZS1TdGFtcCBTZXJ2aWNlMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAtHwPuuYYgK4ssGCCsr2N7eElKlz0JPButr/gpvZ67kNlHqgKAW0JuKAy4xxjfVCUev/eS5aEcnTmfj63fvs8eid0MNvP91T6r819dIqvWnBTY4vKVjSzDnfVVnWxYB3IPYRAITNN0sPgolsLrCYAKieIkECq+EPJfEnQ26+WTvit1US+uJuwNnHMKVYRri/rYQ2P8fKIJRfcxkadj8CEPJrN+lyENag/pwmA0JJeYdX1ewmBcniX4BgCBqoC83w34Sk37RMSsKAU5/BlXbVyDu+B6c5XjyCYb8Qx/Qu9EB6KvE9S76M0HclIVtbVZTxnnGwsSg2V7fmJx0RP4bfAM2ZxJeVBizi33ghZHnjX4+xROSrSSZ0/j/U7gYPnhmwnl5SctprBc7HFPV+BtZv1VGDVnhqylam4vmAXAdrxQ0xHGwp9+ivqqtdVVDU50k5LUmV6+GlmWyxIJUOh0xzfQjd9Z7OfLq006h+l9o+u3AnS6RdwsPXJP7z27i5AH+upQronsemQ27R9HkznEa05yH2fKdw71qWivEN+IR1vrN6q0J9xujjq77+t+yyVwZK4kXOXAQ2dT69D4knqMlFSsH6avnXNZQyJZMsNWaEt3rr/8Nr9gGMDQGLSFxi479Zy19aT/fHzsAtu2ocBuTqLVwnxrZyiJ66P70EBJKO5eQECAwEAAaOCAUkwggFFMB0GA1UdDgQWBBTQGl3CUWdSDBiLOEgh/14F3J/DjTAfBgNVHSMEGDAWgBSfpxVdAF5iXYP05dJlpxtTNRnpcjBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NybC9NaWNyb3NvZnQlMjBUaW1lLVN0YW1wJTIwUENBJTIwMjAxMCgxKS5jcmwwbAYIKwYBBQUHAQEEYDBeMFwGCCsGAQUFBzAChlBodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMFRpbWUtU3RhbXAlMjBQQ0ElMjAyMDEwKDEpLmNydDAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDANBgkqhkiG9w0BAQsFAAOCAgEAWoa7N86wCbjAAl8RGYmBZbS00ss+TpViPnf6EGZQgKyoaCP2hc01q2AKr6Me3TcSJPNWHG14pY4uhMzHf1wJxQmAM5Agf4aO7KNhVV04Jr0XHqUjr3T84FkWXPYMO4ulQG6j/+/d7gqezjXaY7cDqYNCSd3F4lKx0FJuQqpxwHtML+a4U6HODf2Z+KMYgJzWRnOIkT/od0oIXyn36+zXIZRHm7OQij7ryr+fmQ23feF1pDbfhUSHTA9IT50KCkpGp/GBiwFP/m1drd7xNfImVWgb2PBcGsqdJBvj6TX2MdUHfBVR+We4A0lEj1rNbCpgUoNtlaR9Dy2k2gV8ooVEdtaiZyh0/VtWfuQpZQJMDxgbZGVMG2+uzcKpjeYANMlSKDhyQ38wboAivxD4AKYoESbg4Wk5xkxfRzFqyil2DEz1pJ0G6xol9nci2Xe8LkLdET3u5RGxUHam8L4KeMW238+RjvWX1RMfNQI774ziFIZLOR+77IGFcwZ4FmoteX1x9+Bg9ydEWNBP3sZv9uDiywsgW40k00Am5v4i/GGiZGu1a4HhI33fmgx+8blwR5nt7JikFngNuS83jhm8RHQQdFqQvbFvWuuyPtzwj5q4SpjO1SkOe6roHGkEhQCUXdQMnRIwbnGpb/2EsxadokK8h6sRZMWbriO2ECLQEMzCcLA=</X509Certificate><X509Certificate>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</X509Certificate></X509Data><CounterSignature ts-format="cms-timestamp-message" xmlns="http://schemas.microsoft.com/xmldsig/timestamp/2003">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</CounterSignature></Object></Signature></doc>
