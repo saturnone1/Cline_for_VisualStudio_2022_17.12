@@ -50,9 +50,15 @@ export class VisualStudioWebviewRouter {
 		| null = null
 	private messageSequence = 0
 	private activePartialTextTs: number | null = null
+	private activeStatusTextTs: number | null = null
 	private partialIdleTimer: NodeJS.Timeout | null = null
+	private taskIdleNoticeTimer: NodeJS.Timeout | null = null
 	private taskIdleTimer: NodeJS.Timeout | null = null
 	private lastTaskActivityAt = 0
+	private lastTaskActivityReason = ""
+	private reasoningStartedAt = 0
+	private reasoningChunkCount = 0
+	private lastReasoningStatusAt = 0
 	private lastToolSummaries: string[] = []
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
@@ -911,9 +917,10 @@ export class VisualStudioWebviewRouter {
 	private handleAgentEvent(event: Record<string, unknown>) {
 		const type = getString(event, "type")
 		const contentType = getString(event, "contentType")
-		this.noteTaskActivity(type || contentType || "agent_event")
 
 		if (type === "content_start" && contentType === "text") {
+			this.noteTaskActivity("content_start:text")
+			this.clearReasoningStatus()
 			const text = getString(event, "accumulated") || getString(event, "text")
 			if (text) {
 				this.upsertPartialText(text)
@@ -922,7 +929,13 @@ export class VisualStudioWebviewRouter {
 			}
 		}
 
+		if (type === "content_start" && contentType === "reasoning") {
+			this.handleReasoningDelta(getString(event, "reasoning") || getString(event, "text") || getString(event, "accumulated"))
+		}
+
 		if (type === "content_end" && contentType === "text") {
+			this.noteTaskActivity("content_end:text")
+			this.clearReasoningStatus()
 			const text = getString(event, "text") || getString(event, "accumulated")
 			if (text && this.activePartialTextTs) {
 				this.upsertMessage(this.activePartialTextTs, { type: "say", say: "text", text, partial: false })
@@ -933,12 +946,21 @@ export class VisualStudioWebviewRouter {
 			}
 		}
 
+		if (type === "content_end" && contentType === "reasoning") {
+			this.noteTaskActivity("content_end:reasoning")
+			this.clearReasoningStatus()
+		}
+
 		if (type === "content_start" && contentType === "tool") {
+			this.noteTaskActivity("content_start:tool")
+			this.clearReasoningStatus()
 			this.clearPartialIdleWatchdog()
 			this.activePartialTextTs = null
 		}
 
 		if (type === "content_end" && contentType === "tool") {
+			this.noteTaskActivity("content_end:tool")
+			this.clearReasoningStatus()
 			const toolName = getString(event, "toolName")
 			const error = getString(event, "error")
 			const isCommand = toolName === "bash" || toolName === "run_commands"
@@ -977,6 +999,8 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "tool-finished") {
+			this.noteTaskActivity("tool-finished")
+			this.clearReasoningStatus()
 			const toolCall = asRecord(event.toolCall)
 			const mappedToolName = mapToolName(getString(toolCall, "toolName"))
 			const result = asRecord(event.result)
@@ -993,6 +1017,8 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "assistant-message") {
+			this.noteTaskActivity("assistant-message")
+			this.clearReasoningStatus()
 			const text = contentToText(asRecord(event.message).content)
 			if (text.trim()) {
 				this.finalizeActivePartialText()
@@ -1001,6 +1027,8 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "run-finished") {
+			this.noteTaskActivity("run-finished")
+			this.clearReasoningStatus()
 			const result = asRecord(event.result)
 			const text = getString(result, "outputText")
 			this.finalizeActivePartialText()
@@ -1008,11 +1036,14 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "run-failed") {
+			this.noteTaskActivity("run-failed")
+			this.clearReasoningStatus()
 			this.finalizeActivePartialText()
 			this.addCompletionResult(this.buildTerminalCompletionFallback("failed"))
 		}
 
 		if (type === "usage") {
+			this.noteTaskActivity("usage")
 			const usage = asRecord(event.usage)
 			this.updateCurrentTaskItem({
 				tokensIn: numberValue(event.totalInputTokens) ?? numberValue(usage.inputTokens),
@@ -1024,19 +1055,63 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "done") {
+			this.noteTaskActivity("done")
+			this.clearReasoningStatus()
 			const text = getString(event, "text")
 			this.finalizeActivePartialText()
 			if (text) {
 				this.addCompletionResult(text)
+			} else if (!this.hasAssistantTextAfterLastUserMessage()) {
+				logInteraction("sidecar", "emptyDoneFallback", { lastTaskActivityReason: this.lastTaskActivityReason })
+				this.addCompletionResult(this.buildTerminalCompletionFallback("completed"))
 			}
 		}
 
 		if (type === "error") {
+			this.noteTaskActivity("error")
+			this.clearReasoningStatus()
 			this.addMessage({ type: "say", say: "error", text: stringify(event.error) })
 		}
 
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handleReasoningDelta(text: string) {
+		if (!this.state.currentTaskItem) {
+			return
+		}
+
+		if (!this.reasoningStartedAt) {
+			this.reasoningStartedAt = Date.now()
+			logInteraction("sidecar", "reasoningStarted", { textLength: text.length })
+		}
+
+		this.reasoningChunkCount++
+		const now = Date.now()
+		const intervalMs = readPositiveIntEnv("VSCLINE_REASONING_STATUS_INTERVAL_MS", 2000)
+		if (now - this.lastReasoningStatusAt < intervalMs) {
+			return
+		}
+
+		this.lastReasoningStatusAt = now
+		const elapsedSeconds = Math.max(1, Math.round((now - this.reasoningStartedAt) / 1000))
+		const textPreview = text.trim() ? ` 최근 reasoning ${text.length}자 수신.` : ""
+		this.upsertStatusText(
+			`모델 내부 reasoning 수신 중입니다. ${elapsedSeconds}초 경과, ${this.reasoningChunkCount}개 청크.${textPreview} 아직 사용자에게 보여줄 본문이나 도구 호출은 도착하지 않았습니다.`,
+		)
+		logInteraction("sidecar", "reasoningProgress", {
+			elapsedSeconds,
+			chunks: this.reasoningChunkCount,
+			textLength: text.length,
+		})
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private clearReasoningStatus() {
+		this.reasoningStartedAt = 0
+		this.reasoningChunkCount = 0
+		this.lastReasoningStatusAt = 0
 	}
 
 	private async handleFileChangedEvent(payload: Record<string, unknown>) {
@@ -1142,6 +1217,21 @@ export class VisualStudioWebviewRouter {
 		const sdkBaseUrl = providerId === "ollama" ? normalizeOllamaOpenAiBaseUrl(configuredBaseUrl) : configuredBaseUrl
 		const modelId = await this.resolveEffectiveModelId(apiConfig, providerId, modePrefix, modelLookupBaseUrl)
 		const apiKey = resolveApiKey(apiConfig, providerId) || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
+		const maxTokens = readPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN", 4096)
+		const timeout = resolveRequestTimeoutMs(apiConfig)
+		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
+		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
+
+		logInteraction("sidecar", "sdkConfig", {
+			providerId: sdkProviderId,
+			modelId,
+			baseUrl: sdkBaseUrl || undefined,
+			mode: this.state.mode,
+			maxTokens,
+			timeout,
+			thinking,
+			reasoningEffort,
+		})
 
 		return {
 			providerId: sdkProviderId,
@@ -1156,8 +1246,18 @@ export class VisualStudioWebviewRouter {
 			enableAgentTeams: false,
 			maxIterations: readPositiveIntEnv("VSCLINE_MAX_ITERATIONS", 12),
 			maxParallelToolCalls: readPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS", 2),
-			maxTokensPerTurn: readPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN", 4096),
-			apiTimeoutMs: readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 180000),
+			maxTokens,
+			timeout,
+			thinking,
+			reasoningEffort,
+			providerConfig: {
+				maxTokens,
+				timeout,
+				reasoning: {
+					enabled: thinking,
+					effort: reasoningEffort,
+				},
+			},
 			checkpoint: {
 				enabled: this.state.enableCheckpointsSetting !== false,
 			},
@@ -1431,6 +1531,8 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 		this.lastTaskActivityAt = Date.now()
+		this.lastTaskActivityReason = reason
+		this.removeActiveStatusText()
 		logInteraction("sidecar", "taskActivity", { reason })
 		this.scheduleTaskIdleWatchdog()
 	}
@@ -1440,7 +1542,24 @@ export class VisualStudioWebviewRouter {
 		if (!this.state.currentTaskItem) {
 			return
 		}
+		const noticeMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000)
 		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 180000)
+		if (noticeMs > 0 && noticeMs < timeoutMs) {
+			this.taskIdleNoticeTimer = setTimeout(() => {
+				if (!this.state.currentTaskItem || this.activePartialTextTs) {
+					return
+				}
+				const idleForMs = Date.now() - this.lastTaskActivityAt
+				if (idleForMs < noticeMs - 1000) {
+					return
+				}
+
+				const text = `Cline SDK 응답을 기다리는 중입니다. 마지막 활동 후 ${Math.round(idleForMs / 1000)}초가 지났습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}`
+				logInteraction("sidecar", "taskIdleNotice", { noticeMs, idleForMs, reason: this.lastTaskActivityReason })
+				this.upsertStatusText(text)
+				this.broadcastState().catch((error) => console.error(error))
+			}, noticeMs)
+		}
 		this.taskIdleTimer = setTimeout(() => {
 			if (!this.state.currentTaskItem) {
 				return
@@ -1451,8 +1570,9 @@ export class VisualStudioWebviewRouter {
 				return
 			}
 
-			logInteraction("sidecar", "taskIdleComplete", { timeoutMs, idleForMs })
+			logInteraction("sidecar", "taskIdleComplete", { timeoutMs, idleForMs, reason: this.lastTaskActivityReason })
 			const activeText = this.getActivePartialText()
+			this.removeActiveStatusText()
 			this.finalizeActivePartialText()
 			this.addCompletionResult(activeText || this.buildTerminalCompletionFallback("stalled"))
 			const activeSessionId = this.clineSdk?.status.activeSessionId
@@ -1464,9 +1584,68 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private clearTaskIdleWatchdog() {
+		if (this.taskIdleNoticeTimer) {
+			clearTimeout(this.taskIdleNoticeTimer)
+			this.taskIdleNoticeTimer = null
+		}
 		if (this.taskIdleTimer) {
 			clearTimeout(this.taskIdleTimer)
 			this.taskIdleTimer = null
+		}
+	}
+
+	private upsertStatusText(text: string) {
+		if (!this.activeStatusTextTs) {
+			this.activeStatusTextTs = Date.now() + this.messageSequence++
+			this.state.clineMessages.push({
+				ts: this.activeStatusTextTs,
+				type: "say",
+				say: "text",
+				text,
+				partial: true,
+			})
+			return
+		}
+
+		this.upsertMessage(this.activeStatusTextTs, { type: "say", say: "text", text, partial: true })
+	}
+
+	private removeActiveStatusText() {
+		if (!this.activeStatusTextTs) {
+			return
+		}
+
+		const ts = this.activeStatusTextTs
+		this.state.clineMessages = this.state.clineMessages.filter((message) => message.ts !== ts)
+		this.activeStatusTextTs = null
+	}
+
+	private describeTaskActivityReason(reason: string) {
+		switch (reason) {
+			case "content_start:text":
+				return "모델 본문 수신"
+			case "content_end:text":
+				return "모델 본문 완료"
+			case "content_start:tool":
+				return "도구 호출 시작"
+			case "content_end:tool":
+				return "도구 호출 완료"
+			case "content_end:reasoning":
+				return "모델 reasoning 완료"
+			case "assistant-message":
+				return "모델 응답"
+			case "tool-finished":
+				return "도구 실행 완료"
+			case "run-finished":
+			case "done":
+				return "SDK 작업 완료"
+			case "run-failed":
+			case "error":
+				return "SDK 오류"
+			case "usage":
+				return "토큰 사용량 갱신"
+			default:
+				return reason || "알 수 없음"
 		}
 	}
 
@@ -1590,6 +1769,10 @@ function numberValue(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
+function booleanValue(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined
+}
+
 function readPositiveIntEnv(name: string, fallback: number) {
 	const raw = process.env[name]
 	if (!raw) {
@@ -1598,6 +1781,66 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 	const value = Number.parseInt(raw, 10)
 	return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function resolveRequestTimeoutMs(apiConfig: Record<string, unknown>) {
+	const configured =
+		numberValue(apiConfig.requestTimeoutMs) ||
+		numberValue(apiConfig.apiTimeoutMs) ||
+		numberValue(apiConfig.openAiRequestTimeoutMs) ||
+		numberValue(apiConfig.openAiCompatibleRequestTimeoutMs)
+	return configured && configured > 0 ? configured : readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 180000)
+}
+
+function resolveReasoningEffort(apiConfig: Record<string, unknown>, modePrefix: string) {
+	const candidates = [
+		getString(apiConfig, `${modePrefix}ReasoningEffort`),
+		getString(apiConfig, `${modePrefix}OpenAiReasoningEffort`),
+		getString(apiConfig, "reasoningEffort"),
+		getString(apiConfig, "openAiReasoningEffort"),
+		getString(apiConfig, "openAiCompatibleReasoningEffort"),
+	]
+		.map((value) => value.trim().toLowerCase())
+		.filter(Boolean)
+
+	for (const candidate of candidates) {
+		if (candidate === "low" || candidate === "medium" || candidate === "high" || candidate === "xhigh" || candidate === "none") {
+			return candidate
+		}
+	}
+
+	return process.env.VSCLINE_REASONING_EFFORT as "low" | "medium" | "high" | "xhigh" | "none" | undefined
+}
+
+function resolveThinkingEnabled(
+	apiConfig: Record<string, unknown>,
+	modePrefix: string,
+	providerId: string,
+	reasoningEffort?: string,
+): boolean | undefined {
+	const candidates = [
+		booleanValue(apiConfig[`${modePrefix}EnableThinking`]),
+		booleanValue(apiConfig[`${modePrefix}ThinkingEnabled`]),
+		booleanValue(apiConfig.enableThinking),
+		booleanValue(apiConfig.thinking),
+		booleanValue(apiConfig.openAiThinkingEnabled),
+		booleanValue(apiConfig.openAiCompatibleThinkingEnabled),
+	].filter((value): value is boolean => value !== undefined)
+
+	if (candidates.length > 0) {
+		return candidates[0]
+	}
+
+	if (reasoningEffort === "none") {
+		return false
+	}
+	if (reasoningEffort) {
+		return true
+	}
+	if (providerId === "openai" || providerId === "openai-compatible") {
+		return false
+	}
+	return undefined
 }
 
 function readLoopDetectionConfig() {
