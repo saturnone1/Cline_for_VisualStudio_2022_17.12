@@ -2991,7 +2991,7 @@ function agentChunkRecordToTranscriptText(record: Record<string, unknown>): stri
 	}
 
 	if (type === "content_start" || type === "content_update" || type === "content_delta" || type === "content_end") {
-		return agentContentEventToText(record)
+		return ""
 	}
 
 	if (type === "text" || type === "thinking" || type === "tool_use" || type === "tool_result" || type === "file" || type === "image") {
