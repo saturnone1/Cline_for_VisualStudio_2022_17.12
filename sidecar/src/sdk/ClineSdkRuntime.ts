@@ -79,11 +79,13 @@ export class ClineSdkRuntime {
 			stringValue(request.systemPrompt) ||
 			"You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper."
 		const mode = agentMode(config.mode) || agentMode(request.mode) || "act"
+		const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
 		const userImages = stringArrayValue(request.userImages)
 		const userFiles = stringArrayValue(request.userFiles)
 		const startInput: any = {
 			config: {
 				...config,
+				...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
 				providerId,
 				modelId,
 				apiKey,
@@ -103,10 +105,20 @@ export class ClineSdkRuntime {
 			userFiles: userFiles.length > 0 ? userFiles : undefined,
 		}
 
-		const result = await core.start(startInput)
+		if (requestedSessionId) {
+			this.activeSessionId = requestedSessionId
+		}
 
-		this.activeSessionId = result.sessionId
-		return result
+		try {
+			const result = await core.start(startInput)
+			this.activeSessionId = result.sessionId || requestedSessionId || this.activeSessionId
+			return result
+		} catch (error) {
+			if (requestedSessionId && this.activeSessionId === requestedSessionId) {
+				this.activeSessionId = null
+			}
+			throw error
+		}
 	}
 
 	async send(params: unknown) {
@@ -117,14 +129,21 @@ export class ClineSdkRuntime {
 			throw new Error("No active Cline SDK session. Call sdk.startSession first.")
 		}
 
-		return core.send({
-			sessionId,
-			prompt: stringValue(request.prompt) || "",
-			mode: agentMode(request.mode),
-			delivery: request.delivery === "queue" || request.delivery === "steer" ? request.delivery : undefined,
-			userImages: stringArrayValue(request.userImages),
-			userFiles: stringArrayValue(request.userFiles),
-		})
+		try {
+			return await core.send({
+				sessionId,
+				prompt: stringValue(request.prompt) || "",
+				mode: agentMode(request.mode),
+				delivery: request.delivery === "queue" || request.delivery === "steer" ? request.delivery : undefined,
+				userImages: stringArrayValue(request.userImages),
+				userFiles: stringArrayValue(request.userFiles),
+			})
+		} catch (error) {
+			if (this.activeSessionId === sessionId && /session not found/i.test(error instanceof Error ? error.message : String(error))) {
+				this.activeSessionId = null
+			}
+			throw error
+		}
 	}
 
 	async stop(params: unknown) {

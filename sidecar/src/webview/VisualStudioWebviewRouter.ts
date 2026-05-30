@@ -175,7 +175,16 @@ export class VisualStudioWebviewRouter {
 		const payload = asRecord(record.payload)
 
 		if (type === "agent_event") {
-			this.handleAgentEvent(asRecord(payload.event))
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				logInteraction("sidecar", "ignoredSdkAgentEvent", {
+					sessionId,
+					activeSessionId: this.clineSdk?.status.activeSessionId,
+					currentTaskId: this.state.currentTaskItem?.id,
+				})
+				return
+			}
+			this.handleAgentEvent(asRecord(payload.event), sessionId)
 			return
 		}
 
@@ -582,7 +591,7 @@ export class VisualStudioWebviewRouter {
 			userImages: images,
 			userFiles: files,
 			interactive: true,
-			config: await this.buildSdkConfig(cwd),
+			config: await this.buildSdkConfig(cwd, String(taskItem.id || "")),
 			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
 		}).then(async (result) => {
 			const resultRecord = asRecord(result)
@@ -816,7 +825,7 @@ export class VisualStudioWebviewRouter {
 				workspace: restoreType === "workspace" || restoreType === "taskAndWorkspace",
 			},
 			start: {
-				config: await this.buildSdkConfig(cwd),
+				config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
 				interactive: true,
 				toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
 			},
@@ -924,9 +933,12 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private handleAgentEvent(event: Record<string, unknown>) {
+	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
 		const type = getString(event, "type")
 		const contentType = getString(event, "contentType")
+		if (sessionId) {
+			this.bindCurrentTaskToSession(sessionId)
+		}
 
 		if (type === "content_start" && contentType === "text") {
 			this.noteTaskActivity("content_start:text")
@@ -1217,7 +1229,7 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private async buildSdkConfig(cwd: string) {
+	private async buildSdkConfig(cwd: string, sessionId?: string) {
 		const apiConfig = asRecord(this.state.apiConfiguration)
 		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
 		const providerId = normalizeProviderId(getString(apiConfig, `${modePrefix}ApiProvider`) || process.env.CLINE_PROVIDER_ID || "anthropic")
@@ -1241,11 +1253,13 @@ export class VisualStudioWebviewRouter {
 			timeout,
 			thinking,
 			reasoningEffort,
+			sessionId: sessionId || undefined,
 		})
 
 		return {
 			providerId: sdkProviderId,
 			modelId,
+			sessionId: sessionId || undefined,
 			apiKey,
 			baseUrl: sdkBaseUrl || undefined,
 			cwd,
@@ -1663,7 +1677,29 @@ export class VisualStudioWebviewRouter {
 		if (activeSessionId) {
 			return sessionId !== activeSessionId
 		}
-		return !this.state.currentTaskItem
+		const currentTaskId = String(this.state.currentTaskItem?.id || "")
+		return !!currentTaskId && sessionId !== currentTaskId
+	}
+
+	private bindCurrentTaskToSession(sessionId: string) {
+		if (!sessionId || !this.state.currentTaskItem) {
+			return
+		}
+		const currentTaskId = String(this.state.currentTaskItem.id || "")
+		if (!currentTaskId || currentTaskId === sessionId) {
+			return
+		}
+
+		const snapshot = this.taskSnapshots.get(currentTaskId)
+		if (snapshot) {
+			this.taskSnapshots.delete(currentTaskId)
+			this.taskSnapshots.set(sessionId, snapshot)
+		}
+		this.state.currentTaskItem = { ...this.state.currentTaskItem, id: sessionId }
+		this.state.taskHistory = this.state.taskHistory.map((item) =>
+			String(item.id || "") === currentTaskId ? { ...item, id: sessionId } : item,
+		)
+		logInteraction("sidecar", "taskSessionIdRebound", { previousTaskId: currentTaskId, sessionId })
 	}
 
 	private upsertMessage(ts: number, updates: Record<string, unknown>) {
