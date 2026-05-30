@@ -199,6 +199,14 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			if (status === "idle") {
+				logInteraction("sidecar", "sdkStatusIdle", { sessionId })
+				this.clearTaskIdleWatchdog()
+				this.clearPartialIdleWatchdog()
+				this.removeActiveStatusText()
+				this.broadcastState().catch((error) => console.error(error))
+				return
+			}
 			if (isTerminalSdkStatus(status)) {
 				const activeText = this.getActivePartialText()
 				this.finishSdkTask(sessionId, status, activeText)
@@ -1003,6 +1011,55 @@ export class VisualStudioWebviewRouter {
 			})
 		}
 
+		if (type === "content_update" && contentType === "tool") {
+			this.noteTaskActivity("content_update:tool")
+			this.clearReasoningStatus()
+			const toolName = mapToolName(getString(event, "toolName"))
+			const update = event.update
+			if (update !== undefined) {
+				this.rememberToolSummary(
+					toolName,
+					JSON.stringify({
+						tool: toolName,
+						path: getToolPathFromUnknown(update),
+						content: summarizeToolOutput(toolName, update),
+					}),
+				)
+			}
+		}
+
+		if (type === "iteration_start") {
+			const iteration = getNumber(event, "iteration")
+			this.noteTaskActivity("iteration_start")
+			this.upsertStatusText(iteration ? `Cline SDK iteration ${iteration} started.` : "Cline SDK iteration started.")
+		}
+
+		if (type === "iteration_end") {
+			const iteration = getNumber(event, "iteration")
+			this.noteTaskActivity("iteration_end")
+			const toolCallCount = getNumber(event, "toolCallCount") || 0
+			this.upsertStatusText(
+				iteration
+					? `Cline SDK iteration ${iteration} finished. Tool calls: ${toolCallCount}.`
+					: `Cline SDK iteration finished. Tool calls: ${toolCallCount}.`,
+			)
+		}
+
+		if (type === "notice") {
+			this.noteTaskActivity("notice")
+			const message = getString(event, "message")
+			const reason = getString(event, "reason")
+			const noticeType = getString(event, "noticeType")
+			if (message) {
+				const text = reason ? `${message}\n\nReason: ${reason}` : message
+				if (noticeType === "status") {
+					this.upsertStatusText(text)
+				} else {
+					this.addMessage({ type: "say", say: "text", text })
+				}
+			}
+		}
+
 		if (type === "tool-finished") {
 			this.noteTaskActivity("tool-finished")
 			this.clearReasoningStatus()
@@ -1214,10 +1271,13 @@ export class VisualStudioWebviewRouter {
 		const sdkBaseUrl = providerId === "ollama" ? normalizeOllamaOpenAiBaseUrl(configuredBaseUrl) : configuredBaseUrl
 		const modelId = await this.resolveEffectiveModelId(apiConfig, providerId, modePrefix, modelLookupBaseUrl)
 		const apiKey = resolveApiKey(apiConfig, providerId) || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
-		const maxTokens = readPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN", 4096)
+		const maxTokens = readOptionalPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN")
 		const timeout = resolveRequestTimeoutMs(apiConfig)
 		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
 		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
+		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
+		const maxParallelToolCalls = readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS")
+		const execution = buildOptionalExecutionConfig()
 
 		logInteraction("sidecar", "sdkConfig", {
 			providerId: sdkProviderId,
@@ -1229,6 +1289,9 @@ export class VisualStudioWebviewRouter {
 			thinking,
 			reasoningEffort,
 			sessionId: sessionId || undefined,
+			maxIterations,
+			maxParallelToolCalls,
+			execution,
 		})
 
 		return {
@@ -1243,15 +1306,15 @@ export class VisualStudioWebviewRouter {
 			enableTools: true,
 			enableSpawnAgent: false,
 			enableAgentTeams: false,
-			maxIterations: readPositiveIntEnv("VSCLINE_MAX_ITERATIONS", 12),
-			maxParallelToolCalls: readPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS", 2),
-			maxTokens,
-			timeout,
+			...(maxIterations ? { maxIterations } : {}),
+			...(maxParallelToolCalls ? { maxParallelToolCalls } : {}),
+			...(maxTokens ? { maxTokens } : {}),
+			...(timeout ? { timeout } : {}),
 			thinking,
 			reasoningEffort,
 			providerConfig: {
-				maxTokens,
-				timeout,
+				...(maxTokens ? { maxTokens } : {}),
+				...(timeout ? { timeout } : {}),
 				reasoning: {
 					enabled: thinking,
 					effort: reasoningEffort,
@@ -1260,11 +1323,7 @@ export class VisualStudioWebviewRouter {
 			checkpoint: {
 				enabled: this.state.enableCheckpointsSetting !== false,
 			},
-			execution: {
-				maxConsecutiveMistakes: readPositiveIntEnv("VSCLINE_MAX_CONSECUTIVE_MISTAKES", 3),
-				reminderAfterIterations: readPositiveIntEnv("VSCLINE_REMINDER_AFTER_ITERATIONS", 6),
-				loopDetection: readLoopDetectionConfig(),
-			},
+			...(execution ? { execution } : {}),
 			systemPrompt: "You are Cline running inside Visual Studio 2022 through the VsClineAgent SDK wrapper.",
 		}
 	}
@@ -1828,13 +1887,23 @@ function readPositiveIntEnv(name: string, fallback: number) {
 	return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
+function readOptionalPositiveIntEnv(name: string) {
+	const raw = process.env[name]
+	if (!raw) {
+		return undefined
+	}
+
+	const value = Number.parseInt(raw, 10)
+	return Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 function resolveRequestTimeoutMs(apiConfig: Record<string, unknown>) {
 	const configured =
 		numberValue(apiConfig.requestTimeoutMs) ||
 		numberValue(apiConfig.apiTimeoutMs) ||
 		numberValue(apiConfig.openAiRequestTimeoutMs) ||
 		numberValue(apiConfig.openAiCompatibleRequestTimeoutMs)
-	return configured && configured > 0 ? configured : readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 180000)
+	return configured && configured > 0 ? configured : readOptionalPositiveIntEnv("VSCLINE_API_TIMEOUT_MS")
 }
 
 function resolveReasoningEffort(apiConfig: Record<string, unknown>, modePrefix: string) {
@@ -1888,15 +1957,36 @@ function resolveThinkingEnabled(
 	return undefined
 }
 
+function buildOptionalExecutionConfig() {
+	const execution: Record<string, unknown> = {}
+	const maxConsecutiveMistakes = readOptionalPositiveIntEnv("VSCLINE_MAX_CONSECUTIVE_MISTAKES")
+	const reminderAfterIterations = readOptionalPositiveIntEnv("VSCLINE_REMINDER_AFTER_ITERATIONS")
+	const loopDetection = readLoopDetectionConfig()
+	if (maxConsecutiveMistakes) {
+		execution.maxConsecutiveMistakes = maxConsecutiveMistakes
+	}
+	if (reminderAfterIterations) {
+		execution.reminderAfterIterations = reminderAfterIterations
+	}
+	if (loopDetection !== undefined) {
+		execution.loopDetection = loopDetection
+	}
+	return Object.keys(execution).length > 0 ? execution : undefined
+}
+
 function readLoopDetectionConfig() {
-	const raw = (process.env.VSCLINE_LOOP_DETECTION || "1").trim().toLowerCase()
+	const rawValue = process.env.VSCLINE_LOOP_DETECTION
+	if (!rawValue) {
+		return undefined
+	}
+	const raw = rawValue.trim().toLowerCase()
 	if (raw === "0" || raw === "false" || raw === "off") {
 		return false
 	}
 
 	return {
-		softThreshold: readPositiveIntEnv("VSCLINE_LOOP_SOFT_THRESHOLD", 3),
-		hardThreshold: readPositiveIntEnv("VSCLINE_LOOP_HARD_THRESHOLD", 5),
+		softThreshold: readOptionalPositiveIntEnv("VSCLINE_LOOP_SOFT_THRESHOLD") || 3,
+		hardThreshold: readOptionalPositiveIntEnv("VSCLINE_LOOP_HARD_THRESHOLD") || 5,
 	}
 }
 
