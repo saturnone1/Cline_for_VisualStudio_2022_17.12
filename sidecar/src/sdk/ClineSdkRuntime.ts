@@ -55,6 +55,20 @@ export class ClineSdkRuntime {
 		}
 	}
 
+	async activateSession(sessionId: string) {
+		const core = await this.getCore()
+		if (!sessionId) {
+			this.activeSessionId = null
+			return null
+		}
+
+		const session = await core.get(sessionId)
+		if (session) {
+			this.activeSessionId = sessionId
+		}
+		return session
+	}
+
 	async ensureStarted() {
 		const core = await this.getCore()
 		const history = await core.listHistory({ limit: 5 }).catch(() => [])
