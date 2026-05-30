@@ -213,6 +213,28 @@ html, body, #root {
     color: var(--vscode-foreground) !important;
     font-family: var(--vscode-font-family) !important;
     font-size: var(--vscode-font-size) !important;
+    scrollbar-gutter: stable !important;
+    scrollbar-width: auto !important;
+    scrollbar-color: var(--vscode-scrollbarSlider-background) transparent !important;
+}
+*::-webkit-scrollbar {
+    width: 12px !important;
+    height: 12px !important;
+}
+*::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background) !important;
+    border: 3px solid transparent !important;
+    border-radius: 8px !important;
+    background-clip: content-box !important;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vscode-scrollbarSlider-hoverBackground) !important;
+}
+*::-webkit-scrollbar-thumb:active {
+    background-color: var(--vscode-scrollbarSlider-activeBackground) !important;
 }
 `;
             (document.head || document.documentElement).appendChild(themeStyle);
