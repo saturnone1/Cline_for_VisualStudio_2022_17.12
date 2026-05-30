@@ -69,6 +69,75 @@ import UserMessage from "./UserMessage"
 
 const HEADER_CLASSNAMES = "flex items-center gap-2.5 mb-3"
 
+type VsClineChangedFile = {
+	filePath: string
+	beforePath: string
+	afterPath: string
+	action: string
+	additions: number
+	deletions: number
+}
+
+const VsClineChangedFilesCard = memo(({ tool }: { tool: ClineSayTool }) => {
+	const files = Array.isArray(tool.files) ? (tool.files as VsClineChangedFile[]) : []
+	const additions = typeof tool.additions === "number" ? tool.additions : files.reduce((sum, file) => sum + (file.additions || 0), 0)
+	const deletions = typeof tool.deletions === "number" ? tool.deletions : files.reduce((sum, file) => sum + (file.deletions || 0), 0)
+	const visibleFiles = files.slice(0, 8)
+	const hiddenCount = Math.max(files.length - visibleFiles.length, 0)
+
+	const openDiff = (file: VsClineChangedFile) => {
+		FileServiceClient.openVsClineDiff({
+			leftPath: file.beforePath,
+			rightPath: file.afterPath || file.filePath,
+			title: `Cline change: ${file.filePath.split(/[\\/]/).pop() || file.filePath}`,
+		}).catch((err: unknown) => console.error("Failed to open Cline diff:", err))
+	}
+
+	if (files.length === 0) {
+		return null
+	}
+
+	return (
+		<div className="rounded-sm border border-editor-group-border bg-code overflow-hidden">
+			<div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-editor-group-border">
+				<div className="flex items-center gap-2 min-w-0">
+					<PencilIcon className="size-3 shrink-0" />
+					<div className="min-w-0">
+						<div className="font-bold text-foreground">Edited {files.length} file{files.length > 1 ? "s" : ""}</div>
+						<div className="text-xs">
+							<span className="text-success">+{additions}</span>
+							<span className="mx-1" />
+							<span className="text-error">-{deletions}</span>
+						</div>
+					</div>
+				</div>
+				<button
+					className="rounded-sm border border-editor-group-border px-2 py-1 text-xs hover:text-link hover:border-link"
+					onClick={() => openDiff(files[0])}
+					type="button">
+					Review
+				</button>
+			</div>
+			<div className="divide-y divide-editor-group-border/60">
+				{visibleFiles.map((file) => (
+					<button
+						className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-list-hover"
+						key={`${file.beforePath}-${file.afterPath}-${file.filePath}`}
+						onClick={() => openDiff(file)}
+						type="button">
+						<FileCode2Icon className="size-3 shrink-0 opacity-70" />
+						<span className="flex-1 min-w-0 truncate">{cleanPathPrefix(file.filePath)}</span>
+						<span className="text-success text-xs">+{file.additions || 0}</span>
+						<span className="text-error text-xs">-{file.deletions || 0}</span>
+						<SquareArrowOutUpRightIcon className="size-2 shrink-0 opacity-70" />
+					</button>
+				))}
+				{hiddenCount > 0 && <div className="px-3 py-2 text-xs text-description">Show {hiddenCount} more file{hiddenCount > 1 ? "s" : ""} in the task log.</div>}
+			</div>
+		</div>
+	)
+})
+
 interface ChatRowProps {
 	message: ClineMessage
 	isExpanded: boolean
@@ -430,6 +499,8 @@ export const ChatRowContent = memo(
 			)
 
 			switch (tool.tool) {
+				case "vsclineChangedFiles":
+					return <VsClineChangedFilesCard tool={tool} />
 				case "editedExistingFile":
 					const content = tool?.content || ""
 					const isApplyingPatch = content?.startsWith("%%bash") && !content.endsWith("*** End Patch\nEOF")

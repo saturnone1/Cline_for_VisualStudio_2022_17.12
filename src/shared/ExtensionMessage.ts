@@ -232,9 +232,20 @@ export interface ClineSayTool {
 		| "webSearch"
 		| "summarizeTask"
 		| "useSkill"
+		| "vsclineChangedFiles"
 	path?: string
 	diff?: string
 	content?: string
+	files?: Array<{
+		filePath: string
+		beforePath: string
+		afterPath: string
+		action: string
+		additions: number
+		deletions: number
+	}>
+	additions?: number
+	deletions?: number
 	regex?: string
 	filePattern?: string
 	operationIsLocatedInWorkspace?: boolean
