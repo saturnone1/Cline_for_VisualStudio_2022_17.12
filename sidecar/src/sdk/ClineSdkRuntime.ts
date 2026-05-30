@@ -366,7 +366,7 @@ export class ClineSdkRuntime {
 							if (abortSignal?.aborted) {
 								throw new Error("Command was cancelled.")
 							}
-							return typeof result === "string" ? result : JSON.stringify(result)
+							return normalizeCommandResultForSdk(result)
 						} finally {
 							abortSignal?.removeEventListener("abort", abortHandler)
 						}
@@ -519,6 +519,39 @@ function stringValue(value: unknown) {
 
 function numberValue(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function normalizeCommandResultForSdk(result: unknown) {
+	const limit = readPositiveIntEnv("VSCLINE_SDK_COMMAND_RESULT_CHARS", 20000)
+	if (typeof result === "string") {
+		return truncateText(result, limit)
+	}
+
+	const record = asRecord(result)
+	if (Object.keys(record).length === 0) {
+		return truncateText(String(result), limit)
+	}
+
+	const stdout = typeof record.stdout === "string" ? record.stdout : undefined
+	const stderr = typeof record.stderr === "string" ? record.stderr : undefined
+	return JSON.stringify({
+		...record,
+		stdout: stdout === undefined ? undefined : truncateText(stdout, limit),
+		stderr: stderr === undefined ? undefined : truncateText(stderr, Math.min(limit, 8000)),
+	})
+}
+
+function truncateText(value: string, maxChars: number) {
+	if (value.length <= maxChars) {
+		return value
+	}
+
+	return `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`
+}
+
+function readPositiveIntEnv(name: string, fallback: number) {
+	const value = Number.parseInt(process.env[name] || "", 10)
+	return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function stringArrayValue(value: unknown) {
