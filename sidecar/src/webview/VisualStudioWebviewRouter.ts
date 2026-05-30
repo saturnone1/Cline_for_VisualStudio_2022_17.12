@@ -125,6 +125,7 @@ export class VisualStudioWebviewRouter {
 			this.pendingQuestion.resolve("")
 			this.pendingQuestion = null
 		}
+		this.removeAskMessages("followup")
 
 		this.addMessage({
 			type: "ask",
@@ -431,6 +432,10 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.newTask":
+				if (this.pendingQuestion) {
+					await this.sendAskResponse(message)
+					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
+				}
 				await this.startNewTask(message, { broadcast: false })
 				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 
@@ -586,10 +591,12 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (this.pendingQuestion) {
-			const text = buildTaskInputWithAttachments(getString(message, "text"), getStringArray(message, "images"), getStringArray(message, "files"))
+			const answer = getAskResponseText(message)
+			const text = buildTaskInputWithAttachments(answer, getStringArray(message, "images"), getStringArray(message, "files"))
 			const pending = this.pendingQuestion
 			this.pendingQuestion = null
 			clearTimeout(pending.timeout)
+			this.removeAskMessages("followup")
 			this.addMessage({
 				type: "say",
 				say: "user_feedback",
@@ -1229,6 +1236,10 @@ export class VisualStudioWebviewRouter {
 		})
 	}
 
+	private removeAskMessages(askKind: string) {
+		this.state.clineMessages = this.state.clineMessages.filter((message) => getString(message, "ask") !== askKind)
+	}
+
 	private addToolActivityMessage(tool: string, input: Record<string, unknown>, fallback: unknown) {
 		this.addMessage({
 			type: "say",
@@ -1695,6 +1706,34 @@ function tryParseJson(value: string) {
 	} catch {
 		return undefined
 	}
+}
+
+function getAskResponseText(message: unknown) {
+	const record = asRecord(message)
+	const direct = firstString(record, ["text", "value", "response", "answer", "selected", "selectedOption", "option"])
+	if (direct) {
+		return direct
+	}
+
+	for (const key of ["askResponse", "response", "selection"]) {
+		const nested = asRecord(record[key])
+		const nestedValue = firstString(nested, ["text", "value", "response", "answer", "selected", "selectedOption", "option"])
+		if (nestedValue) {
+			return nestedValue
+		}
+	}
+
+	return ""
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]) {
+	for (const key of keys) {
+		const value = getString(record, key)
+		if (value.trim()) {
+			return value
+		}
+	}
+	return ""
 }
 
 function findLastIndex<T>(items: T[], predicate: (item: T) => boolean) {
