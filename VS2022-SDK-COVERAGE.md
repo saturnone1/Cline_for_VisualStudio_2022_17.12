@@ -2,6 +2,13 @@
 
 This project now treats `@cline/sdk` as the runtime source of truth. The VSIX should provide host adapters and UI transport; it should not reimplement Cline's agent runtime in C#.
 
+Reviewed against the public Cline SDK docs on 2026-05-30:
+
+- https://docs.cline.bot/sdk/overview
+- https://docs.cline.bot/sdk/reference/cline-core
+- https://docs.cline.bot/sdk/tools
+- https://docs.cline.bot/llms.txt
+
 ## Covered Through Cline SDK
 
 - Session lifecycle: start, send, stop, get, update, delete.
@@ -12,6 +19,25 @@ This project now treats `@cline/sdk` as the runtime source of truth. The VSIX sh
 - Rules, workflows, and skills through `core.settings.list()` and `core.settings.toggle()`.
 - Checkpoint restore through `core.restore()` when the SDK session has checkpoint metadata.
 - Built-in Cline tool execution delegated to the Visual Studio host adapter for workspace/editor/terminal operations.
+
+## Current VSIX Implementation Snapshot
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| SDK runtime | Covered | The sidecar creates `ClineCore` with `backendMode: "local"` and uses SDK session APIs as the task authority. |
+| WebView transport | Covered | WebView gRPC-style messages are routed to the sidecar; C# only provides startup hydration and host RPC. |
+| Message streaming | Covered | SDK events are normalized into Cline WebView messages, including partial text, task completion fallback, and terminal states. |
+| Tool approval | Covered | SDK `requestToolApproval` is mapped to WebView approval UI and respects Visual Studio auto-approve settings. |
+| Follow-up questions | Covered | SDK `ask_question` shows a WebView question, waits for option or freeform input, and removes the answered prompt. |
+| File reads/searches | Covered | Host executors resolve paths inside Visual Studio workspace roots; automatic search/listing honors `.clineignore`. |
+| File edits/apply_patch | Covered | SDK edits write through host adapters, snapshot before-content, emit compact change cards, and open VS diffs only on user review. |
+| Commands | Partial | SDK `run_commands` executes through the Visual Studio command host with cancellation, but it is not yet a reusable integrated terminal session with background output tracking. |
+| Checkpoints | Partial | SDK restore is wired when checkpoint run metadata exists; checkpoint diff/review parity is still limited. |
+| Rules/workflows/skills settings | Partial | SDK settings can be listed/toggled, but the `skills` execution tool is disabled until approval and execution UX are complete. |
+| MCP | Partial | MCP-related UI/state exists and MCP tool approval names are mapped, but marketplace/server lifecycle backends are not complete. |
+| Browser/web fetch | Partial | `fetch_web_content` is disabled by default for air-gapped use and only enabled by `VSCLINE_ENABLE_WEB_FETCH=1`; full browser-session tooling needs a VSIX Chrome adapter. |
+| Provider catalogs/OAuth | Partial | Local API configuration works for supported providers; remote catalog refresh and OAuth provider setup remain reduced. |
+| Interaction diagnostics | Covered | Host, sidecar, WebView, user input, tool approvals, model/tool events, and responses are written to capped `%LOCALAPPDATA%\VsClineAgent\logs\interaction-*.jsonl` files. |
 
 ## Wrapper Boundary
 
@@ -64,6 +90,7 @@ The VSIX wrapper is now expected to stay inside these responsibilities:
 - SDK sessions apply production guardrails by default: `maxIterations=20`, `maxParallelToolCalls=4`, `maxTokensPerTurn=4096`, `apiTimeoutMs=180000`, `execution.maxConsecutiveMistakes=3`, `execution.reminderAfterIterations=6`, and `execution.loopDetection={ softThreshold: 3, hardThreshold: 5 }`. Override with `VSCLINE_MAX_ITERATIONS`, `VSCLINE_MAX_PARALLEL_TOOL_CALLS`, `VSCLINE_MAX_TOKENS_PER_TURN`, `VSCLINE_API_TIMEOUT_MS`, `VSCLINE_MAX_CONSECUTIVE_MISTAKES`, `VSCLINE_REMINDER_AFTER_ITERATIONS`, `VSCLINE_LOOP_DETECTION`, `VSCLINE_LOOP_SOFT_THRESHOLD`, and `VSCLINE_LOOP_HARD_THRESHOLD`.
 - Provider ids sent by the WebApp may arrive as proto enum names such as `OLLAMA`; the wrapper normalizes those to SDK provider ids such as `ollama` before persisting or starting sessions.
 - Settings hydration is intentionally duplicated at the boundary: C# sends a safe initial state so React can render even if sidecar streaming is late, while the sidecar remains the authoritative state stream and persistence owner.
+- The Cline SDK docs list MCPs, checkpoints, web fetch, cron/scheduled agents, subagents, and plugins as SDK capabilities. This VSIX only marks those as covered when a Visual Studio host adapter and WebView UX exist; SDK availability alone is not treated as Visual Studio parity.
 
 The VSIX wrapper should not own these responsibilities:
 
@@ -83,6 +110,8 @@ The legacy C# runtime path (`Agent/*`, `Bridge/VisualStudioClineBridge.cs`, `Set
 - Account/auth: unauthenticated snapshots are supported, but VS Code authentication-provider flows are not available in Visual Studio 2022.
 - Subagents/teams: SDK runtime support exists, but the VSIX UI/host mapping is still reduced.
 - Hooks: SDK settings can surface hook-related configuration, but VSIX host lifecycle hook execution is not fully mapped.
+- Scheduled agents/cron automation: Cline SDK exposes automation APIs when enabled, but the VSIX does not currently run a scheduler or automation service.
+- Plugins/extensions: the SDK supports plugins and custom tools, but the VSIX does not yet expose a plugin install/configuration surface.
 
 ## Not Directly Portable To Visual Studio 2022 17.12
 
@@ -102,9 +131,11 @@ The WebView should show SDK-owned features as available, partial, or blocked by 
 
 ## Remaining Work
 
-1. Replace C# runtime fallback paths with sidecar SDK service handlers until `VisualStudioClineBridge` is only a transport fallback.
-2. Build a VS-specific terminal manager with reusable terminal sessions, output streaming, cancellation, and background command tracking.
-3. Add a Chrome debugging browser adapter for SDK browser/web actions.
-4. Implement real MCP server and marketplace service handlers on top of SDK/core MCP capabilities.
-5. Implement OAuth/account callback handling outside VS Code auth providers.
-6. Complete SDK checkpoint/diff parity: editor and `apply_patch` writes now open Visual Studio diffs, but checkpoint-history diff/restore buttons still need deeper SDK metadata mapping.
+1. Finish eliminating C# runtime fallback behavior: `VisualStudioClineBridge` should remain only a transport/safe-hydration fallback, not an alternate agent runtime.
+2. Build a VS-specific terminal manager with reusable terminal sessions, bounded output streaming, cancellation, background command tracking, and clearer command display.
+3. Complete review UX for file changes: group edits are now shown in the tool window, but undo/revert and multi-file review actions still need first-class buttons.
+4. Add a Chrome debugging browser adapter for SDK browser/web actions.
+5. Implement real MCP server and marketplace service handlers on top of SDK/core MCP capabilities.
+6. Implement OAuth/account callback handling outside VS Code auth providers.
+7. Complete SDK checkpoint parity: restore is wired for SDK checkpoint metadata, but checkpoint diff/review buttons still need deeper SDK metadata mapping.
+8. Decide whether scheduled agents, plugins, and subagents should be exposed in the Visual Studio UI or explicitly hidden as unsupported features.
