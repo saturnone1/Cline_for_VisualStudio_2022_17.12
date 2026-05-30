@@ -363,8 +363,9 @@ export const ExtensionStateContextProvider: React.FC<{
 							const incomingVersion = stateData.autoApprovalSettings?.version ?? 1
 							const currentVersion = prevState.autoApprovalSettings?.version ?? 1
 							const shouldUpdateAutoApproval = incomingVersion > currentVersion
-							// HACK: Preserve clineMessages if currentTaskItem is the same
-							if (stateData.currentTaskItem?.id === prevState.currentTaskItem?.id) {
+							// HACK: Preserve clineMessages if the same active task sends an empty snapshot.
+							// Do not preserve messages when the host intentionally clears the task to return home.
+							if (stateData.currentTaskItem?.id && stateData.currentTaskItem.id === prevState.currentTaskItem?.id) {
 								stateData.clineMessages = stateData.clineMessages?.length
 									? stateData.clineMessages
 									: prevState.clineMessages
@@ -521,6 +522,9 @@ export const ExtensionStateContextProvider: React.FC<{
 							const newClineMessages = [...prevState.clineMessages]
 							newClineMessages[lastIndex] = partialMessage
 							return { ...prevState, clineMessages: newClineMessages }
+						}
+						if (prevState.currentTaskItem) {
+							return { ...prevState, clineMessages: [...prevState.clineMessages, partialMessage] }
 						}
 						return prevState
 					})
