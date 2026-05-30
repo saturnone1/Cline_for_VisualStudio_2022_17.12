@@ -96,12 +96,19 @@ namespace VsClineAgent.Services
             return false;
         }
 
-        public async Task ExecuteCommandAsync(string commandName)
+        public async Task ExecuteCommandAsync(string commandName, string? arguments = null)
         {
             try
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                GetDte()?.ExecuteCommand(commandName);
+                var dte = GetDte();
+                if (dte == null)
+                    return;
+
+                if (string.IsNullOrWhiteSpace(arguments))
+                    dte.ExecuteCommand(commandName);
+                else
+                    dte.ExecuteCommand(commandName, arguments);
             }
             catch { }
         }

@@ -60,6 +60,7 @@ The VSIX wrapper is now expected to stay inside these responsibilities:
 - SDK `ask_question` is routed through the Cline WebView follow-up UI and waits for the user's response instead of auto-selecting an option.
 - SDK tool cancellation is bridged for `run_commands`: the executor observes `AgentToolContext.abortSignal` and asks the Visual Studio host to terminate active command processes on task stop/cancel.
 - SDK file and command tools validate paths at the sidecar boundary. `read_files`, `search_codebase`, `run_commands` cwd, and `editor` paths must resolve inside the open Visual Studio workspace roots.
+- SDK editor writes are tracked at the sidecar boundary: before-content snapshots are stored under `%LOCALAPPDATA%\VsClineAgent\changes`, line additions/deletions are surfaced in the Cline tool transcript, and the Visual Studio `Tools.DiffFiles` command is opened automatically for review.
 - SDK sessions apply production guardrails by default: `maxIterations=20`, `maxParallelToolCalls=4`, `maxTokensPerTurn=4096`, `apiTimeoutMs=180000`, `execution.maxConsecutiveMistakes=3`, `execution.reminderAfterIterations=6`, and `execution.loopDetection={ softThreshold: 3, hardThreshold: 5 }`. Override with `VSCLINE_MAX_ITERATIONS`, `VSCLINE_MAX_PARALLEL_TOOL_CALLS`, `VSCLINE_MAX_TOKENS_PER_TURN`, `VSCLINE_API_TIMEOUT_MS`, `VSCLINE_MAX_CONSECUTIVE_MISTAKES`, `VSCLINE_REMINDER_AFTER_ITERATIONS`, `VSCLINE_LOOP_DETECTION`, `VSCLINE_LOOP_SOFT_THRESHOLD`, and `VSCLINE_LOOP_HARD_THRESHOLD`.
 - Provider ids sent by the WebApp may arrive as proto enum names such as `OLLAMA`; the wrapper normalizes those to SDK provider ids such as `ollama` before persisting or starting sessions.
 - Settings hydration is intentionally duplicated at the boundary: C# sends a safe initial state so React can render even if sidecar streaming is late, while the sidecar remains the authoritative state stream and persistence owner.
@@ -106,4 +107,4 @@ The WebView should show SDK-owned features as available, partial, or blocked by 
 3. Add a Chrome debugging browser adapter for SDK browser/web actions.
 4. Implement real MCP server and marketplace service handlers on top of SDK/core MCP capabilities.
 5. Implement OAuth/account callback handling outside VS Code auth providers.
-6. Map SDK checkpoint/diff metadata to Visual Studio diff and review UI.
+6. Complete SDK checkpoint/diff parity: editor writes now open Visual Studio diffs, but checkpoint-history diff/restore buttons and full `apply_patch` snapshot tracking still need deeper SDK metadata mapping.
