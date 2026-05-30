@@ -54,6 +54,7 @@ export class VisualStudioWebviewRouter {
 		| null = null
 	private messageSequence = 0
 	private activePartialTextTs: number | null = null
+	private activeAssistantTextBuffer = ""
 	private activeStatusTextTs: number | null = null
 	private activeReasoningTextTs: number | null = null
 	private activeToolActivityTs: number | null = null
@@ -617,6 +618,7 @@ export class VisualStudioWebviewRouter {
 
 		this.state.clineMessages = []
 		this.lastToolSummaries = []
+		this.activeAssistantTextBuffer = ""
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 		this.activeReasoningTextTs = null
@@ -644,9 +646,13 @@ export class VisualStudioWebviewRouter {
 			const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
 			const sessionId = getString(resultRecord, "sessionId")
 			if (resultText) {
-				this.addCompletionResult(resultText)
+				this.addAssistantTextResult(resultText)
 			} else if (agentResult && Object.keys(agentResult).length > 0 && !this.hasAssistantTextAfterLastUserMessage()) {
-				this.addCompletionResult(this.buildTerminalCompletionFallback(getString(agentResult, "finishReason") || "completed"))
+				logInteraction("sidecar", "emptyStartSessionResult", {
+					sessionId,
+					finishReason: getString(agentResult, "finishReason") || "completed",
+					lastTaskActivityReason: this.lastTaskActivityReason,
+				})
 			}
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
@@ -1173,10 +1179,14 @@ export class VisualStudioWebviewRouter {
 		if (type === "content_start" && contentType === "text") {
 			this.noteTaskActivity("content_start:text")
 			this.clearReasoningStatus()
-			const text = getString(event, "accumulated") || getString(event, "text")
+			const accumulated = getString(event, "accumulated")
+			const delta = getString(event, "delta") || getString(event, "text")
+			const text = accumulated || delta
 			if (text) {
 				if (shouldFoldTextContentAsReasoning(text)) {
 					this.upsertFoldedReasoningText(text)
+				} else if (!shouldDropTokenizedReasoning(text)) {
+					this.upsertAssistantTextFromEvent(accumulated, delta)
 				}
 				shouldBroadcastState = false
 			} else if (!this.state.clineMessages.some((message) => message.say === "api_req_started" && message.partial === true)) {
@@ -1197,9 +1207,13 @@ export class VisualStudioWebviewRouter {
 		if ((type === "content_update" || type === "content_delta") && contentType === "text") {
 			this.noteTaskActivity(`${type}:text`)
 			this.clearReasoningStatus()
-			const text = getString(event, "accumulated") || getString(event, "text") || getString(event, "delta")
+			const accumulated = getString(event, "accumulated")
+			const delta = getString(event, "delta") || getString(event, "text")
+			const text = accumulated || delta
 			if (text && shouldFoldTextContentAsReasoning(text)) {
 				this.upsertFoldedReasoningText(text)
+			} else if (text && !shouldDropTokenizedReasoning(text)) {
+				this.upsertAssistantTextFromEvent(accumulated, delta)
 			}
 			shouldBroadcastState = false
 		}
@@ -1217,7 +1231,7 @@ export class VisualStudioWebviewRouter {
 		if (type === "content_end" && contentType === "text") {
 			this.noteTaskActivity("content_end:text")
 			this.clearReasoningStatus()
-			const text = getString(event, "text") || getString(event, "accumulated")
+			const text = getString(event, "accumulated") || getString(event, "text") || this.activeAssistantTextBuffer
 			if (text && shouldFoldTextContentAsReasoning(text)) {
 				this.upsertFoldedReasoningText(text)
 				shouldBroadcastState = false
@@ -1229,10 +1243,12 @@ export class VisualStudioWebviewRouter {
 				this.upsertMessage(this.activePartialTextTs, { type: "say", say: "text", text, partial: false })
 				this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
 				this.activePartialTextTs = null
+				this.activeAssistantTextBuffer = ""
 			} else if (text) {
 				this.finishActiveToolActivity()
 				this.finishFoldedReasoningText()
 				this.addMessage({ type: "say", say: "text", text })
+				this.activeAssistantTextBuffer = ""
 			}
 		}
 
@@ -1616,24 +1632,26 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private addCompletionResult(text: string) {
+	private addAssistantTextResult(text: string) {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.removeActiveStatusText()
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
-		if (this.hasCompletionResult()) {
+		const normalizedText = normalizeAssistantTranscriptText(text || "")
+		if (!normalizedText) {
 			return
 		}
 
 		const lastText = [...this.state.clineMessages]
 			.reverse()
 			.find((message) => message.say === "text" && message.partial !== true)
-		const normalizedText = text || ""
-		const completionText =
-			normalizedText && getString(lastText, "text").trim() !== normalizedText.trim() ? normalizedText : ""
-		this.addMessage({ type: "ask", ask: "completion_result", text: completionText })
+		if (normalizeTranscriptText(getString(lastText, "text")) === normalizeTranscriptText(normalizedText)) {
+			return
+		}
+
+		this.addMessage({ type: "say", say: "text", text: normalizedText })
 	}
 
 	private hasCompletionResult() {
@@ -1649,12 +1667,11 @@ export class VisualStudioWebviewRouter {
 		this.finishActiveToolActivity()
 
 		if (activeText) {
-			this.addCompletionResult(activeText)
-		} else if (this.hasAssistantTextAfterLastUserMessage()) {
-			this.addCompletionResult("")
+			this.addAssistantTextResult(activeText)
+		} else if (!this.hasAssistantTextAfterLastUserMessage()) {
+			logInteraction("sidecar", "emptyDoneNoAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		} else {
-			logInteraction("sidecar", "emptyDoneFallback", { status, lastTaskActivityReason: this.lastTaskActivityReason })
-			this.addCompletionResult(this.buildTerminalCompletionFallback(status || "completed"))
+			logInteraction("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		}
 	}
 
@@ -1828,13 +1845,13 @@ export class VisualStudioWebviewRouter {
 			}
 		}
 
-		const groupedText = JSON.stringify(buildGroupedToolActivity(this.activeToolActivityEntries, true))
+		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true)
 		if (!this.activeToolActivityTs) {
 			this.activeToolActivityTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
 				ts: this.activeToolActivityTs,
 				type: "say",
-				say: "tool",
+				say: "text",
 				text: groupedText,
 				partial: true,
 				isCollapsed: true,
@@ -1843,7 +1860,7 @@ export class VisualStudioWebviewRouter {
 		} else {
 			this.upsertMessage(this.activeToolActivityTs, {
 				type: "say",
-				say: "tool",
+				say: "text",
 				text: groupedText,
 				partial: true,
 				isCollapsed: true,
@@ -1863,8 +1880,8 @@ export class VisualStudioWebviewRouter {
 
 		this.upsertMessage(this.activeToolActivityTs, {
 			type: "say",
-			say: "tool",
-			text: JSON.stringify(buildGroupedToolActivity(this.activeToolActivityEntries, false)),
+			say: "text",
+			text: buildGroupedToolActivityText(this.activeToolActivityEntries, false),
 			partial: false,
 			isCollapsed: true,
 			isExpanded: false,
@@ -1968,6 +1985,19 @@ export class VisualStudioWebviewRouter {
 		this.schedulePartialIdleWatchdog()
 		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
 		this.schedulePartialStateBroadcast()
+	}
+
+	private upsertAssistantTextFromEvent(accumulated: string, delta: string) {
+		const nextText = accumulated || mergeTextDelta(this.activeAssistantTextBuffer, delta)
+		const normalized = normalizeAssistantTranscriptText(nextText)
+		if (!normalized) {
+			return
+		}
+
+		this.activeAssistantTextBuffer = normalized
+		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
+		this.upsertPartialText(normalized)
 	}
 
 	private upsertFoldedReasoningText(text: string) {
@@ -3416,6 +3446,25 @@ function normalizeReasoningTranscriptText(text: string) {
 	return trimmed.replace(/\s+/g, " ")
 }
 
+function normalizeAssistantTranscriptText(text: string) {
+	const trimmed = text.trim()
+	if (!trimmed) {
+		return ""
+	}
+
+	return trimmed.replace(/\n{3,}/g, "\n\n")
+}
+
+function mergeTextDelta(current: string, delta: string) {
+	if (!delta) {
+		return current
+	}
+	if (!current) {
+		return delta
+	}
+	return current.endsWith(delta) ? current : current + delta
+}
+
 function looksLikeTokenizedReasoning(lines: string[]) {
 	if (lines.length < 5) {
 		return false
@@ -3626,7 +3675,15 @@ function toolTranscriptToActivityEntries(text: string): ToolActivityEntry[] {
 	if (resultMatch) {
 		const result = resultMatch[1].trim()
 		const parsed = tryParseJson(result)
+		const parsedRecord = asRecord(parsed)
+		const query = getString(parsedRecord, "query")
+		if (looksLikeCommandText(query)) {
+			return [{ kind: "command", label: query }]
+		}
 		const commandSummary = summarizeCommandOutput(parsed ?? result)
+		if (looksLikeCommandText(commandSummary)) {
+			return [{ kind: "command", label: truncateText(commandSummary, 240) }]
+		}
 		const paths = splitToolPaths(commandSummary)
 		if (paths.length > 0) {
 			return paths.map((filePath) => ({ kind: "file", label: filePath }))
@@ -3653,7 +3710,7 @@ function toolTranscriptToActivityEntries(text: string): ToolActivityEntry[] {
 	return body ? [{ kind: "tool", label: `${toolMatch[1].trim()}: ${body}` }] : [{ kind: "tool", label: toolMatch[1].trim() }]
 }
 
-function buildGroupedToolActivity(entries: ToolActivityEntry[], running: boolean) {
+function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boolean) {
 	const files = uniqueStrings(entries.filter((entry) => entry.kind === "file").map((entry) => entry.label))
 	const searches = uniqueStrings(entries.filter((entry) => entry.kind === "search").map((entry) =>
 		entry.detail ? `${entry.label} (${entry.detail})` : entry.label,
@@ -3668,24 +3725,25 @@ function buildGroupedToolActivity(entries: ToolActivityEntry[], running: boolean
 		commands.length ? `ran ${commands.length} command${commands.length > 1 ? "s" : ""}` : "",
 		others.length ? `used ${others.length} tool${others.length > 1 ? "s" : ""}` : "",
 	].filter(Boolean)
-	const content = [
-		running ? "파일 읽기 진행 중" : "Done.",
-		files.length ? `Files:\n${files.join("\n")}` : "",
-		searches.length ? `Searches:\n${searches.join("\n")}` : "",
-		edits.length ? `Edits:\n${edits.join("\n")}` : "",
-		commands.length ? `Commands:\n${commands.join("\n")}` : "",
-		others.length ? `Tools:\n${others.join("\n")}` : "",
-	].filter(Boolean).join("\n\n")
+	const detailLimit = readPositiveIntEnv("VSCLINE_TOOL_ACTIVITY_ITEMS", 40)
+	const sections = [
+		formatToolActivitySection("Files", files, detailLimit),
+		formatToolActivitySection("Searches", searches, detailLimit),
+		formatToolActivitySection("Edits", edits, detailLimit),
+		formatToolActivitySection("Commands", commands, 8),
+		formatToolActivitySection("Tools", others, 12),
+	].filter(Boolean)
+	const body = sections.length ? `\n${sections.join("\n")}` : ""
+	return `${summaryParts.join(", ") || "Cline used tools"}:\n${running ? "파일 읽기 진행 중" : "Done."}${body}`
+}
 
-	return {
-		tool: files.length > 0 || searches.length > 0 ? "readFile" : "tool",
-		path: files[0] || edits[0] || "",
-		content: `${summaryParts.join(", ") || "Cline used tools"}:\n${content}`,
-		files,
-		searches,
-		edits,
-		commands,
+function formatToolActivitySection(title: string, values: string[], limit: number) {
+	if (values.length === 0) {
+		return ""
 	}
+	const visible = values.slice(0, Math.max(1, limit)).map((value) => `- ${value}`)
+	const hiddenCount = values.length - visible.length
+	return `${title}:\n${visible.join("\n")}${hiddenCount > 0 ? `\n- ... ${hiddenCount} more` : ""}`
 }
 
 function toolActivityEntryKey(entry: ToolActivityEntry) {
@@ -3699,9 +3757,21 @@ function splitToolPaths(text: string) {
 			.map((line) => line.trim())
 			.map((line) => line.replace(/^[-*]\s+/, "").replace(/^Path:\s*/i, "").replace(/^File:\s*/i, ""))
 			.filter((line) => line.length > 0)
+			.filter((line) => !looksLikeCommandText(line))
 			.filter((line) => !line.startsWith("{") && !line.startsWith("["))
 			.filter((line) => /[\\/]/.test(line) || /\.[A-Za-z0-9]{1,8}(:\d+(-\d*)?)?$/.test(line)),
 	)
+}
+
+function looksLikeCommandText(text: string) {
+	const normalized = text.trim().toLowerCase()
+	return normalized.startsWith("cmd ") ||
+		normalized.startsWith("cmd/") ||
+		normalized.startsWith("powershell ") ||
+		normalized.startsWith("pwsh ") ||
+		normalized.startsWith("dir ") ||
+		normalized.startsWith("type ") ||
+		normalized.includes(" /c ")
 }
 
 function uniqueStrings(values: string[]) {
