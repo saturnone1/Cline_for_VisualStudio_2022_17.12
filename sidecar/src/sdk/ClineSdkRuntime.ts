@@ -142,6 +142,19 @@ export class ClineSdkRuntime {
 		return this.status
 	}
 
+	async abort(params: unknown) {
+		const core = await this.getCore()
+		const request = asRecord(params)
+		const sessionId = stringValue(request.sessionId) || this.activeSessionId
+		if (!sessionId) {
+			return this.status
+		}
+
+		await core.abort(sessionId)
+		this.activeSessionId = sessionId
+		return this.status
+	}
+
 	async listHistory(params: unknown) {
 		const core = await this.getCore()
 		const request = asRecord(params)
