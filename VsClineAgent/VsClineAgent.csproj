@@ -12,9 +12,9 @@
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>VsClineAgent</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
-    <AssemblyVersion>1.0.82.0</AssemblyVersion>
-    <FileVersion>1.0.82.0</FileVersion>
-    <Version>1.0.82</Version>
+    <AssemblyVersion>1.0.83.0</AssemblyVersion>
+    <FileVersion>1.0.83.0</FileVersion>
+    <Version>1.0.83</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <!-- VSIX 생성 설정 -->
@@ -145,6 +145,10 @@
   <!-- WPF XAML 컴파일 타겟 -->
   <Import Project="$(MSBuildToolsPath)\Microsoft.WinFX.targets"
           Condition="Exists('$(MSBuildToolsPath)\Microsoft.WinFX.targets')" />
+  <PropertyGroup>
+    <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0</VSToolsPath>
+    <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0</VSToolsPath>
+  </PropertyGroup>
   <!-- VSSDK 빌드 타겟: VS 설치 경로 또는 NuGet 패키지에서 임포트 -->
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
           Condition="'$(VSToolsPath)' != '' And Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
