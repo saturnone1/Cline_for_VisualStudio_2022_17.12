@@ -517,6 +517,13 @@ namespace VsClineAgent.Host
         {
             var leftPath = GetStringParameter(parameters, "leftPath");
             var rightPath = GetStringParameter(parameters, "rightPath");
+            if (!string.IsNullOrWhiteSpace(leftPath) && !string.IsNullOrWhiteSpace(rightPath))
+            {
+                var args = QuoteVsCommandArgument(leftPath) + " " + QuoteVsCommandArgument(rightPath);
+                await _editorService.ExecuteCommandAsync("Tools.DiffFiles", args).ConfigureAwait(false);
+                return new JObject { ["success"] = true };
+            }
+
             if (!string.IsNullOrWhiteSpace(leftPath))
                 await _editorService.OpenFileAsync(leftPath).ConfigureAwait(false);
 
@@ -524,6 +531,11 @@ namespace VsClineAgent.Host
                 await _editorService.OpenFileAsync(rightPath).ConfigureAwait(false);
 
             return new JObject { ["success"] = true };
+        }
+
+        private static string QuoteVsCommandArgument(string value)
+        {
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
         private static void OpenExternal(string value)

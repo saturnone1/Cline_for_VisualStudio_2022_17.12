@@ -43,6 +43,7 @@ export class VisualStudioWebviewRouter {
 	private activePartialTextTs: number | null = null
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private lastToolSummaries: string[] = []
+	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -152,6 +153,11 @@ export class VisualStudioWebviewRouter {
 
 		if (type === "agent_event") {
 			this.handleAgentEvent(asRecord(payload.event))
+			return
+		}
+
+		if (type === "vscline_file_changed") {
+			this.handleFileChangedEvent(payload).catch((error) => console.error(error))
 			return
 		}
 
@@ -886,6 +892,16 @@ export class VisualStudioWebviewRouter {
 			const isCommand = toolName === "bash" || toolName === "run_commands"
 			const mappedToolName = mapToolName(toolName)
 			const input = asRecord(event.input)
+			const trackedPath =
+				mappedToolName === "editedExistingFile"
+					? getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output)
+					: ""
+			if (
+				(toolName === "editor" || toolName === "edit") &&
+				(this.hasRecentlyTrackedChange() || (trackedPath && this.wasRecentlyTracked(trackedPath)))
+			) {
+				return
+			}
 			const text = isCommand
 				? truncateText(error || summarizeCommandOutput(event.output), readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
 				: JSON.stringify({
@@ -971,6 +987,60 @@ export class VisualStudioWebviewRouter {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
+	private async handleFileChangedEvent(payload: Record<string, unknown>) {
+		const filePath = getString(payload, "filePath")
+		const beforePath = getString(payload, "beforePath")
+		const afterPath = getString(payload, "afterPath") || filePath
+		if (!filePath || !beforePath || !afterPath) {
+			return
+		}
+
+		const additions = getNumber(payload, "additions") || 0
+		const deletions = getNumber(payload, "deletions") || 0
+		const action = getString(payload, "action") || "modified"
+		this.recentlyTrackedChangePaths.set(normalizeChangePath(filePath), Date.now())
+		this.pruneTrackedChangePaths()
+
+		const title = `Cline change: ${path.basename(filePath)}`
+		VisualStudioHostProvider.create(this.connection).diffClient.openDiff({ leftPath: beforePath, rightPath: afterPath, title }).catch((error) => {
+			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
+			this.broadcastState().catch(() => undefined)
+		})
+
+		const text = JSON.stringify({
+			tool: "editedExistingFile",
+			path: filePath,
+			content: `${action === "created" ? "Created" : "Changed"} ${filePath}\n+${additions} -${deletions}\nVisual Studio diff opened for review.`,
+			beforePath,
+			afterPath,
+			additions,
+			deletions,
+		})
+		this.rememberToolSummary("editedExistingFile", text)
+		this.addMessage({ type: "say", say: "tool", text })
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
+	}
+
+	private wasRecentlyTracked(filePath: string) {
+		this.pruneTrackedChangePaths()
+		return this.recentlyTrackedChangePaths.has(normalizeChangePath(filePath))
+	}
+
+	private hasRecentlyTrackedChange() {
+		this.pruneTrackedChangePaths()
+		return this.recentlyTrackedChangePaths.size > 0
+	}
+
+	private pruneTrackedChangePaths() {
+		const cutoff = Date.now() - 15_000
+		for (const [filePath, ts] of this.recentlyTrackedChangePaths) {
+			if (ts < cutoff) {
+				this.recentlyTrackedChangePaths.delete(filePath)
+			}
+		}
+	}
+
 	private async buildSdkConfig(cwd: string) {
 		const apiConfig = asRecord(this.state.apiConfiguration)
 		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
@@ -997,6 +1067,9 @@ export class VisualStudioWebviewRouter {
 			maxParallelToolCalls: readPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS", 2),
 			maxTokensPerTurn: readPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN", 4096),
 			apiTimeoutMs: readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 180000),
+			checkpoint: {
+				enabled: this.state.enableCheckpointsSetting !== false,
+			},
 			execution: {
 				maxConsecutiveMistakes: readPositiveIntEnv("VSCLINE_MAX_CONSECUTIVE_MISTAKES", 3),
 				reminderAfterIterations: readPositiveIntEnv("VSCLINE_REMINDER_AFTER_ITERATIONS", 6),
@@ -1882,6 +1955,10 @@ function settingsItemToSkillInfo(item: Record<string, unknown>) {
 		enabled: item.enabled !== false,
 		description: getString(item, "description"),
 	}
+}
+
+function normalizeChangePath(filePath: string) {
+	return path.resolve(filePath).toLowerCase()
 }
 
 function mapToolName(toolName: string) {

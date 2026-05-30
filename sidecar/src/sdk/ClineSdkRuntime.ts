@@ -339,10 +339,15 @@ export class ClineSdkRuntime {
 							abortSignal?.removeEventListener("abort", abortHandler)
 						}
 					},
-					editor: async (input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null }, cwd: string) => {
+					editor: async (
+						input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null },
+						cwd: string,
+						context?: AgentToolContext,
+					) => {
 						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 						const filePath = resolveWorkspacePath(input.path, workspaceRoots, cwd)
 						const current = await this.host.workspaceClient.readTextFile({ path: filePath })
+						const before = current.exists ? current.content : ""
 						let next = current.exists ? current.content : ""
 						if (input.old_text) {
 							if (!next.includes(input.old_text)) {
@@ -357,7 +362,16 @@ export class ClineSdkRuntime {
 							next = input.new_text
 						}
 
+						const beforePath = await this.writeChangeSnapshot(filePath, before, context)
 						await this.host.workspaceClient.writeTextFile({ path: filePath, content: next })
+						this.emitFileChanged({
+							sessionId: (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || undefined,
+							filePath,
+							beforePath,
+							afterPath: filePath,
+							action: current.exists ? "modified" : "created",
+							...countLineChanges(before, next),
+						})
 						return `Wrote ${filePath}`
 					},
 					applyPatch: defaultExecutors.applyPatch,
@@ -393,6 +407,23 @@ export class ClineSdkRuntime {
 		this.host.envClient.debugLog({
 			message: `[Cline SDK:${level}] ${message}${metadata ? ` ${JSON.stringify(metadata)}` : ""}`,
 		}).catch(() => undefined)
+	}
+
+	private async writeChangeSnapshot(filePath: string, content: string, context?: AgentToolContext) {
+		const sessionId = (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || "session"
+		const changeRoot = path.join(getLocalAppDataRoot(), "VsClineAgent", "changes", sanitizePathPart(sessionId))
+		await fs.promises.mkdir(changeRoot, { recursive: true })
+		const snapshotName = `${Date.now()}-${sanitizePathPart(path.basename(filePath) || "file")}.before`
+		const snapshotPath = path.join(changeRoot, snapshotName)
+		await fs.promises.writeFile(snapshotPath, content, "utf8")
+		return snapshotPath
+	}
+
+	private emitFileChanged(payload: Record<string, unknown>) {
+		;(this.onCoreEvent as ((event: unknown) => void) | undefined)?.({
+			type: "vscline_file_changed",
+			payload,
+		})
 	}
 
 	private readSdkVersion() {
@@ -445,6 +476,48 @@ function resolveWorkspacePath(inputPath: string, workspaceRoots: string[], baseP
 function isPathInsideOrEqual(candidate: string, root: string) {
 	const relative = path.relative(root, candidate)
 	return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+function getLocalAppDataRoot() {
+	return process.env.LOCALAPPDATA || process.env.APPDATA || process.cwd()
+}
+
+function sanitizePathPart(value: string) {
+	return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "item"
+}
+
+function countLineChanges(before: string, after: string) {
+	const beforeLines = splitLinesForDiff(before)
+	const afterLines = splitLinesForDiff(after)
+	const cellCount = beforeLines.length * afterLines.length
+	if (cellCount > 1_000_000) {
+		return {
+			additions: Math.max(afterLines.length - beforeLines.length, 0),
+			deletions: Math.max(beforeLines.length - afterLines.length, 0),
+		}
+	}
+
+	let previous = new Array(afterLines.length + 1).fill(0)
+	for (let i = 1; i <= beforeLines.length; i++) {
+		const current = new Array(afterLines.length + 1).fill(0)
+		for (let j = 1; j <= afterLines.length; j++) {
+			current[j] = beforeLines[i - 1] === afterLines[j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], current[j - 1])
+		}
+		previous = current
+	}
+
+	const common = previous[afterLines.length]
+	return {
+		additions: Math.max(afterLines.length - common, 0),
+		deletions: Math.max(beforeLines.length - common, 0),
+	}
+}
+
+function splitLinesForDiff(value: string) {
+	if (!value) {
+		return []
+	}
+	return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
 }
 
 async function importClineSdk(): Promise<ClineSdkModule> {
