@@ -66,7 +66,11 @@ namespace VsClineAgent.ToolWindows
 
             try
             {
-                var runtimeCandidates = GetWebView2RuntimeCandidates(assemblyDirectory);
+                SetStatus("Preparing WebView2 runtime...");
+                await System.Windows.Threading.Dispatcher.Yield();
+
+                var runtimeCandidates = await Task.Run(() =>
+                    GetWebView2RuntimeCandidates(assemblyDirectory));
                 foreach (var candidate in runtimeCandidates)
                 {
                     initializationFailures.Add(
@@ -719,7 +723,13 @@ html, body, #root {
 
                 _sidecarProcess?.Dispose();
                 _sidecarProcess = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                var status = await _sidecarProcess.EnsureStartedAsync(CancellationToken.None);
+                SetStatus("Preparing Cline sidecar runtime...");
+                await System.Windows.Threading.Dispatcher.Yield();
+
+                var sidecarProcess = _sidecarProcess
+                    ?? throw new InvalidOperationException("Cline sidecar process was not created.");
+                var status = await Task.Run(() =>
+                    sidecarProcess.EnsureStartedAsync(CancellationToken.None));
                 _lastSidecarError = null;
                 SetStatus($"Cline sidecar: {status}");
                 return _sidecarProcess != null && _sidecarProcess.IsRunning;
@@ -1093,7 +1103,13 @@ html, body, #root {
 
         private void SetStatus(string message)
         {
-            Dispatcher.Invoke(() => statusText.Text = message);
+            if (Dispatcher.CheckAccess())
+            {
+                statusText.Text = message;
+                return;
+            }
+
+            Dispatcher.BeginInvoke(new Action(() => statusText.Text = message));
         }
 
         private void ShowError(string message)
