@@ -73,6 +73,7 @@ export class VisualStudioWebviewRouter {
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
 	private changeSummaryTimer: NodeJS.Timeout | null = null
+	private readonly closingSessionIds = new Set<string>()
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -613,6 +614,7 @@ export class VisualStudioWebviewRouter {
 			throw new Error("Cline SDK runtime is not attached.")
 		}
 
+		this.closingSessionIds.clear()
 		await this.clineSdk.stop({})
 		const text = getString(message, "text")
 		const images = getStringArray(message, "images")
@@ -777,15 +779,32 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async clearTask() {
-		if (this.clineSdk) {
-			await this.clineSdk.stop({})
+		const sessionId = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		if (sessionId) {
+			this.closingSessionIds.add(sessionId)
 		}
+
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
+		this.removeActiveStatusText()
+		this.finalizeActivePartialText()
+		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
+		this.pendingApproval?.resolve({ approved: false, reason: "Task was closed." })
+		this.pendingApproval = null
+		this.pendingQuestion?.resolve("")
+		this.pendingQuestion = null
 		this.state.currentTaskItem = null
 		this.state.clineMessages = []
 		await this.broadcastState()
+
+		this.clineSdk?.stop({}).catch((error) => {
+			logInteraction("sidecar", "clearTaskStopFailed", {
+				sessionId,
+				error: error instanceof Error ? error.message : String(error),
+			})
+		})
 	}
 
 	private async showTaskWithId(taskId: string) {
@@ -2343,6 +2362,12 @@ export class VisualStudioWebviewRouter {
 	private shouldIgnoreSdkEvent(sessionId: string) {
 		if (!sessionId) {
 			return false
+		}
+		if (this.closingSessionIds.has(sessionId)) {
+			return true
+		}
+		if (!this.state.currentTaskItem) {
+			return true
 		}
 		const activeSessionId = this.clineSdk?.status.activeSessionId
 		if (activeSessionId) {
