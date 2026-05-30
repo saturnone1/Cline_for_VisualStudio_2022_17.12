@@ -61,6 +61,7 @@ export class VisualStudioWebviewRouter {
 	private activeFoldedActivityText = ""
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
+	private readonly sessionProgressMessages = new Map<string, Array<Record<string, unknown>>>()
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private lastPartialStateBroadcastAt = 0
@@ -828,7 +829,7 @@ export class VisualStudioWebviewRouter {
 			const messages = await this.clineSdk.readMessages({ sessionId: taskId })
 			const taskItem = sdkSessionToHistoryItem(session)
 			this.state.currentTaskItem = taskItem
-			this.state.clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+			this.state.clineMessages = this.mergeSessionProgressMessages(taskId, sdkMessagesToClineMessages(messages, taskItem))
 			this.taskSnapshots.set(taskId, {
 				taskItem: { ...taskItem },
 				messages: this.state.clineMessages.map((message) => ({ ...message })),
@@ -926,11 +927,31 @@ export class VisualStudioWebviewRouter {
 
 		const taskItem = sdkSessionToHistoryItem(session)
 		this.state.currentTaskItem = taskItem
-		this.state.clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+		this.state.clineMessages = this.mergeSessionProgressMessages(taskId, sdkMessagesToClineMessages(messages, taskItem))
 		this.taskSnapshots.set(taskId, {
 			taskItem: { ...taskItem },
 			messages: this.state.clineMessages.map((message) => ({ ...message })),
 		})
+	}
+
+	private mergeSessionProgressMessages(sessionId: string, messages: Array<Record<string, unknown>>) {
+		const progressMessages = this.sessionProgressMessages.get(sessionId) || []
+		if (progressMessages.length === 0) {
+			return messages
+		}
+
+		const existingKeys = new Set(messages.map((message) => progressMessageKey(message)))
+		const merged = [...messages]
+		for (const progress of progressMessages) {
+			const key = progressMessageKey(progress)
+			if (!key || existingKeys.has(key)) {
+				continue
+			}
+			merged.push({ ...progress, partial: false, isCollapsed: true, isExpanded: false })
+			existingKeys.add(key)
+		}
+
+		return merged.sort((a, b) => (numberValue(a.ts) || 0) - (numberValue(b.ts) || 0))
 	}
 
 	private async restoreCheckpoint(message: unknown) {
@@ -2158,7 +2179,9 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.moveActiveReasoningToEnd()
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
+		this.rememberSessionProgressMessage(progressMessage)
+		this.sendPartialMessage(progressMessage)
 		this.schedulePartialStateBroadcast()
 	}
 
@@ -2168,10 +2191,45 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.upsertMessage(this.activeReasoningTextTs, { partial: false, isCollapsed: true, isExpanded: false })
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
+		this.rememberSessionProgressMessage(progressMessage)
+		this.sendPartialMessage(progressMessage)
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
+	}
+
+	private rememberSessionProgressMessage(message: Record<string, unknown> | undefined) {
+		if (!message || getString(message, "say") !== "reasoning") {
+			return
+		}
+
+		const sessionId = this.getCurrentSessionId()
+		const reasoning = getString(message, "reasoning")
+		if (!sessionId || !reasoning.trim()) {
+			return
+		}
+
+		const normalized = normalizeTranscriptText(reasoning)
+		if (!normalized) {
+			return
+		}
+
+		const stored = this.sessionProgressMessages.get(sessionId) || []
+		const key = progressMessageKey(message)
+		const ts = numberValue(message.ts)
+		const existingIndex = stored.findIndex((item) => (ts !== undefined && numberValue(item.ts) === ts) || progressMessageKey(item) === key)
+		const copy = { ...message, partial: false, isCollapsed: true, isExpanded: false }
+		if (existingIndex >= 0) {
+			stored[existingIndex] = copy
+		} else {
+			stored.push(copy)
+		}
+		this.sessionProgressMessages.set(sessionId, stored.slice(-20))
+	}
+
+	private getCurrentSessionId() {
+		return this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
 	}
 
 	private finalizeOpenPartialMessages() {
@@ -3315,6 +3373,15 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 		}
 	}
 	return result
+}
+
+function progressMessageKey(message: Record<string, unknown>) {
+	const reasoning = normalizeTranscriptText(getString(message, "reasoning"))
+	const text = normalizeTranscriptText(getString(message, "text"))
+	if (!reasoning && !text) {
+		return ""
+	}
+	return `${getString(message, "say")}:${reasoning || text}`
 }
 
 function sdkContentToVisibleAssistantText(content: unknown): string {
