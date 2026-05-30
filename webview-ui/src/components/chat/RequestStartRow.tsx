@@ -125,6 +125,29 @@ const findPrevCompletedApiReq = (messages: ClineMessage[], beforeIdx: number): n
 	return -1
 }
 
+const getApiRequestSummary = (text?: string) => {
+	if (!text) {
+		return ""
+	}
+
+	try {
+		const request = String(JSON.parse(text).request || "").trim()
+		if (
+			!request ||
+			request === "Cline SDK is thinking..." ||
+			request === "Cline SDK started." ||
+			request === "모델 진행 중" ||
+			request === "Done."
+		) {
+			return ""
+		}
+
+		return request
+	} catch {
+		return ""
+	}
+}
+
 /**
  * Displays the current state of an active tool operation,
  */
@@ -143,7 +166,12 @@ export const RequestStartRow: React.FC<RequestStartRowProps> = ({
 	// Derive explicit state
 	const hasError = !!(apiRequestFailedMessage || apiReqStreamingFailedMessage)
 	const hasCost = cost != null
-	const hasReasoning = !!reasoningContent
+	const apiRequestSummary = useMemo(() => getApiRequestSummary(message.text), [message.text])
+	const foldedReasoningContent = useMemo(
+		() => [apiRequestSummary, reasoningContent].filter(Boolean).join("\n\n"),
+		[apiRequestSummary, reasoningContent],
+	)
+	const hasReasoning = !!foldedReasoningContent
 	const hasCompletionResult = clineMessages.some(
 		(msg) => msg.ask === "completion_result" || msg.say === "completion_result" || msg.ask === "plan_mode_respond",
 	)
@@ -226,26 +254,17 @@ export const RequestStartRow: React.FC<RequestStartRowProps> = ({
 					</div>
 				</div>
 			)}
-			{reasoningContent &&
-				(!hasCost ? (
-					// Still streaming - show "Thinking..." text with shimmer
-					<div className="ml-1 pl-0 mb-1 -mt-1.25 pt-1">
-						<div className="inline-flex justify-baseline gap-0.5 text-left select-none px-0 w-full">
-							<span className="animate-shimmer bg-linear-90 from-foreground to-description bg-[length:200%_100%] bg-clip-text text-transparent text-[13px] leading-none">
-								Thinking...
-							</span>
-						</div>
-					</div>
-				) : (
-					// Complete - always show collapsible thinking section
-					<ThinkingRow
-						isExpanded={isExpanded}
-						isVisible={true}
-						onToggle={handleToggle}
-						reasoningContent={reasoningContent}
-						showTitle={true}
-					/>
-				))}
+			{foldedReasoningContent && (
+				<ThinkingRow
+					isExpanded={isExpanded}
+					isVisible={true}
+					onToggle={handleToggle}
+					reasoningContent={foldedReasoningContent}
+					showTitle={true}
+					isStreaming={!hasCost}
+					title={!hasCost ? "모델 진행 중" : "모델 내부 추론"}
+				/>
+			)}
 
 			{apiReqState === "error" && (
 				<ErrorRow
