@@ -296,7 +296,11 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 	}
 
 	// Handle say messages (typically don't require buttons except in special cases)
-	if (message.type === "say" && message.say === "api_req_started") {
+	if (message.type === "say" && message.say === "completion_result") {
+		return BUTTON_CONFIGS.completion_result
+	}
+
+	if (message.type === "say" && message.say === "api_req_started" && isStreaming) {
 		return BUTTON_CONFIGS.api_req_active
 	}
 
@@ -306,5 +310,5 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 		return BUTTON_CONFIGS.command_output
 	}
 
-	return BUTTON_CONFIGS.partial
+	return BUTTON_CONFIGS.default
 }
