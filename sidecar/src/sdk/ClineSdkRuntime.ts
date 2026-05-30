@@ -374,7 +374,47 @@ export class ClineSdkRuntime {
 						})
 						return `Wrote ${filePath}`
 					},
-					applyPatch: defaultExecutors.applyPatch,
+					applyPatch: async (input: { input: string }, cwd: string, context: AgentToolContext) => {
+						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
+						const patchText = typeof input === "string" ? input : input.input
+						const changes = parseApplyPatchChanges(patchText)
+						const snapshots = []
+						for (const change of changes) {
+							const beforeFilePath = resolveWorkspacePath(change.path, workspaceRoots, cwd)
+							const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd)
+							const current = await this.host.workspaceClient.readTextFile({ path: beforeFilePath })
+							const before = current.exists ? current.content : ""
+							const beforePath = await this.writeChangeSnapshot(beforeFilePath, before, context, "before")
+							snapshots.push({
+								...change,
+								beforeFilePath,
+								afterFilePath,
+								before,
+								beforePath,
+							})
+						}
+
+						const result = await defaultExecutors.applyPatch?.(input, cwd, context)
+
+						for (const snapshot of snapshots) {
+							const after = await this.host.workspaceClient.readTextFile({ path: snapshot.afterFilePath })
+							const afterContent = after.exists ? after.content : ""
+							const afterPath =
+								after.exists
+									? snapshot.afterFilePath
+									: await this.writeChangeSnapshot(snapshot.afterFilePath, afterContent, context, "after")
+							this.emitFileChanged({
+								sessionId: (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || undefined,
+								filePath: snapshot.afterFilePath,
+								beforePath: snapshot.beforePath,
+								afterPath,
+								action: snapshot.action,
+								...countLineChanges(snapshot.before, afterContent),
+							})
+						}
+
+						return result || `Applied patch to ${snapshots.map((snapshot) => snapshot.afterFilePath).join(", ")}`
+					},
 					askQuestion: async (question: string, options: string[]) => {
 						if (this.onAskQuestion) {
 							return this.onAskQuestion(question, options)
@@ -409,11 +449,11 @@ export class ClineSdkRuntime {
 		}).catch(() => undefined)
 	}
 
-	private async writeChangeSnapshot(filePath: string, content: string, context?: AgentToolContext) {
+	private async writeChangeSnapshot(filePath: string, content: string, context?: AgentToolContext, suffix = "before") {
 		const sessionId = (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || "session"
 		const changeRoot = path.join(getLocalAppDataRoot(), "VsClineAgent", "changes", sanitizePathPart(sessionId))
 		await fs.promises.mkdir(changeRoot, { recursive: true })
-		const snapshotName = `${Date.now()}-${sanitizePathPart(path.basename(filePath) || "file")}.before`
+		const snapshotName = `${Date.now()}-${sanitizePathPart(path.basename(filePath) || "file")}.${suffix}`
 		const snapshotPath = path.join(changeRoot, snapshotName)
 		await fs.promises.writeFile(snapshotPath, content, "utf8")
 		return snapshotPath
@@ -518,6 +558,41 @@ function splitLinesForDiff(value: string) {
 		return []
 	}
 	return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
+}
+
+type PatchChange = {
+	path: string
+	moveTo?: string
+	action: "created" | "modified" | "deleted"
+}
+
+function parseApplyPatchChanges(patchText: string): PatchChange[] {
+	const changes: PatchChange[] = []
+	let current: PatchChange | null = null
+	const pushCurrent = () => {
+		if (current) {
+			changes.push(current)
+			current = null
+		}
+	}
+
+	for (const rawLine of patchText.split(/\r?\n/)) {
+		const line = rawLine.trimEnd()
+		if (line.startsWith("*** Add File: ")) {
+			pushCurrent()
+			current = { path: line.slice("*** Add File: ".length).trim(), action: "created" }
+		} else if (line.startsWith("*** Update File: ")) {
+			pushCurrent()
+			current = { path: line.slice("*** Update File: ".length).trim(), action: "modified" }
+		} else if (line.startsWith("*** Delete File: ")) {
+			pushCurrent()
+			changes.push({ path: line.slice("*** Delete File: ".length).trim(), action: "deleted" })
+		} else if (line.startsWith("*** Move to: ") && current) {
+			current.moveTo = line.slice("*** Move to: ".length).trim()
+		}
+	}
+	pushCurrent()
+	return changes.filter((change) => change.path.length > 0)
 }
 
 async function importClineSdk(): Promise<ClineSdkModule> {
