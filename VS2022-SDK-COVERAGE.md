@@ -15,7 +15,7 @@ Reviewed against the public Cline SDK docs on 2026-05-30:
 - Session history and stored message reads.
 - Token and cost usage through SDK accumulated usage.
 - Tool approval routing through the SDK approval callback and the Cline webview approval buttons.
-- Text streaming through SDK events mapped to webview partial messages.
+- Text streaming through SDK events mapped to webview partial messages, including SDK notice and iteration/status events.
 - Rules, workflows, and skills through `core.settings.list()` and `core.settings.toggle()`.
 - Checkpoint restore through `core.restore()` when the SDK session has checkpoint metadata.
 - Built-in Cline tool execution delegated to the Visual Studio host adapter for workspace/editor/terminal operations.
@@ -26,7 +26,7 @@ Reviewed against the public Cline SDK docs on 2026-05-30:
 | --- | --- | --- |
 | SDK runtime | Covered | The sidecar creates `ClineCore` with `backendMode: "local"` and uses SDK session APIs as the task authority. |
 | WebView transport | Covered | WebView gRPC-style messages are routed to the sidecar; C# only provides startup hydration and host RPC. |
-| Message streaming | Covered | SDK events are normalized into Cline WebView messages, including partial text, task completion fallback, and terminal states. |
+| Message streaming | Covered | SDK events are normalized into Cline WebView messages, including partial text, notice/iteration progress, task completion fallback, idle state separation, and terminal states. |
 | Tool approval | Covered | SDK `requestToolApproval` is mapped to WebView approval UI and respects Visual Studio auto-approve settings. |
 | Follow-up questions | Covered | SDK `ask_question` shows a WebView question, waits for option or freeform input, and removes the answered prompt. |
 | File reads/searches | Covered | Host executors resolve paths inside Visual Studio workspace roots; automatic search/listing honors `.clineignore`. |
@@ -88,7 +88,10 @@ The VSIX wrapper is now expected to stay inside these responsibilities:
 - SDK session identity is host-owned: each WebView task id is passed as `CoreSessionConfig.sessionId`, and incoming SDK events are ignored unless their `payload.sessionId` matches the active/current task. This keeps `send`, `abort`, `restore`, approvals, history, and late event routing on the same session instead of mixing stale or SDK-generated ids.
 - SDK file and command tools validate paths at the sidecar boundary. `read_files`, `search_codebase`, `run_commands` cwd, and `editor` paths must resolve inside the open Visual Studio workspace roots.
 - SDK editor and `apply_patch` writes are tracked at the sidecar boundary: before-content snapshots are stored under `%LOCALAPPDATA%\VsClineAgent\changes`, line additions/deletions are surfaced in a compact Cline tool-window change card, and Visual Studio `Tools.DiffFiles` is opened only when the user chooses a file to review.
-- SDK sessions apply production guardrails by default: `maxIterations=20`, `maxParallelToolCalls=4`, `maxTokensPerTurn=4096`, `apiTimeoutMs=180000`, `execution.maxConsecutiveMistakes=3`, `execution.reminderAfterIterations=6`, and `execution.loopDetection={ softThreshold: 3, hardThreshold: 5 }`. Override with `VSCLINE_MAX_ITERATIONS`, `VSCLINE_MAX_PARALLEL_TOOL_CALLS`, `VSCLINE_MAX_TOKENS_PER_TURN`, `VSCLINE_API_TIMEOUT_MS`, `VSCLINE_MAX_CONSECUTIVE_MISTAKES`, `VSCLINE_REMINDER_AFTER_ITERATIONS`, `VSCLINE_LOOP_DETECTION`, `VSCLINE_LOOP_SOFT_THRESHOLD`, and `VSCLINE_LOOP_HARD_THRESHOLD`.
+- SDK sessions do not receive wrapper-owned conversation-flow limits by default. `maxIterations`, `maxParallelToolCalls`, `maxTokens`, `apiTimeoutMs`, `execution.maxConsecutiveMistakes`, `execution.reminderAfterIterations`, and `execution.loopDetection` are only sent when explicitly configured through API settings or environment variables (`VSCLINE_MAX_ITERATIONS`, `VSCLINE_MAX_PARALLEL_TOOL_CALLS`, `VSCLINE_MAX_TOKENS_PER_TURN`, `VSCLINE_API_TIMEOUT_MS`, `VSCLINE_MAX_CONSECUTIVE_MISTAKES`, `VSCLINE_REMINDER_AFTER_ITERATIONS`, `VSCLINE_LOOP_DETECTION`, `VSCLINE_LOOP_SOFT_THRESHOLD`, `VSCLINE_LOOP_HARD_THRESHOLD`). This keeps Cline SDK's own runtime semantics authoritative unless the user opts into a host policy.
+- SDK `abort()` is treated as an in-flight operation cancel, not a session stop. The VS wrapper keeps the active session id after Cancel so the user can continue the same conversation; `stop()` remains the only session-ending path.
+- SDK `status: idle` is not treated as task progress. It clears VS wrapper idle/status notices without adding artificial `api_req_started` rows, so an idle notification from SDK does not by itself keep the UI in a fake Thinking state.
+- SDK `AgentEvent` coverage now includes `content_update`, `iteration_start`, `iteration_end`, and `notice` events in addition to `content_start`, `content_end`, `usage`, `done`, and `error`. This prevents recovery/status messages from being lost between the SDK and WebView.
 - Provider ids sent by the WebApp may arrive as proto enum names such as `OLLAMA`; the wrapper normalizes those to SDK provider ids such as `ollama` before persisting or starting sessions.
 - Settings hydration is intentionally duplicated at the boundary: C# sends a safe initial state so React can render even if sidecar streaming is late, while the sidecar remains the authoritative state stream and persistence owner.
 - The Cline SDK docs list MCPs, checkpoints, web fetch, cron/scheduled agents, subagents, and plugins as SDK capabilities. This VSIX only marks those as covered when a Visual Studio host adapter and WebView UX exist; SDK availability alone is not treated as Visual Studio parity.
