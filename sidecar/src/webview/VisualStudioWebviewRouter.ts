@@ -988,8 +988,7 @@ export class VisualStudioWebviewRouter {
 
 		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
 		if (stream === "agent") {
-			this.upsertPartialText(`${this.getActivePartialText()}${chunk}`)
-			this.broadcastState().catch((error) => console.error(error))
+			logInteraction("sidecar", "sdkAgentChunkIgnoredForUi", { length: chunk.length })
 			return
 		}
 
