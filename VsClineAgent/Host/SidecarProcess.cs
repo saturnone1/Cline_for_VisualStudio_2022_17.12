@@ -800,9 +800,16 @@ namespace VsClineAgent.Host
                 "1.0.0");
             var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
+            var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
             var expectedStamp = GetArchiveStamp(nodeModulesZip);
+            var expectedRuntimeStamp = GetRuntimeStamp(packagedSidecarDirectory);
 
-            CopyRuntimeFiles(packagedSidecarDirectory, cacheRoot);
+            if (!File.Exists(runtimeStampPath) ||
+                !string.Equals(File.ReadAllText(runtimeStampPath), expectedRuntimeStamp, StringComparison.Ordinal))
+            {
+                CopyRuntimeFiles(packagedSidecarDirectory, cacheRoot);
+                File.WriteAllText(runtimeStampPath, expectedRuntimeStamp);
+            }
 
             if (!Directory.Exists(nodeModulesDirectory) ||
                 !File.Exists(stampPath) ||
@@ -820,6 +827,37 @@ namespace VsClineAgent.Host
             }
 
             return cacheRoot;
+        }
+
+        private static string GetRuntimeStamp(string sourceDirectory)
+        {
+            if (!Directory.Exists(sourceDirectory))
+                return "missing";
+
+            var builder = new StringBuilder();
+            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                var relativePath = file.Substring(sourceDirectory.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (relativePath.StartsWith("node_modules", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relativePath, "node.exe", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relativePath, "node_modules.zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var info = new FileInfo(file);
+                builder.Append(relativePath.Replace('\\', '/'))
+                    .Append('|')
+                    .Append(info.Length)
+                    .Append('|')
+                    .Append(info.LastWriteTimeUtc.Ticks)
+                    .AppendLine();
+            }
+
+            return builder.ToString();
         }
 
         private static void CopyRuntimeFiles(string sourceDirectory, string targetDirectory)
