@@ -39,13 +39,11 @@ export class VisualStudioWebviewRouter {
 	private pendingApproval:
 		| {
 				resolve: (value: ToolApprovalResult) => void
-				timeout: NodeJS.Timeout
 		  }
 		| null = null
 	private pendingQuestion:
 		| {
 				resolve: (value: AskQuestionResult) => void
-				timeout: NodeJS.Timeout
 		  }
 		| null = null
 	private messageSequence = 0
@@ -117,7 +115,6 @@ export class VisualStudioWebviewRouter {
 					})
 
 		if (this.pendingApproval) {
-			clearTimeout(this.pendingApproval.timeout)
 			this.pendingApproval.resolve({ approved: false, reason: "Superseded by a newer Cline tool approval request." })
 			this.pendingApproval = null
 		}
@@ -127,20 +124,13 @@ export class VisualStudioWebviewRouter {
 		await this.broadcastState()
 
 		return new Promise<ToolApprovalResult>((resolve) => {
-			const timeout = setTimeout(() => {
-				if (this.pendingApproval?.resolve === resolve) {
-					this.pendingApproval = null
-				}
-				resolve({ approved: false, reason: "Timed out waiting for Visual Studio tool approval." })
-			}, 30 * 60 * 1000)
-			this.pendingApproval = { resolve, timeout }
+			this.pendingApproval = { resolve }
 		})
 	}
 
 	async requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> {
 		logInteraction("sdk->sidecar", "question.request", { question, options })
 		if (this.pendingQuestion) {
-			clearTimeout(this.pendingQuestion.timeout)
 			this.pendingQuestion.resolve("")
 			this.pendingQuestion = null
 		}
@@ -158,13 +148,7 @@ export class VisualStudioWebviewRouter {
 		await this.broadcastState()
 
 		return new Promise<AskQuestionResult>((resolve) => {
-			const timeout = setTimeout(() => {
-				if (this.pendingQuestion?.resolve === resolve) {
-					this.pendingQuestion = null
-				}
-				resolve("")
-			}, 30 * 60 * 1000)
-			this.pendingQuestion = { resolve, timeout }
+			this.pendingQuestion = { resolve }
 		})
 	}
 
@@ -675,7 +659,6 @@ export class VisualStudioWebviewRouter {
 			)
 			const pending = this.pendingApproval
 			this.pendingApproval = null
-			clearTimeout(pending.timeout)
 			this.addMessage({
 				type: "say",
 				say: "user_feedback",
@@ -694,7 +677,6 @@ export class VisualStudioWebviewRouter {
 			const text = buildTaskInputWithAttachments(answer, getStringArray(message, "images"), getStringArray(message, "files"))
 			const pending = this.pendingQuestion
 			this.pendingQuestion = null
-			clearTimeout(pending.timeout)
 			this.removeAskMessages("followup")
 			this.addMessage({
 				type: "say",
@@ -1086,6 +1068,7 @@ export class VisualStudioWebviewRouter {
 	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
 		const type = getString(event, "type")
 		const contentType = getString(event, "contentType")
+		let shouldBroadcastState = true
 		if (sessionId) {
 			this.bindCurrentTaskToSession(sessionId)
 		}
@@ -1096,13 +1079,16 @@ export class VisualStudioWebviewRouter {
 			const text = getString(event, "accumulated") || getString(event, "text")
 			if (text) {
 				this.upsertPartialText(text)
+				shouldBroadcastState = false
 			} else if (!this.state.clineMessages.some((message) => message.say === "api_req_started" && message.partial === true)) {
 				this.addApiRequestStarted("Cline SDK is thinking...", { partial: true })
 			}
 		}
 
 		if (type === "content_start" && contentType === "reasoning") {
+			this.noteTaskActivity("content_start:reasoning")
 			this.handleReasoningDelta(getString(event, "reasoning") || getString(event, "text") || getString(event, "accumulated"))
+			shouldBroadcastState = false
 		}
 
 		if (type === "content_end" && contentType === "text") {
@@ -1287,7 +1273,9 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
+		if (shouldBroadcastState) {
+			this.broadcastState().catch((error) => console.error(error))
+		}
 	}
 
 	private handleReasoningDelta(text: string) {
@@ -1483,7 +1471,8 @@ export class VisualStudioWebviewRouter {
 				enabled: this.state.enableCheckpointsSetting !== false,
 			},
 			...(execution ? { execution } : {}),
-			systemPrompt: "You are Cline running inside Visual Studio 2022 through the VsClineAgent SDK wrapper.",
+			systemPrompt:
+				"You are Cline running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.",
 		}
 	}
 
@@ -1869,6 +1858,8 @@ export class VisualStudioWebviewRouter {
 				return "모델 본문 완료"
 			case "content_start:tool":
 				return "도구 호출 시작"
+			case "content_start:reasoning":
+				return "모델 reasoning 수신"
 			case "content_end:tool":
 				return "도구 호출 완료"
 			case "content_end:reasoning":
