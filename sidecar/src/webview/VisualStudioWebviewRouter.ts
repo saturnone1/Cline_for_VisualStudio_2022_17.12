@@ -199,23 +199,14 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.noteTaskActivity(status || type)
 			if (isTerminalSdkStatus(status)) {
-				this.clearTaskIdleWatchdog()
 				const activeText = this.getActivePartialText()
-				this.finalizeActivePartialText()
-				if (status === "completed" && activeText) {
-					this.addCompletionResult(activeText)
-				} else if (status === "completed" && !this.hasAssistantTextAfterLastUserMessage()) {
-					this.addCompletionResult(this.buildTerminalCompletionFallback(status))
-				} else if (status === "failed" || status === "error" || status === "cancelled" || status === "stopped") {
-					this.addCompletionResult(this.buildTerminalCompletionFallback(status))
-				}
-				this.clineSdk?.markSessionInactive(sessionId)
+				this.finishSdkTask(sessionId, status, activeText)
 				this.updateCurrentTaskItem()
 				this.broadcastState().catch((error) => console.error(error))
 				return
 			}
+			this.noteTaskActivity(status || type)
 			if (status && status !== "idle") {
 				this.addApiRequestStarted(status)
 			}
@@ -228,16 +219,8 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.noteTaskActivity(type)
-			this.clearTaskIdleWatchdog()
 			const activeText = this.getActivePartialText()
-			this.finalizeActivePartialText()
-			if (activeText) {
-				this.addCompletionResult(activeText)
-			} else if (!this.hasAssistantTextAfterLastUserMessage()) {
-				this.addCompletionResult(this.buildTerminalCompletionFallback(getString(payload, "reason") || "ended"))
-			}
-			this.clineSdk?.markSessionInactive(sessionId)
+			this.finishSdkTask(sessionId, getString(payload, "reason") || "ended", activeText)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}
@@ -1053,15 +1036,13 @@ export class VisualStudioWebviewRouter {
 			this.clearReasoningStatus()
 			const result = asRecord(event.result)
 			const text = getString(result, "outputText")
-			this.finalizeActivePartialText()
-			this.addCompletionResult(text || this.buildTerminalCompletionFallback(getString(result, "status") || "completed"))
+			this.finishSdkTask(sessionId, getString(result, "status") || "completed", text)
 		}
 
 		if (type === "run-failed") {
 			this.noteTaskActivity("run-failed")
 			this.clearReasoningStatus()
-			this.finalizeActivePartialText()
-			this.addCompletionResult(this.buildTerminalCompletionFallback("failed"))
+			this.finishSdkTask(sessionId, "failed")
 		}
 
 		if (type === "usage") {
@@ -1080,13 +1061,7 @@ export class VisualStudioWebviewRouter {
 			this.noteTaskActivity("done")
 			this.clearReasoningStatus()
 			const text = getString(event, "text")
-			this.finalizeActivePartialText()
-			if (text) {
-				this.addCompletionResult(text)
-			} else if (!this.hasAssistantTextAfterLastUserMessage()) {
-				logInteraction("sidecar", "emptyDoneFallback", { lastTaskActivityReason: this.lastTaskActivityReason })
-				this.addCompletionResult(this.buildTerminalCompletionFallback("completed"))
-			}
+			this.finishSdkTask(sessionId, "completed", text)
 		}
 
 		if (type === "error") {
@@ -1295,21 +1270,44 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addCompletionResult(text: string) {
-		if (!text) {
-			return
-		}
-
 		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.removeActiveStatusText()
 		this.finalizeActivePartialText()
-		if (this.state.clineMessages.some((message) => message.say === "completion_result" || message.ask === "completion_result")) {
+		if (this.hasCompletionResult()) {
 			return
 		}
 
 		const lastText = [...this.state.clineMessages]
 			.reverse()
 			.find((message) => message.say === "text" && message.partial !== true)
-		const completionText = getString(lastText, "text").trim() === text.trim() ? "" : text
+		const normalizedText = text || ""
+		const completionText =
+			normalizedText && getString(lastText, "text").trim() !== normalizedText.trim() ? normalizedText : ""
 		this.addMessage({ type: "ask", ask: "completion_result", text: completionText })
+	}
+
+	private hasCompletionResult() {
+		return this.state.clineMessages.some((message) => message.say === "completion_result" || message.ask === "completion_result")
+	}
+
+	private finishSdkTask(sessionId: string, status: string, text = "") {
+		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.clearReasoningStatus()
+		const activeText = text || this.getActivePartialText()
+		this.finalizeActivePartialText()
+
+		if (activeText) {
+			this.addCompletionResult(activeText)
+		} else if (this.hasAssistantTextAfterLastUserMessage()) {
+			this.addCompletionResult("")
+		} else {
+			logInteraction("sidecar", "emptyDoneFallback", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+			this.addCompletionResult(this.buildTerminalCompletionFallback(status || "completed"))
+		}
+
+		this.clineSdk?.markSessionInactive(sessionId)
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {
@@ -1558,6 +1556,11 @@ export class VisualStudioWebviewRouter {
 		this.lastTaskActivityReason = reason
 		this.removeActiveStatusText()
 		logInteraction("sidecar", "taskActivity", { reason })
+		if (this.hasCompletionResult() || isTerminalSdkStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
+			this.clearTaskIdleWatchdog()
+			this.clearPartialIdleWatchdog()
+			return
+		}
 		this.scheduleTaskIdleWatchdog()
 	}
 
