@@ -837,11 +837,11 @@ export function groupLowStakesTools(groupedMessages: (ClineMessage | ClineMessag
 			continue
 		}
 
-		// Text - once a tool group is active, ignore additional text so it
-		// doesn't continue mutating the text row rendered above the group.
+		// Text after a tool group is the assistant's visible answer. Commit the
+		// folded tool/progress block first, then render the answer normally.
 		if (messageType === "text") {
 			if (hasTools) {
-				continue
+				commitToolGroup()
 			}
 			flushPending()
 			result.push(message)
