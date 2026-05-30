@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -10,6 +11,10 @@ namespace VsClineAgent.Host
     {
         private const long MaxBytes = 8L * 1024L * 1024L;
         private const int MaxLineChars = 96 * 1024;
+        private const int MaxStringChars = 4096;
+        private const int MaxArrayItems = 50;
+        private const int MaxObjectProperties = 80;
+        private const int MaxDepth = 8;
         private static readonly object Gate = new object();
 
         public static void Write(string direction, string eventName, object? payload)
@@ -60,7 +65,7 @@ namespace VsClineAgent.Host
                 token = JToken.FromObject(payload);
             }
 
-            Redact(token);
+            Redact(token, 0);
             return token;
         }
 
@@ -76,11 +81,18 @@ namespace VsClineAgent.Host
             }
         }
 
-        private static void Redact(JToken token)
+        private static void Redact(JToken token, int depth)
         {
+            if (depth >= MaxDepth)
+            {
+                ReplaceToken(token, new JValue("[max-depth]"));
+                return;
+            }
+
             if (token is JObject obj)
             {
-                foreach (var property in obj.Properties())
+                var properties = obj.Properties().ToList();
+                foreach (var property in properties.Take(MaxObjectProperties))
                 {
                     if (IsSensitiveKey(property.Name))
                     {
@@ -88,14 +100,27 @@ namespace VsClineAgent.Host
                     }
                     else
                     {
-                        Redact(property.Value);
+                        Redact(property.Value, depth + 1);
                     }
                 }
+
+                foreach (var property in properties.Skip(MaxObjectProperties).ToList())
+                    property.Remove();
+
+                if (properties.Count > MaxObjectProperties)
+                    obj["__truncatedProperties"] = properties.Count - MaxObjectProperties;
             }
             else if (token is JArray array)
             {
-                foreach (var item in array)
-                    Redact(item);
+                var items = array.ToList();
+                foreach (var item in items.Take(MaxArrayItems))
+                    Redact(item, depth + 1);
+
+                while (array.Count > MaxArrayItems)
+                    array.RemoveAt(array.Count - 1);
+
+                if (items.Count > MaxArrayItems)
+                    array.Add("[truncated " + (items.Count - MaxArrayItems) + " items]");
             }
             else if (token is JValue value && value.Type == JTokenType.String)
             {
@@ -103,14 +128,20 @@ namespace VsClineAgent.Host
                 var parsed = TryParseJson(text);
                 if (parsed != null)
                 {
-                    Redact(parsed);
-                    value.Value = parsed.ToString(Formatting.None);
+                    Redact(parsed, depth + 1);
+                    value.Value = TruncateDiagnosticString(parsed.ToString(Formatting.None));
                 }
                 else
                 {
-                    value.Value = RedactSecretLikeString(text);
+                    value.Value = TruncateDiagnosticString(RedactSecretLikeString(text));
                 }
             }
+        }
+
+        private static void ReplaceToken(JToken token, JToken replacement)
+        {
+            if (token.Parent != null)
+                token.Replace(replacement);
         }
 
         private static bool IsSensitiveKey(string key)
@@ -141,6 +172,14 @@ namespace VsClineAgent.Host
                 value,
                 @"\b(sk-[A-Za-z0-9_-]{12,}|sk-proj-[A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{12,}|nvapi-[A-Za-z0-9_-]{12,})\b",
                 match => match.Value.Substring(0, Math.Min(7, match.Value.Length)) + "..." + match.Value.Substring(Math.Max(0, match.Value.Length - 4)));
+        }
+
+        private static string TruncateDiagnosticString(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= MaxStringChars)
+                return value;
+
+            return value.Substring(0, MaxStringChars) + "...[truncated " + (value.Length - MaxStringChars) + " chars]";
         }
 
         private static string GetLogPath()

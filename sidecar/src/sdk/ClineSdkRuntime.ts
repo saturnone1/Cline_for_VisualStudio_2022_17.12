@@ -77,7 +77,7 @@ export class ClineSdkRuntime {
 		const systemPrompt =
 			stringValue(config.systemPrompt) ||
 			stringValue(request.systemPrompt) ||
-			"You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper."
+			"You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths."
 		const mode = agentMode(config.mode) || agentMode(request.mode) || "act"
 		const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
 		const userImages = stringArrayValue(request.userImages)
@@ -345,8 +345,8 @@ export class ClineSdkRuntime {
 						const commandCwd = resolveWorkspacePath(cwd, workspaceRoots)
 						const commandText =
 							typeof command === "string"
-								? command
-								: [command.command, ...(command.args || [])].filter(Boolean).join(" ")
+								? normalizeCommandForWindows(command)
+								: normalizeCommandForWindows([command.command, ...(command.args || []).map(normalizeCommandArgumentForWindows)].filter(Boolean).join(" "))
 						const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal }).abortSignal
 						if (abortSignal?.aborted) {
 							throw new Error("Command was cancelled before it started.")
@@ -539,6 +539,26 @@ function normalizeCommandResultForSdk(result: unknown) {
 		stdout: stdout === undefined ? undefined : truncateText(stdout, limit),
 		stderr: stderr === undefined ? undefined : truncateText(stderr, Math.min(limit, 8000)),
 	})
+}
+
+function normalizeCommandForWindows(command: string) {
+	if (process.platform !== "win32" || !command) {
+		return command
+	}
+
+	return command.replace(/(^|\s)(?!\/)([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.()[\]{}$@+-]+)+)/g, (_match, prefix: string, candidate: string) => {
+		if (candidate.includes("://")) {
+			return `${prefix}${candidate}`
+		}
+		return `${prefix}${candidate.replace(/\//g, "\\")}`
+	})
+}
+
+function normalizeCommandArgumentForWindows(argument: string) {
+	if (process.platform !== "win32" || !argument || argument.startsWith("/") || argument.includes("://")) {
+		return argument
+	}
+	return argument.includes("/") ? argument.replace(/\//g, "\\") : argument
 }
 
 function truncateText(value: string, maxChars: number) {
