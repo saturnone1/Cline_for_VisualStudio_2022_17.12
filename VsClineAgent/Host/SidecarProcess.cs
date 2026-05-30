@@ -793,11 +793,12 @@ namespace VsClineAgent.Host
         private static string PrepareSidecarRuntime(string packagedSidecarDirectory)
         {
             var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
+            var runtimeVersion = GetRuntimeCacheVersion();
             var cacheRoot = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "VsClineAgent",
                 "Sidecar",
-                "1.0.0");
+                runtimeVersion);
             var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
@@ -827,6 +828,17 @@ namespace VsClineAgent.Host
             }
 
             return cacheRoot;
+        }
+
+        private static string GetRuntimeCacheVersion()
+        {
+            var version = typeof(SidecarProcess).Assembly.GetName().Version?.ToString();
+            string cacheVersion = string.IsNullOrWhiteSpace(version) ? "unknown" : version!;
+
+            foreach (var invalidChar in Path.GetInvalidFileNameChars())
+                cacheVersion = cacheVersion.Replace(invalidChar, '_');
+
+            return cacheVersion.Replace(' ', '_');
         }
 
         private static string GetRuntimeStamp(string sourceDirectory)
