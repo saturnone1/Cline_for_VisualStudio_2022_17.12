@@ -57,6 +57,8 @@ export class VisualStudioWebviewRouter {
 	private activeAssistantTextBuffer = ""
 	private activeStatusTextTs: number | null = null
 	private activeReasoningTextTs: number | null = null
+	private activeFoldedReasoningText = ""
+	private activeFoldedActivityText = ""
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
 	private partialIdleTimer: NodeJS.Timeout | null = null
@@ -629,6 +631,8 @@ export class VisualStudioWebviewRouter {
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 		this.activeReasoningTextTs = null
+		this.activeFoldedReasoningText = ""
+		this.activeFoldedActivityText = ""
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
@@ -647,24 +651,7 @@ export class VisualStudioWebviewRouter {
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, String(taskItem.id || "")),
 			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
-		}).then(async (result) => {
-			const resultRecord = asRecord(result)
-			const agentResult = asRecord(resultRecord.result)
-			const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
-			const sessionId = getString(resultRecord, "sessionId")
-			if (resultText) {
-				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), getString(agentResult, "finishReason") || "completed", resultText)
-			} else if (agentResult && Object.keys(agentResult).length > 0 && !this.hasAssistantTextAfterLastUserMessage()) {
-				logInteraction("sidecar", "emptyStartSessionResult", {
-					sessionId,
-					finishReason: getString(agentResult, "finishReason") || "completed",
-					lastTaskActivityReason: this.lastTaskActivityReason,
-				})
-				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), getString(agentResult, "finishReason") || "completed")
-			}
-			this.updateCurrentTaskItem()
-			await this.broadcastState()
-		}).catch(async (error) => {
+		}).then((result) => this.completeFromSdkResult(result, String(taskItem.id || ""), "startSession")).catch(async (error) => {
 			this.clearTaskIdleWatchdog()
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			this.updateCurrentTaskItem()
@@ -747,10 +734,45 @@ export class VisualStudioWebviewRouter {
 			userImages: getStringArray(message, "images"),
 			userFiles: getStringArray(message, "files"),
 			delivery: normalizePromptDelivery(getString(message, "delivery")),
-		}).catch(async (error) => {
+		}).then((result) => this.completeFromSdkResult(result, sessionId, "send")).catch(async (error) => {
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			await this.broadcastState()
 		})
+	}
+
+	private async completeFromSdkResult(result: unknown, fallbackSessionId: string, source: string) {
+		const resultRecord = asRecord(result)
+		const agentResult = asRecord(resultRecord.result ?? result)
+		if (Object.keys(agentResult).length === 0) {
+			logInteraction("sidecar", "emptySdkResult", {
+				source,
+				sessionId: fallbackSessionId,
+				lastTaskActivityReason: this.lastTaskActivityReason,
+			})
+			return
+		}
+
+		const sessionId = getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || "")
+		const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
+		const finishReason = getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed"
+		if (resultText) {
+			this.finishSdkTask(sessionId, finishReason, resultText)
+		} else if (!this.hasAssistantTextAfterLastUserMessage()) {
+			logInteraction("sidecar", "emptySdkResultNoAssistantText", {
+				source,
+				sessionId,
+				finishReason,
+				lastTaskActivityReason: this.lastTaskActivityReason,
+			})
+			this.finishSdkTask(sessionId, finishReason)
+		} else {
+			this.finalizeOpenPartialMessages()
+			this.removeActiveStatusText()
+			this.addCompletionResultMarker(finishReason)
+		}
+
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
 	}
 
 	private async cancelTask() {
@@ -1905,6 +1927,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true)
+		this.upsertFoldedActivityText(groupedText)
 		if (!this.activeToolActivityTs) {
 			this.activeToolActivityTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
@@ -1937,11 +1960,13 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, false)
+		this.upsertFoldedActivityText(groupedText)
 		this.upsertMessage(this.activeToolActivityTs, {
 			type: "say",
 			say: "api_req_started",
 			text: JSON.stringify({
-				request: buildGroupedToolActivityText(this.activeToolActivityEntries, false),
+				request: groupedText,
 				tokensIn: 0,
 				tokensOut: 0,
 				cacheWrites: 0,
@@ -2082,35 +2107,54 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const capped = truncateText(normalized, readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000))
+		const previous = this.activeFoldedReasoningText
+		const previousNormalized = normalizeTranscriptText(previous)
+		const cappedNormalized = normalizeTranscriptText(capped)
+		if (previousNormalized.includes(cappedNormalized)) {
+			return
+		}
+
+		this.activeFoldedReasoningText = truncateText(
+			cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
+			readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
+		)
+		this.upsertFoldedProgressMessage()
+	}
+
+	private upsertFoldedActivityText(text: string) {
+		const normalized = normalizeProgressTranscriptText(text)
+		if (!normalized) {
+			return
+		}
+
+		this.activeFoldedActivityText = truncateText(normalized, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
+		this.upsertFoldedProgressMessage()
+	}
+
+	private upsertFoldedProgressMessage() {
+		const foldedText = [this.activeFoldedActivityText, this.activeFoldedReasoningText].filter(Boolean).join("\n\n")
+		if (!foldedText.trim()) {
+			return
+		}
+
 		if (!this.activeReasoningTextTs) {
 			this.activeReasoningTextTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
 				ts: this.activeReasoningTextTs,
 				type: "say",
 				say: "reasoning",
-				text: "모델 내부 추론",
-				reasoning: capped,
+				text: "모델 진행 중",
+				reasoning: foldedText,
 				partial: true,
 				isCollapsed: true,
 				isExpanded: false,
 			})
 		} else {
-			const existing = this.state.clineMessages.find((item) => item.ts === this.activeReasoningTextTs)
-			const previous = getString(existing, "reasoning")
-			const previousNormalized = normalizeTranscriptText(previous)
-			const cappedNormalized = normalizeTranscriptText(capped)
-			if (previousNormalized.includes(cappedNormalized)) {
-				return
-			}
-			const next = truncateText(
-				cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
-				readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
-			)
 			this.upsertMessage(this.activeReasoningTextTs, {
 				type: "say",
 				say: "reasoning",
-				text: "모델 내부 추론",
-				reasoning: next,
+				text: "모델 진행 중",
+				reasoning: foldedText,
 				partial: true,
 				isCollapsed: true,
 				isExpanded: false,
@@ -2130,6 +2174,8 @@ export class VisualStudioWebviewRouter {
 		this.upsertMessage(this.activeReasoningTextTs, { partial: false, isCollapsed: true, isExpanded: false })
 		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
 		this.activeReasoningTextTs = null
+		this.activeFoldedReasoningText = ""
+		this.activeFoldedActivityText = ""
 	}
 
 	private finalizeOpenPartialMessages() {
@@ -2174,6 +2220,8 @@ export class VisualStudioWebviewRouter {
 		}
 		this.activePartialTextTs = null
 		this.activeReasoningTextTs = null
+		this.activeFoldedReasoningText = ""
+		this.activeFoldedActivityText = ""
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 	}
@@ -3702,6 +3750,19 @@ function normalizeReasoningTranscriptText(text: string) {
 	}
 
 	return trimmed.replace(/\s+/g, " ")
+}
+
+function normalizeProgressTranscriptText(text: string) {
+	const trimmed = text.trim()
+	if (!trimmed) {
+		return ""
+	}
+
+	return trimmed
+		.split(/\r?\n/)
+		.map((line) => line.trimEnd())
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
 }
 
 function normalizeAssistantTranscriptText(text: string) {
