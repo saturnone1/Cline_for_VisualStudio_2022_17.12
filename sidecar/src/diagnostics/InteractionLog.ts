@@ -4,6 +4,10 @@ import path from "node:path"
 
 const MAX_BYTES = 8 * 1024 * 1024
 const MAX_LINE_CHARS = 96 * 1024
+const MAX_STRING_CHARS = 4096
+const MAX_ARRAY_ITEMS = 50
+const MAX_OBJECT_KEYS = 80
+const MAX_DEPTH = 8
 
 const SENSITIVE_KEYS = [
 	"apikey",
@@ -22,7 +26,7 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 			source: "sidecar",
 			direction,
 			event,
-			payload: sanitize(payload),
+			payload: sanitize(payload, 0),
 		}
 		let line = JSON.stringify(entry)
 		if (line.length > MAX_LINE_CHARS) {
@@ -65,24 +69,32 @@ function rotateIfNeeded(filePath: string) {
 	fs.renameSync(filePath, archive)
 }
 
-function sanitize(value: unknown): unknown {
+function sanitize(value: unknown, depth: number): unknown {
 	if (value === null || value === undefined) {
 		return value
 	}
 	if (typeof value === "string") {
 		const parsed = tryParseJson(value)
-		return parsed === undefined ? redactSecretLikeString(value) : sanitize(parsed)
+		return parsed === undefined ? truncateDiagnosticString(redactSecretLikeString(value)) : sanitize(parsed, depth + 1)
 	}
 	if (typeof value !== "object") {
 		return value
 	}
+	if (depth >= MAX_DEPTH) {
+		return "[max-depth]"
+	}
 	if (Array.isArray(value)) {
-		return value.map((item) => sanitize(item))
+		const items = value.slice(0, MAX_ARRAY_ITEMS).map((item) => sanitize(item, depth + 1))
+		return value.length > MAX_ARRAY_ITEMS ? [...items, `[truncated ${value.length - MAX_ARRAY_ITEMS} items]`] : items
 	}
 
 	const result: Record<string, unknown> = {}
-	for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-		result[key] = isSensitiveKey(key) ? redactValue(nested) : sanitize(nested)
+	const entries = Object.entries(value as Record<string, unknown>)
+	for (const [key, nested] of entries.slice(0, MAX_OBJECT_KEYS)) {
+		result[key] = isSensitiveKey(key) ? redactValue(nested) : sanitize(nested, depth + 1)
+	}
+	if (entries.length > MAX_OBJECT_KEYS) {
+		result.__truncatedKeys = entries.length - MAX_OBJECT_KEYS
 	}
 	return result
 }
@@ -113,4 +125,11 @@ function redactSecretLikeString(value: string) {
 		/\b(sk-[A-Za-z0-9_-]{12,}|sk-proj-[A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{12,}|nvapi-[A-Za-z0-9_-]{12,})\b/g,
 		(match) => `${match.slice(0, 7)}...${match.slice(-4)}`,
 	)
+}
+
+function truncateDiagnosticString(value: string) {
+	if (value.length <= MAX_STRING_CHARS) {
+		return value
+	}
+	return `${value.slice(0, MAX_STRING_CHARS)}...[truncated ${value.length - MAX_STRING_CHARS} chars]`
 }

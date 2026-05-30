@@ -169,7 +169,7 @@ export class VisualStudioWebviewRouter {
 	}
 
 	handleSdkEvent(event: unknown) {
-		logInteraction("sdk->sidecar", "sdk.event", event)
+		logInteraction("sdk->sidecar", "sdk.event", summarizeSdkEventForLog(event))
 		const record = asRecord(event)
 		const type = getString(record, "type")
 		const payload = asRecord(record.payload)
@@ -982,13 +982,14 @@ export class VisualStudioWebviewRouter {
 	private handleSessionChunk(payload: Record<string, unknown>) {
 		const stream = getString(payload, "stream")
 		const chunk = getString(payload, "chunk")
-		if (!chunk) {
+		const chunkRecord = asRecord(payload.chunk)
+		if (!chunk && Object.keys(chunkRecord).length === 0) {
 			return
 		}
 
 		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
 		if (stream === "agent") {
-			logInteraction("sidecar", "sdkAgentChunkIgnoredForUi", { length: chunk.length })
+			logInteraction("sidecar", "sdkAgentChunkIgnoredForUi", summarizeAgentChunkForLog(payload.chunk))
 			return
 		}
 
@@ -1963,7 +1964,7 @@ export class VisualStudioWebviewRouter {
 
 	private async broadcastState() {
 		const messages = this.buildStateMessages()
-		logInteraction("sidecar->webview", "state.broadcast", { count: messages.length, messages })
+		logInteraction("sidecar->webview", "state.broadcast", { count: messages.length, messages: messages.map(summarizeGrpcMessageForLog) })
 		await Promise.all(
 			messages.map((message) =>
 				sendHostRequest(
@@ -1987,13 +1988,92 @@ export class VisualStudioWebviewRouter {
 		}
 
 		for (const requestId of this.partialMessageStreamRequestIds) {
-			logInteraction("sidecar->webview", "partialMessage", { requestId, message })
+			logInteraction("sidecar->webview", "partialMessage", { requestId, message: summarizeClineMessageForLog(message) })
 			sendHostRequest(
 				this.connection,
 				"webview.postMessage",
 				{ message: grpcResponse(requestId, toProtoClineMessage(message), true) },
 			).catch((error) => console.error(error))
 		}
+	}
+}
+
+function summarizeSdkEventForLog(event: unknown) {
+	const record = asRecord(event)
+	const type = getString(record, "type")
+	const payload = asRecord(record.payload)
+	if (type === "agent_event") {
+		return {
+			type,
+			sessionId: getString(payload, "sessionId"),
+			event: summarizeAgentChunkForLog(payload.event),
+		}
+	}
+	if (type === "chunk") {
+		return {
+			type,
+			sessionId: getString(payload, "sessionId"),
+			stream: getString(payload, "stream"),
+			chunk: summarizeAgentChunkForLog(payload.chunk),
+		}
+	}
+	if (type === "session_snapshot") {
+		const snapshot = asRecord(payload.snapshot)
+		return {
+			type,
+			sessionId: getString(payload, "sessionId"),
+			status: getString(snapshot, "status"),
+			messageCount: getNumber(snapshot, "messageCount"),
+		}
+	}
+	return event
+}
+
+function summarizeAgentChunkForLog(value: unknown) {
+	if (typeof value === "string") {
+		return { kind: "string", length: value.length, preview: truncateText(value, 240) }
+	}
+	const record = asRecord(value)
+	if (Object.keys(record).length === 0) {
+		return { kind: typeof value }
+	}
+	return {
+		type: getString(record, "type"),
+		contentType: getString(record, "contentType"),
+		toolName: getString(record, "toolName"),
+		textLength: getString(record, "text").length,
+		accumulatedLength: getString(record, "accumulated").length,
+		reasoningLength: getString(record, "reasoning").length,
+		hasInput: Object.keys(asRecord(record.input)).length > 0,
+		hasOutput: record.output !== undefined,
+		hasUsage: record.usage !== undefined,
+	}
+}
+
+function summarizeClineMessageForLog(message: Record<string, unknown>) {
+	const text = getString(message, "text")
+	return {
+		ts: getNumber(message, "ts"),
+		type: getString(message, "type"),
+		say: getString(message, "say"),
+		ask: getString(message, "ask"),
+		partial: message.partial === true,
+		textLength: text.length,
+		textPreview: truncateText(text, 240),
+	}
+}
+
+function summarizeGrpcMessageForLog(message: unknown) {
+	const record = asRecord(message)
+	const grpcResponseRecord = asRecord(record.grpc_response)
+	const responseMessage = asRecord(grpcResponseRecord.message)
+	const stateJson = getString(responseMessage, "stateJson")
+	return {
+		type: getString(record, "type"),
+		requestId: getString(grpcResponseRecord, "request_id"),
+		isStreaming: grpcResponseRecord.is_streaming === true,
+		error: truncateText(getString(grpcResponseRecord, "error"), 240),
+		stateJsonLength: stateJson.length,
 	}
 }
 
