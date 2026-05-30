@@ -193,6 +193,60 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		if (type === "chunk") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handleSessionChunk(payload)
+			return
+		}
+
+		if (type === "session_snapshot") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handleSessionSnapshot(payload)
+			return
+		}
+
+		if (type === "team_progress") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handleTeamProgress(payload)
+			return
+		}
+
+		if (type === "hook") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handleHookEvent(payload)
+			return
+		}
+
+		if (type === "pending_prompts") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handlePendingPrompts(payload)
+			return
+		}
+
+		if (type === "pending_prompt_submitted") {
+			const sessionId = getString(payload, "sessionId")
+			if (this.shouldIgnoreSdkEvent(sessionId)) {
+				return
+			}
+			this.handlePendingPromptSubmitted(payload)
+			return
+		}
+
 		if (type === "status") {
 			const status = getString(payload, "status")
 			const sessionId = getString(payload, "sessionId")
@@ -660,7 +714,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		const activeSessionId = this.clineSdk.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		const activeSessionId = this.clineSdk.status.activeSessionId
 		if (!activeSessionId) {
 			await this.startNewTask(
 				{
@@ -682,6 +736,7 @@ export class VisualStudioWebviewRouter {
 			prompt: getString(message, "text"),
 			userImages: getStringArray(message, "images"),
 			userFiles: getStringArray(message, "files"),
+			delivery: normalizePromptDelivery(getString(message, "delivery")),
 		}).catch(async (error) => {
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			await this.broadcastState()
@@ -690,7 +745,7 @@ export class VisualStudioWebviewRouter {
 
 	private async cancelTask() {
 		if (this.clineSdk) {
-			const sessionId = this.clineSdk.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+			const sessionId = this.clineSdk.status.activeSessionId
 			if (sessionId) {
 				await this.clineSdk.abort({ sessionId }).catch((error) => {
 					logInteraction("sidecar", "cancelAbortFailed", {
@@ -922,6 +977,110 @@ export class VisualStudioWebviewRouter {
 		} else {
 			this.state.lastDismissedInfoBannerVersion = version
 		}
+	}
+
+	private handleSessionChunk(payload: Record<string, unknown>) {
+		const stream = getString(payload, "stream")
+		const chunk = getString(payload, "chunk")
+		if (!chunk) {
+			return
+		}
+
+		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
+		if (stream === "agent") {
+			this.upsertPartialText(`${this.getActivePartialText()}${chunk}`)
+			this.broadcastState().catch((error) => console.error(error))
+			return
+		}
+
+		const text = truncateText(chunk, readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
+		this.addMessage({
+			type: "say",
+			say: stream === "stderr" ? "command_output" : "tool",
+			text,
+		})
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handleSessionSnapshot(payload: Record<string, unknown>) {
+		const sessionId = getString(payload, "sessionId")
+		if (sessionId) {
+			this.bindCurrentTaskToSession(sessionId)
+		}
+
+		const snapshot = asRecord(payload.snapshot)
+		const status = getString(snapshot, "status")
+		const model = asRecord(snapshot.model)
+		const aggregateUsage = asRecord(snapshot.aggregateUsage)
+		const usage = Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage)
+		this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
+		this.updateCurrentTaskItem({
+			modelId: getString(model, "modelId") || undefined,
+			tokensIn: numberValue(usage.inputTokens),
+			tokensOut: numberValue(usage.outputTokens),
+			cacheReads: numberValue(usage.cacheReadTokens),
+			cacheWrites: numberValue(usage.cacheWriteTokens),
+			totalCost: numberValue(usage.totalCost),
+		})
+		if (status && status !== "running" && status !== "pending" && status !== "starting" && status !== "idle") {
+			const activeText = this.getActivePartialText()
+			this.finishSdkTask(sessionId, status, activeText)
+		}
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handleTeamProgress(payload: Record<string, unknown>) {
+		const summary = asRecord(payload.summary)
+		const lifecycle = asRecord(payload.lifecycle)
+		const message =
+			getString(summary, "message") ||
+			getString(summary, "status") ||
+			getString(lifecycle, "phase") ||
+			getString(payload, "teamName") ||
+			"Team progress updated."
+		this.noteTaskActivity("team_progress")
+		this.upsertStatusText(message)
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handleHookEvent(payload: Record<string, unknown>) {
+		const hookEventName = getString(payload, "hookEventName")
+		const toolName = getString(payload, "toolName")
+		const text = JSON.stringify({
+			hookEventName,
+			toolName,
+			agentId: getString(payload, "agentId") || undefined,
+			conversationId: getString(payload, "conversationId") || undefined,
+			iteration: getNumber(payload, "iteration"),
+		})
+		this.noteTaskActivity(`hook:${hookEventName || "unknown"}`)
+		this.addMessage({ type: "say", say: "hook_status", text })
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handlePendingPrompts(payload: Record<string, unknown>) {
+		const prompts = Array.isArray(payload.prompts) ? payload.prompts : []
+		this.noteTaskActivity("pending_prompts")
+		if (prompts.length > 0) {
+			this.upsertStatusText(`Pending prompts: ${prompts.length}`)
+		} else {
+			this.removeActiveStatusText()
+		}
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private handlePendingPromptSubmitted(payload: Record<string, unknown>) {
+		const prompt = getString(payload, "prompt")
+		this.noteTaskActivity("pending_prompt_submitted")
+		if (prompt) {
+			this.upsertStatusText(`Queued prompt: ${truncateText(prompt, 160)}`)
+		}
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
 	}
 
 	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
@@ -1271,8 +1430,8 @@ export class VisualStudioWebviewRouter {
 		const sdkBaseUrl = providerId === "ollama" ? normalizeOllamaOpenAiBaseUrl(configuredBaseUrl) : configuredBaseUrl
 		const modelId = await this.resolveEffectiveModelId(apiConfig, providerId, modePrefix, modelLookupBaseUrl)
 		const apiKey = resolveApiKey(apiConfig, providerId) || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
-		const maxTokens = readOptionalPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN")
-		const timeout = resolveRequestTimeoutMs(apiConfig)
+		const maxTokensPerTurn = readOptionalPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN")
+		const apiTimeoutMs = resolveRequestTimeoutMs(apiConfig)
 		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
 		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
 		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
@@ -1284,8 +1443,8 @@ export class VisualStudioWebviewRouter {
 			modelId,
 			baseUrl: sdkBaseUrl || undefined,
 			mode: this.state.mode,
-			maxTokens,
-			timeout,
+			maxTokensPerTurn,
+			apiTimeoutMs,
 			thinking,
 			reasoningEffort,
 			sessionId: sessionId || undefined,
@@ -1308,13 +1467,13 @@ export class VisualStudioWebviewRouter {
 			enableAgentTeams: false,
 			...(maxIterations ? { maxIterations } : {}),
 			...(maxParallelToolCalls ? { maxParallelToolCalls } : {}),
-			...(maxTokens ? { maxTokens } : {}),
-			...(timeout ? { timeout } : {}),
+			...(maxTokensPerTurn ? { maxTokensPerTurn } : {}),
+			...(apiTimeoutMs ? { apiTimeoutMs } : {}),
 			thinking,
 			reasoningEffort,
 			providerConfig: {
-				...(maxTokens ? { maxTokens } : {}),
-				...(timeout ? { timeout } : {}),
+				...(maxTokensPerTurn ? { maxTokens: maxTokensPerTurn } : {}),
+				...(apiTimeoutMs ? { timeout: apiTimeoutMs } : {}),
 				reasoning: {
 					enabled: thinking,
 					effort: reasoningEffort,
@@ -1857,6 +2016,10 @@ function getStringArray(message: unknown, key: string): string[] {
 	const record = asRecord(message)
 	const value = record[key]
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
+function normalizePromptDelivery(value: string): "queue" | "steer" | undefined {
+	return value === "queue" || value === "steer" ? value : undefined
 }
 
 function getNumber(message: unknown, key: string): number | undefined {
