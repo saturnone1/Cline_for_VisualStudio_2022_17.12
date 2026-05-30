@@ -4,7 +4,7 @@
   <Metadata>
     <Identity Id="VsClineAgent.3F8C2A1D-E7B4-4F9E-A8C5-6D2B1F7E3A04"
               Language="en-US"
-              Version="1.0.73"
+              Version="1.0.74"
               Publisher="Developer" />
     <DisplayName>VS AI Agent (Cline Port)</DisplayName>
     <Description xml:space="preserve">AI coding agent for Visual Studio, powered by Cline SDK and local/offline runtimes</Description>
