@@ -4,6 +4,7 @@ import {
 	ClineAskQuestion,
 	ClineAskUseMcpServer,
 	ClineMessage,
+	ClineSayGenerateExplanationComment,
 	ClinePlanModeResponse,
 	ClineSayGenerateExplanation,
 	ClineSayTool,
@@ -975,6 +976,18 @@ export const ChatRowContent = memo(
 								lastModifiedMessage?.ask === "resume_completed_task")
 						const isGenerating = explanationInfo.status === "generating" && !wasCancelled
 						const isError = explanationInfo.status === "error"
+						const explanationComments = explanationInfo.comments ?? []
+						const renderExplanationComment = (
+							comment: ClineSayGenerateExplanationComment,
+							index: number,
+						) => (
+							<div className="border border-editor-group-border rounded-sm px-2.5 py-2 mt-2" key={`${comment.filePath}:${comment.line}:${index}`}>
+								<div className="text-xs opacity-70 break-all mb-1.5">
+									{cleanPathPrefix(comment.filePath)}:{comment.line + 1}
+								</div>
+								<MarkdownRow markdown={comment.body} />
+							</div>
+						)
 						return (
 							<div className="bg-code flex flex-col border border-editor-group-border rounded-sm py-2.5 px-3">
 								<div className="flex items-center">
@@ -1012,6 +1025,17 @@ export const ChatRowContent = memo(
 												<code className="bg-quote rounded-sm py-0.5 px-1.5">
 													{explanationInfo.toRef || "working directory"}
 												</code>
+											</div>
+										)}
+										{explanationInfo.summary && (
+											<div className="mt-2 text-sm text-foreground">
+												<MarkdownRow markdown={explanationInfo.summary} />
+											</div>
+										)}
+										{explanationComments.length > 0 && (
+											<div className="mt-2">
+												<div className="text-xs uppercase tracking-wide opacity-60">Comments</div>
+												{explanationComments.map(renderExplanationComment)}
 											</div>
 										)}
 									</div>

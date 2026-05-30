@@ -1,0 +1,17 @@
+{
+  "name": "vscline-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc && node scripts/copy-runtime.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@cline/sdk": "^0.0.42"
+  }
+}

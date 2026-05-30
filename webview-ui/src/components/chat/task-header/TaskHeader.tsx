@@ -14,6 +14,7 @@ import { CheckpointError } from "./CheckpointError"
 import ContextWindow from "./ContextWindow"
 import { FocusChain } from "./FocusChain"
 import { highlightText } from "./Highlights"
+import { SdkCoverageStrip } from "./SdkCoverageStrip"
 
 const IS_DEV = process.env.IS_DEV === '"true"'
 interface TaskHeaderProps {
@@ -56,6 +57,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 		expandTaskHeader: isTaskExpanded,
 		setExpandTaskHeader: setIsTaskExpanded,
 		environment,
+		vsClineSdkCoverage,
 	} = useExtensionState()
 
 	const [isHighlightedTextExpanded, setIsHighlightedTextExpanded] = useState(false)
@@ -119,6 +121,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 				checkpointManagerErrorMessage={checkpointManagerErrorMessage}
 				handleCheckpointSettingsClick={handleCheckpointSettingsClick}
 			/>
+			<SdkCoverageStrip coverage={vsClineSdkCoverage} />
 			{/* Task Header */}
 			<div
 				className={cn(

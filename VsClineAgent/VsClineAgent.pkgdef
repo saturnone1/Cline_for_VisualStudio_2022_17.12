@@ -1,0 +1,16 @@
+[$RootKey$\Packages\{3f8c2a1d-e7b4-4f9e-a8c5-6d2b1f7e3a04}]
+@="VsClineAgentPackage"
+"InprocServer32"="$WinDir$\SYSTEM32\MSCOREE.DLL"
+"Class"="VsClineAgent.VsClineAgentPackage"
+"CodeBase"="$PackageFolder$\VsClineAgent.dll"
+"AllowsBackgroundLoad"=dword:00000001
+
+[$RootKey$\Menus]
+"{3f8c2a1d-e7b4-4f9e-a8c5-6d2b1f7e3a04}"=", Menus.ctmenu, 1"
+
+[$RootKey$\ToolWindows\{b9e4c7f3-2a1d-4e8b-9c6f-3b7a2e5d1c0e}]
+@="{3f8c2a1d-e7b4-4f9e-a8c5-6d2b1f7e3a04}"
+"Name"="VsClineAgent.ToolWindows.ChatToolWindow"
+"Orientation"="Right"
+"Style"="Tabbed"
+"Window"="{34E76E81-EE4A-11D0-AE2E-00A0C90FFFC3}"

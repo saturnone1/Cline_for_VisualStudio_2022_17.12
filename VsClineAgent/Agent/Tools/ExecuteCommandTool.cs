@@ -8,9 +8,16 @@ using System.Threading.Tasks;
 namespace VsClineAgent.Agent.Tools
 {
     // Port of execute_command tool from Cline
-    // VS 2022 wrapper: uses Process.Start(cmd.exe) in place of VS Code's terminal integration
+    // VS 2022 wrapper: runs commands through a Visual Studio-hosted command service and mirrors output to the Output window.
     internal class ExecuteCommandTool : IAgentTool
     {
+        private readonly Services.VsCommandExecutionService _commandService;
+
+        public ExecuteCommandTool(Services.VsCommandExecutionService commandService)
+        {
+            _commandService = commandService;
+        }
+
         public string Name => "execute_command";
 
         public async Task<string> ExecuteAsync(
@@ -32,71 +39,56 @@ namespace VsClineAgent.Agent.Tools
             if (requiresApproval)
             {
                 bool approved = await callbacks.AskApprovalAsync(
-                    $"Execute command: {command}", ct);
+                    $"Execute command: {command}",
+                    new ApprovalRequest
+                    {
+                        Action = ApprovalAction.ExecuteCommand,
+                        RequiresExplicitApproval = true,
+                    },
+                    ct);
+                if (!approved)
+                    return "The user denied this operation.";
+            }
+            else
+            {
+                bool approved = await callbacks.AskApprovalAsync(
+                    $"Execute command: {command}",
+                    new ApprovalRequest
+                    {
+                        Action = ApprovalAction.ExecuteCommand,
+                        RequiresExplicitApproval = false,
+                    },
+                    ct);
                 if (!approved)
                     return "The user denied this operation.";
             }
 
             callbacks.PostStatus($"$ {command}");
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/c {command}",
-                WorkingDirectory = cwd,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            var stdOut = new StringBuilder();
-            var stdErr = new StringBuilder();
-
-            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            var tcs = new TaskCompletionSource<int>();
-            process.Exited += (s, e) => tcs.TrySetResult(process.ExitCode);
-            process.OutputDataReceived += (s, e) => { if (e.Data != null) stdOut.AppendLine(e.Data); };
-            process.ErrorDataReceived += (s, e) => { if (e.Data != null) stdErr.AppendLine(e.Data); };
-
             try
             {
-                process.Start();
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-
-                using var cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts2.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
-
-                await Task.WhenAny(tcs.Task, Task.Delay(-1, cts2.Token));
-
-                if (!process.HasExited)
-                {
-                    try { process.Kill(); } catch { }
-                    return $"Command timed out after {timeoutSec}s\n\nPartial output:\n{stdOut}";
-                }
-
-                int exitCode = await tcs.Task;
+                var result = await _commandService.ExecuteCommandAsync(command, cwd, timeoutSec, ct);
 
                 var sb = new StringBuilder();
-                if (stdOut.Length > 0)
-                    sb.Append(stdOut);
-                if (stdErr.Length > 0)
+                if (!string.IsNullOrWhiteSpace(result.StdOut))
+                    sb.Append(result.StdOut);
+                if (!string.IsNullOrWhiteSpace(result.StdErr))
                 {
                     if (sb.Length > 0) sb.AppendLine();
-                    sb.Append(stdErr);
+                    sb.Append(result.StdErr);
                 }
 
                 string output = sb.ToString().Trim();
                 if (string.IsNullOrEmpty(output))
                     output = "(no output)";
 
+                if (result.TimedOut)
+                    return $"Command timed out after {timeoutSec}s\n\nPartial output:\n{output}";
+
                 // Mirror Cline's format: command result with exit code
-                return exitCode == 0
+                return result.ExitCode == 0
                     ? output
-                    : $"Command failed with exit code {exitCode}:\n{output}";
+                    : $"Command failed with exit code {result.ExitCode}:\n{output}";
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {

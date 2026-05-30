@@ -113,6 +113,30 @@ export interface ExtensionState {
 	banners?: BannerCardData[]
 	welcomeBanners?: BannerCardData[]
 	openAiCodexIsAuthenticated?: boolean
+	vsClineSdkCoverage?: VsClineSdkCoverage
+}
+
+export interface VsClineSdkCoverage {
+	mode: "sdk-wrapper"
+	sdkPackage: string
+	sdkVersion?: string | null
+	status: "ready" | "starting" | "error"
+	supported: VsClineSdkCapability[]
+	partial: VsClineSdkCapability[]
+	visualStudioUnsupported: VsClineSdkLimitation[]
+	lastError?: string
+}
+
+export interface VsClineSdkCapability {
+	id: string
+	label: string
+	owner: "cline-sdk" | "visual-studio-host"
+}
+
+export interface VsClineSdkLimitation {
+	id: string
+	label: string
+	reason: string
 }
 
 export interface ClineMessage {
@@ -266,12 +290,20 @@ export interface ClineSayBrowserAction {
 	text?: string
 }
 
+export interface ClineSayGenerateExplanationComment {
+	filePath: string
+	line: number
+	body: string
+}
+
 export interface ClineSayGenerateExplanation {
 	title: string
 	fromRef: string
 	toRef: string
 	status: "generating" | "complete" | "error"
 	error?: string
+	summary?: string
+	comments?: ClineSayGenerateExplanationComment[]
 }
 
 export type SubagentExecutionStatus = "pending" | "running" | "completed" | "failed"

@@ -28,7 +28,14 @@ namespace VsClineAgent.Agent.Tools
             bool exists = File.Exists(absPath);
 
             bool approved = await callbacks.AskApprovalAsync(
-                $"{(exists ? "Overwrite" : "Create")} file: {relPath}", ct);
+                $"{(exists ? "Overwrite" : "Create")} file: {relPath}",
+                new ApprovalRequest
+                {
+                    Action = ApprovalAction.EditFiles,
+                    TargetPath = absPath,
+                    IsExternal = IsExternalToWorkspace(cwd, absPath),
+                },
+                ct);
             if (!approved)
                 return "The user denied this operation.";
 
@@ -54,6 +61,14 @@ namespace VsClineAgent.Agent.Tools
         {
             if (Path.IsPathRooted(path)) return path;
             return Path.GetFullPath(Path.Combine(cwd, path));
+        }
+
+        private static bool IsExternalToWorkspace(string cwd, string path)
+        {
+            var workspaceRoot = Path.GetFullPath(cwd)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fullPath = Path.GetFullPath(path);
+            return !fullPath.StartsWith(workspaceRoot, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

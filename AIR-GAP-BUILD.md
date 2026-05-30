@@ -5,8 +5,8 @@
 | 단계 | 인터넷 필요 | 작업 내용 |
 |------|------------|---------|
 | 1. 패키지 다운로드 | ✅ 필요 | NuGet 패키지를 LocalPackages에 저장 |
-| 2. 빌드 | ❌ 불필요 | VS 2022에서 .vsix 생성 |
-| 3. 설치 | ❌ 불필요 | WebView2 + VSIX 설치 |
+| 2. 빌드 | ❌ 불필요 | WebView2 Fixed Runtime 포함 VSIX 생성 |
+| 3. 설치 | ❌ 불필요 | VSIX 설치 |
 | 4. 실행 | ❌ 불필요 | Ollama + VS 2022 실행 |
 
 ---
@@ -37,19 +37,28 @@ cd VsClineAgent
 
 ---
 
-## Step 2 — WebView2 Runtime 오프라인 설치 파일 준비
+## Step 2 — WebView2 Fixed Version Runtime 준비
 
-WebView2는 런타임 설치가 필요합니다. 에어갭 PC에 없을 경우:
+이 확장은 airgap PC에서 WebView2 온라인 설치 프로그램을 실행하지 않습니다. 인터넷 PC에서 Microsoft 공식 WebView2 Fixed Version Runtime CAB를 받은 뒤, 빌드 전에 VSIX에 포함합니다.
 
-```
-인터넷 PC에서 다운로드:
-https://go.microsoft.com/fwlink/p/?LinkId=2124703
-(MicrosoftEdgeWebview2Setup.exe, 약 2MB)
-
-→ scripts\ 폴더에 복사
+```powershell
+# 예시 파일명
+Microsoft.WebView2.FixedVersionRuntime.<version>.x64.cab
 ```
 
-> **확인 방법**: 제어판 → 프로그램 → "Microsoft Edge WebView2 Runtime" 있으면 설치됨
+주의: `MicrosoftEdgeWebview2Setup.exe`는 온라인 bootstrapper라 airgap 용도로 쓰지 않습니다. 또한 이미 설치된 `Program Files\Microsoft\EdgeWebView\Application\<version>` 폴더를 복사하면 Fixed Version Runtime으로 동작하지 않을 수 있습니다.
+
+빌드 전에 다음 중 하나를 실행합니다.
+
+```powershell
+.\scripts\Bundle-WebView2Runtime.ps1 -SourceCab "D:\offline\Microsoft.WebView2.FixedVersionRuntime.<version>.x64.cab"
+```
+
+또는 CAB를 미리 풀어둔 경우:
+
+```powershell
+.\scripts\Bundle-WebView2Runtime.ps1 -SourceRuntime "D:\offline\Microsoft.WebView2.FixedVersionRuntime.<version>.x64"
+```
 
 ---
 
@@ -59,9 +68,9 @@ https://go.microsoft.com/fwlink/p/?LinkId=2124703
 ```
 VsClineAgent\
 ├── LocalPackages\          ← Step 1에서 생성
+├── downloads\
+│   └── Microsoft.WebView2.FixedVersionRuntime.<version>.x64.cab   ← Step 2에서 다운로드
 ├── scripts\
-│   ├── Install-Prerequisites.ps1
-│   └── MicrosoftEdgeWebview2Setup.exe   ← Step 2에서 다운로드
 ├── VsClineAgent\
 ├── nuget.config
 ├── VsClineAgent.sln
@@ -71,6 +80,12 @@ VsClineAgent\
 ---
 
 ## Step 4 — 에어갭 PC에서 빌드
+
+먼저 WebView2 Fixed Runtime을 VSIX 소스에 포함합니다.
+
+```powershell
+.\scripts\Bundle-WebView2Runtime.ps1 -SourceCab ".\downloads\Microsoft.WebView2.FixedVersionRuntime.<version>.x64.cab"
+```
 
 ### 방법 A: Visual Studio 2022 GUI
 1. `VsClineAgent.sln` 더블클릭 → VS 2022 열림
@@ -91,18 +106,7 @@ msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPat
 
 ## Step 5 — 설치
 
-### 자동 설치 (권장)
-```powershell
-# PowerShell — 관리자 권한 필요
-.\scripts\Install-Prerequisites.ps1
-```
-- WebView2 Runtime 자동 설치
-- VSIX 자동 설치
-
-### 수동 설치
-1. `scripts\MicrosoftEdgeWebview2Setup.exe` 실행 → WebView2 설치
-2. `VsClineAgent\bin\Release\VsClineAgent.vsix` 더블클릭 → VSIX 설치
-3. Visual Studio 2022 재시작
+`VsClineAgent\bin\Release\VsClineAgent.vsix`를 더블클릭해서 설치한 뒤 Visual Studio 2022를 재시작합니다. WebView2 Fixed Runtime과 Cline SDK sidecar 런타임은 VSIX에 포함되어 있으므로 별도 온라인 설치가 필요 없습니다.
 
 ---
 
@@ -151,8 +155,8 @@ msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPat
 → VS 2022에 **"Visual Studio extension development"** 워크로드 미설치
 → VS Installer → 수정 → 워크로드 추가
 
-### 패널 열면 흰 화면 또는 에러
-→ WebView2 Runtime 미설치. Step 5의 Install-Prerequisites.ps1 실행
+### 패널 열면 WebView2 init failed
+→ VSIX에 WebView2 Fixed Runtime이 포함되지 않았거나 잘못된 Evergreen 폴더를 복사한 상태입니다. Step 2/4의 `Bundle-WebView2Runtime.ps1`을 공식 Fixed Runtime CAB로 다시 실행한 뒤 재빌드/재설치합니다.
 
 ### "LLM error: Cannot connect"
 → Ollama가 실행 중인지 확인: `ollama serve` 또는 작업 표시줄 확인

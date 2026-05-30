@@ -30,7 +30,15 @@ namespace VsClineAgent.Agent.Tools
             if (!File.Exists(absPath))
                 return $"Error: File not found: {relPath}. Did you mean to use write_to_file to create it?";
 
-            bool approved = await callbacks.AskApprovalAsync($"Edit file: {relPath}", ct);
+            bool approved = await callbacks.AskApprovalAsync(
+                $"Edit file: {relPath}",
+                new ApprovalRequest
+                {
+                    Action = ApprovalAction.EditFiles,
+                    TargetPath = absPath,
+                    IsExternal = IsExternalToWorkspace(cwd, absPath),
+                },
+                ct);
             if (!approved)
                 return "The user denied this operation.";
 
@@ -62,6 +70,14 @@ namespace VsClineAgent.Agent.Tools
         {
             if (Path.IsPathRooted(path)) return path;
             return Path.GetFullPath(Path.Combine(cwd, path));
+        }
+
+        private static bool IsExternalToWorkspace(string cwd, string path)
+        {
+            var workspaceRoot = Path.GetFullPath(cwd)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fullPath = Path.GetFullPath(path);
+            return !fullPath.StartsWith(workspaceRoot, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

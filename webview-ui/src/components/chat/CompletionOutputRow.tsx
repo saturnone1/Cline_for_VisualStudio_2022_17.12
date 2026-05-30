@@ -4,6 +4,7 @@ import { MarkdownRow } from "./MarkdownRow"
 import { Int64Request } from "@shared/proto/cline/common"
 import { CheckIcon } from "lucide-react"
 import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
+import { useExtensionState } from "@/context/ExtensionStateContext"
 import { TaskServiceClient } from "@/services/grpc-client"
 import { CopyButton } from "../common/CopyButton"
 import SuccessButton from "../common/SuccessButton"
@@ -88,6 +89,13 @@ const CompletionOutputActionRow = memo(
 		setExplainChangesDisabled: (value: boolean) => void
 		messageTs: number
 	}) => {
+		const { checkpointManagerErrorMessage, enableCheckpointsSetting } = useExtensionState()
+		const canUseCheckpointActions = enableCheckpointsSetting && !checkpointManagerErrorMessage
+
+		if (!canUseCheckpointActions) {
+			return null
+		}
+
 		return (
 			<div style={{ paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
 				<SuccessButton

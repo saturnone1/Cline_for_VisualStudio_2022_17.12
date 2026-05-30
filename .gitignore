@@ -21,3 +21,11 @@ packages/
 # Local porting references and oversized offline runtime bundle
 .upstream-cline/
 VsClineAgent/WebView2Runtime/
+downloads/
+LocalPackages/
+
+# Generated sidecar/runtime artifacts
+sidecar/node_modules/
+sidecar/dist/
+VsClineAgent/M/
+VsClineAgent/Sidecar/

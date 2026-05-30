@@ -4,21 +4,21 @@
   <Metadata>
     <Identity Id="VsClineAgent.3F8C2A1D-E7B4-4F9E-A8C5-6D2B1F7E3A04"
               Language="en-US"
-              Version="1.0.0"
+              Version="1.0.59"
               Publisher="Developer" />
     <DisplayName>VS AI Agent (Cline Port)</DisplayName>
-    <Description xml:space="preserve">AI coding agent for Visual Studio 2022, powered by local LLMs via Ollama (airgap compatible)</Description>
+    <Description xml:space="preserve">AI coding agent for Visual Studio, powered by Cline SDK and local/offline runtimes</Description>
     <Tags>ai,agent,coding,ollama,llm,airgap</Tags>
     <ProjectType>Other</ProjectType>
   </Metadata>
   <Installation>
-    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
-    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
-    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
   </Installation>
@@ -30,7 +30,7 @@
   </Dependencies>
   <Prerequisites>
     <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor"
-                  Version="[17.0,18.0)"
+                  Version="[17.0,19.0)"
                   DisplayName="Visual Studio core editor" />
   </Prerequisites>
   <Assets>

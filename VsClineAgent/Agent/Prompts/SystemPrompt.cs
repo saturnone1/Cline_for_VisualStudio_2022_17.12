@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using VsClineAgent.Agent.AssistantMessage;
+using VsClineAgent.Services;
 
 namespace VsClineAgent.Agent.Prompts
 {
@@ -335,7 +338,7 @@ Your final result description here
         }
 
         // Builds environment_details block appended to the first user message
-        public static string BuildEnvironmentDetails(string cwd, string fileTreeSummary)
+        internal static string BuildEnvironmentDetails(string cwd, string fileTreeSummary, IReadOnlyList<RunningCommandInfo> activeCommands)
         {
             var sb = new StringBuilder();
             sb.AppendLine("<environment_details>");
@@ -351,6 +354,19 @@ Your final result description here
             sb.AppendLine("# Current Working Directory (" + cwd + ") Files");
             if (!string.IsNullOrEmpty(fileTreeSummary))
                 sb.AppendLine(fileTreeSummary);
+            sb.AppendLine();
+            sb.AppendLine("# Actively Running Terminals");
+            if (activeCommands != null && activeCommands.Count > 0)
+            {
+                foreach (var command in activeCommands.OrderBy(command => command.StartedAt))
+                {
+                    sb.AppendLine($"- PID {command.ProcessId}: {command.Command} (cwd: {command.WorkingDirectory})");
+                }
+            }
+            else
+            {
+                sb.AppendLine("(No active terminals)");
+            }
             sb.AppendLine();
             sb.AppendLine("# Current Mode");
             sb.AppendLine("ACT MODE");
