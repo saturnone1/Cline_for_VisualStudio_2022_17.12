@@ -251,9 +251,8 @@ export class VisualStudioWebviewRouter {
 			}
 			if (status === "idle") {
 				logInteraction("sidecar", "sdkStatusIdle", { sessionId })
-				this.clearTaskIdleWatchdog()
-				this.clearPartialIdleWatchdog()
-				this.removeActiveStatusText()
+				this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
+				this.updateCurrentTaskItem()
 				this.broadcastState().catch((error) => console.error(error))
 				return
 			}
@@ -513,6 +512,10 @@ export class VisualStudioWebviewRouter {
 					await this.sendAskResponse(message)
 					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 				}
+				if (this.state.currentTaskItem && getString(message, "text").trim()) {
+					await this.sendAskResponse(message)
+					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
+				}
 				await this.startNewTask(message, { broadcast: false })
 				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 
@@ -648,13 +651,14 @@ export class VisualStudioWebviewRouter {
 			const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
 			const sessionId = getString(resultRecord, "sessionId")
 			if (resultText) {
-				this.addAssistantTextResult(resultText)
+				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), getString(agentResult, "finishReason") || "completed", resultText)
 			} else if (agentResult && Object.keys(agentResult).length > 0 && !this.hasAssistantTextAfterLastUserMessage()) {
 				logInteraction("sidecar", "emptyStartSessionResult", {
 					sessionId,
 					finishReason: getString(agentResult, "finishReason") || "completed",
 					lastTaskActivityReason: this.lastTaskActivityReason,
 				})
+				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), getString(agentResult, "finishReason") || "completed")
 			}
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
@@ -764,6 +768,8 @@ export class VisualStudioWebviewRouter {
 		this.clearPartialStateBroadcastTimer()
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
+		this.finalizeOpenPartialMessages()
 		this.removeTerminalAskMessages()
 		this.addMessage({ type: "say", say: "info", text: "현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다." })
 		this.updateCurrentTaskItem()
@@ -1050,6 +1056,15 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addAgentTranscriptChunk(chunk: unknown) {
+		const terminal = agentChunkToTerminalResult(chunk)
+		if (terminal) {
+			this.noteTaskActivity(terminal.reason)
+			this.finishSdkTask(this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), terminal.status, terminal.text)
+			this.updateCurrentTaskItem()
+			this.broadcastState().catch((error) => console.error(error))
+			return
+		}
+
 		const text = agentChunkToTranscriptText(chunk)
 		if (!text.trim()) {
 			const reasoning = agentChunkToFoldedReasoningText(chunk)
@@ -1102,9 +1117,7 @@ export class VisualStudioWebviewRouter {
 		const aggregateUsage = asRecord(snapshot.aggregateUsage)
 		const usage = Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage)
 		if (status === "idle") {
-			this.clearTaskIdleWatchdog()
-			this.clearPartialIdleWatchdog()
-			this.removeActiveStatusText()
+			this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
 		} else {
 			this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
 		}
@@ -1673,6 +1686,7 @@ export class VisualStudioWebviewRouter {
 		const activeText = text || this.getActivePartialText()
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
 
 		if (activeText) {
 			this.addAssistantTextResult(activeText)
@@ -1681,6 +1695,8 @@ export class VisualStudioWebviewRouter {
 		} else {
 			logInteraction("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		}
+		this.removeActiveStatusText()
+		this.finalizeOpenPartialMessages()
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {
@@ -2079,6 +2095,52 @@ export class VisualStudioWebviewRouter {
 		this.upsertMessage(this.activeReasoningTextTs, { partial: false, isCollapsed: true, isExpanded: false })
 		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
 		this.activeReasoningTextTs = null
+	}
+
+	private finalizeOpenPartialMessages() {
+		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
+		let changed = false
+		this.state.clineMessages = this.state.clineMessages.filter((message) => {
+			if (message.partial !== true) {
+				return true
+			}
+
+			if (message.say === "api_req_started" && isPlaceholderApiRequest(getString(message, "text"))) {
+				Object.assign(message, {
+					text: JSON.stringify({
+						request: "모델 진행 중",
+						tokensIn: 0,
+						tokensOut: 0,
+						cacheWrites: 0,
+						cacheReads: 0,
+						cost: 0,
+					}),
+					partial: false,
+					isCollapsed: true,
+					isExpanded: false,
+				})
+				this.sendPartialMessage(message)
+				changed = true
+				return true
+			}
+
+			message.partial = false
+			if (message.say === "api_req_started" || message.say === "reasoning") {
+				message.isCollapsed = true
+				message.isExpanded = false
+			}
+			this.sendPartialMessage(message)
+			changed = true
+			return true
+		})
+		if (changed) {
+			logInteraction("sidecar", "finalizedOpenPartials", {})
+		}
+		this.activePartialTextTs = null
+		this.activeReasoningTextTs = null
+		this.activeToolActivityTs = null
+		this.activeToolActivityEntries = []
 	}
 
 	private schedulePartialIdleWatchdog() {
@@ -2617,6 +2679,13 @@ function stringify(value: unknown) {
 	} catch {
 		return String(value)
 	}
+}
+
+function isPlaceholderApiRequest(text: string) {
+	const parsed = asRecord(tryParseJson(text) ?? {})
+	const request = getString(parsed, "request") || text
+	const normalized = request.replace(/\s+/g, " ").trim().toLowerCase()
+	return normalized === "cline sdk is thinking..." || normalized === "thinking" || normalized === "모델 진행 중"
 }
 
 function truncateText(value: string, maxChars: number) {
@@ -3207,6 +3276,83 @@ function agentChunkToFoldedReasoningText(chunk: unknown): string {
 	}
 
 	return agentChunkRecordToFoldedReasoningText(record)
+}
+
+function agentChunkToTerminalResult(chunk: unknown): { status: string; reason: string; text: string } | null {
+	if (typeof chunk === "string") {
+		const text = chunk.trim()
+		if (!text) {
+			return null
+		}
+
+		const parsed = tryParseJson(text)
+		if (parsed !== undefined) {
+			return agentChunkToTerminalResult(parsed)
+		}
+
+		const sequence = parseJsonObjectSequence(text)
+		for (let index = sequence.length - 1; index >= 0; index--) {
+			const terminal = agentChunkToTerminalResult(sequence[index])
+			if (terminal) {
+				return terminal
+			}
+		}
+
+		const jsonLines = text
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((line) => tryParseJson(line))
+		if (jsonLines.length > 0 && jsonLines.every((item) => item !== undefined)) {
+			for (let index = jsonLines.length - 1; index >= 0; index--) {
+				const terminal = agentChunkToTerminalResult(jsonLines[index])
+				if (terminal) {
+					return terminal
+				}
+			}
+		}
+
+		return null
+	}
+
+	if (Array.isArray(chunk)) {
+		for (let index = chunk.length - 1; index >= 0; index--) {
+			const terminal = agentChunkToTerminalResult(chunk[index])
+			if (terminal) {
+				return terminal
+			}
+		}
+		return null
+	}
+
+	return agentChunkRecordToTerminalResult(asRecord(chunk))
+}
+
+function agentChunkRecordToTerminalResult(record: Record<string, unknown>): { status: string; reason: string; text: string } | null {
+	const type = getString(record, "type")
+	if (type === "done") {
+		return {
+			status: getString(record, "status") || "completed",
+			reason: getString(record, "reason") || "done",
+			text: getString(record, "text"),
+		}
+	}
+	if (type === "run-finished") {
+		const result = asRecord(record.result)
+		return {
+			status: getString(result, "status") || "completed",
+			reason: "run-finished",
+			text: getString(result, "outputText") || getString(record, "text"),
+		}
+	}
+	if (type === "run-failed") {
+		return {
+			status: "failed",
+			reason: "run-failed",
+			text: getString(record, "text") || stringify(record.error),
+		}
+	}
+	return null
 }
 
 function agentChunkStringToTranscriptText(chunk: string): string {
