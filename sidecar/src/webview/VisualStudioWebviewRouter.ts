@@ -87,7 +87,10 @@ export class VisualStudioWebviewRouter {
 					})
 				: JSON.stringify({
 						tool: mappedToolName,
-						path: mappedToolName === "searchFiles" ? getToolPath(input) || "/" : getToolPathFromUnknown(input),
+						path:
+							mappedToolName === "searchFiles"
+								? getToolPath(input) || "/"
+								: getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input),
 						regex: mappedToolName === "searchFiles" ? getSearchQuery(input) : undefined,
 						filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) : undefined,
 						content: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || summarizeToolInput(input),
@@ -894,7 +897,7 @@ export class VisualStudioWebviewRouter {
 			const input = asRecord(event.input)
 			const trackedPath =
 				mappedToolName === "editedExistingFile"
-					? getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output)
+					? getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output)
 					: ""
 			if (
 				(toolName === "editor" || toolName === "edit") &&
@@ -909,7 +912,7 @@ export class VisualStudioWebviewRouter {
 						path:
 							mappedToolName === "searchFiles"
 								? getToolPath(input) || getToolPath(asRecord(event.output)) || "/"
-								: getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output),
+								: getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output),
 						regex: mappedToolName === "searchFiles" ? getSearchQuery(input) || getSearchQuery(event.output) : undefined,
 						filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) || getSearchFilePattern(event.output) : undefined,
 						content: error || summarizeToolOutput(mappedToolName, event.output),
@@ -1582,6 +1585,11 @@ function getSearchFilePattern(value: unknown): string {
 }
 
 function summarizeToolInput(input: Record<string, unknown>) {
+	const patchPaths = getPatchPathsFromUnknown(input)
+	if (patchPaths) {
+		return `Patch files:\n${patchPaths}`
+	}
+
 	const pathValue = getToolPathFromUnknown(input)
 	if (pathValue) {
 		return pathValue
@@ -1596,6 +1604,13 @@ function summarizeToolInput(input: Record<string, unknown>) {
 }
 
 function summarizeToolOutput(tool: string, output: unknown) {
+	if (tool === "editedExistingFile") {
+		const patchPaths = getPatchPathsFromUnknown(output)
+		if (patchPaths) {
+			return `Patch files:\n${patchPaths}`
+		}
+	}
+
 	if (tool === "readFile") {
 		const records = Array.isArray(output) ? output.map(asRecord) : [asRecord(output)]
 		const paths = records.map((item) => getToolPathFromUnknown(item) || getString(item, "query")).filter(Boolean)
@@ -1614,6 +1629,41 @@ function summarizeToolOutput(tool: string, output: unknown) {
 	}
 
 	return truncateText(stringify(output), readPositiveIntEnv("VSCLINE_TOOL_OUTPUT_CHARS", 12000))
+}
+
+function getPatchPathsFromUnknown(value: unknown): string {
+	if (Array.isArray(value)) {
+		return value.map(getPatchPathsFromUnknown).filter(Boolean).join("\n")
+	}
+
+	const record = asRecord(value)
+	const patchText = getString(record, "input") || getString(record, "patch")
+	if (!patchText) {
+		return ""
+	}
+
+	return parsePatchPaths(patchText).join("\n")
+}
+
+function parsePatchPaths(patchText: string) {
+	const paths: string[] = []
+	for (const rawLine of patchText.split(/\r?\n/)) {
+		const line = rawLine.trimEnd()
+		const pathValue =
+			line.startsWith("*** Add File: ")
+				? line.slice("*** Add File: ".length).trim()
+				: line.startsWith("*** Update File: ")
+					? line.slice("*** Update File: ".length).trim()
+					: line.startsWith("*** Delete File: ")
+						? line.slice("*** Delete File: ".length).trim()
+						: line.startsWith("*** Move to: ")
+							? line.slice("*** Move to: ".length).trim()
+							: ""
+		if (pathValue && !paths.includes(pathValue)) {
+			paths.push(pathValue)
+		}
+	}
+	return paths
 }
 
 function summarizeCommandOutput(output: unknown) {
