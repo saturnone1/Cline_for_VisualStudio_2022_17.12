@@ -21,6 +21,15 @@ export type GrpcRequest = {
 	message?: unknown
 }
 
+type TrackedChangeSummary = {
+	filePath: string
+	beforePath: string
+	afterPath: string
+	action: string
+	additions: number
+	deletions: number
+}
+
 export class VisualStudioWebviewRouter {
 	private clineSdk: ClineSdkRuntime | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
@@ -44,6 +53,8 @@ export class VisualStudioWebviewRouter {
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private lastToolSummaries: string[] = []
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
+	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
+	private changeSummaryTimer: NodeJS.Timeout | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -497,6 +508,18 @@ export class VisualStudioWebviewRouter {
 			case "FileService.toggleSkill":
 				await this.toggleSdkSetting("skills", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
+
+			case "FileService.openVsClineDiff": {
+				const leftPath = getString(message, "leftPath") || getString(message, "beforePath")
+				const rightPath = getString(message, "rightPath") || getString(message, "afterPath") || getString(message, "filePath")
+				const title = getString(message, "title") || (rightPath ? `Cline change: ${path.basename(rightPath)}` : "Cline change")
+				if (leftPath && rightPath) {
+					await VisualStudioHostProvider.create(this.connection).diffClient.openDiff({ leftPath, rightPath, title })
+				} else if (rightPath) {
+					await VisualStudioHostProvider.create(this.connection).windowClient.openFile({ filePath: rightPath })
+				}
+				return grpcHandled(grpcResponse(requestId, {}, false))
+			}
 
 			case "ModelsService.getOllamaModels": {
 				const values = await getOllamaModels(getString(message, "value"))
@@ -1011,22 +1034,61 @@ export class VisualStudioWebviewRouter {
 		this.recentlyTrackedChangePaths.set(normalizeChangePath(filePath), Date.now())
 		this.pruneTrackedChangePaths()
 
-		const title = `Cline change: ${path.basename(filePath)}`
-		VisualStudioHostProvider.create(this.connection).diffClient.openDiff({ leftPath: beforePath, rightPath: afterPath, title }).catch((error) => {
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-			this.broadcastState().catch(() => undefined)
-		})
-
-		const text = JSON.stringify({
-			tool: "editedExistingFile",
-			path: filePath,
-			content: `${action === "created" ? "Created" : "Changed"} ${filePath}\n+${additions} -${deletions}\nVisual Studio diff opened for review.`,
+		this.queueChangeSummary({
+			filePath,
 			beforePath,
 			afterPath,
+			action,
 			additions,
 			deletions,
 		})
-		this.rememberToolSummary("editedExistingFile", text)
+	}
+
+	private queueChangeSummary(change: TrackedChangeSummary) {
+		const key = normalizeChangePath(change.filePath)
+		const existing = this.pendingChangeSummaries.get(key)
+		this.pendingChangeSummaries.set(key, {
+			...change,
+			beforePath: existing?.beforePath || change.beforePath,
+			additions: (existing?.additions || 0) + change.additions,
+			deletions: (existing?.deletions || 0) + change.deletions,
+		})
+
+		if (this.changeSummaryTimer) {
+			clearTimeout(this.changeSummaryTimer)
+		}
+		this.changeSummaryTimer = setTimeout(() => {
+			this.flushChangeSummary().catch((error) => console.error(error))
+		}, 250)
+	}
+
+	private async flushChangeSummary() {
+		this.changeSummaryTimer = null
+		const files = Array.from(this.pendingChangeSummaries.values())
+		this.pendingChangeSummaries.clear()
+		if (files.length === 0) {
+			return
+		}
+
+		const additions = files.reduce((sum, file) => sum + file.additions, 0)
+		const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
+		const changed = files.filter((file) => file.action !== "created" && file.action !== "deleted").length
+		const created = files.filter((file) => file.action === "created").length
+		const deleted = files.filter((file) => file.action === "deleted").length
+		const actionParts = [
+			changed ? `edited ${changed}` : "",
+			created ? `created ${created}` : "",
+			deleted ? `deleted ${deleted}` : "",
+		].filter(Boolean)
+
+		const text = JSON.stringify({
+			tool: "vsclineChangedFiles",
+			path: files[0]?.filePath || "",
+			content: `Cline ${actionParts.join(", ") || "changed"} file${files.length > 1 ? "s" : ""}.`,
+			files,
+			additions,
+			deletions,
+		})
 		this.addMessage({ type: "say", say: "tool", text })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
