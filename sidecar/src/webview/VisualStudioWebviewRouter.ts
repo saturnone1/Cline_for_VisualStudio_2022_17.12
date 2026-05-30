@@ -660,7 +660,8 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		if (!this.clineSdk.status.activeSessionId) {
+		const activeSessionId = this.clineSdk.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		if (!activeSessionId) {
 			await this.startNewTask(
 				{
 					text: getString(message, "text"),
@@ -677,6 +678,7 @@ export class VisualStudioWebviewRouter {
 		await this.broadcastState()
 
 		this.clineSdk.send({
+			sessionId: activeSessionId,
 			prompt: getString(message, "text"),
 			userImages: getStringArray(message, "images"),
 			userFiles: getStringArray(message, "files"),
@@ -688,13 +690,21 @@ export class VisualStudioWebviewRouter {
 
 	private async cancelTask() {
 		if (this.clineSdk) {
-			await this.clineSdk.stop({})
+			const sessionId = this.clineSdk.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+			if (sessionId) {
+				await this.clineSdk.abort({ sessionId }).catch((error) => {
+					logInteraction("sidecar", "cancelAbortFailed", {
+						sessionId,
+						error: error instanceof Error ? error.message : String(error),
+					})
+				})
+			}
 		}
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.finalizeActivePartialText()
-		this.addMessage({ type: "ask", ask: "resume_task", text: "Task was cancelled." })
-		this.state.currentTaskItem = null
+		this.removeTerminalAskMessages()
+		this.addMessage({ type: "say", say: "info", text: "현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다." })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
 	}
@@ -1510,12 +1520,12 @@ export class VisualStudioWebviewRouter {
 				return
 			}
 
-			logInteraction("sidecar", "partialIdleComplete", { timeoutMs, textLength: text.length })
-			this.finalizeActivePartialText()
-			this.addCompletionResult(text)
+			logInteraction("sidecar", "partialIdleNotice", { timeoutMs, textLength: text.length })
+			this.upsertStatusText(
+				`모델 응답 일부를 수신한 뒤 ${Math.round(timeoutMs / 1000)}초 동안 새 본문이 없습니다. 요청은 계속 열려 있으며, 필요하면 사용자가 직접 Cancel로 중단할 수 있습니다.`,
+			)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
-			this.clineSdk?.stop({}).catch((error) => console.error(error))
 		}, timeoutMs)
 	}
 
@@ -1570,14 +1580,10 @@ export class VisualStudioWebviewRouter {
 				return
 			}
 
-			logInteraction("sidecar", "taskIdleComplete", { timeoutMs, idleForMs, reason: this.lastTaskActivityReason })
-			const activeText = this.getActivePartialText()
-			this.removeActiveStatusText()
-			this.finalizeActivePartialText()
-			this.addCompletionResult(activeText || this.buildTerminalCompletionFallback("stalled"))
-			const activeSessionId = this.clineSdk?.status.activeSessionId
-			this.clineSdk?.stop({ sessionId: activeSessionId }).catch((error) => console.error(error))
-			this.clineSdk?.markSessionInactive(activeSessionId || undefined)
+			logInteraction("sidecar", "taskIdleLongRunning", { timeoutMs, idleForMs, reason: this.lastTaskActivityReason })
+			this.upsertStatusText(
+				`Cline SDK가 ${Math.round(idleForMs / 1000)}초 동안 새 진행 이벤트를 보내지 않았습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}. 요청은 강제 종료하지 않고 유지합니다.`,
+			)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}, timeoutMs)
