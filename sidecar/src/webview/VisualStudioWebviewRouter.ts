@@ -2899,16 +2899,20 @@ function agentChunkStringToTranscriptText(chunk: string): string {
 			return parsed.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
 		}
 
-		const parsedText = agentChunkRecordToTranscriptText(asRecord(parsed))
+		const parsedRecord = asRecord(parsed)
+		const parsedText = agentChunkRecordToTranscriptText(parsedRecord)
 		if (parsedText) {
 			return parsedText
+		}
+		if (isKnownAgentEventRecord(parsedRecord)) {
+			return ""
 		}
 	}
 
 	const sequence = parseJsonObjectSequence(text)
 	if (sequence.length > 0) {
 		const sequenceText = sequence.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
-		if (sequenceText) {
+		if (sequenceText || sequence.length > 0) {
 			return sequenceText
 		}
 	}
@@ -2920,12 +2924,10 @@ function agentChunkStringToTranscriptText(chunk: string): string {
 		.map((line) => tryParseJson(line))
 	if (jsonLines.length > 0 && jsonLines.every((item) => item !== undefined)) {
 		const lineText = jsonLines.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
-		if (lineText) {
-			return lineText
-		}
+		return lineText
 	}
 
-	return text
+	return unknownAgentChunkTextToTranscriptText(text)
 }
 
 function parseJsonObjectSequence(text: string) {
@@ -3003,6 +3005,23 @@ function agentChunkRecordToTranscriptText(record: Record<string, unknown>): stri
 	return ""
 }
 
+function isKnownAgentEventRecord(record: Record<string, unknown>) {
+	const type = getString(record, "type")
+	return Boolean(type) && (
+		type === "iteration_start" ||
+		type === "iteration_end" ||
+		type === "usage" ||
+		type === "done" ||
+		type === "content_start" ||
+		type === "content_update" ||
+		type === "content_delta" ||
+		type === "content_end" ||
+		type === "notice" ||
+		type === "status" ||
+		type === "error"
+	)
+}
+
 function agentContentEventToText(record: Record<string, unknown>): string {
 	const contentType = getString(record, "contentType") || getString(record, "content_type")
 	if (contentType === "text" || contentType === "reasoning") {
@@ -3022,6 +3041,34 @@ function agentContentEventToText(record: Record<string, unknown>): string {
 	}
 
 	return ""
+}
+
+function unknownAgentChunkTextToTranscriptText(text: string) {
+	const trimmed = text.trim()
+	if (!trimmed) {
+		return ""
+	}
+
+	if (trimmed.startsWith("{\"type\":") || trimmed.startsWith("{'type':")) {
+		return ""
+	}
+
+	const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+	if (looksLikeTokenizedReasoning(lines)) {
+		return ""
+	}
+
+	return lines.length > 1 ? lines.join("\n") : trimmed
+}
+
+function looksLikeTokenizedReasoning(lines: string[]) {
+	if (lines.length < 5) {
+		return false
+	}
+
+	const shortLines = lines.filter((line) => line.length <= 16).length
+	const avgLength = lines.reduce((total, line) => total + line.length, 0) / lines.length
+	return shortLines / lines.length >= 0.75 && avgLength <= 10
 }
 
 function isToolTranscript(text: string) {
