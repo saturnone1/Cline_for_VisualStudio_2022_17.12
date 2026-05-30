@@ -802,9 +802,6 @@ export class VisualStudioWebviewRouter {
 
 	private async clearTask() {
 		const sessionId = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
-		if (sessionId) {
-			this.closingSessionIds.add(sessionId)
-		}
 
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
@@ -821,17 +818,13 @@ export class VisualStudioWebviewRouter {
 		this.state.clineMessages = []
 		await this.broadcastState()
 
-		this.clineSdk?.stop({}).catch((error) => {
-			logInteraction("sidecar", "clearTaskStopFailed", {
-				sessionId,
-				error: error instanceof Error ? error.message : String(error),
-			})
-		})
+		this.clineSdk?.markSessionInactive(sessionId)
 	}
 
 	private async showTaskWithId(taskId: string) {
 		if (this.clineSdk && taskId) {
-			const session = asRecord(await this.clineSdk.getSession({ sessionId: taskId }))
+			this.closingSessionIds.delete(taskId)
+			const session = asRecord(await this.clineSdk.activateSession(taskId))
 			const messages = await this.clineSdk.readMessages({ sessionId: taskId })
 			const taskItem = sdkSessionToHistoryItem(session)
 			this.state.currentTaskItem = taskItem
@@ -915,6 +908,9 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 		if (activeSessionId === taskId && this.activePartialTextTs) {
+			return
+		}
+		if (activeSessionId === taskId && (this.activeReasoningTextTs || this.activeToolActivityTs || this.activeStatusTextTs)) {
 			return
 		}
 
@@ -3281,12 +3277,28 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 	for (const message of messages) {
 		const record = asRecord(message)
 		const role = getString(record, "role")
-		const text = contentToText(record.content)
 		const ts = Date.now() + sequence++
 		if (role === "user") {
+			const text = contentToText(record.content)
 			result.push({ ts, type: "say", say: result.length === 0 ? "task" : "user_feedback", text })
 		} else if (role === "assistant") {
-			result.push({ ts, type: "say", say: "text", text })
+			const folded = sdkContentToFoldedProgress(record.content)
+			if (folded) {
+				result.push({
+					ts,
+					type: "say",
+					say: "reasoning",
+					text: "모델 진행 중",
+					reasoning: folded,
+					partial: false,
+					isCollapsed: true,
+					isExpanded: false,
+				})
+			}
+			const text = sdkContentToVisibleAssistantText(record.content)
+			if (text) {
+				result.push({ ts: Date.now() + sequence++, type: "say", say: "text", text })
+			}
 		}
 
 		const metadata = asRecord(record.metadata)
@@ -3303,6 +3315,56 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 		}
 	}
 	return result
+}
+
+function sdkContentToVisibleAssistantText(content: unknown): string {
+	if (typeof content === "string") {
+		return normalizeAssistantTranscriptText(content)
+	}
+	if (!Array.isArray(content)) {
+		return ""
+	}
+
+	const text = content
+		.map((block) => {
+			const record = asRecord(block)
+			if (getString(record, "type") !== "text") {
+				return ""
+			}
+			return getString(record, "text")
+		})
+		.filter(Boolean)
+		.join("\n\n")
+	return normalizeAssistantTranscriptText(text)
+}
+
+function sdkContentToFoldedProgress(content: unknown): string {
+	if (!Array.isArray(content)) {
+		return ""
+	}
+
+	const parts = content
+		.map((block) => {
+			const record = asRecord(block)
+			const type = getString(record, "type")
+			if (type === "thinking") {
+				return normalizeReasoningTranscriptText(getString(record, "thinking"))
+			}
+			if (type === "tool_use") {
+				return `Tool: ${getString(record, "name") || "tool"}\n${toolInputToText(record.input)}`
+			}
+			if (type === "tool_result") {
+				return `Tool result: ${toolResultToText(record.content)}`
+			}
+			if (type === "file") {
+				return `File: ${getString(record, "path")}`
+			}
+			return ""
+		})
+		.filter(Boolean)
+		.join("\n\n")
+
+	return normalizeProgressTranscriptText(parts)
 }
 
 function contentToText(content: unknown): string {
