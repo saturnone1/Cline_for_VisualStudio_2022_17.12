@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,15 @@ using VsClineAgent.Services;
 
 namespace VsClineAgent.Agent
 {
+    // Represents the full agent runtime state for checkpointing and restore.
+    public class TaskState
+    {
+        public List<ChatMessage> ApiHistory { get; set; } = new List<ChatMessage>();
+        public string TaskText { get; set; } = string.Empty;
+        public bool TaskCompleted { get; set; }
+        public int ConsecutiveMistakeCount { get; set; }
+    }
+
     // Port of Task class from /apps/vscode/src/core/task/index.ts
     // Handles the agent loop: startTask → recursivelyMakeClineRequests → parse XML → execute tools → loop
     internal class AgentController : IToolCallbacks
@@ -21,9 +31,12 @@ namespace VsClineAgent.Agent
         private readonly ToolRegistry _tools;
         private readonly SettingsService _settings;
         private readonly VsEditorService _editorService;
+        private readonly VsCommandExecutionService _commandService;
 
         // Conversation history — mirrors apiConversationHistory in Cline
         private readonly List<ChatMessage> _apiHistory = new List<ChatMessage>();
+
+        private string _taskText = string.Empty;
 
         private CancellationTokenSource _cts;
         private string _cwd;
@@ -47,6 +60,7 @@ namespace VsClineAgent.Agent
         {
             _settings = settings;
             _editorService = editorService;
+            _commandService = new VsCommandExecutionService();
             _llm = new LlmClient();
 
             // Register all Cline tools
@@ -56,7 +70,7 @@ namespace VsClineAgent.Agent
             _tools.Register(new ReplaceInFileTool());
             _tools.Register(new ListFilesTool());
             _tools.Register(new SearchFilesTool());
-            _tools.Register(new ExecuteCommandTool());
+            _tools.Register(new ExecuteCommandTool(_commandService));
             _tools.Register(new ListCodeDefinitionsTool());
             _tools.Register(new AskFollowupQuestionTool());
             _tools.Register(new AttemptCompletionTool());
@@ -65,6 +79,41 @@ namespace VsClineAgent.Agent
         public void UpdateSettings()
         {
             _llm.Configure(_settings.Load());
+        }
+
+        public List<ChatMessage> GetApiHistorySnapshot()
+        {
+            return _apiHistory
+                .Where(message => message != null && !string.IsNullOrWhiteSpace(message.Role) && !string.IsNullOrWhiteSpace(message.Content))
+                .Select(message => new ChatMessage
+                {
+                    Role = message.Role,
+                    Content = message.Content
+                })
+                .ToList();
+        }
+
+        // Returns a snapshot of the full agent state for checkpointing
+        public TaskState GetTaskStateSnapshot()
+        {
+            return new TaskState
+            {
+                ApiHistory = GetApiHistorySnapshot(),
+                TaskText = _taskText,
+                TaskCompleted = _taskCompleted,
+                ConsecutiveMistakeCount = _consecutiveMistakeCount
+            };
+        }
+
+        // Restores the agent state from a checkpoint
+        public void RestoreTaskState(TaskState state)
+        {
+            _apiHistory.Clear();
+            if (state?.ApiHistory != null)
+                _apiHistory.AddRange(state.ApiHistory);
+            _taskText = state?.TaskText ?? string.Empty;
+            _taskCompleted = state?.TaskCompleted ?? false;
+            _consecutiveMistakeCount = state?.ConsecutiveMistakeCount ?? 0;
         }
 
         public void Stop()
@@ -89,12 +138,34 @@ namespace VsClineAgent.Agent
         // Entry point — port of Task.startTask()
         public async Task StartTaskAsync(string task, string workspacePath)
         {
+            _taskText = task;
+            await StartTaskInternalAsync(task, workspacePath, resumeHistory: null);
+        }
+
+        public async Task ResumeTaskAsync(string task, string workspacePath, IEnumerable<ChatMessage>? resumeHistory)
+        {
+            _taskText = task;
+            await StartTaskInternalAsync(task, workspacePath, resumeHistory);
+        }
+
+        private async Task StartTaskInternalAsync(string task, string workspacePath, IEnumerable<ChatMessage>? resumeHistory)
+        {
             var cfg = _settings.Load();
             _llm.Configure(cfg);
             _cwd = string.IsNullOrEmpty(workspacePath) ? Directory.GetCurrentDirectory() : workspacePath;
 
             _cts = new CancellationTokenSource();
             _apiHistory.Clear();
+            if (resumeHistory != null)
+            {
+                _apiHistory.AddRange(resumeHistory
+                    .Where(message => message != null && !string.IsNullOrWhiteSpace(message.Role) && !string.IsNullOrWhiteSpace(message.Content))
+                    .Select(message => new ChatMessage
+                    {
+                        Role = message.Role,
+                        Content = message.Content
+                    }));
+            }
             _consecutiveMistakeCount = 0;
             _taskCompleted = false;
 
@@ -104,7 +175,8 @@ namespace VsClineAgent.Agent
             // Build initial user content — port of startTask userContent construction
             // Wraps task in <task> tags exactly as Cline does
             string fileTreeSummary = BuildFileTree(_cwd, recursive: false);
-            string envDetails = SystemPrompt.BuildEnvironmentDetails(_cwd, fileTreeSummary);
+            var activeCommands = await _commandService.GetActiveCommandsAsync();
+            string envDetails = SystemPrompt.BuildEnvironmentDetails(_cwd, fileTreeSummary, activeCommands);
             string userText = $"<task>\n{task}\n</task>\n\n{envDetails}";
 
             await RecursivelyMakeRequestsAsync(
@@ -269,10 +341,9 @@ namespace VsClineAgent.Agent
         }
 
         // IToolCallbacks — VS 2022 wrapper for user approval (port of shouldAutoApproveTool / ask pattern)
-        public async Task<bool> AskApprovalAsync(string description, CancellationToken ct)
+        public async Task<bool> AskApprovalAsync(string description, ApprovalRequest request, CancellationToken ct)
         {
-            var cfg = _settings.Load();
-            if (cfg.AutoApprove) return true;
+            if (ShouldAutoApprove(request)) return true;
 
             _pendingApproval = new TaskCompletionSource<bool>();
 
@@ -284,6 +355,33 @@ namespace VsClineAgent.Agent
 
             using var reg = ct.Register(() => _pendingApproval.TrySetResult(false));
             return await _pendingApproval.Task;
+        }
+
+        private bool ShouldAutoApprove(ApprovalRequest request)
+        {
+            var cfg = _settings.Load();
+            var settings = cfg.AutoApprovalSettings;
+            var actions = settings?.Actions;
+            if (settings == null || actions == null || !settings.Enabled)
+                return false;
+
+            switch (request?.Action)
+            {
+                case ApprovalAction.ReadFiles:
+                    return request.IsExternal ? actions.ReadFilesExternally : actions.ReadFiles;
+                case ApprovalAction.EditFiles:
+                    return request.IsExternal ? actions.EditFilesExternally : actions.EditFiles;
+                case ApprovalAction.ExecuteCommand:
+                    if (request.RequiresExplicitApproval)
+                        return actions.ExecuteAllCommands;
+                    return actions.ExecuteSafeCommands || actions.ExecuteAllCommands;
+                case ApprovalAction.UseBrowser:
+                    return actions.UseBrowser;
+                case ApprovalAction.UseMcp:
+                    return actions.UseMcp;
+                default:
+                    return false;
+            }
         }
 
         // IToolCallbacks — post status to UI

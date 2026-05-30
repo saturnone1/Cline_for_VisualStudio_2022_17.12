@@ -26,14 +26,23 @@
                        HorizontalAlignment="Center" />
         </StackPanel>
 
-        <TextBlock x:Name="errorText"
-                   Visibility="Collapsed"
-                   VerticalAlignment="Center"
-                   HorizontalAlignment="Center"
-                   Foreground="#F44747"
-                   FontSize="12"
-                   TextWrapping="Wrap"
-                   Margin="16"
-                   Text="" />
+        <TextBox x:Name="errorText"
+                 Visibility="Collapsed"
+                 VerticalAlignment="Stretch"
+                 HorizontalAlignment="Stretch"
+                 Foreground="#F44747"
+                 Background="#1E1E1E"
+                 BorderBrush="#3C3C3C"
+                 FontFamily="Consolas"
+                 FontSize="12"
+                 Margin="16"
+                 Padding="12"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 AcceptsTab="True"
+                 TextWrapping="NoWrap"
+                 HorizontalScrollBarVisibility="Auto"
+                 VerticalScrollBarVisibility="Auto"
+                 Text="" />
     </Grid>
 </UserControl>

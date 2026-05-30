@@ -110,15 +110,8 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 			return true
 		}
 
-		// Always show when the last rendered row is a toolgroup.
+		// Tool output may be followed by additional model work.
 		if (lastVisibleRow && isToolGroup(lastVisibleRow)) {
-			return true
-		}
-
-		// User-requested behavior:
-		// if the last visible row is not actively partial, always show Thinking in the footer.
-		// (some rows like checkpoint_created don't set `partial`, and should be treated as non-partial)
-		if (lastVisibleMessage.partial !== true) {
 			return true
 		}
 
@@ -126,17 +119,16 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 			// No messages after the initial task message - new task just started
 			return true
 		}
-		if (lastMsg.say === "user_feedback" || lastMsg.say === "user_feedback_diff") return true
+		if (lastMsg.say === "task" || lastMsg.say === "user_feedback" || lastMsg.say === "user_feedback_diff") return true
 		if (lastMsg.say === "api_req_started") {
 			try {
 				const info = JSON.parse(lastMsg.text || "{}")
-				// Still in progress (no cost) and nothing has streamed after it yet
-				return info.cost == null
+				return info.cancelReason !== "user_cancelled"
 			} catch {
 				return true
 			}
 		}
-		return false
+		return lastMsg.partial === true
 	}, [lastRawMessage, groupedMessages.length, lastVisibleMessage, lastVisibleRow, modifiedMessages])
 
 	// Keep loader in the message flow (not footer). During handoff from waiting -> reasoning stream,

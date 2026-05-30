@@ -24,7 +24,8 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 	const [restoreBothDisabled, setRestoreBothDisabled] = useState(false)
 	const [showRestoreConfirm, setShowRestoreConfirm] = useState(false)
 	const [showMoreOptions, setShowMoreOptions] = useState(false)
-	const { onRelinquishControl } = useExtensionState()
+	const { checkpointManagerErrorMessage, enableCheckpointsSetting, onRelinquishControl } = useExtensionState()
+	const canUseCheckpointActions = enableCheckpointsSetting && !checkpointManagerErrorMessage
 
 	// Debounce
 	const closeMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -185,8 +186,8 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 					})}>
 					{isCheckpointCheckedOut ? "Checkpoint (restored)" : "Checkpoint"}
 				</span>
-				<DottedLine $isCheckedOut={isCheckpointCheckedOut} />
-				<ButtonGroup>
+				{canUseCheckpointActions && <DottedLine $isCheckedOut={isCheckpointCheckedOut} />}
+				{canUseCheckpointActions && <ButtonGroup>
 					<CustomButton
 						$isCheckedOut={isCheckpointCheckedOut}
 						disabled={compareDisabled}
@@ -289,7 +290,7 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 							)}
 					</div>
 					<DottedLine $isCheckedOut={isCheckpointCheckedOut} small />
-				</ButtonGroup>
+				</ButtonGroup>}
 			</div>
 		</Container>
 	)

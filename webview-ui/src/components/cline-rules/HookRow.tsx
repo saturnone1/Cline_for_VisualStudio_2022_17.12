@@ -11,6 +11,7 @@ interface HookRowProps {
 	absolutePath: string
 	isGlobal: boolean
 	isWindows: boolean
+	hooksRuntimeUnsupported?: boolean
 	workspaceName?: string
 	onToggle: (hookName: string, newEnabled: boolean) => void
 	onDelete: (hooksToggles: HooksToggles) => void
@@ -22,10 +23,15 @@ const HookRow: React.FC<HookRowProps> = ({
 	absolutePath,
 	isGlobal,
 	isWindows,
+	hooksRuntimeUnsupported = false,
 	workspaceName,
 	onToggle,
 	onDelete,
 }) => {
+	const disableHookMutations = isWindows || hooksRuntimeUnsupported
+	const disabledReason =
+		"Hooks are not executed in the Visual Studio port yet, so create, toggle, and delete actions are disabled."
+
 	const handleEditClick = () => {
 		FileServiceClient.openFile(StringRequest.create({ value: absolutePath })).catch((err) =>
 			console.error("Failed to open file:", err),
@@ -33,6 +39,10 @@ const HookRow: React.FC<HookRowProps> = ({
 	}
 
 	const handleDeleteClick = () => {
+		if (disableHookMutations) {
+			return
+		}
+
 		FileServiceClient.deleteHook(
 			DeleteHookRequest.create({
 				hookName,
@@ -58,18 +68,14 @@ const HookRow: React.FC<HookRowProps> = ({
 				{/* Toggle Switch */}
 				<div className="flex items-center space-x-2 gap-2">
 					<div
-						title={
-							isWindows
-								? "Hook toggling is not yet supported on Windows in this foundation PR. Hooks execute when the hook file exists."
-								: undefined
-						}>
+						title={disableHookMutations ? disabledReason : undefined}>
 						<Switch
 							checked={enabled}
 							className="mx-1"
-							disabled={isWindows}
+							disabled={disableHookMutations}
 							key={hookName}
-							onClick={() => onToggle(hookName, !enabled)}
-							style={isWindows ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+							onClick={() => !disableHookMutations && onToggle(hookName, !enabled)}
+							style={disableHookMutations ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
 						/>
 					</div>
 					<Button aria-label="Edit hook file" onClick={handleEditClick} size="xs" title="Edit hook file" variant="icon">
@@ -77,9 +83,10 @@ const HookRow: React.FC<HookRowProps> = ({
 					</Button>
 					<Button
 						aria-label="Delete hook file"
+						disabled={disableHookMutations}
 						onClick={handleDeleteClick}
 						size="xs"
-						title="Delete hook file"
+						title={disableHookMutations ? disabledReason : "Delete hook file"}
 						variant="icon">
 						<Trash2Icon />
 					</Button>

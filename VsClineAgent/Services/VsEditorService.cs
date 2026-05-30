@@ -68,6 +68,44 @@ namespace VsClineAgent.Services
             catch { }
         }
 
+        public async Task<bool> SaveDocumentIfDirtyAsync(string filePath)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var dte = GetDte();
+                if (dte?.Documents == null) return false;
+
+                foreach (Document doc in dte.Documents)
+                {
+                    try
+                    {
+                        if (!string.Equals(doc.FullName, filePath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        if (!doc.Saved)
+                            doc.Save();
+
+                        return true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        public async Task ExecuteCommandAsync(string commandName)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                GetDte()?.ExecuteCommand(commandName);
+            }
+            catch { }
+        }
+
         public async Task ReloadFileAsync(string filePath)
         {
             try

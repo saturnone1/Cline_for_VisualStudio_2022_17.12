@@ -10,6 +10,8 @@ interface NewRuleRowProps {
 	isGlobal: boolean
 	ruleType?: string
 	existingHooks?: string[]
+	disabled?: boolean
+	disabledReason?: string
 	workspaceName?: string
 }
 
@@ -24,7 +26,14 @@ const HOOK_TYPES = [
 	{ name: "PreCompact", description: "Executes before conversation compaction" },
 ]
 
-const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHooks = [], workspaceName }) => {
+const NewRuleRow: React.FC<NewRuleRowProps> = ({
+	isGlobal,
+	ruleType,
+	existingHooks = [],
+	disabled = false,
+	disabledReason,
+	workspaceName,
+}) => {
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [filename, setFilename] = useState("")
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -63,7 +72,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 	}
 
 	const handleCreateHook = async (hookName: string) => {
-		if (!hookName) return
+		if (!hookName || disabled) return
 
 		try {
 			await FileServiceClient.createHook(
@@ -174,7 +183,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 								aria-describedby="hook-select-description"
 								aria-label="Select hook type to create"
 								className="flex-1 bg-input-background text-input-foreground border-0 outline-0 rounded focus:outline-none focus:ring-0 focus:border-transparent px-2 cursor-pointer"
-								disabled={availableHookTypes.length === 0}
+								disabled={disabled || availableHookTypes.length === 0}
 								id="hook-type-select"
 								onChange={(e) => {
 									if (e.target.value) {
@@ -190,10 +199,17 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({ isGlobal, ruleType, existingHoo
 									backgroundRepeat: "no-repeat",
 									backgroundPosition: "right 8px center",
 									paddingRight: "24px",
+									opacity: disabled ? 0.5 : 1,
+									cursor: disabled ? "not-allowed" : "pointer",
 								}}
+								title={disabled ? disabledReason : undefined}
 								value="">
 								<option disabled value="">
-									{availableHookTypes.length === 0 ? "All hooks created" : "New hook..."}
+									{disabled
+										? "Hooks unavailable in Visual Studio port"
+										: availableHookTypes.length === 0
+											? "All hooks created"
+											: "New hook..."}
 								</option>
 								{availableHookTypes.map((hook) => (
 									<option key={hook.name} title={hook.description} value={hook.name}>
