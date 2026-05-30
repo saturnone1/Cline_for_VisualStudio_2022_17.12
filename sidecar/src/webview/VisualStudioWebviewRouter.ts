@@ -1697,6 +1697,22 @@ export class VisualStudioWebviewRouter {
 		}
 		this.removeActiveStatusText()
 		this.finalizeOpenPartialMessages()
+		this.addCompletionResultMarker(status)
+	}
+
+	private addCompletionResultMarker(status: string) {
+		if (this.hasCompletionResult()) {
+			return
+		}
+
+		const normalizedStatus = String(status || "").toLowerCase()
+		const text =
+			normalizedStatus === "cancelled" || normalizedStatus === "stopped" || normalizedStatus === "aborted"
+				? "요청을 취소했습니다."
+				: normalizedStatus === "failed" || normalizedStatus === "error"
+					? "작업이 오류 상태로 종료되었습니다."
+					: "Done."
+		this.addMessage({ type: "say", say: "completion_result", text })
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {

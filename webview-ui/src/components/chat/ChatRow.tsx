@@ -967,20 +967,27 @@ export const ChatRowContent = memo(
 					}
 					case "reasoning": {
 						const isReasoningStreaming = message.partial === true
-						const hasReasoningText = !!message.text?.trim()
+						const reasoningContent = message.reasoning || message.text || ""
+						const hasReasoningText = !!reasoningContent.trim()
+						const isSyntheticThinkingLoader = message.ts === Number.MIN_SAFE_INTEGER
+						const title = message.reasoning
+							? message.text?.trim() || "모델 진행 중"
+							: isReasoningStreaming
+								? "Thinking..."
+								: "Thinking"
 						// Show feature tips throughout the entire thinking/reasoning phase
-						const showFeatureTip = isReasoningStreaming
+						const showFeatureTip = isReasoningStreaming && isSyntheticThinkingLoader
 						return (
 							<div>
 								<ThinkingRow
-									isExpanded={(isReasoningStreaming && hasReasoningText) || isExpanded}
+									isExpanded={isSyntheticThinkingLoader ? false : isExpanded}
 									isStreaming={isReasoningStreaming}
 									isVisible={true}
-									onToggle={isReasoningStreaming ? undefined : handleToggle}
-									reasoningContent={message.text}
-									showChevron={!isReasoningStreaming || hasReasoningText}
+									onToggle={hasReasoningText && !isSyntheticThinkingLoader ? handleToggle : undefined}
+									reasoningContent={reasoningContent}
+									showChevron={hasReasoningText}
 									showTitle={true}
-									title={isReasoningStreaming ? "Thinking..." : "Thinking"}
+									title={title}
 								/>
 								{isReasoningStreaming && showFeatureTips !== false && <FeatureTip />}
 							</div>
