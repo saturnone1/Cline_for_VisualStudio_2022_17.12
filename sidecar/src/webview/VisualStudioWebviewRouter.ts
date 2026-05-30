@@ -50,6 +50,8 @@ export class VisualStudioWebviewRouter {
 	private activePartialTextTs: number | null = null
 	private activeStatusTextTs: number | null = null
 	private partialIdleTimer: NodeJS.Timeout | null = null
+	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
+	private lastPartialStateBroadcastAt = 0
 	private taskIdleNoticeTimer: NodeJS.Timeout | null = null
 	private taskIdleTimer: NodeJS.Timeout | null = null
 	private lastTaskActivityAt = 0
@@ -331,7 +333,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (isStreaming) {
-			return this.handleStreamingRequest(key, requestId)
+			return await this.handleStreamingRequest(key, requestId)
 		}
 
 		try {
@@ -345,9 +347,11 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private handleStreamingRequest(key: string, requestId: string) {
+	private async handleStreamingRequest(key: string, requestId: string) {
 		if (key === "StateService.subscribeToState") {
 			this.stateStreamRequestIds.add(requestId)
+			await this.refreshTaskHistoryFromSdk()
+			await this.refreshSelectedTaskFromSdk()
 			return grpcHandled(grpcResponse(requestId, { stateJson: JSON.stringify(this.state) }, true))
 		}
 
@@ -739,6 +743,7 @@ export class VisualStudioWebviewRouter {
 		}
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
 		this.finalizeActivePartialText()
 		this.removeTerminalAskMessages()
 		this.addMessage({ type: "say", say: "info", text: "현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다." })
@@ -752,6 +757,7 @@ export class VisualStudioWebviewRouter {
 		}
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
 		this.state.currentTaskItem = null
 		this.state.clineMessages = []
 		await this.broadcastState()
@@ -826,6 +832,43 @@ export class VisualStudioWebviewRouter {
 		if (Array.isArray(sdkHistory)) {
 			this.state.taskHistory = sdkHistory.map((session) => sdkSessionToHistoryItem(asRecord(session)))
 		}
+	}
+
+	private async refreshSelectedTaskFromSdk() {
+		if (!this.clineSdk || !this.state.currentTaskItem) {
+			return
+		}
+
+		const taskId = String(this.state.currentTaskItem.id || "")
+		if (!taskId) {
+			return
+		}
+
+		const activeSessionId = this.clineSdk.status.activeSessionId
+		if (activeSessionId && activeSessionId !== taskId) {
+			return
+		}
+		if (activeSessionId === taskId && this.activePartialTextTs) {
+			return
+		}
+
+		const session = asRecord(await this.clineSdk.getSession({ sessionId: taskId }).catch(() => null))
+		if (!session || Object.keys(session).length === 0) {
+			return
+		}
+
+		const messages = await this.clineSdk.readMessages({ sessionId: taskId }).catch(() => null)
+		if (!Array.isArray(messages)) {
+			return
+		}
+
+		const taskItem = sdkSessionToHistoryItem(session)
+		this.state.currentTaskItem = taskItem
+		this.state.clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+		this.taskSnapshots.set(taskId, {
+			taskItem: { ...taskItem },
+			messages: this.state.clineMessages.map((message) => ({ ...message })),
+		})
 	}
 
 	private async restoreCheckpoint(message: unknown) {
@@ -971,7 +1014,7 @@ export class VisualStudioWebviewRouter {
 
 		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
 		if (stream === "agent") {
-			logInteraction("sidecar", "sdkAgentChunkIgnoredForUi", summarizeAgentChunkForLog(payload.chunk))
+			this.addAgentTranscriptChunk(payload.chunk)
 			return
 		}
 
@@ -983,6 +1026,36 @@ export class VisualStudioWebviewRouter {
 		})
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private addAgentTranscriptChunk(chunk: unknown) {
+		const text = agentChunkToTranscriptText(chunk)
+		if (!text.trim()) {
+			logInteraction("sidecar", "sdkAgentChunkSkippedForUi", summarizeAgentChunkForLog(chunk))
+			return
+		}
+
+		const capped = truncateText(text, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
+		if (this.isDuplicateRecentTranscript(capped)) {
+			return
+		}
+
+		this.addMessage({
+			type: "say",
+			say: isToolTranscript(capped) ? "tool" : "text",
+			text: capped,
+		})
+		this.updateCurrentTaskItem()
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private isDuplicateRecentTranscript(text: string) {
+		const normalized = normalizeTranscriptText(text)
+		if (!normalized) {
+			return true
+		}
+
+		return this.state.clineMessages.slice(-3).some((message) => normalizeTranscriptText(getString(message, "text")) === normalized)
 	}
 
 	private handleSessionSnapshot(payload: Record<string, unknown>) {
@@ -1677,6 +1750,7 @@ export class VisualStudioWebviewRouter {
 
 	private finalizeActivePartialText() {
 		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
 		if (!this.activePartialTextTs) {
 			return
 		}
@@ -1727,6 +1801,7 @@ export class VisualStudioWebviewRouter {
 
 		this.schedulePartialIdleWatchdog()
 		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
+		this.schedulePartialStateBroadcast()
 	}
 
 	private schedulePartialIdleWatchdog() {
@@ -1755,6 +1830,34 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
+	private clearPartialStateBroadcastTimer() {
+		if (this.partialStateBroadcastTimer) {
+			clearTimeout(this.partialStateBroadcastTimer)
+			this.partialStateBroadcastTimer = null
+		}
+	}
+
+	private schedulePartialStateBroadcast() {
+		if (this.stateStreamRequestIds.size === 0 || this.partialStateBroadcastTimer) {
+			return
+		}
+
+		const intervalMs = readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 1500)
+		const now = Date.now()
+		const elapsed = now - this.lastPartialStateBroadcastAt
+		if (elapsed >= intervalMs) {
+			this.lastPartialStateBroadcastAt = now
+			this.broadcastState().catch((error) => console.error(error))
+			return
+		}
+
+		this.partialStateBroadcastTimer = setTimeout(() => {
+			this.partialStateBroadcastTimer = null
+			this.lastPartialStateBroadcastAt = Date.now()
+			this.broadcastState().catch((error) => console.error(error))
+		}, intervalMs - elapsed)
+	}
+
 	private noteTaskActivity(reason: string) {
 		if (!this.state.currentTaskItem) {
 			return
@@ -1766,6 +1869,7 @@ export class VisualStudioWebviewRouter {
 		if (this.hasCompletionResult() || isTerminalSdkStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
 			this.clearTaskIdleWatchdog()
 			this.clearPartialIdleWatchdog()
+			this.clearPartialStateBroadcastTimer()
 			return
 		}
 		this.scheduleTaskIdleWatchdog()
@@ -2755,10 +2859,10 @@ function contentToText(content: unknown): string {
 			return getString(record, "thinking")
 		}
 		if (type === "tool_use") {
-			return `Tool: ${getString(record, "name")}\n${stringify(record.input)}`
+			return `Tool: ${getString(record, "name")}\n${toolInputToText(record.input)}`
 		}
 		if (type === "tool_result") {
-			return `Tool result: ${contentToText(record.content)}`
+			return `Tool result: ${toolResultToText(record.content)}`
 		}
 		if (type === "file") {
 			return `File: ${getString(record, "path")}\n${getString(record, "content")}`
@@ -2768,6 +2872,223 @@ function contentToText(content: unknown): string {
 		}
 		return stringify(record)
 	}).filter(Boolean).join("\n\n")
+}
+
+function agentChunkToTranscriptText(chunk: unknown): string {
+	if (typeof chunk === "string") {
+		return agentChunkStringToTranscriptText(chunk)
+	}
+
+	const record = asRecord(chunk)
+	if (Object.keys(record).length === 0) {
+		return ""
+	}
+
+	return agentChunkRecordToTranscriptText(record) || contentToText(chunk)
+}
+
+function agentChunkStringToTranscriptText(chunk: string): string {
+	const text = chunk.trim()
+	if (!text) {
+		return ""
+	}
+
+	const parsed = tryParseJson(text)
+	if (parsed !== undefined) {
+		if (Array.isArray(parsed)) {
+			return parsed.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
+		}
+
+		const parsedText = agentChunkRecordToTranscriptText(asRecord(parsed))
+		if (parsedText) {
+			return parsedText
+		}
+	}
+
+	const sequence = parseJsonObjectSequence(text)
+	if (sequence.length > 0) {
+		const sequenceText = sequence.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
+		if (sequenceText) {
+			return sequenceText
+		}
+	}
+
+	const jsonLines = text
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.map((line) => tryParseJson(line))
+	if (jsonLines.length > 0 && jsonLines.every((item) => item !== undefined)) {
+		const lineText = jsonLines.map((item) => agentChunkToTranscriptText(item)).filter(Boolean).join("\n\n")
+		if (lineText) {
+			return lineText
+		}
+	}
+
+	return text
+}
+
+function parseJsonObjectSequence(text: string) {
+	const results: unknown[] = []
+	let depth = 0
+	let start = -1
+	let inString = false
+	let escaped = false
+
+	for (let index = 0; index < text.length; index++) {
+		const char = text[index]
+		if (inString) {
+			if (escaped) {
+				escaped = false
+			} else if (char === "\\") {
+				escaped = true
+			} else if (char === "\"") {
+				inString = false
+			}
+			continue
+		}
+
+		if (char === "\"") {
+			inString = true
+			continue
+		}
+
+		if (char === "{") {
+			if (depth === 0) {
+				start = index
+			}
+			depth++
+		} else if (char === "}" && depth > 0) {
+			depth--
+			if (depth === 0 && start >= 0) {
+				const parsed = tryParseJson(text.slice(start, index + 1))
+				if (parsed === undefined) {
+					return []
+				}
+				results.push(parsed)
+				start = -1
+			}
+		}
+	}
+
+	return depth === 0 && results.length > 1 ? results : []
+}
+
+function agentChunkRecordToTranscriptText(record: Record<string, unknown>): string {
+	const type = getString(record, "type")
+	if (!type) {
+		const role = getString(record, "role")
+		if (role) {
+			return contentToText(record.content)
+		}
+		return ""
+	}
+
+	if (type === "iteration_start" || type === "iteration_end" || type === "usage" || type === "done") {
+		return ""
+	}
+
+	if (type === "content_start" || type === "content_update" || type === "content_delta" || type === "content_end") {
+		return agentContentEventToText(record)
+	}
+
+	if (type === "text" || type === "thinking" || type === "tool_use" || type === "tool_result" || type === "file" || type === "image") {
+		return contentToText([record])
+	}
+
+	if (type === "notice" || type === "status" || type === "error") {
+		return firstString(record, ["message", "text", "error", "status"])
+	}
+
+	return ""
+}
+
+function agentContentEventToText(record: Record<string, unknown>): string {
+	const contentType = getString(record, "contentType") || getString(record, "content_type")
+	if (contentType === "text" || contentType === "reasoning") {
+		return firstString(record, ["text", "reasoning", "content", "accumulated", "delta"])
+	}
+
+	if (contentType === "tool" || contentType === "tool_use" || contentType === "tool_result") {
+		const toolName = firstString(record, ["name", "toolName", "tool_name", "id"])
+		const input = record.input ?? record.arguments ?? record.params ?? record.message
+		const output = record.output ?? record.result ?? record.content
+		if (output !== undefined) {
+			return `Tool result: ${toolResultToText(output)}`
+		}
+		if (toolName || input !== undefined) {
+			return `Tool: ${toolName || "tool"}${input !== undefined ? `\n${toolInputToText(input)}` : ""}`
+		}
+	}
+
+	return ""
+}
+
+function isToolTranscript(text: string) {
+	const normalized = text.trim()
+	return normalized.startsWith("Tool:") || normalized.startsWith("Tool result:")
+}
+
+function toolInputToText(input: unknown): string {
+	const record = asRecord(input)
+	const command = getString(record, "command")
+	const files = Array.isArray(record.files) ? record.files.map((item) => asRecord(item)) : []
+	const query = getString(record, "query")
+	const pathValue = getString(record, "path")
+	const patch = getString(record, "patch")
+	if (command) {
+		return command
+	}
+	if (files.length > 0) {
+		return files.map((file) => {
+			const pathText = getString(file, "path")
+			const startLine = getNumber(file, "start_line")
+			const endLine = getNumber(file, "end_line")
+			if (startLine !== undefined || endLine !== undefined) {
+				return `${pathText}:${startLine ?? 1}-${endLine ?? ""}`
+			}
+			return pathText
+		}).filter(Boolean).join("\n")
+	}
+	if (query) {
+		return query
+	}
+	if (pathValue) {
+		return pathValue
+	}
+	if (patch) {
+		return parsePatchPaths(patch).join("\n") || patch
+	}
+	return stringify(input)
+}
+
+function toolResultToText(result: unknown): string {
+	const text = contentToText(result)
+	const parsed = tryParseJson(text)
+	if (parsed !== undefined) {
+		const summarized = summarizeCommandOutput(parsed)
+		if (summarized && summarized !== stringify(parsed)) {
+			return summarized
+		}
+		return stringifyPretty(parsed)
+	}
+
+	return text
+}
+
+function stringifyPretty(value: unknown) {
+	if (typeof value === "string") {
+		return value
+	}
+	try {
+		return JSON.stringify(value, null, 2)
+	} catch {
+		return String(value)
+	}
+}
+
+function normalizeTranscriptText(text: string) {
+	return text.replace(/\s+/g, " ").trim()
 }
 
 function findCheckpointRunCount(messages: Array<Record<string, unknown>>, messageTs?: number) {
