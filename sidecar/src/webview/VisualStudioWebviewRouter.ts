@@ -257,7 +257,7 @@ export class VisualStudioWebviewRouter {
 			}
 			this.noteTaskActivity(status || type)
 			if (status && status !== "idle") {
-				this.addApiRequestStarted(status)
+				this.addApiRequestStarted(status, { partial: true })
 			}
 			this.broadcastState().catch((error) => console.error(error))
 			return
@@ -1163,10 +1163,8 @@ export class VisualStudioWebviewRouter {
 			this.clearReasoningStatus()
 			const text = getString(event, "accumulated") || getString(event, "text")
 			if (text) {
-				if (shouldFoldTextContentAsReasoning(text)) {
+				if (!shouldDropTokenizedReasoning(text)) {
 					this.upsertFoldedReasoningText(text)
-				} else if (!shouldDropTokenizedReasoning(text)) {
-					this.upsertPartialText(text)
 				}
 				shouldBroadcastState = false
 			} else if (!this.state.clineMessages.some((message) => message.say === "api_req_started" && message.partial === true)) {
@@ -1188,10 +1186,8 @@ export class VisualStudioWebviewRouter {
 			this.noteTaskActivity(`${type}:text`)
 			this.clearReasoningStatus()
 			const text = getString(event, "accumulated") || getString(event, "text") || getString(event, "delta")
-			if (text && shouldFoldTextContentAsReasoning(text)) {
+			if (text && !shouldDropTokenizedReasoning(text)) {
 				this.upsertFoldedReasoningText(text)
-			} else if (text && !shouldDropTokenizedReasoning(text)) {
-				this.upsertPartialText(text)
 			}
 			shouldBroadcastState = false
 		}
@@ -1212,7 +1208,6 @@ export class VisualStudioWebviewRouter {
 			const text = getString(event, "text") || getString(event, "accumulated")
 			if (text && shouldFoldTextContentAsReasoning(text)) {
 				this.upsertFoldedReasoningText(text)
-				this.finishFoldedReasoningText()
 				shouldBroadcastState = false
 			} else if (text && shouldDropTokenizedReasoning(text)) {
 				shouldBroadcastState = false
@@ -1227,7 +1222,6 @@ export class VisualStudioWebviewRouter {
 
 		if (type === "content_end" && contentType === "reasoning") {
 			this.noteTaskActivity("content_end:reasoning")
-			this.finishFoldedReasoningText()
 			this.clearReasoningStatus()
 		}
 
@@ -1827,18 +1821,44 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addApiRequestStarted(request: string, options: { partial?: boolean } = {}) {
+		const text = JSON.stringify({
+			request,
+			tokensIn: 0,
+			tokensOut: 0,
+			cacheWrites: 0,
+			cacheReads: 0,
+			cost: 0,
+		})
+		if (options.partial === true) {
+			for (let index = this.state.clineMessages.length - 1; index >= 0; index--) {
+				const message = this.state.clineMessages[index]
+				if (message.say === "api_req_started" && message.partial === true) {
+					this.upsertMessage(numberValue(message.ts) || Date.now(), {
+						type: "say",
+						say: "api_req_started",
+						text,
+						partial: true,
+						isCollapsed: true,
+						isExpanded: false,
+					})
+					return
+				}
+			}
+		}
+
+		if (this.state.clineMessages.slice(-3).some((message) =>
+			message.say === "api_req_started" && normalizeTranscriptText(getString(message, "text")) === normalizeTranscriptText(text)
+		)) {
+			return
+		}
+
 		this.addMessage({
 			type: "say",
 			say: "api_req_started",
-			text: JSON.stringify({
-				request,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				cost: 0,
-			}),
+			text,
 			partial: options.partial === true ? true : undefined,
+			isCollapsed: options.partial === true ? true : undefined,
+			isExpanded: options.partial === true ? false : undefined,
 		})
 	}
 
@@ -1883,10 +1903,15 @@ export class VisualStudioWebviewRouter {
 		} else {
 			const existing = this.state.clineMessages.find((item) => item.ts === this.activeReasoningTextTs)
 			const previous = getString(existing, "reasoning")
-			if (normalizeTranscriptText(previous).includes(normalizeTranscriptText(capped))) {
+			const previousNormalized = normalizeTranscriptText(previous)
+			const cappedNormalized = normalizeTranscriptText(capped)
+			if (previousNormalized.includes(cappedNormalized)) {
 				return
 			}
-			const next = truncateText([previous, capped].filter(Boolean).join("\n"), readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000))
+			const next = truncateText(
+				cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
+				readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
+			)
 			this.upsertMessage(this.activeReasoningTextTs, {
 				type: "say",
 				say: "reasoning",
@@ -3163,13 +3188,20 @@ function agentChunkRecordToTranscriptText(record: Record<string, unknown>): stri
 		if (!text.trim() || contentType === "reasoning") {
 			return ""
 		}
+		if (contentType === "text" && type !== "content_end") {
+			return ""
+		}
 		if (contentType === "text" && (shouldDropTokenizedReasoning(text) || shouldFoldTextContentAsReasoning(text))) {
 			return ""
 		}
 		return text
 	}
 
-	if (type === "text" || type === "thinking" || type === "tool_use" || type === "tool_result" || type === "file" || type === "image") {
+	if (type === "text" || type === "thinking") {
+		return ""
+	}
+
+	if (type === "tool_use" || type === "tool_result" || type === "file" || type === "image") {
 		return contentToText([record])
 	}
 
@@ -3194,7 +3226,10 @@ function agentChunkRecordToFoldedReasoningText(record: Record<string, unknown>):
 		}
 		if (contentType === "text") {
 			const text = agentContentEventToText(record)
-			return shouldFoldTextContentAsReasoning(text) ? normalizeReasoningTranscriptText(text) : ""
+			if (type === "content_end") {
+				return ""
+			}
+			return shouldDropTokenizedReasoning(text) ? "" : normalizeReasoningTranscriptText(text)
 		}
 		return ""
 	}
@@ -3261,7 +3296,7 @@ function unknownAgentChunkTextToTranscriptText(text: string) {
 	if (looksLikeTokenizedReasoning(lines)) {
 		return ""
 	}
-	if (looksLikeReasoningNarration(trimmed)) {
+	if (!isToolTranscript(trimmed)) {
 		return ""
 	}
 
