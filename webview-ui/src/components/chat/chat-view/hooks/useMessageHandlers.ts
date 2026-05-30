@@ -113,6 +113,17 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 							}),
 						)
 						messageSent = true
+					} else {
+						// Completed/cancelled tasks should keep their transcript visible and continue through the
+						// host-side SDK session bridge instead of forcing the user to press Start New Task.
+						await TaskServiceClient.newTask(
+							NewTaskRequest.create({
+								text: messageToSend,
+								images,
+								files,
+							}),
+						)
+						messageSent = true
 					}
 				}
 

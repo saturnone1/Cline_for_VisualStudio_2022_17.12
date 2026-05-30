@@ -3704,8 +3704,9 @@ function looksLikeTokenizedReasoning(lines: string[]) {
 	}
 
 	const shortLines = lines.filter((line) => line.length <= 16).length
+	const wordLikeShortLines = lines.filter((line) => /^[A-Za-z0-9가-힣'"().,!?-]+$/.test(line) && line.length <= 12).length
 	const avgLength = lines.reduce((total, line) => total + line.length, 0) / lines.length
-	return shortLines / lines.length >= 0.75 && avgLength <= 10
+	return (shortLines / lines.length >= 0.72 && avgLength <= 12) || wordLikeShortLines / lines.length >= 0.6
 }
 
 function looksLikeReasoningNarration(text: string) {

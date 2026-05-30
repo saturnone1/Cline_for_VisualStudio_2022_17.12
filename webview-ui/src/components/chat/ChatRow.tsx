@@ -167,6 +167,18 @@ interface ChatRowContentProps extends Omit<ChatRowProps, "onHeightChange"> {}
 export const ProgressIndicator = () => <LoaderCircleIcon className="size-2 mr-2 animate-spin" />
 const InvisibleSpacer = () => <div aria-hidden className="h-px" />
 
+function looksLikeTokenizedReasoningBlock(text: string) {
+	const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+	if (lines.length < 5) {
+		return false
+	}
+
+	const shortLines = lines.filter((line) => line.length <= 16).length
+	const wordLikeShortLines = lines.filter((line) => /^[A-Za-z0-9가-힣'"().,!?-]+$/.test(line) && line.length <= 12).length
+	const avgLength = lines.reduce((total, line) => total + line.length, 0) / lines.length
+	return (shortLines / lines.length >= 0.72 && avgLength <= 12) || wordLikeShortLines / lines.length >= 0.6
+}
+
 const ChatRow = memo(
 	(props: ChatRowProps) => {
 		const { isLast, onHeightChange, message } = props
@@ -970,6 +982,9 @@ export const ChatRowContent = memo(
 						const reasoningContent = message.reasoning || message.text || ""
 						const hasReasoningText = !!reasoningContent.trim()
 						const isSyntheticThinkingLoader = message.ts === Number.MIN_SAFE_INTEGER
+						if (!isSyntheticThinkingLoader && looksLikeTokenizedReasoningBlock(reasoningContent)) {
+							return <InvisibleSpacer />
+						}
 						const title = message.reasoning
 							? message.text?.trim() || "모델 진행 중"
 							: isReasoningStreaming
