@@ -32,8 +32,11 @@ namespace VsClineAgent.Services
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
+                // cmd.exe emits text in the active Windows code page unless the
+                // command changes it. Use the local code page so built-ins like
+                // dir are readable on Korean Windows installations.
+                StandardOutputEncoding = Encoding.Default,
+                StandardErrorEncoding = Encoding.Default,
             };
 
             var stdOut = new StringBuilder();

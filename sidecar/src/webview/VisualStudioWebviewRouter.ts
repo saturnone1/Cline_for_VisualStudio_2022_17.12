@@ -314,8 +314,10 @@ export class VisualStudioWebviewRouter {
 					webviewMessages: [],
 				}
 			}
-			this.stateStreamRequestIds.delete(requestId)
-			this.partialMessageStreamRequestIds.delete(requestId)
+			// The Cline webview may cancel long-lived subscription request IDs while
+			// cancelling a task. Keep those host-owned streams alive so the user can
+			// continue the same conversation after Cancel.
+			logInteraction("webview->sidecar", "grpc_request_cancel.ignored", { requestId })
 			return {
 				handled: true,
 				owner: "sidecar",
@@ -1099,7 +1101,13 @@ export class VisualStudioWebviewRouter {
 		const model = asRecord(snapshot.model)
 		const aggregateUsage = asRecord(snapshot.aggregateUsage)
 		const usage = Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage)
-		this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
+		if (status === "idle") {
+			this.clearTaskIdleWatchdog()
+			this.clearPartialIdleWatchdog()
+			this.removeActiveStatusText()
+		} else {
+			this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
+		}
 		this.updateCurrentTaskItem({
 			modelId: getString(model, "modelId") || undefined,
 			tokensIn: numberValue(usage.inputTokens),
@@ -1851,8 +1859,8 @@ export class VisualStudioWebviewRouter {
 			this.state.clineMessages.push({
 				ts: this.activeToolActivityTs,
 				type: "say",
-				say: "text",
-				text: groupedText,
+				say: "api_req_started",
+				text: JSON.stringify({ request: groupedText, tokensIn: 0, tokensOut: 0, cacheWrites: 0, cacheReads: 0, cost: 0 }),
 				partial: true,
 				isCollapsed: true,
 				isExpanded: false,
@@ -1860,8 +1868,8 @@ export class VisualStudioWebviewRouter {
 		} else {
 			this.upsertMessage(this.activeToolActivityTs, {
 				type: "say",
-				say: "text",
-				text: groupedText,
+				say: "api_req_started",
+				text: JSON.stringify({ request: groupedText, tokensIn: 0, tokensOut: 0, cacheWrites: 0, cacheReads: 0, cost: 0 }),
 				partial: true,
 				isCollapsed: true,
 				isExpanded: false,
@@ -1880,8 +1888,15 @@ export class VisualStudioWebviewRouter {
 
 		this.upsertMessage(this.activeToolActivityTs, {
 			type: "say",
-			say: "text",
-			text: buildGroupedToolActivityText(this.activeToolActivityEntries, false),
+			say: "api_req_started",
+			text: JSON.stringify({
+				request: buildGroupedToolActivityText(this.activeToolActivityEntries, false),
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				cost: 0,
+			}),
 			partial: false,
 			isCollapsed: true,
 			isExpanded: false,
@@ -1995,6 +2010,15 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.activeAssistantTextBuffer = normalized
+		if (shouldFoldTextContentAsReasoning(normalized)) {
+			this.upsertFoldedReasoningText(normalized)
+			return
+		}
+		if (!accumulated && shouldDelayAssistantTextUntilClassified(normalized)) {
+			this.schedulePartialIdleWatchdog()
+			this.schedulePartialStateBroadcast()
+			return
+		}
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
 		this.upsertPartialText(normalized)
@@ -2787,20 +2811,46 @@ function summarizeCommandOutput(output: unknown) {
 	const summarized = records
 		.map((record) => {
 			const result = asRecord(tryParseJson(getString(record, "result")) ?? record.result)
-			const stdout = getString(result, "stdout")
-			const stderr = getString(result, "stderr")
+			const stdout = sanitizeConsoleOutput(getString(result, "stdout"))
+			const stderr = sanitizeConsoleOutput(getString(result, "stderr"))
 			const exitCode = result.exitCode
 			const parts = [
 				getString(record, "query"),
 				typeof exitCode === "number" ? `exitCode=${exitCode}` : "",
-				stdout ? `stdout:\n${stdout}` : "",
-				stderr ? `stderr:\n${stderr}` : "",
+				stdout ? `stdout:\n${truncateText(stdout, 1200)}` : "",
+				stderr ? `stderr:\n${truncateText(stderr, 800)}` : "",
 			]
 			return parts.filter(Boolean).join("\n")
 		})
 		.filter(Boolean)
 		.join("\n\n")
 	return summarized || text
+}
+
+function summarizeCommandLabel(output: unknown) {
+	const parsed = typeof output === "string" ? tryParseJson(output) : output
+	const records = Array.isArray(parsed) ? parsed.map(asRecord) : [asRecord(parsed)]
+	return records
+		.map((record) => {
+			const result = asRecord(tryParseJson(getString(record, "result")) ?? record.result)
+			const query = getString(record, "query")
+			const exitCode = result.exitCode
+			return [query, typeof exitCode === "number" ? `exitCode=${exitCode}` : ""].filter(Boolean).join(" ")
+		})
+		.filter(Boolean)
+		.join("\n")
+}
+
+function sanitizeConsoleOutput(text: string) {
+	const trimmed = text.trim()
+	if (!trimmed) {
+		return ""
+	}
+	const replacementCount = (trimmed.match(/\uFFFD|�/g) || []).length
+	if (replacementCount >= 4 || replacementCount > trimmed.length / 20) {
+		return "[console output omitted: text encoding could not be decoded reliably]"
+	}
+	return trimmed
 }
 
 function tryParseJson(value: string) {
@@ -3432,6 +3482,27 @@ function shouldFoldTextContentAsReasoning(text: string) {
 	return !shouldDropTokenizedReasoning(text) && looksLikeReasoningNarration(text)
 }
 
+function shouldDelayAssistantTextUntilClassified(text: string) {
+	const normalized = text.replace(/\s+/g, " ").trim()
+	if (!normalized) {
+		return false
+	}
+	if (normalized.length < 80) {
+		return true
+	}
+	const lower = normalized.toLowerCase()
+	return [
+		"the user",
+		"user ",
+		"we ",
+		"let",
+		"probably",
+		"maybe",
+		"need ",
+		"i ",
+	].some((prefix) => lower.startsWith(prefix))
+}
+
 function normalizeReasoningTranscriptText(text: string) {
 	const trimmed = text.trim()
 	if (!trimmed) {
@@ -3678,11 +3749,11 @@ function toolTranscriptToActivityEntries(text: string): ToolActivityEntry[] {
 		const parsedRecord = asRecord(parsed)
 		const query = getString(parsedRecord, "query")
 		if (looksLikeCommandText(query)) {
-			return [{ kind: "command", label: query }]
+			return [{ kind: "command", label: summarizeCommandLabel(parsed ?? result) || query }]
 		}
 		const commandSummary = summarizeCommandOutput(parsed ?? result)
 		if (looksLikeCommandText(commandSummary)) {
-			return [{ kind: "command", label: truncateText(commandSummary, 240) }]
+			return [{ kind: "command", label: summarizeCommandLabel(parsed ?? result) || truncateText(commandSummary, 240) }]
 		}
 		const paths = splitToolPaths(commandSummary)
 		if (paths.length > 0) {
