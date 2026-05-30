@@ -3054,7 +3054,13 @@ function unknownAgentChunkTextToTranscriptText(text: string) {
 	}
 
 	const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+	if (trimmed.length < 40 && !isToolTranscript(trimmed)) {
+		return ""
+	}
 	if (looksLikeTokenizedReasoning(lines)) {
+		return ""
+	}
+	if (looksLikeReasoningNarration(trimmed)) {
 		return ""
 	}
 
@@ -3069,6 +3075,16 @@ function looksLikeTokenizedReasoning(lines: string[]) {
 	const shortLines = lines.filter((line) => line.length <= 16).length
 	const avgLength = lines.reduce((total, line) => total + line.length, 0) / lines.length
 	return shortLines / lines.length >= 0.75 && avgLength <= 10
+}
+
+function looksLikeReasoningNarration(text: string) {
+	const normalized = text.replace(/\s+/g, " ").trim().toLowerCase()
+	return normalized.startsWith("the user says") ||
+		normalized.startsWith("user says") ||
+		normalized.startsWith("we need to") ||
+		normalized.startsWith("probably ") ||
+		normalized.startsWith("let's ") ||
+		normalized.startsWith("i need to")
 }
 
 function isToolTranscript(text: string) {

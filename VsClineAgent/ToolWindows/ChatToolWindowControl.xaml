@@ -24,6 +24,14 @@
                        Foreground="#888888"
                        FontSize="12"
                        HorizontalAlignment="Center" />
+            <ProgressBar x:Name="loadingProgress"
+                         IsIndeterminate="True"
+                         Width="220"
+                         Height="4"
+                         Margin="0,12,0,0"
+                         Foreground="#0E70C0"
+                         Background="#333333"
+                         BorderThickness="0" />
         </StackPanel>
 
         <TextBox x:Name="errorText"
