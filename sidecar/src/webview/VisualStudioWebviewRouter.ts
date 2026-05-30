@@ -42,6 +42,7 @@ export class VisualStudioWebviewRouter {
 	private messageSequence = 0
 	private activePartialTextTs: number | null = null
 	private partialIdleTimer: NodeJS.Timeout | null = null
+	private lastToolSummaries: string[] = []
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -165,10 +166,12 @@ export class VisualStudioWebviewRouter {
 				this.finalizeActivePartialText()
 				if (status === "completed" && activeText) {
 					this.addCompletionResult(activeText)
+				} else if (status === "completed" && !this.hasAssistantTextAfterLastUserMessage()) {
+					this.addCompletionResult(this.buildTerminalCompletionFallback(status))
+				} else if (status === "failed" || status === "error" || status === "cancelled" || status === "stopped") {
+					this.addCompletionResult(this.buildTerminalCompletionFallback(status))
 				}
-				if (status && status !== "idle") {
-					this.addApiRequestStarted(status)
-				}
+				this.clineSdk?.markSessionInactive(sessionId)
 				this.updateCurrentTaskItem()
 				this.broadcastState().catch((error) => console.error(error))
 				return
@@ -185,7 +188,14 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			const activeText = this.getActivePartialText()
 			this.finalizeActivePartialText()
+			if (activeText) {
+				this.addCompletionResult(activeText)
+			} else if (!this.hasAssistantTextAfterLastUserMessage()) {
+				this.addCompletionResult(this.buildTerminalCompletionFallback(getString(payload, "reason") || "ended"))
+			}
+			this.clineSdk?.markSessionInactive(sessionId)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}
@@ -506,6 +516,7 @@ export class VisualStudioWebviewRouter {
 		const taskItem = createHistoryItem(createId(), text, cwd, this.getModelId())
 
 		this.state.clineMessages = []
+		this.lastToolSummaries = []
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
@@ -875,24 +886,62 @@ export class VisualStudioWebviewRouter {
 			const isCommand = toolName === "bash" || toolName === "run_commands"
 			const mappedToolName = mapToolName(toolName)
 			const input = asRecord(event.input)
+			const text = isCommand
+				? truncateText(error || summarizeCommandOutput(event.output), readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
+				: JSON.stringify({
+						tool: mappedToolName,
+						path:
+							mappedToolName === "searchFiles"
+								? getToolPath(input) || getToolPath(asRecord(event.output)) || "/"
+								: getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output),
+						regex: mappedToolName === "searchFiles" ? getSearchQuery(input) || getSearchQuery(event.output) : undefined,
+						filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) || getSearchFilePattern(event.output) : undefined,
+						content: error || summarizeToolOutput(mappedToolName, event.output),
+						error: error || undefined,
+					})
+			this.rememberToolSummary(mappedToolName, text)
 			this.addMessage({
 				type: "say",
 				say: isCommand ? "command_output" : "tool",
-				text: isCommand
-					? truncateText(error || summarizeCommandOutput(event.output), readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
-					: JSON.stringify({
-							tool: mappedToolName,
-							path:
-								mappedToolName === "searchFiles"
-									? getToolPath(input) || getToolPath(asRecord(event.output)) || "/"
-									: getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output),
-							regex: mappedToolName === "searchFiles" ? getSearchQuery(input) || getSearchQuery(event.output) : undefined,
-							filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) || getSearchFilePattern(event.output) : undefined,
-							content: error || summarizeToolOutput(mappedToolName, event.output),
-							error: error || undefined,
-						}),
+				text,
 				commandCompleted: isCommand ? true : undefined,
 			})
+		}
+
+		if (type === "tool-finished") {
+			const toolCall = asRecord(event.toolCall)
+			const mappedToolName = mapToolName(getString(toolCall, "toolName"))
+			const result = asRecord(event.result)
+			const output = result.output ?? event.message
+			const input = asRecord(toolCall.input)
+			const text = JSON.stringify({
+				tool: mappedToolName,
+				path: getToolPathFromUnknown(input) || getToolPathFromUnknown(output),
+				content: summarizeToolOutput(mappedToolName, output),
+				error: result.isError === true ? summarizeToolOutput(mappedToolName, output) : undefined,
+			})
+			this.rememberToolSummary(mappedToolName, text)
+			this.addMessage({ type: "say", say: "tool", text })
+		}
+
+		if (type === "assistant-message") {
+			const text = contentToText(asRecord(event.message).content)
+			if (text.trim()) {
+				this.finalizeActivePartialText()
+				this.addMessage({ type: "say", say: "text", text })
+			}
+		}
+
+		if (type === "run-finished") {
+			const result = asRecord(event.result)
+			const text = getString(result, "outputText")
+			this.finalizeActivePartialText()
+			this.addCompletionResult(text || this.buildTerminalCompletionFallback(getString(result, "status") || "completed"))
+		}
+
+		if (type === "run-failed") {
+			this.finalizeActivePartialText()
+			this.addCompletionResult(this.buildTerminalCompletionFallback("failed"))
 		}
 
 		if (type === "usage") {
@@ -972,6 +1021,38 @@ export class VisualStudioWebviewRouter {
 			.find((message) => message.say === "text" && message.partial !== true)
 		const completionText = getString(lastText, "text").trim() === text.trim() ? "" : text
 		this.addMessage({ type: "ask", ask: "completion_result", text: completionText })
+	}
+
+	private hasAssistantTextAfterLastUserMessage() {
+		const lastUserIndex = findLastIndex(
+			this.state.clineMessages,
+			(message) => getString(message, "say") === "user_feedback" || getString(message, "say") === "task",
+		)
+		return this.state.clineMessages
+			.slice(lastUserIndex + 1)
+			.some((message) => getString(message, "say") === "text" && getString(message, "text").trim().length > 0 && message.partial !== true)
+	}
+
+	private buildTerminalCompletionFallback(status: string) {
+		const toolSummary = this.lastToolSummaries.slice(-5).join("\n")
+		if (status === "failed" || status === "error") {
+			return toolSummary ? `작업이 오류 상태로 종료되었습니다.\n\n${toolSummary}` : "작업이 오류 상태로 종료되었습니다."
+		}
+		if (status === "cancelled" || status === "stopped" || status === "aborted") {
+			return toolSummary ? `작업이 중단되었습니다.\n\n${toolSummary}` : "작업이 중단되었습니다."
+		}
+		return toolSummary ? `작업이 완료되었습니다.\n\n${toolSummary}` : "작업이 완료되었습니다."
+	}
+
+	private rememberToolSummary(tool: string, text: string) {
+		const parsed = asRecord(tryParseJson(text) ?? {})
+		const pathValue = getString(parsed, "path")
+		const content = getString(parsed, "content")
+		const summary = [tool, pathValue, content].filter(Boolean).join(": ")
+		this.lastToolSummaries.push(truncateText(summary || text, 2000))
+		if (this.lastToolSummaries.length > 20) {
+			this.lastToolSummaries = this.lastToolSummaries.slice(-20)
+		}
 	}
 
 	private async resolveEffectiveModelId(
@@ -1310,7 +1391,7 @@ function readLoopDetectionConfig() {
 }
 
 function isTerminalSdkStatus(status: string) {
-	return status === "completed" || status === "idle" || status === "stopped" || status === "cancelled" || status === "failed" || status === "error"
+	return status === "completed" || status === "stopped" || status === "cancelled" || status === "failed" || status === "error"
 }
 
 function stringify(value: unknown) {
@@ -1491,6 +1572,15 @@ function tryParseJson(value: string) {
 	} catch {
 		return undefined
 	}
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean) {
+	for (let index = items.length - 1; index >= 0; index--) {
+		if (predicate(items[index])) {
+			return index
+		}
+	}
+	return -1
 }
 
 function shouldAutoApproveTool(toolName: string, autoApprovalSettings: unknown) {
