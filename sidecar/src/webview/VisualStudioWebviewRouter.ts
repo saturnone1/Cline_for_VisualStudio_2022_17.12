@@ -51,6 +51,8 @@ export class VisualStudioWebviewRouter {
 	private messageSequence = 0
 	private activePartialTextTs: number | null = null
 	private partialIdleTimer: NodeJS.Timeout | null = null
+	private taskIdleTimer: NodeJS.Timeout | null = null
+	private lastTaskActivityAt = 0
 	private lastToolSummaries: string[] = []
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
@@ -182,7 +184,9 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			this.noteTaskActivity(status || type)
 			if (isTerminalSdkStatus(status)) {
+				this.clearTaskIdleWatchdog()
 				const activeText = this.getActivePartialText()
 				this.finalizeActivePartialText()
 				if (status === "completed" && activeText) {
@@ -209,6 +213,8 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			this.noteTaskActivity(type)
+			this.clearTaskIdleWatchdog()
 			const activeText = this.getActivePartialText()
 			this.finalizeActivePartialText()
 			if (activeText) {
@@ -558,6 +564,7 @@ export class VisualStudioWebviewRouter {
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
 		this.addApiRequestStarted("Cline SDK started.")
+		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
 		if (options.broadcast !== false) {
 			await this.broadcastState()
@@ -572,12 +579,21 @@ export class VisualStudioWebviewRouter {
 			config: await this.buildSdkConfig(cwd),
 			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
 		}).then(async (result) => {
-			if (result?.result?.text) {
-				this.addCompletionResult(result.result.text)
+			const resultRecord = asRecord(result)
+			const agentResult = asRecord(resultRecord.result)
+			const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
+			const sessionId = getString(resultRecord, "sessionId")
+			if (resultText) {
+				this.addCompletionResult(resultText)
+				this.clineSdk?.markSessionInactive(sessionId)
+			} else if (agentResult && Object.keys(agentResult).length > 0 && !this.hasAssistantTextAfterLastUserMessage()) {
+				this.addCompletionResult(this.buildTerminalCompletionFallback(getString(agentResult, "finishReason") || "completed"))
+				this.clineSdk?.markSessionInactive(sessionId)
 			}
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
 		}).catch(async (error) => {
+			this.clearTaskIdleWatchdog()
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
@@ -668,6 +684,7 @@ export class VisualStudioWebviewRouter {
 		if (this.clineSdk) {
 			await this.clineSdk.stop({})
 		}
+		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.finalizeActivePartialText()
 		this.addMessage({ type: "ask", ask: "resume_task", text: "Task was cancelled." })
@@ -680,6 +697,7 @@ export class VisualStudioWebviewRouter {
 		if (this.clineSdk) {
 			await this.clineSdk.stop({})
 		}
+		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.state.currentTaskItem = null
 		this.state.clineMessages = []
@@ -893,6 +911,7 @@ export class VisualStudioWebviewRouter {
 	private handleAgentEvent(event: Record<string, unknown>) {
 		const type = getString(event, "type")
 		const contentType = getString(event, "contentType")
+		this.noteTaskActivity(type || contentType || "agent_event")
 
 		if (type === "content_start" && contentType === "text") {
 			const text = getString(event, "accumulated") || getString(event, "text")
@@ -1156,6 +1175,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		this.clearTaskIdleWatchdog()
 		this.finalizeActivePartialText()
 		if (this.state.clineMessages.some((message) => message.say === "completion_result" || message.ask === "completion_result")) {
 			return
@@ -1182,6 +1202,11 @@ export class VisualStudioWebviewRouter {
 		const toolSummary = this.lastToolSummaries.slice(-5).join("\n")
 		if (status === "failed" || status === "error") {
 			return toolSummary ? `작업이 오류 상태로 종료되었습니다.\n\n${toolSummary}` : "작업이 오류 상태로 종료되었습니다."
+		}
+		if (status === "stalled" || status === "idle-timeout") {
+			return toolSummary
+				? `Cline SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다.\n\n마지막으로 확인된 작업:\n${toolSummary}`
+				: "Cline SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다."
 		}
 		if (status === "cancelled" || status === "stopped" || status === "aborted") {
 			return toolSummary ? `작업이 중단되었습니다.\n\n${toolSummary}` : "작업이 중단되었습니다."
@@ -1285,6 +1310,10 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addMessage(message: Record<string, unknown>) {
+		if (isMeaninglessToolMessage(message)) {
+			logInteraction("sidecar", "skipMeaninglessToolMessage", message)
+			return
+		}
 		this.state.clineMessages.push({
 			ts: Date.now() + this.messageSequence++,
 			...normalizeClineMessagePayload(message),
@@ -1394,6 +1423,50 @@ export class VisualStudioWebviewRouter {
 		if (this.partialIdleTimer) {
 			clearTimeout(this.partialIdleTimer)
 			this.partialIdleTimer = null
+		}
+	}
+
+	private noteTaskActivity(reason: string) {
+		if (!this.state.currentTaskItem) {
+			return
+		}
+		this.lastTaskActivityAt = Date.now()
+		logInteraction("sidecar", "taskActivity", { reason })
+		this.scheduleTaskIdleWatchdog()
+	}
+
+	private scheduleTaskIdleWatchdog() {
+		this.clearTaskIdleWatchdog()
+		if (!this.state.currentTaskItem) {
+			return
+		}
+		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 180000)
+		this.taskIdleTimer = setTimeout(() => {
+			if (!this.state.currentTaskItem) {
+				return
+			}
+			const idleForMs = Date.now() - this.lastTaskActivityAt
+			if (idleForMs < timeoutMs - 1000) {
+				this.scheduleTaskIdleWatchdog()
+				return
+			}
+
+			logInteraction("sidecar", "taskIdleComplete", { timeoutMs, idleForMs })
+			const activeText = this.getActivePartialText()
+			this.finalizeActivePartialText()
+			this.addCompletionResult(activeText || this.buildTerminalCompletionFallback("stalled"))
+			const activeSessionId = this.clineSdk?.status.activeSessionId
+			this.clineSdk?.stop({ sessionId: activeSessionId }).catch((error) => console.error(error))
+			this.clineSdk?.markSessionInactive(activeSessionId || undefined)
+			this.updateCurrentTaskItem()
+			this.broadcastState().catch((error) => console.error(error))
+		}, timeoutMs)
+	}
+
+	private clearTaskIdleWatchdog() {
+		if (this.taskIdleTimer) {
+			clearTimeout(this.taskIdleTimer)
+			this.taskIdleTimer = null
 		}
 	}
 
@@ -1869,6 +1942,28 @@ function normalizeClineMessagePayload(message: Record<string, unknown>) {
 	}
 
 	return normalized
+}
+
+function isMeaninglessToolMessage(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	const ask = getString(message, "ask")
+	if (say !== "tool" && ask !== "tool") {
+		return false
+	}
+
+	const text = getString(message, "text")
+	if (text && !isJsonObjectString(text)) {
+		return false
+	}
+
+	const parsed = asRecord(tryParseJson(text || "{}") ?? {})
+	return (
+		!getString(parsed, "tool") &&
+		!getString(parsed, "path") &&
+		!getString(parsed, "content") &&
+		!getString(parsed, "command") &&
+		!getString(parsed, "error")
+	)
 }
 
 function isJsonObjectString(value: string) {

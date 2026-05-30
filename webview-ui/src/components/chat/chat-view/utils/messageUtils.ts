@@ -33,6 +33,18 @@ export function isLowStakesTool(message: ClineMessage): boolean {
 	}
 }
 
+function isMeaninglessToolMessage(message: ClineMessage): boolean {
+	if (message.say !== "tool" && message.ask !== "tool") {
+		return false
+	}
+	try {
+		const tool = JSON.parse(message.text || "{}") as Record<string, unknown>
+		return !tool.tool && !tool.path && !tool.content && !tool.command && !tool.error
+	} catch {
+		return false
+	}
+}
+
 /**
  * Check if a message group is a tool group (array with _isToolGroup marker)
  */
@@ -52,6 +64,9 @@ export function processMessages(messages: ClineMessage[]): ClineMessage[] {
  */
 export function filterVisibleMessages(messages: ClineMessage[]): ClineMessage[] {
 	return messages.filter((message, index, arr) => {
+		if (isMeaninglessToolMessage(message)) {
+			return false
+		}
 		switch (message.ask) {
 			case "completion_result":
 				// don't show a chat row for a completion_result ask without text. This specific type of message only occurs if cline wants to execute a command as part of its completion result, in which case we interject the completion_result tool with the execute_command tool.
