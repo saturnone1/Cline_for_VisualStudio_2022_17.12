@@ -77,6 +77,7 @@ export class VisualStudioWebviewRouter {
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
 	private changeSummaryTimer: NodeJS.Timeout | null = null
 	private readonly closingSessionIds = new Set<string>()
+	private readonly deletedTaskIds = new Set<string>()
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -549,11 +550,7 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.deleteAllTaskHistory":
-				this.taskSnapshots.clear()
-				this.state.taskHistory = []
-				if (!this.state.currentTaskItem) {
-					this.state.clineMessages = []
-				}
+				await this.deleteAllTasks()
 				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
@@ -1135,12 +1132,62 @@ export class VisualStudioWebviewRouter {
 
 		const ids = new Set(taskIds)
 		for (const id of ids) {
-			await this.clineSdk?.deleteSession({ sessionId: id }).catch(() => false)
+			this.deletedTaskIds.add(id)
+			const deleted = await this.clineSdk?.deleteSession({ sessionId: id }).catch((error) => {
+				logInteraction("sidecar", "deleteSessionFailed", {
+					sessionId: id,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return false
+			})
+			logInteraction("sidecar", "deleteSessionRequested", { sessionId: id, deleted })
 			this.taskSnapshots.delete(id)
 		}
-		this.state.taskHistory = this.state.taskHistory.filter((item) => !ids.has(String(item.id || "")))
+		this.state.taskHistory = removeDeletedHistoryItems(this.state.taskHistory, this.deletedTaskIds)
 		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
+			this.clearLiveInteractionState("deleteTasks")
 			this.state.currentTaskItem = null
+			this.state.clineMessages = []
+		}
+	}
+
+	private async deleteAllTasks() {
+		const ids = new Set(this.state.taskHistory.map((item) => String(item.id || "")).filter(Boolean))
+		if (this.clineSdk) {
+			const sdkHistory = await this.clineSdk.listHistory({ limit: 1000 }).catch((error) => {
+				logInteraction("sidecar", "deleteAllListHistoryFailed", {
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return null
+			})
+			if (Array.isArray(sdkHistory)) {
+				for (const session of sdkHistory) {
+					const id = getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")
+					if (id) {
+						ids.add(id)
+					}
+				}
+			}
+		}
+
+		for (const id of ids) {
+			this.deletedTaskIds.add(id)
+			await this.clineSdk?.deleteSession({ sessionId: id }).catch((error) => {
+				logInteraction("sidecar", "deleteAllSessionFailed", {
+					sessionId: id,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return false
+			})
+		}
+
+		this.taskSnapshots.clear()
+		this.state.taskHistory = []
+		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
+			this.clearLiveInteractionState("deleteAllTasks")
+			this.state.currentTaskItem = null
+		}
+		if (!this.state.currentTaskItem) {
 			this.state.clineMessages = []
 		}
 	}
@@ -1170,7 +1217,10 @@ export class VisualStudioWebviewRouter {
 
 		const sdkHistory = await this.clineSdk.listHistory({ limit: 200 }).catch(() => null)
 		if (Array.isArray(sdkHistory)) {
-			this.state.taskHistory = sdkHistory.map((session) => sdkSessionToHistoryItem(asRecord(session)))
+			this.state.taskHistory = removeDeletedHistoryItems(
+				sdkHistory.map((session) => sdkSessionToHistoryItem(asRecord(session))),
+				this.deletedTaskIds,
+			)
 		}
 	}
 
@@ -3648,6 +3698,13 @@ function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 		modelId: getString(metadata, "modelId") || getString(session, "modelId") || "",
 		latestCheckpointRunCount: getNumber(latestCheckpoint, "runCount"),
 	}
+}
+
+function removeDeletedHistoryItems(items: Array<Record<string, unknown>>, deletedTaskIds: Set<string>) {
+	if (deletedTaskIds.size === 0) {
+		return items
+	}
+	return items.filter((item) => !deletedTaskIds.has(String(item.id || "")))
 }
 
 function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, unknown>) {

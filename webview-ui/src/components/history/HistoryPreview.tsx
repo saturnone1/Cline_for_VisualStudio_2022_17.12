@@ -9,7 +9,7 @@ type HistoryPreviewProps = {
 }
 
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
-	const { taskHistory } = useExtensionState()
+	const { didHydrateState, taskHistory } = useExtensionState()
 	const [loadedHistory, setLoadedHistory] = useState<typeof taskHistory>([])
 	const [hasLoadedHistory, setHasLoadedHistory] = useState(false)
 
@@ -35,8 +35,9 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 	}, [])
 
 	const visibleTasks = useMemo(() => {
+		const source = didHydrateState ? taskHistory : loadedHistory.length > 0 ? loadedHistory : taskHistory
 		const map = new Map<string, (typeof taskHistory)[number]>()
-		for (const item of [...loadedHistory, ...taskHistory]) {
+		for (const item of source) {
 			if (item.id && item.ts && item.task && !map.has(item.id)) {
 				map.set(item.id, item)
 			}
@@ -44,7 +45,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 		return Array.from(map.values())
 			.sort((a, b) => (b.ts || 0) - (a.ts || 0))
 			.slice(0, 3)
-	}, [loadedHistory, taskHistory])
+	}, [didHydrateState, loadedHistory, taskHistory])
 
 	const handleHistorySelect = (id: string) => {
 		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>
