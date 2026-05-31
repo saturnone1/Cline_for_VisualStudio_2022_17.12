@@ -179,6 +179,32 @@ function looksLikeTokenizedReasoningBlock(text: string) {
 	return (shortLines / lines.length >= 0.72 && avgLength <= 12) || wordLikeShortLines / lines.length >= 0.6
 }
 
+function normalizeTokenizedReasoningBlock(text: string) {
+	const tokens = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+	let result = ""
+
+	for (const token of tokens) {
+		if (!result) {
+			result = token
+			continue
+		}
+
+		const previous = result[result.length - 1] || ""
+		const isClosingPunctuation = /^[,.;:!?%)\]}]$/.test(token)
+		const isOpeningPunctuation = /^[(\[{]$/.test(previous)
+		const isSingleHangulContinuation = /^[가-힣]$/.test(previous) && /^[가-힣]$/.test(token)
+		const isQuoteBoundary = previous === "\"" || token === "\"" || previous === "'" || token === "'"
+		const separator = isClosingPunctuation || isOpeningPunctuation || isSingleHangulContinuation || isQuoteBoundary ? "" : " "
+		result += `${separator}${token}`
+	}
+
+	return result
+		.replace(/\s+([,.;:!?%)\]}])/g, "$1")
+		.replace(/([(\[{])\s+/g, "$1")
+		.replace(/\s{2,}/g, " ")
+		.trim()
+}
+
 const ChatRow = memo(
 	(props: ChatRowProps) => {
 		const { isLast, onHeightChange, message } = props
@@ -980,13 +1006,16 @@ export const ChatRowContent = memo(
 					case "reasoning": {
 						const isReasoningStreaming = message.partial === true
 						const reasoningContent = message.reasoning || message.text || ""
-						const hasReasoningText = !!reasoningContent.trim()
 						const isSyntheticThinkingLoader = message.ts === Number.MIN_SAFE_INTEGER
-						if (!isSyntheticThinkingLoader && looksLikeTokenizedReasoningBlock(reasoningContent)) {
-							return <InvisibleSpacer />
-						}
+						const isTokenizedNoise = !isSyntheticThinkingLoader && looksLikeTokenizedReasoningBlock(reasoningContent)
+						const visibleReasoningContent = isTokenizedNoise ? normalizeTokenizedReasoningBlock(reasoningContent) : reasoningContent
+						const hasReasoningText = !!visibleReasoningContent.trim()
 						const title = message.reasoning
-							? message.text?.trim() || "모델 진행 중"
+							? isReasoningStreaming
+								? message.text?.trim() || "모델 진행 중"
+								: message.text?.trim() === "모델 진행 중"
+									? "모델 진행 기록"
+									: message.text?.trim() || "모델 진행 기록"
 							: isReasoningStreaming
 								? "Thinking..."
 								: "Thinking"
@@ -999,7 +1028,7 @@ export const ChatRowContent = memo(
 									isStreaming={isReasoningStreaming}
 									isVisible={true}
 									onToggle={hasReasoningText && !isSyntheticThinkingLoader ? handleToggle : undefined}
-									reasoningContent={reasoningContent}
+									reasoningContent={visibleReasoningContent}
 									showChevron={hasReasoningText}
 									showTitle={true}
 									title={title}

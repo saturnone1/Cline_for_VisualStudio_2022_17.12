@@ -574,6 +574,11 @@ export class VisualStudioWebviewRouter {
 				await this.toggleSdkSetting("rules", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
 
+			case "FileService.toggleCursorRule":
+			case "FileService.toggleWindsurfRule":
+			case "FileService.toggleAgentsRule":
+				return grpcHandled(grpcResponse(requestId, {}, false))
+
 			case "FileService.toggleWorkflow":
 				await this.toggleSdkSetting("workflows", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
@@ -581,6 +586,16 @@ export class VisualStudioWebviewRouter {
 			case "FileService.toggleSkill":
 				await this.toggleSdkSetting("skills", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
+
+			case "FileService.createRuleFile":
+			case "FileService.deleteRuleFile":
+			case "FileService.refreshHooks":
+			case "FileService.createHook":
+			case "FileService.deleteHook":
+			case "FileService.toggleHook":
+			case "FileService.createSkillFile":
+			case "FileService.deleteSkillFile":
+				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "FileService.openVsClineDiff": {
 				const leftPath = getString(message, "leftPath") || getString(message, "beforePath")
@@ -594,6 +609,48 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 			}
 
+			case "FileService.copyToClipboard":
+				return grpcHandled(grpcResponse(requestId, {}, false))
+
+			case "FileService.ifFileExistsRelativePath": {
+				const relativePath = getString(message, "value") || getString(message, "path") || getString(message, "relativePath")
+				const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+				const fullPath = workspaceRoot && relativePath ? path.resolve(workspaceRoot, relativePath) : ""
+				const exists = fullPath ? fs.existsSync(fullPath) : false
+				return grpcHandled(grpcResponse(requestId, { value: exists }, false))
+			}
+
+			case "FileService.getRelativePaths":
+				return grpcHandled(grpcResponse(requestId, { values: [], paths: [] }, false))
+
+			case "FileService.searchFiles":
+			case "FileService.searchCommits":
+				return grpcHandled(grpcResponse(requestId, { results: [], values: [] }, false))
+
+			case "FileService.selectFiles":
+				return grpcHandled(grpcResponse(requestId, { files: [], values: [] }, false))
+
+			case "FileService.openMention":
+			case "FileService.openDiskConversationHistory":
+			case "FileService.openFocusChainFile":
+			case "FileService.openImage":
+				return grpcHandled(grpcResponse(requestId, {}, false))
+
+			case "FileService.openFile":
+			case "FileService.openFileRelativePath": {
+				const filePath =
+					getString(message, "filePath") ||
+					getString(message, "path") ||
+					getString(message, "value") ||
+					getString(message, "relativePath")
+				const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+				const fullPath = path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath
+				if (fullPath) {
+					await host.windowClient.openFile({ filePath: fullPath, line: getNumber(message, "line") })
+				}
+				return grpcHandled(grpcResponse(requestId, {}, false))
+			}
+
 			case "ModelsService.getOllamaModels": {
 				const values = await getOllamaModels(getString(message, "value"))
 				if (values.length > 0) {
@@ -602,6 +659,58 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, { values }, false))
 			}
 
+			case "ModelsService.getVsCodeLmModels":
+			case "ModelsService.getSapAiCoreModels":
+			case "ModelsService.getLmStudioModels":
+			case "ModelsService.getAihubmixModels":
+			case "ModelsService.refreshOpenAiModels":
+			case "ModelsService.refreshOcaModels":
+			case "ModelsService.refreshOpenRouterModelsRpc":
+			case "ModelsService.refreshLiteLlmModelsRpc":
+			case "ModelsService.refreshHicapModels":
+			case "ModelsService.refreshBasetenModelsRpc":
+			case "ModelsService.refreshVercelAiGatewayModelsRpc":
+			case "ModelsService.refreshClineModelsRpc":
+			case "ModelsService.refreshRequestyModels":
+			case "ModelsService.refreshHuggingFaceModels":
+			case "ModelsService.refreshGroqModelsRpc":
+			case "ModelsService.refreshClineRecommendedModelsRpc":
+				return grpcHandled(grpcResponse(requestId, this.createCurrentModelCatalog(), false))
+
+			case "WorktreeService.listWorktrees":
+				return grpcHandled(grpcResponse(requestId, { worktrees: [], items: [] }, false))
+
+			case "WorktreeService.getWorktreeDefaults":
+				return grpcHandled(grpcResponse(requestId, { branch: "", baseBranch: "", cwd: await this.getPrimaryWorkspaceRoot() }, false))
+
+			case "WorktreeService.getWorktreeIncludeStatus":
+				return grpcHandled(grpcResponse(requestId, { enabled: false, included: false }, false))
+
+			case "WorktreeService.createWorktreeInclude":
+			case "WorktreeService.createWorktree":
+			case "WorktreeService.switchWorktree":
+			case "WorktreeService.mergeWorktree":
+			case "WorktreeService.deleteWorktree":
+			case "WorktreeService.trackWorktreeViewOpened":
+				return grpcHandled(grpcResponse(requestId, {}, false))
+
+			case "McpService.getLatestMcpServers":
+				return grpcHandled(grpcResponse(requestId, { mcpServers: [], servers: [] }, false))
+
+			case "McpService.refreshMcpMarketplace":
+				return grpcHandled(grpcResponse(requestId, { catalog: [], items: [] }, false))
+
+			case "McpService.addRemoteMcpServer":
+			case "McpService.openMcpSettings":
+			case "McpService.updateMcpTimeout":
+			case "McpService.restartMcpServer":
+			case "McpService.deleteMcpServer":
+			case "McpService.toggleToolAutoApprove":
+			case "McpService.toggleMcpServer":
+			case "McpService.authenticateMcpServer":
+			case "McpService.downloadMcp":
+				return grpcHandled(grpcResponse(requestId, {}, false))
+
 			case "TaskService.toggleTaskFavorite":
 				this.toggleTaskFavorite(getString(message, "taskId"), asRecord(message).isFavorited === true)
 				await this.broadcastState()
@@ -609,6 +718,45 @@ export class VisualStudioWebviewRouter {
 
 			default:
 				return null
+		}
+	}
+
+	private async getPrimaryWorkspaceRoot() {
+		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({}).catch(() => [])
+		return workspaceRoots[0] || String(this.state.currentTaskItem?.cwdOnTaskInitialization || process.cwd())
+	}
+
+	private clearLiveInteractionState(reason: string) {
+		const hadState =
+			!!this.pendingApproval ||
+			!!this.pendingQuestion ||
+			!!this.activePartialTextTs ||
+			!!this.activeStatusTextTs ||
+			!!this.activeReasoningTextTs ||
+			!!this.activeToolActivityTs ||
+			this.activeToolActivityEntries.length > 0 ||
+			!!this.activeAssistantTextBuffer ||
+			!!this.activeFoldedReasoningText ||
+			!!this.activeFoldedActivityText
+
+		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
+		this.pendingApproval?.resolve({ approved: false, reason: `Cleared by ${reason}.` })
+		this.pendingApproval = null
+		this.pendingQuestion?.resolve("")
+		this.pendingQuestion = null
+		this.activePartialTextTs = null
+		this.activeAssistantTextBuffer = ""
+		this.activeStatusTextTs = null
+		this.activeReasoningTextTs = null
+		this.activeFoldedReasoningText = ""
+		this.activeFoldedActivityText = ""
+		this.activeToolActivityTs = null
+		this.activeToolActivityEntries = []
+
+		if (hadState) {
+			logInteraction("sidecar", "clearedLiveInteractionState", { reason })
 		}
 	}
 
@@ -666,15 +814,24 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const responseType = getString(message, "responseType")
-		if (this.pendingApproval) {
+		const text = buildTaskInputWithAttachments(getString(message, "text"), getStringArray(message, "images"), getStringArray(message, "files"))
+		const activeSessionId = this.clineSdk.status.activeSessionId
+		const selectedSessionId = String(this.state.currentTaskItem?.id || "")
+		logInteraction("sidecar", "sendAskResponse.received", {
+			responseType,
+			textLength: text.length,
+			hasPendingApproval: !!this.pendingApproval,
+			hasPendingQuestion: !!this.pendingQuestion,
+			activeSessionId,
+			selectedSessionId,
+		})
+
+		if (this.pendingApproval && activeSessionId) {
 			const approved = responseType === "yesButtonClicked"
-			const feedback = buildTaskInputWithAttachments(
-				getString(message, "text"),
-				getStringArray(message, "images"),
-				getStringArray(message, "files"),
-			)
+			const feedback = text
 			const pending = this.pendingApproval
 			this.pendingApproval = null
+			logInteraction("sidecar", "sendAskResponse.pendingApproval", { approved, activeSessionId })
 			this.addMessage({
 				type: "say",
 				say: "user_feedback",
@@ -688,32 +845,46 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		if (this.pendingQuestion) {
+		if (this.pendingQuestion && activeSessionId) {
 			const answer = getAskResponseText(message)
-			const text = buildTaskInputWithAttachments(answer, getStringArray(message, "images"), getStringArray(message, "files"))
+			const answerText = buildTaskInputWithAttachments(answer, getStringArray(message, "images"), getStringArray(message, "files"))
 			const pending = this.pendingQuestion
 			this.pendingQuestion = null
+			logInteraction("sidecar", "sendAskResponse.pendingQuestion", { activeSessionId, answerLength: answerText.length })
 			this.removeAskMessages("followup")
 			this.addMessage({
 				type: "say",
 				say: "user_feedback",
-				text: text.trim() || "No response.",
+				text: answerText.trim() || "No response.",
 				images: getStringArray(message, "images"),
 				files: getStringArray(message, "files"),
 			})
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
-			pending.resolve(text.trim())
+			pending.resolve(answerText.trim())
 			return
 		}
 
-		const text = buildTaskInputWithAttachments(getString(message, "text"), getStringArray(message, "images"), getStringArray(message, "files"))
 		if (!text.trim()) {
 			return
 		}
 
-		const sessionId = this.clineSdk.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		if (this.pendingApproval || this.pendingQuestion) {
+			logInteraction("sidecar", "sendAskResponse.stalePendingIgnored", {
+				hasPendingApproval: !!this.pendingApproval,
+				hasPendingQuestion: !!this.pendingQuestion,
+				activeSessionId,
+				selectedSessionId,
+			})
+			this.pendingApproval?.resolve({ approved: false, reason: "Superseded by resumed chat message." })
+			this.pendingApproval = null
+			this.pendingQuestion?.resolve("")
+			this.pendingQuestion = null
+		}
+
+		const sessionId = selectedSessionId || activeSessionId
 		if (!sessionId) {
+			logInteraction("sidecar", "sendAskResponse.startNewTask", { textLength: text.length })
 			await this.startNewTask(
 				{
 					text: getString(message, "text"),
@@ -730,9 +901,14 @@ export class VisualStudioWebviewRouter {
 		await this.broadcastState()
 
 		if (this.clineSdk.status.activeSessionId !== sessionId) {
+			logInteraction("sidecar", "sendAskResponse.activateSession", {
+				from: this.clineSdk.status.activeSessionId,
+				to: sessionId,
+			})
 			await this.clineSdk.activateSession(sessionId)
 		}
 
+		logInteraction("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength: text.length })
 		this.clineSdk.send({
 			sessionId,
 			prompt: getString(message, "text"),
@@ -836,6 +1012,7 @@ export class VisualStudioWebviewRouter {
 
 	private async showTaskWithId(taskId: string) {
 		if (this.clineSdk && taskId) {
+			this.clearLiveInteractionState("showTaskWithId")
 			this.closingSessionIds.delete(taskId)
 			const session = asRecord(await this.clineSdk.activateSession(taskId))
 			const messages = await this.clineSdk.readMessages({ sessionId: taskId })
@@ -863,6 +1040,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		this.clearLiveInteractionState("showTaskWithId:snapshot")
 		this.state.currentTaskItem = { ...snapshot.taskItem }
 		this.state.clineMessages = snapshot.messages.map((message) => ({ ...message }))
 		await this.broadcastState()
@@ -926,6 +1104,9 @@ export class VisualStudioWebviewRouter {
 
 		const activeSessionId = this.clineSdk.status.activeSessionId
 		if (activeSessionId && activeSessionId !== taskId) {
+			return
+		}
+		if (activeSessionId === taskId && this.state.clineMessages.length > 0) {
 			return
 		}
 		if (activeSessionId === taskId && this.activePartialTextTs) {
@@ -1431,7 +1612,11 @@ export class VisualStudioWebviewRouter {
 					? `Cline SDK iteration ${iteration} finished. Tool calls: ${toolCallCount}.`
 					: `Cline SDK iteration finished. Tool calls: ${toolCallCount}.`,
 			)
-			if (!hadToolCalls && !this.hasCompletionResult() && (this.getActivePartialText().trim() || this.hasAssistantTextAfterLastUserMessage())) {
+			if (
+				!hadToolCalls &&
+				!this.hasCompletionResultAfterLastUserMessage() &&
+				(this.getActivePartialText().trim() || this.hasAssistantTextAfterLastUserMessage())
+			) {
 				logInteraction("sidecar", "iterationEndCompletesTurn", {
 					sessionId,
 					iteration,
@@ -1755,6 +1940,20 @@ export class VisualStudioWebviewRouter {
 		return this.state.clineMessages.some((message) => message.say === "completion_result" || message.ask === "completion_result")
 	}
 
+	private getLastUserMessageIndex() {
+		return findLastIndex(
+			this.state.clineMessages,
+			(message) => getString(message, "say") === "user_feedback" || getString(message, "say") === "task",
+		)
+	}
+
+	private hasCompletionResultAfterLastUserMessage() {
+		const lastUserIndex = this.getLastUserMessageIndex()
+		return this.state.clineMessages
+			.slice(lastUserIndex + 1)
+			.some((message) => getString(message, "say") === "completion_result" || getString(message, "ask") === "completion_result")
+	}
+
 	private finishSdkTask(sessionId: string, status: string, text = "") {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
@@ -1777,7 +1976,7 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addCompletionResultMarker(status: string) {
-		if (this.hasCompletionResult()) {
+		if (this.hasCompletionResultAfterLastUserMessage()) {
 			return
 		}
 
@@ -1792,10 +1991,7 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {
-		const lastUserIndex = findLastIndex(
-			this.state.clineMessages,
-			(message) => getString(message, "say") === "user_feedback" || getString(message, "say") === "task",
-		)
+		const lastUserIndex = this.getLastUserMessageIndex()
 		return this.state.clineMessages
 			.slice(lastUserIndex + 1)
 			.some((message) => getString(message, "say") === "text" && getString(message, "text").trim().length > 0 && message.partial !== true)
@@ -1913,6 +2109,10 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addMessage(message: Record<string, unknown>) {
+		if (isMeaninglessTextMessage(message)) {
+			logInteraction("sidecar", "skipMeaninglessTextMessage", message)
+			return
+		}
 		if (isMeaninglessToolMessage(message)) {
 			logInteraction("sidecar", "skipMeaninglessToolMessage", message)
 			return
@@ -2114,12 +2314,30 @@ export class VisualStudioWebviewRouter {
 		if (previousNormalized.includes(cappedNormalized)) {
 			return
 		}
+		if (!this.activeReasoningTextTs && this.hasRecentFoldedReasoning(capped)) {
+			return
+		}
 
 		this.activeFoldedReasoningText = truncateText(
 			cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
 			readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
 		)
 		this.upsertFoldedProgressMessage()
+	}
+
+	private hasRecentFoldedReasoning(text: string) {
+		const normalized = normalizeTranscriptText(text)
+		if (!normalized) {
+			return true
+		}
+
+		return this.state.clineMessages.slice(-6).some((message) => {
+			if (getString(message, "say") !== "reasoning") {
+				return false
+			}
+			const existing = normalizeTranscriptText(getString(message, "reasoning"))
+			return existing === normalized || existing.includes(normalized) || normalized.includes(existing)
+		})
 	}
 
 	private upsertFoldedActivityText(text: string) {
@@ -2179,7 +2397,12 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		this.upsertMessage(this.activeReasoningTextTs, { partial: false, isCollapsed: true, isExpanded: false })
+		this.upsertMessage(this.activeReasoningTextTs, {
+			text: "모델 진행 기록",
+			partial: false,
+			isCollapsed: true,
+			isExpanded: false,
+		})
 		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
 		this.sendPartialMessage(progressMessage)
 		this.activeReasoningTextTs = null
@@ -2310,7 +2533,7 @@ export class VisualStudioWebviewRouter {
 		this.lastTaskActivityReason = reason
 		this.removeActiveStatusText()
 		logInteraction("sidecar", "taskActivity", { reason })
-		if (this.hasCompletionResult() || isTerminalSdkStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
+		if (this.hasCompletionResultAfterLastUserMessage() || isTerminalSdkStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
 			this.clearTaskIdleWatchdog()
 			this.clearPartialIdleWatchdog()
 			this.clearPartialStateBroadcastTimer()
@@ -2505,6 +2728,21 @@ export class VisualStudioWebviewRouter {
 		}
 
 		return resolveModelId(apiConfig, providerId, modePrefix) || process.env.CLINE_MODEL_ID || "claude-sonnet-4-6"
+	}
+
+	private createCurrentModelCatalog() {
+		const id = this.getModelId()
+		const model = {
+			id,
+			name: id,
+			contextWindow: 128000,
+			maxTokens: 128000,
+			capabilities: ["tools", "reasoning"],
+		}
+		return {
+			models: { [id]: model },
+			values: [model],
+		}
 	}
 
 	private async broadcastState() {
@@ -3170,6 +3408,15 @@ function isMeaninglessToolMessage(message: Record<string, unknown>) {
 	)
 }
 
+function isMeaninglessTextMessage(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	const ask = getString(message, "ask")
+	if (ask || say !== "text") {
+		return false
+	}
+	return isEmptyJsonObjectString(getString(message, "text"))
+}
+
 function isJsonObjectString(value: string) {
 	try {
 		const parsed = JSON.parse(value)
@@ -3177,6 +3424,23 @@ function isJsonObjectString(value: string) {
 	} catch {
 		return false
 	}
+}
+
+function isEmptyJsonObjectString(value: string) {
+	const trimmed = value.trim()
+	if (trimmed !== "{}") {
+		return false
+	}
+	try {
+		const parsed = JSON.parse(trimmed)
+		return isEmptyPlainObject(parsed)
+	} catch {
+		return false
+	}
+}
+
+function isEmptyPlainObject(value: unknown) {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0
 }
 
 function toProtoClineMessage(message: Record<string, unknown>) {
@@ -3305,7 +3569,55 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 	}
 
 	const result: Array<Record<string, unknown>> = []
+	const toolEntries: ToolActivityEntry[] = []
+	const reasoningParts: string[] = []
 	let messageIndex = 0
+	const flushToolEntries = (ts: number) => {
+		const uniqueEntries = uniqueToolActivityEntries(toolEntries)
+		if (uniqueEntries.length === 0) {
+			return
+		}
+
+		result.push({
+			ts,
+			type: "say",
+			say: "api_req_started",
+			text: JSON.stringify({
+				request: buildGroupedToolActivityText(uniqueEntries, false),
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				cost: 0,
+			}),
+			partial: false,
+			isCollapsed: true,
+			isExpanded: false,
+		})
+		toolEntries.length = 0
+	}
+	const flushReasoning = (ts: number) => {
+		const reasoning = uniqueStrings(reasoningParts)
+			.filter((part) => part && part !== "모델 진행 중")
+			.join("\n\n")
+		if (!reasoning) {
+			reasoningParts.length = 0
+			return
+		}
+
+		result.push({
+			ts,
+			type: "say",
+			say: "reasoning",
+			text: "모델 내부 추론",
+			reasoning,
+			partial: false,
+			isCollapsed: true,
+			isExpanded: false,
+		})
+		reasoningParts.length = 0
+	}
+
 	for (const message of messages) {
 		const record = asRecord(message)
 		const role = getString(record, "role")
@@ -3313,23 +3625,29 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 		let partOffset = 0
 		if (role === "user") {
 			const text = contentToText(record.content)
-			result.push({ ts: ts + partOffset++, type: "say", say: result.length === 0 ? "task" : "user_feedback", text })
+			const entries = sdkContentToToolActivityEntries(record.content)
+			if (result.length === 0) {
+				result.push({ ts: ts + partOffset++, type: "say", say: "task", text })
+			} else if (entries.length > 0) {
+				toolEntries.push(...entries)
+			} else if (text.trim()) {
+				flushToolEntries(ts + partOffset++)
+				flushReasoning(ts + partOffset++)
+				result.push({ ts: ts + partOffset++, type: "say", say: "user_feedback", text })
+			}
 		} else if (role === "assistant") {
-			const folded = sdkContentToFoldedProgress(record.content)
+			const entries = sdkContentToToolActivityEntries(record.content)
+			if (entries.length > 0) {
+				toolEntries.push(...entries)
+			}
+			const folded = sdkContentToReasoningText(record.content)
 			if (folded) {
-				result.push({
-					ts: ts + partOffset++,
-					type: "say",
-					say: "reasoning",
-					text: "모델 진행 중",
-					reasoning: folded,
-					partial: false,
-					isCollapsed: true,
-					isExpanded: false,
-				})
+				reasoningParts.push(folded)
 			}
 			const text = sdkContentToVisibleAssistantText(record.content)
 			if (text) {
+				flushToolEntries(ts + partOffset++)
+				flushReasoning(ts + partOffset++)
 				result.push({ ts: ts + partOffset++, type: "say", say: "text", text })
 			}
 		}
@@ -3347,6 +3665,9 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 			})
 		}
 	}
+	const tailTs = stableSessionBaseTimestamp(taskItem) + (messageIndex + 1) * 10
+	flushToolEntries(tailTs)
+	flushReasoning(tailTs + 1)
 	return result
 }
 
@@ -3416,7 +3737,7 @@ function sdkContentToVisibleAssistantText(content: unknown): string {
 	return normalizeAssistantTranscriptText(text)
 }
 
-function sdkContentToFoldedProgress(content: unknown): string {
+function sdkContentToReasoningText(content: unknown): string {
 	if (!Array.isArray(content)) {
 		return ""
 	}
@@ -3428,15 +3749,6 @@ function sdkContentToFoldedProgress(content: unknown): string {
 			if (type === "thinking") {
 				return normalizeReasoningTranscriptText(getString(record, "thinking"))
 			}
-			if (type === "tool_use") {
-				return `Tool: ${getString(record, "name") || "tool"}\n${toolInputToText(record.input)}`
-			}
-			if (type === "tool_result") {
-				return `Tool result: ${toolResultToText(record.content)}`
-			}
-			if (type === "file") {
-				return `File: ${getString(record, "path")}`
-			}
 			return ""
 		})
 		.filter(Boolean)
@@ -3445,11 +3757,43 @@ function sdkContentToFoldedProgress(content: unknown): string {
 	return normalizeProgressTranscriptText(parts)
 }
 
+function sdkContentToToolActivityEntries(content: unknown): ToolActivityEntry[] {
+	if (typeof content === "string") {
+		return isToolTranscript(content) ? toolTranscriptToActivityEntries(content) : []
+	}
+	if (!Array.isArray(content)) {
+		return []
+	}
+
+	return content.flatMap((block) => {
+		const record = asRecord(block)
+		const type = getString(record, "type")
+		if (type === "tool_use") {
+			return toolTranscriptToActivityEntries(`Tool: ${getString(record, "name") || "tool"}\n${toolInputToText(record.input)}`)
+		}
+		if (type === "tool_result") {
+			return toolTranscriptToActivityEntries(`Tool result: ${toolResultToText(record.content)}`)
+		}
+		if (type === "file") {
+			const pathValue = getString(record, "path")
+			return pathValue ? [{ kind: "file", label: pathValue }] : []
+		}
+		if (type === "text") {
+			const text = getString(record, "text")
+			return isToolTranscript(text) ? toolTranscriptToActivityEntries(text) : []
+		}
+		return []
+	})
+}
+
 function contentToText(content: unknown): string {
 	if (typeof content === "string") {
 		return content
 	}
 	if (!Array.isArray(content)) {
+		if (isEmptyPlainObject(content)) {
+			return ""
+		}
 		return stringify(content)
 	}
 	return content.map((block) => {
@@ -3907,7 +4251,7 @@ function normalizeProgressTranscriptText(text: string) {
 
 function normalizeAssistantTranscriptText(text: string) {
 	const trimmed = text.trim()
-	if (!trimmed) {
+	if (!trimmed || isEmptyJsonObjectString(trimmed)) {
 		return ""
 	}
 
@@ -4208,6 +4552,20 @@ function formatToolActivitySection(title: string, values: string[], limit: numbe
 
 function toolActivityEntryKey(entry: ToolActivityEntry) {
 	return `${entry.kind}:${entry.label}:${entry.detail || ""}`.toLowerCase()
+}
+
+function uniqueToolActivityEntries(entries: ToolActivityEntry[]) {
+	const seen = new Set<string>()
+	const result: ToolActivityEntry[] = []
+	for (const entry of entries) {
+		const key = toolActivityEntryKey(entry)
+		if (seen.has(key)) {
+			continue
+		}
+		seen.add(key)
+		result.push(entry)
+	}
+	return result
 }
 
 function splitToolPaths(text: string) {

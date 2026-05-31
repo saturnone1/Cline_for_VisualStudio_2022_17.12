@@ -45,6 +45,10 @@ function isMeaninglessToolMessage(message: ClineMessage): boolean {
 	}
 }
 
+function isMeaninglessTextMessage(message: ClineMessage): boolean {
+	return message.type === "say" && message.say === "text" && (message.text || "").trim() === "{}"
+}
+
 /**
  * Check if a message group is a tool group (array with _isToolGroup marker)
  */
@@ -64,6 +68,9 @@ export function processMessages(messages: ClineMessage[]): ClineMessage[] {
  */
 export function filterVisibleMessages(messages: ClineMessage[]): ClineMessage[] {
 	return messages.filter((message, index, arr) => {
+		if (isMeaninglessTextMessage(message)) {
+			return false
+		}
 		if (isMeaninglessToolMessage(message)) {
 			return false
 		}
