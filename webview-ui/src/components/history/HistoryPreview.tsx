@@ -11,6 +11,7 @@ type HistoryPreviewProps = {
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 	const { taskHistory } = useExtensionState()
 	const [loadedHistory, setLoadedHistory] = useState<typeof taskHistory>([])
+	const [hasLoadedHistory, setHasLoadedHistory] = useState(false)
 
 	useEffect(() => {
 		let cancelled = false
@@ -18,9 +19,15 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 			.then((response) => {
 				if (!cancelled) {
 					setLoadedHistory(response.tasks ?? [])
+					setHasLoadedHistory(true)
 				}
 			})
-			.catch((error) => console.error("Error loading recent tasks:", error))
+			.catch((error) => {
+				console.error("Error loading recent tasks:", error)
+				if (!cancelled) {
+					setHasLoadedHistory(true)
+				}
+			})
 
 		return () => {
 			cancelled = true
@@ -196,7 +203,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								</div>
 							</div>
 						))
-					) : (
+					) : hasLoadedHistory ? (
 						<div
 							style={{
 								textAlign: "center",
@@ -205,6 +212,16 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								padding: "10px 0",
 							}}>
 							No recent tasks
+						</div>
+					) : (
+						<div
+							style={{
+								textAlign: "center",
+								color: "var(--vscode-descriptionForeground)",
+								fontSize: "var(--vscode-font-size)",
+								padding: "10px 0",
+							}}>
+							Loading recent tasks...
 						</div>
 					)}
 				</div>

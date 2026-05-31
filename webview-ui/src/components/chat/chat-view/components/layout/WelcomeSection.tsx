@@ -264,7 +264,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 				{!showWhatsNewModal && (
 					<>
 						<BannerCarousel banners={activeBanners} />
-						{!shouldShowQuickWins && taskHistory.length > 0 && <HistoryPreview showHistoryView={showHistoryView} />}
+						{!shouldShowQuickWins && <HistoryPreview showHistoryView={showHistoryView} />}
 						{/* Quick launch worktree button */}
 						{isGitRepo && worktreesEnabled?.featureFlag && worktreesEnabled?.user && (
 							<div className="flex flex-col items-center gap-3 mt-2 mb-4 px-5">
