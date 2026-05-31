@@ -188,7 +188,7 @@ namespace VsClineAgent.Services
             }
         }
 
-        private static async Task<IVsOutputWindowPane> GetOrCreatePaneAsync()
+        private static async Task<IVsOutputWindowPane?> GetOrCreatePaneAsync()
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 

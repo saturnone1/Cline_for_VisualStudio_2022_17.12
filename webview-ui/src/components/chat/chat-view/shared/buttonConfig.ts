@@ -209,6 +209,33 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 
 const errorTypes = ["api_req_failed", "mistake_limit_reached"]
 
+function parseApiRequestInfo(message: ClineMessage): Record<string, unknown> {
+	try {
+		return JSON.parse(message.text || "{}") as Record<string, unknown>
+	} catch {
+		return {}
+	}
+}
+
+function isApiRequestStillActive(message: ClineMessage) {
+	if (message.partial === true) {
+		return true
+	}
+
+	const info = parseApiRequestInfo(message)
+	if (info.cancelReason || info.streamingFailedMessage) {
+		return false
+	}
+
+	const hasUsage =
+		typeof info.cost === "number" ||
+		typeof info.totalCost === "number" ||
+		typeof info.tokensIn === "number" ||
+		typeof info.tokensOut === "number"
+
+	return !hasUsage
+}
+
 /**
  * Determines button configuration based on message type and state
  * This is the single source of truth used by both ActionButtons and useMessageHandlers
@@ -302,8 +329,8 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 		}
 	}
 
-	if (message.type === "say" && message.say === "api_req_started" && isStreaming) {
-		return BUTTON_CONFIGS.api_req_active
+	if (message.type === "say" && message.say === "api_req_started") {
+		return isApiRequestStillActive(message) ? BUTTON_CONFIGS.api_req_active : BUTTON_CONFIGS.default
 	}
 
 	// Special case: command_output say messages should show "Proceed While Running" button

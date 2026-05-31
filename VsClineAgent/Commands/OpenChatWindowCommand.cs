@@ -30,11 +30,12 @@ namespace VsClineAgent.Commands
 
         private void Execute(object sender, EventArgs e)
         {
-            _package.JoinableTaskFactory.RunAsync(async () =>
+            _ = _package.JoinableTaskFactory.RunAsync(async () =>
             {
                 var window = await _package.ShowToolWindowAsync(
                     typeof(ChatToolWindow), 0, true, _package.DisposalToken);
 
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);
                 if (window?.Frame is Microsoft.VisualStudio.Shell.Interop.IVsWindowFrame frame)
                 {
                     Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());

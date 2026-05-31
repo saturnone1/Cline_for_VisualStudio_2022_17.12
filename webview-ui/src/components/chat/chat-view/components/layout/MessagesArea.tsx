@@ -30,7 +30,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	chatState,
 	messageHandlers,
 }) => {
-	const { clineMessages } = useExtensionState()
+	const { clineMessages, currentTaskItem } = useExtensionState()
 	const lastRawMessage = useMemo(() => clineMessages.at(-1), [clineMessages])
 
 	const {
@@ -71,6 +71,39 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 		return Array.isArray(lastRow) ? lastRow.at(-1) : lastRow
 	}, [lastVisibleRow])
 
+	const lastRawMessageLooksActive = useMemo(() => {
+		if (!currentTaskItem) {
+			return false
+		}
+
+		if (!lastRawMessage) {
+			return true
+		}
+
+		if (lastRawMessage.type === "ask") {
+			return false
+		}
+
+		if (lastRawMessage.type === "say" && lastRawMessage.say === "completion_result") {
+			return false
+		}
+
+		if (lastRawMessage.partial === true) {
+			return true
+		}
+
+		if (lastRawMessage.type === "say" && lastRawMessage.say === "api_req_started") {
+			try {
+				const info = JSON.parse(lastRawMessage.text || "{}")
+				return !info.cancelReason && !info.streamingFailedMessage && info.cost == null && info.totalCost == null
+			} catch {
+				return true
+			}
+		}
+
+		return false
+	}, [currentTaskItem, lastRawMessage])
+
 	// Show "Thinking..." until real content starts streaming.
 	// This is the sole early loading indicator - RequestStartRow does NOT duplicate it.
 	// Covers: pre-api_req_started (backend processing) AND post-api_req_started (waiting for model).
@@ -98,7 +131,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 		if (lastRawMessage?.type === "say" && lastRawMessage.say === "api_req_started") {
 			try {
 				const info = JSON.parse(lastRawMessage.text || "{}")
-				if (info.cancelReason === "user_cancelled") {
+				if (info.cancelReason === "user_cancelled" || info.streamingFailedMessage || info.cost != null || info.totalCost != null) {
 					return false
 				}
 			} catch {
@@ -108,7 +141,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
 		// Always show while task has started but no visible rows are rendered yet.
 		if (groupedMessages.length === 0) {
-			return true
+			return lastRawMessageLooksActive
 		}
 
 		// Defensive guard for transient states where a grouped row exists
@@ -119,7 +152,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 
 		// Tool output may be followed by additional model work.
 		if (lastVisibleRow && isToolGroup(lastVisibleRow)) {
-			return true
+			return lastRawMessageLooksActive
 		}
 
 		if (!lastMsg) {
@@ -130,13 +163,13 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 		if (lastMsg.say === "api_req_started") {
 			try {
 				const info = JSON.parse(lastMsg.text || "{}")
-				return info.cancelReason !== "user_cancelled"
+				return info.cancelReason !== "user_cancelled" && !info.streamingFailedMessage && info.cost == null && info.totalCost == null
 			} catch {
 				return true
 			}
 		}
 		return lastMsg.partial === true
-	}, [lastRawMessage, groupedMessages.length, lastVisibleMessage, lastVisibleRow, modifiedMessages])
+	}, [lastRawMessage, groupedMessages.length, lastRawMessageLooksActive, lastVisibleMessage, lastVisibleRow, modifiedMessages])
 
 	// Keep loader in the message flow (not footer). During handoff from waiting -> reasoning stream,
 	// keep the loader mounted until a real reasoning row is visible.

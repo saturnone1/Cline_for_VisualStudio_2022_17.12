@@ -1,5 +1,6 @@
 import { BannerAction, BannerCardData } from "@shared/cline/banner"
-import { DynamicIcon } from "lucide-react/dynamic"
+import DynamicIcon from "lucide-react/dist/esm/DynamicIcon.js"
+import type { IconName } from "lucide-react/dynamic"
 import React from "react"
 import { BannerData } from "@/components/common/BannerCarousel"
 
@@ -25,7 +26,7 @@ export function convertBannerData(
 	return {
 		id: banner.id,
 		icon: banner.icon ? (
-			<DynamicIcon className="size-4" name={banner.icon as React.ComponentProps<typeof DynamicIcon>["name"]} />
+			<DynamicIcon className="size-4" name={banner.icon as IconName} />
 		) : undefined,
 		title: banner.title,
 		description: banner.description,
