@@ -122,6 +122,27 @@ export interface ExtensionStateContextType extends ExtensionState {
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
 
+function shouldPreserveLiveMessages(messages: ClineMessage[]) {
+	return messages.some(
+		(message) =>
+			message.partial === true ||
+			(message.type === "say" && (message.say === "reasoning" || message.say === "api_req_started")),
+	)
+}
+
+function mergeMessagesByTimestamp(previous: ClineMessage[], incoming: ClineMessage[]) {
+	const merged = [...previous]
+	for (const message of incoming) {
+		const index = findLastIndex(merged, (item) => item.ts === message.ts)
+		if (index >= 0) {
+			merged[index] = message
+		} else {
+			merged.push(message)
+		}
+	}
+	return merged.sort((a, b) => (a.ts || 0) - (b.ts || 0))
+}
+
 export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
 }> = ({ children }) => {
@@ -373,9 +394,17 @@ export const ExtensionStateContextProvider: React.FC<{
 									(!!stateData.currentTaskItem.task &&
 										stateData.currentTaskItem.task === prevState.currentTaskItem?.task))
 							if (sameActiveTask) {
-								stateData.clineMessages = stateData.clineMessages?.length
-									? stateData.clineMessages
-									: prevState.clineMessages
+								const incomingMessages = stateData.clineMessages ?? []
+								if (incomingMessages.length === 0) {
+									stateData.clineMessages = prevState.clineMessages
+								} else if (
+									incomingMessages.length < prevState.clineMessages.length &&
+									shouldPreserveLiveMessages(prevState.clineMessages)
+								) {
+									stateData.clineMessages = mergeMessagesByTimestamp(prevState.clineMessages, incomingMessages)
+								} else {
+									stateData.clineMessages = incomingMessages
+								}
 							}
 
 							const newState = {

@@ -12,7 +12,7 @@ import type { ChatState, MessageHandlers } from "../types/chatTypes"
  * Handles sending messages, button clicks, and task management
  */
 export function useMessageHandlers(messages: ClineMessage[], chatState: ChatState): MessageHandlers {
-	const { backgroundCommandRunning } = useExtensionState()
+	const { backgroundCommandRunning, currentTaskItem } = useExtensionState()
 	const {
 		setInputValue,
 		activeQuote,
@@ -116,13 +116,24 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 					} else {
 						// Completed/cancelled tasks should keep their transcript visible and continue through the
 						// host-side SDK session bridge instead of forcing the user to press Start New Task.
-						await TaskServiceClient.newTask(
-							NewTaskRequest.create({
-								text: messageToSend,
-								images,
-								files,
-							}),
-						)
+						if (currentTaskItem?.id) {
+							await TaskServiceClient.askResponse(
+								AskResponseRequest.create({
+									responseType: "messageResponse",
+									text: messageToSend,
+									images,
+									files,
+								}),
+							)
+						} else {
+							await TaskServiceClient.newTask(
+								NewTaskRequest.create({
+									text: messageToSend,
+									images,
+									files,
+								}),
+							)
+						}
 						messageSent = true
 					}
 				}
@@ -146,6 +157,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		[
 			messages.length,
 			clineAsk,
+			currentTaskItem?.id,
 			activeQuote,
 			setInputValue,
 			setActiveQuote,
