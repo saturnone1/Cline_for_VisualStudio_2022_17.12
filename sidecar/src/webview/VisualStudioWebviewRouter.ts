@@ -64,6 +64,7 @@ export class VisualStudioWebviewRouter {
 	private readonly sessionProgressMessages = new Map<string, Array<Record<string, unknown>>>()
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
+	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private lastPartialStateBroadcastAt = 0
 	private taskIdleNoticeTimer: NodeJS.Timeout | null = null
 	private taskIdleTimer: NodeJS.Timeout | null = null
@@ -749,7 +750,15 @@ export class VisualStudioWebviewRouter {
 				source,
 				sessionId: fallbackSessionId,
 				lastTaskActivityReason: this.lastTaskActivityReason,
+				activePartialTextLength: this.getActivePartialText().length,
+				hasAssistantTextAfterLastUserMessage: this.hasAssistantTextAfterLastUserMessage(),
 			})
+			const activeText = this.getActivePartialText()
+			if (activeText || this.hasAssistantTextAfterLastUserMessage()) {
+				this.finishSdkTask(fallbackSessionId || String(this.state.currentTaskItem?.id || ""), "completed", activeText)
+				this.updateCurrentTaskItem()
+				await this.broadcastState()
+			}
 			return
 		}
 
@@ -1417,11 +1426,21 @@ export class VisualStudioWebviewRouter {
 			const iteration = getNumber(event, "iteration")
 			this.noteTaskActivity("iteration_end")
 			const toolCallCount = getNumber(event, "toolCallCount") || 0
+			const hadToolCalls = asRecord(event).hadToolCalls === true || toolCallCount > 0
 			this.upsertStatusText(
 				iteration
 					? `Cline SDK iteration ${iteration} finished. Tool calls: ${toolCallCount}.`
 					: `Cline SDK iteration finished. Tool calls: ${toolCallCount}.`,
 			)
+			if (!hadToolCalls && !this.hasCompletionResult() && (this.getActivePartialText().trim() || this.hasAssistantTextAfterLastUserMessage())) {
+				logInteraction("sidecar", "iterationEndCompletesTurn", {
+					sessionId,
+					iteration,
+					toolCallCount,
+					activePartialTextLength: this.getActivePartialText().length,
+				})
+				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), "completed", this.getActivePartialText())
+			}
 		}
 
 		if (type === "notice") {
@@ -1968,7 +1987,9 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.moveActiveReasoningToEnd()
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs))
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs)
+		this.rememberSessionProgressMessage(progressMessage)
+		this.sendPartialMessage(progressMessage)
 		this.schedulePartialStateBroadcast()
 	}
 
@@ -1994,7 +2015,9 @@ export class VisualStudioWebviewRouter {
 			isCollapsed: true,
 			isExpanded: false,
 		})
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs))
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs)
+		this.rememberSessionProgressMessage(progressMessage)
+		this.sendPartialMessage(progressMessage)
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 	}
@@ -2200,17 +2223,17 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private rememberSessionProgressMessage(message: Record<string, unknown> | undefined) {
-		if (!message || getString(message, "say") !== "reasoning") {
+		if (!message || !isSessionProgressMessage(message)) {
 			return
 		}
 
 		const sessionId = this.getCurrentSessionId()
-		const reasoning = getString(message, "reasoning")
-		if (!sessionId || !reasoning.trim()) {
+		const text = getString(message, "reasoning") || getString(message, "text")
+		if (!sessionId || !text.trim()) {
 			return
 		}
 
-		const normalized = normalizeTranscriptText(reasoning)
+		const normalized = normalizeTranscriptText(text)
 		if (!normalized) {
 			return
 		}
@@ -2570,7 +2593,13 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		const messageKey = partialMessageDeliveryKey(message)
 		for (const requestId of this.partialMessageStreamRequestIds) {
+			const deliveryKey = `${requestId}:${messageKey}`
+			if (this.lastPartialMessageKeys.get(requestId) === deliveryKey) {
+				continue
+			}
+			this.lastPartialMessageKeys.set(requestId, deliveryKey)
 			logInteraction("sidecar->webview", "partialMessage", { requestId, message: summarizeClineMessageForLog(message) })
 			sendHostRequest(
 				this.connection,
@@ -3388,6 +3417,44 @@ function progressMessageKey(message: Record<string, unknown>) {
 		return ""
 	}
 	return `${getString(message, "say")}:${reasoning || text}`
+}
+
+function isSessionProgressMessage(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	if (say === "reasoning") {
+		return true
+	}
+
+	if (say !== "api_req_started") {
+		return false
+	}
+
+	const parsed = asRecord(tryParseJson(getString(message, "text")) ?? {})
+	const request = normalizeTranscriptText(getString(parsed, "request") || getString(message, "text"))
+	return (
+		request.includes("모델 진행 중") ||
+		request.includes("Cline read ") ||
+		request.includes("Cline ran ") ||
+		request.includes("Cline performed ") ||
+		request.includes("Cline used ") ||
+		request.includes("Cline edited ") ||
+		request.includes("Cline created ") ||
+		request.includes("Cline deleted ")
+	)
+}
+
+function partialMessageDeliveryKey(message: Record<string, unknown>) {
+	return JSON.stringify({
+		ts: numberValue(message.ts),
+		type: getString(message, "type"),
+		ask: getString(message, "ask"),
+		say: getString(message, "say"),
+		text: getString(message, "text"),
+		reasoning: getString(message, "reasoning"),
+		partial: message.partial === true,
+		isCollapsed: message.isCollapsed === true,
+		isExpanded: message.isExpanded === true,
+	})
 }
 
 function sdkContentToVisibleAssistantText(content: unknown): string {

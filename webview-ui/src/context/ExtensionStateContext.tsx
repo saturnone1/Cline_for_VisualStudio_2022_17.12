@@ -32,11 +32,33 @@ function normalizeMessageText(value: unknown) {
 	return String(value ?? "").replace(/\s+/g, " ").trim()
 }
 
+function readApiRequestText(message: ClineMessage) {
+	if (message.say !== "api_req_started") {
+		return ""
+	}
+
+	try {
+		const parsed = JSON.parse(message.text || "{}") as { request?: string }
+		return normalizeMessageText(parsed.request || message.text)
+	} catch {
+		return normalizeMessageText(message.text)
+	}
+}
+
 function isSdkProgressMessage(message: ClineMessage) {
+	const request = readApiRequestText(message)
 	return (
 		message.type === "say" &&
 		(message.say === "reasoning" ||
-			(message.say === "api_req_started" && normalizeMessageText(message.text).includes("모델 진행 중")))
+			(message.say === "api_req_started" &&
+				(request.includes("모델 진행 중") ||
+					request.includes("Cline read ") ||
+					request.includes("Cline ran ") ||
+					request.includes("Cline performed ") ||
+					request.includes("Cline used ") ||
+					request.includes("Cline edited ") ||
+					request.includes("Cline created ") ||
+					request.includes("Cline deleted "))))
 	)
 }
 
