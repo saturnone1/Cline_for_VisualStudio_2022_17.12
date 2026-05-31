@@ -164,24 +164,36 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 	}, [])
 
 	const handleDeleteHistoryItem = useCallback(
-		(id: string) => {
-			TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: [id] }))
-				.then(() => fetchTotalTasksSize())
-				.catch((error) => console.error("Error deleting task:", error))
+		async (id: string) => {
+			setTasks((prev) => prev.filter((task) => task.id !== id))
+			setSelectedItems((prev) => prev.filter((selectedId) => selectedId !== id))
+			try {
+				await TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: [id] }))
+				await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
+			} catch (error) {
+				console.error("Error deleting task:", error)
+				await loadTaskHistory()
+			}
 		},
-		[fetchTotalTasksSize],
+		[fetchTotalTasksSize, loadTaskHistory],
 	)
 
 	const handleDeleteSelectedHistoryItems = useCallback(
-		(ids: string[]) => {
+		async (ids: string[]) => {
 			if (ids.length > 0) {
-				TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: ids }))
-					.then(() => fetchTotalTasksSize())
-					.catch((error) => console.error("Error deleting tasks:", error))
+				const idSet = new Set(ids)
+				setTasks((prev) => prev.filter((task) => !idSet.has(task.id)))
 				setSelectedItems([])
+				try {
+					await TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: ids }))
+					await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
+				} catch (error) {
+					console.error("Error deleting tasks:", error)
+					await loadTaskHistory()
+				}
 			}
 		},
-		[fetchTotalTasksSize],
+		[fetchTotalTasksSize, loadTaskHistory],
 	)
 
 	const fuse = useMemo(() => {
@@ -443,12 +455,19 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 						aria-label="Delete all history"
 						className="w-full"
 						disabled={deleteAllDisabled || taskHistory.length === 0}
-						onClick={() => {
+						onClick={async () => {
 							setDeleteAllDisabled(true)
-							TaskServiceClient.deleteAllTaskHistory(BooleanRequest.create({}))
-								.then(() => fetchTotalTasksSize())
-								.catch((error) => console.error("Error deleting task history:", error))
-								.finally(() => setDeleteAllDisabled(false))
+							setTasks([])
+							setSelectedItems([])
+							try {
+								await TaskServiceClient.deleteAllTaskHistory(BooleanRequest.create({}))
+								await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
+							} catch (error) {
+								console.error("Error deleting task history:", error)
+								await loadTaskHistory()
+							} finally {
+								setDeleteAllDisabled(false)
+							}
 						}}
 						variant="danger">
 						Delete All History{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
