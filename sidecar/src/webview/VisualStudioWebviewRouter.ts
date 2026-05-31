@@ -61,7 +61,6 @@ export class VisualStudioWebviewRouter {
 	private activeFoldedActivityText = ""
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
-	private readonly sessionProgressMessages = new Map<string, Array<Record<string, unknown>>>()
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private readonly lastPartialMessageKeys = new Map<string, string>()
@@ -841,8 +840,16 @@ export class VisualStudioWebviewRouter {
 			const session = asRecord(await this.clineSdk.activateSession(taskId))
 			const messages = await this.clineSdk.readMessages({ sessionId: taskId })
 			const taskItem = sdkSessionToHistoryItem(session)
+			const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+			logInteraction("sidecar", "sdkMessagesHydrated", {
+				source: "showTaskWithId",
+				sessionId: taskId,
+				sdkCount: Array.isArray(messages) ? messages.length : 0,
+				clineCount: clineMessages.length,
+				messages: clineMessages.map(summarizeClineMessageForLog),
+			})
 			this.state.currentTaskItem = taskItem
-			this.state.clineMessages = this.mergeSessionProgressMessages(taskId, sdkMessagesToClineMessages(messages, taskItem))
+			this.state.clineMessages = clineMessages
 			this.taskSnapshots.set(taskId, {
 				taskItem: { ...taskItem },
 				messages: this.state.clineMessages.map((message) => ({ ...message })),
@@ -939,32 +946,20 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const taskItem = sdkSessionToHistoryItem(session)
+		const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+		logInteraction("sidecar", "sdkMessagesHydrated", {
+			source: "refreshSelectedTaskFromSdk",
+			sessionId: taskId,
+			sdkCount: messages.length,
+			clineCount: clineMessages.length,
+			messages: clineMessages.map(summarizeClineMessageForLog),
+		})
 		this.state.currentTaskItem = taskItem
-		this.state.clineMessages = this.mergeSessionProgressMessages(taskId, sdkMessagesToClineMessages(messages, taskItem))
+		this.state.clineMessages = clineMessages
 		this.taskSnapshots.set(taskId, {
 			taskItem: { ...taskItem },
 			messages: this.state.clineMessages.map((message) => ({ ...message })),
 		})
-	}
-
-	private mergeSessionProgressMessages(sessionId: string, messages: Array<Record<string, unknown>>) {
-		const progressMessages = this.sessionProgressMessages.get(sessionId) || []
-		if (progressMessages.length === 0) {
-			return messages
-		}
-
-		const existingKeys = new Set(messages.map((message) => progressMessageKey(message)))
-		const merged = [...messages]
-		for (const progress of progressMessages) {
-			const key = progressMessageKey(progress)
-			if (!key || existingKeys.has(key)) {
-				continue
-			}
-			merged.push({ ...progress, partial: false, isCollapsed: true, isExpanded: false })
-			existingKeys.add(key)
-		}
-
-		return merged.sort((a, b) => (numberValue(a.ts) || 0) - (numberValue(b.ts) || 0))
 	}
 
 	private async restoreCheckpoint(message: unknown) {
@@ -2060,7 +2055,9 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private upsertPartialText(text: string) {
+		let created = false
 		if (!this.activePartialTextTs) {
+			created = true
 			this.activePartialTextTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
 				ts: this.activePartialTextTs,
@@ -2074,8 +2071,12 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.schedulePartialIdleWatchdog()
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
-		this.schedulePartialStateBroadcast()
+		if (created) {
+			this.broadcastPartialStateNow()
+		} else {
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
+			this.schedulePartialStateBroadcast()
+		}
 	}
 
 	private upsertAssistantTextFromEvent(accumulated: string, delta: string) {
@@ -2137,7 +2138,9 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		let created = false
 		if (!this.activeReasoningTextTs) {
+			created = true
 			this.activeReasoningTextTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
 				ts: this.activeReasoningTextTs,
@@ -2163,9 +2166,12 @@ export class VisualStudioWebviewRouter {
 
 		this.moveActiveReasoningToEnd()
 		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
-		this.rememberSessionProgressMessage(progressMessage)
-		this.sendPartialMessage(progressMessage)
-		this.schedulePartialStateBroadcast()
+		if (created) {
+			this.broadcastPartialStateNow()
+		} else {
+			this.sendPartialMessage(progressMessage)
+			this.schedulePartialStateBroadcast()
+		}
 	}
 
 	private finishFoldedReasoningText() {
@@ -2175,40 +2181,10 @@ export class VisualStudioWebviewRouter {
 
 		this.upsertMessage(this.activeReasoningTextTs, { partial: false, isCollapsed: true, isExpanded: false })
 		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
-		this.rememberSessionProgressMessage(progressMessage)
 		this.sendPartialMessage(progressMessage)
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
-	}
-
-	private rememberSessionProgressMessage(message: Record<string, unknown> | undefined) {
-		if (!message || !isSessionProgressMessage(message)) {
-			return
-		}
-
-		const sessionId = this.getCurrentSessionId()
-		const text = getString(message, "reasoning") || getString(message, "text")
-		if (!sessionId || !text.trim()) {
-			return
-		}
-
-		const normalized = normalizeTranscriptText(text)
-		if (!normalized) {
-			return
-		}
-
-		const stored = this.sessionProgressMessages.get(sessionId) || []
-		const key = progressMessageKey(message)
-		const ts = numberValue(message.ts)
-		const existingIndex = stored.findIndex((item) => (ts !== undefined && numberValue(item.ts) === ts) || progressMessageKey(item) === key)
-		const copy = { ...message, partial: false, isCollapsed: true, isExpanded: false }
-		if (existingIndex >= 0) {
-			stored[existingIndex] = copy
-		} else {
-			stored.push(copy)
-		}
-		this.sessionProgressMessages.set(sessionId, stored.slice(-20))
 	}
 
 	private getCurrentSessionId() {
@@ -2294,6 +2270,15 @@ export class VisualStudioWebviewRouter {
 			clearTimeout(this.partialStateBroadcastTimer)
 			this.partialStateBroadcastTimer = null
 		}
+	}
+
+	private broadcastPartialStateNow() {
+		if (this.stateStreamRequestIds.size === 0) {
+			return
+		}
+		this.clearPartialStateBroadcastTimer()
+		this.lastPartialStateBroadcastAt = Date.now()
+		this.broadcastState().catch((error) => console.error(error))
 	}
 
 	private schedulePartialStateBroadcast() {
@@ -2475,12 +2460,6 @@ export class VisualStudioWebviewRouter {
 		if (snapshot) {
 			this.taskSnapshots.delete(currentTaskId)
 			this.taskSnapshots.set(sessionId, snapshot)
-		}
-		const progressMessages = this.sessionProgressMessages.get(currentTaskId)
-		if (progressMessages) {
-			this.sessionProgressMessages.delete(currentTaskId)
-			const existing = this.sessionProgressMessages.get(sessionId) || []
-			this.sessionProgressMessages.set(sessionId, [...existing, ...progressMessages].slice(-20))
 		}
 		this.state.currentTaskItem = { ...this.state.currentTaskItem, id: sessionId }
 		this.state.taskHistory = this.state.taskHistory.map((item) =>
@@ -3326,19 +3305,20 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 	}
 
 	const result: Array<Record<string, unknown>> = []
-	let sequence = 0
+	let messageIndex = 0
 	for (const message of messages) {
 		const record = asRecord(message)
 		const role = getString(record, "role")
-		const ts = Date.now() + sequence++
+		const ts = sdkMessageTimestamp(record, taskItem, messageIndex++)
+		let partOffset = 0
 		if (role === "user") {
 			const text = contentToText(record.content)
-			result.push({ ts, type: "say", say: result.length === 0 ? "task" : "user_feedback", text })
+			result.push({ ts: ts + partOffset++, type: "say", say: result.length === 0 ? "task" : "user_feedback", text })
 		} else if (role === "assistant") {
 			const folded = sdkContentToFoldedProgress(record.content)
 			if (folded) {
 				result.push({
-					ts,
+					ts: ts + partOffset++,
 					type: "say",
 					say: "reasoning",
 					text: "모델 진행 중",
@@ -3350,7 +3330,7 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 			}
 			const text = sdkContentToVisibleAssistantText(record.content)
 			if (text) {
-				result.push({ ts: Date.now() + sequence++, type: "say", say: "text", text })
+				result.push({ ts: ts + partOffset++, type: "say", say: "text", text })
 			}
 		}
 
@@ -3358,7 +3338,7 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 		const checkpointRunCount = getNumber(metadata, "checkpointRunCount")
 		if (checkpointRunCount !== undefined) {
 			result.push({
-				ts: Date.now() + sequence++,
+				ts: ts + partOffset++,
 				type: "say",
 				say: "checkpoint_created",
 				text: "SDK checkpoint",
@@ -3370,37 +3350,35 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 	return result
 }
 
-function progressMessageKey(message: Record<string, unknown>) {
-	const reasoning = normalizeTranscriptText(getString(message, "reasoning"))
-	const text = normalizeTranscriptText(getString(message, "text"))
-	if (!reasoning && !text) {
-		return ""
+function sdkMessageTimestamp(message: Record<string, unknown>, taskItem: Record<string, unknown>, index: number) {
+	const explicit =
+		getNumber(message, "ts") ??
+		getNumber(message, "timestamp") ??
+		getNumber(message, "createdAt") ??
+		getNumber(message, "updatedAt")
+	if (explicit !== undefined) {
+		return normalizeTimestamp(explicit) + index * 10
 	}
-	return `${getString(message, "say")}:${reasoning || text}`
+
+	return stableSessionBaseTimestamp(taskItem) + index * 10
 }
 
-function isSessionProgressMessage(message: Record<string, unknown>) {
-	const say = getString(message, "say")
-	if (say === "reasoning") {
-		return true
-	}
+function normalizeTimestamp(value: number) {
+	return value > 0 && value < 10_000_000_000 ? value * 1000 : value
+}
 
-	if (say !== "api_req_started") {
-		return false
-	}
+function stableSessionBaseTimestamp(taskItem: Record<string, unknown>) {
+	const id = getString(taskItem, "id") || getString(taskItem, "task") || "cline-sdk-session"
+	return 1_700_000_000_000 + (hashString(id) % 1_000_000_000)
+}
 
-	const parsed = asRecord(tryParseJson(getString(message, "text")) ?? {})
-	const request = normalizeTranscriptText(getString(parsed, "request") || getString(message, "text"))
-	return (
-		request.includes("모델 진행 중") ||
-		request.includes("Cline read ") ||
-		request.includes("Cline ran ") ||
-		request.includes("Cline performed ") ||
-		request.includes("Cline used ") ||
-		request.includes("Cline edited ") ||
-		request.includes("Cline created ") ||
-		request.includes("Cline deleted ")
-	)
+function hashString(value: string) {
+	let hash = 2166136261
+	for (let index = 0; index < value.length; index++) {
+		hash ^= value.charCodeAt(index)
+		hash = Math.imul(hash, 16777619)
+	}
+	return hash >>> 0
 }
 
 function partialMessageDeliveryKey(message: Record<string, unknown>) {
