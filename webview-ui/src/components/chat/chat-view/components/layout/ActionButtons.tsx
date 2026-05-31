@@ -80,13 +80,13 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	// Keyboard event handler
 	const handleKeyDown = useCallback(
 		(event: KeyboardEvent) => {
-			if (event.key === "Escape") {
+			if (event.key === "Escape" && buttonConfig.secondaryAction === "cancel") {
 				event.preventDefault()
 				event.stopPropagation()
 				handleActionClick("cancel")
 			}
 		},
-		[handleActionClick],
+		[buttonConfig.secondaryAction, handleActionClick],
 	)
 
 	useEffect(() => {
@@ -105,54 +105,35 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	const isStreaming = task.partial === true
 	const canInteract = enableButtons && !isProcessing
 
-	// Early return for scroll button to avoid unnecessary computation
-	if (showScrollToBottom || !hasButtons) {
+	// Keep scroll affordance visually separate from task actions. When there are no
+	// task actions, do not render a full-width button that looks like approval UI.
+	if (showScrollToBottom) {
 		const handleScrollToBottom = () => {
 			scrollToBottomSmooth()
 			disableAutoScrollRef.current = false
 		}
-		// Show scroll to top button when there are no action buttons
-		const handleScrollToTop = () => {
-			scrollBehavior.virtuosoRef.current?.scrollTo({
-				top: 0,
-				behavior: "smooth",
-			})
-			disableAutoScrollRef.current = true
-			// Virtual rendering may not have all items rendered when at bottom,
-			// so scroll again after a delay to ensure we reach the true top
-			setTimeout(() => {
-				scrollBehavior.virtuosoRef.current?.scrollTo({
-					top: 0,
-					behavior: "smooth",
-				})
-			}, 300)
-		}
 
 		return (
-			<div className="flex px-3.5">
+			<div className="flex justify-end px-3.5">
 				<VSCodeButton
 					appearance="icon"
-					aria-label={showScrollToBottom ? "Scroll to bottom" : "Scroll to top"}
-					className="text-lg text-(--vscode-primaryButton-foreground) bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_55%,transparent)] rounded-[3px] overflow-hidden cursor-pointer flex justify-center items-center flex-1 h-[25px] hover:bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_90%,transparent)] active:bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_70%,transparent)] border-0"
-					onClick={showScrollToBottom ? handleScrollToBottom : handleScrollToTop}
+					aria-label="Scroll to bottom"
+					className="text-lg text-(--vscode-primaryButton-foreground) bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_55%,transparent)] rounded-[3px] overflow-hidden cursor-pointer flex justify-center items-center size-[25px] hover:bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_90%,transparent)] active:bg-[color-mix(in_srgb,var(--vscode-toolbar-hoverBackground)_70%,transparent)] border-0"
+					onClick={handleScrollToBottom}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" || e.key === " ") {
 							e.preventDefault()
-							if (showScrollToBottom) {
-								handleScrollToBottom()
-							} else {
-								handleScrollToTop()
-							}
+							handleScrollToBottom()
 						}
 					}}>
-					{showScrollToBottom ? (
-						<span className="codicon codicon-chevron-down" />
-					) : (
-						<span className="codicon codicon-chevron-up" />
-					)}
+					<span className="codicon codicon-chevron-down" />
 				</VSCodeButton>
 			</div>
 		)
+	}
+
+	if (!hasButtons) {
+		return null
 	}
 
 	const opacity = canInteract || isStreaming ? 1 : 0.5

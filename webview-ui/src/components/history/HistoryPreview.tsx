@@ -1,5 +1,6 @@
 import { StringRequest } from "@shared/proto/cline/common"
-import { memo } from "react"
+import { GetTaskHistoryRequest } from "@shared/proto/cline/task"
+import { memo, useEffect, useMemo, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { TaskServiceClient } from "@/services/grpc-client"
 
@@ -9,6 +10,35 @@ type HistoryPreviewProps = {
 
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 	const { taskHistory } = useExtensionState()
+	const [loadedHistory, setLoadedHistory] = useState<typeof taskHistory>([])
+
+	useEffect(() => {
+		let cancelled = false
+		TaskServiceClient.getTaskHistory(GetTaskHistoryRequest.create({ sortBy: "newest" }))
+			.then((response) => {
+				if (!cancelled) {
+					setLoadedHistory(response.tasks ?? [])
+				}
+			})
+			.catch((error) => console.error("Error loading recent tasks:", error))
+
+		return () => {
+			cancelled = true
+		}
+	}, [])
+
+	const visibleTasks = useMemo(() => {
+		const map = new Map<string, (typeof taskHistory)[number]>()
+		for (const item of [...loadedHistory, ...taskHistory]) {
+			if (item.id && item.ts && item.task && !map.has(item.id)) {
+				map.set(item.id, item)
+			}
+		}
+		return Array.from(map.values())
+			.sort((a, b) => (b.ts || 0) - (a.ts || 0))
+			.slice(0, 3)
+	}, [loadedHistory, taskHistory])
+
 	const handleHistorySelect = (id: string) => {
 		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>
 			console.error("Error showing task:", error),
@@ -128,7 +158,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 						Recent
 					</span>
 				</div>
-				{taskHistory.filter((item) => item.ts && item.task).length > 0 && (
+				{visibleTasks.length > 0 && (
 					<button
 						aria-label="View all history"
 						className="history-view-all-btn"
@@ -142,33 +172,30 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 
 			{
 				<div className="px-4">
-					{taskHistory.filter((item) => item.ts && item.task).length > 0 ? (
-						taskHistory
-							.filter((item) => item.ts && item.task)
-							.slice(0, 3)
-							.map((item) => (
-								<div className="history-preview-item" key={item.id} onClick={() => handleHistorySelect(item.id)}>
-									<div className="history-task-content">
-										{item.isFavorited && (
-											<span
-												aria-label="Favorited"
-												className="codicon codicon-star-full"
-												style={{
-													color: "var(--vscode-button-background)",
-													flexShrink: 0,
-												}}
-											/>
-										)}
-										<div className="history-task-description ph-no-capture">{item.task}</div>
-									</div>
-									<div className="history-meta-stack">
-										<span className="history-date">{formatDate(item.ts)}</span>
-										{item.totalCost != null && (
-											<span className="history-cost-chip">${item.totalCost.toFixed(2)}</span>
-										)}
-									</div>
+					{visibleTasks.length > 0 ? (
+						visibleTasks.map((item) => (
+							<div className="history-preview-item" key={item.id} onClick={() => handleHistorySelect(item.id)}>
+								<div className="history-task-content">
+									{item.isFavorited && (
+										<span
+											aria-label="Favorited"
+											className="codicon codicon-star-full"
+											style={{
+												color: "var(--vscode-button-background)",
+												flexShrink: 0,
+											}}
+										/>
+									)}
+									<div className="history-task-description ph-no-capture">{item.task}</div>
 								</div>
-							))
+								<div className="history-meta-stack">
+									<span className="history-date">{formatDate(item.ts)}</span>
+									{item.totalCost != null && (
+										<span className="history-cost-chip">${item.totalCost.toFixed(2)}</span>
+									)}
+								</div>
+							</div>
+						))
 					) : (
 						<div
 							style={{

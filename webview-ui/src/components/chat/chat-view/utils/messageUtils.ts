@@ -251,8 +251,11 @@ export function findReasoningForApiReq(
 			break
 		}
 		// Collect reasoning content
-		if (msg.say === "reasoning" && msg.text) {
-			reasoningParts.push(msg.text)
+		if (msg.say === "reasoning") {
+			const reasoning = (msg.reasoning || msg.text || "").trim()
+			if (reasoning) {
+				reasoningParts.push(reasoning)
+			}
 		}
 		// Check if non-reasoning response content has started (text, tool calls, etc.)
 		if (msg.say === "text" || msg.say === "tool" || msg.ask === "tool" || msg.ask === "command" || msg.say === "command") {
