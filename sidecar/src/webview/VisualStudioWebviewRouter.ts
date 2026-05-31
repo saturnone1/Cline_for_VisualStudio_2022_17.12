@@ -900,24 +900,106 @@ export class VisualStudioWebviewRouter {
 		this.addMessage({ type: "say", say: "user_feedback", text })
 		await this.broadcastState()
 
-		if (this.clineSdk.status.activeSessionId !== sessionId) {
-			logInteraction("sidecar", "sendAskResponse.activateSession", {
-				from: this.clineSdk.status.activeSessionId,
-				to: sessionId,
-			})
-			await this.clineSdk.activateSession(sessionId)
-		}
-
-		logInteraction("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength: text.length })
-		this.clineSdk.send({
+		const sendParams = {
 			sessionId,
 			prompt: getString(message, "text"),
 			userImages: getStringArray(message, "images"),
 			userFiles: getStringArray(message, "files"),
 			delivery: normalizePromptDelivery(getString(message, "delivery")),
-		}).then((result) => this.completeFromSdkResult(result, sessionId, "send")).catch(async (error) => {
+		}
+
+		this.sendOrResumeSdkSession(sessionId, sendParams, text.length).then((result) =>
+			this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "send"),
+		).catch(async (error) => {
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			await this.broadcastState()
+		})
+	}
+
+	private async sendOrResumeSdkSession(
+		sessionId: string,
+		sendParams: Record<string, unknown>,
+		textLength: number,
+	): Promise<unknown> {
+		if (!this.clineSdk) {
+			throw new Error("Cline SDK runtime is not attached.")
+		}
+
+		if (this.clineSdk.status.activeSessionId !== sessionId) {
+			logInteraction("sidecar", "sendAskResponse.activateSession", {
+				from: this.clineSdk.status.activeSessionId,
+				to: sessionId,
+			})
+			await this.clineSdk.activateSession(sessionId).catch((error) => {
+				if (!isSessionNotFoundError(error)) {
+					throw error
+				}
+				logInteraction("sidecar", "sendAskResponse.activateSessionMissing", {
+					sessionId,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			})
+		}
+
+		try {
+			logInteraction("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength })
+			return await this.clineSdk.send(sendParams)
+		} catch (error) {
+			if (!isSessionNotFoundError(error)) {
+				throw error
+			}
+			logInteraction("sidecar", "sendAskResponse.sdkSendMissingSession", {
+				sessionId,
+				error: error instanceof Error ? error.message : String(error),
+			})
+			return this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
+		}
+	}
+
+	private async resumeSdkSessionForSend(
+		sessionId: string,
+		sendParams: Record<string, unknown>,
+		textLength: number,
+	): Promise<unknown> {
+		if (!this.clineSdk) {
+			throw new Error("Cline SDK runtime is not attached.")
+		}
+
+		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({})
+		const cwd = String(this.state.currentTaskItem?.cwdOnTaskInitialization || "") || workspaceRoots[0] || process.cwd()
+		const prompt = getString(sendParams, "prompt")
+		const userImages = getStringArray(sendParams, "userImages")
+		const userFiles = getStringArray(sendParams, "userFiles")
+		const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId())
+
+		this.state.currentTaskItem = {
+			...taskItem,
+			id: sessionId,
+			cwdOnTaskInitialization: cwd,
+			modelId: String(taskItem.modelId || "") || this.getModelId(),
+		}
+		this.state.taskHistory = [
+			this.state.currentTaskItem,
+			...this.state.taskHistory.filter((item) => item.id !== sessionId),
+		]
+		this.noteTaskActivity("resume-session")
+		this.addApiRequestStarted("Cline SDK session resumed.", { partial: true })
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
+
+		logInteraction("sidecar", "sendAskResponse.resumeStartSession", {
+			sessionId,
+			textLength,
+			cwd,
+		})
+		return this.clineSdk.startSession({
+			prompt,
+			cwd,
+			userImages,
+			userFiles,
+			interactive: true,
+			config: await this.buildSdkConfig(cwd, sessionId),
+			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
 		})
 	}
 
@@ -3023,6 +3105,11 @@ function readLoopDetectionConfig() {
 
 function isTerminalSdkStatus(status: string) {
 	return status === "completed" || status === "stopped" || status === "cancelled" || status === "failed" || status === "error"
+}
+
+function isSessionNotFoundError(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error)
+	return /session not found/i.test(message)
 }
 
 function stringify(value: unknown) {
