@@ -37,14 +37,12 @@ export const ThinkingRow = memo(
 			}
 		}, [])
 
-		// Only auto-scroll to bottom during streaming (showCursor=true)
-		// For expanded collapsed thinking, start at top
 		useEffect(() => {
-			if (scrollRef.current && isVisible) {
+			if (scrollRef.current && isVisible && isExpanded && isStreaming) {
 				scrollRef.current.scrollTop = scrollRef.current.scrollHeight
 			}
 			checkScrollable()
-		}, [reasoningContent, isVisible, checkScrollable])
+		}, [reasoningContent, isVisible, isExpanded, isStreaming, checkScrollable])
 
 		if (!isVisible) {
 			return null
@@ -103,7 +101,7 @@ export const ThinkingRow = memo(
 						<div className="relative flex-1">
 							<div
 								className={cn(
-									"flex max-h-[150px] overflow-y-auto text-description leading-normal truncated whitespace-pre-wrap break-words pl-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [direction:ltr]",
+									"flex max-h-[150px] overflow-y-auto text-description leading-normal truncated whitespace-pre-wrap break-words pl-0 [scrollbar-width:thin] [direction:ltr]",
 								)}
 								onScroll={checkScrollable}
 								ref={scrollRef}>

@@ -88,6 +88,13 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 		if (lastRawMessage?.type === "say" && lastRawMessage.say === "completion_result") {
 			return false
 		}
+		if (
+			lastRawMessage?.type === "say" &&
+			lastRawMessage.partial !== true &&
+			["text", "error", "diff_error", "clineignore_error", "info"].includes(lastRawMessage.say || "")
+		) {
+			return false
+		}
 		if (lastRawMessage?.type === "say" && lastRawMessage.say === "api_req_started") {
 			try {
 				const info = JSON.parse(lastRawMessage.text || "{}")

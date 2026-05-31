@@ -730,6 +730,10 @@ export class VisualStudioWebviewRouter {
 		this.addMessage({ type: "say", say: "user_feedback", text })
 		await this.broadcastState()
 
+		if (this.clineSdk.status.activeSessionId !== sessionId) {
+			await this.clineSdk.activateSession(sessionId)
+		}
+
 		this.clineSdk.send({
 			sessionId,
 			prompt: getString(message, "text"),
@@ -1964,60 +1968,16 @@ export class VisualStudioWebviewRouter {
 
 		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true)
 		this.upsertFoldedActivityText(groupedText)
-		if (!this.activeToolActivityTs) {
-			this.activeToolActivityTs = Date.now() + this.messageSequence++
-			this.state.clineMessages.push({
-				ts: this.activeToolActivityTs,
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({ request: groupedText, tokensIn: 0, tokensOut: 0, cacheWrites: 0, cacheReads: 0, cost: 0 }),
-				partial: true,
-				isCollapsed: true,
-				isExpanded: false,
-			})
-		} else {
-			this.upsertMessage(this.activeToolActivityTs, {
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({ request: groupedText, tokensIn: 0, tokensOut: 0, cacheWrites: 0, cacheReads: 0, cost: 0 }),
-				partial: true,
-				isCollapsed: true,
-				isExpanded: false,
-			})
-		}
-
-		this.moveActiveReasoningToEnd()
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs)
-		this.rememberSessionProgressMessage(progressMessage)
-		this.sendPartialMessage(progressMessage)
-		this.schedulePartialStateBroadcast()
+		this.activeToolActivityTs = this.activeReasoningTextTs
 	}
 
 	private finishActiveToolActivity() {
-		if (!this.activeToolActivityTs) {
+		if (!this.activeToolActivityTs && this.activeToolActivityEntries.length === 0) {
 			return
 		}
 
 		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, false)
 		this.upsertFoldedActivityText(groupedText)
-		this.upsertMessage(this.activeToolActivityTs, {
-			type: "say",
-			say: "api_req_started",
-			text: JSON.stringify({
-				request: groupedText,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				cost: 0,
-			}),
-			partial: false,
-			isCollapsed: true,
-			isExpanded: false,
-		})
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeToolActivityTs)
-		this.rememberSessionProgressMessage(progressMessage)
-		this.sendPartialMessage(progressMessage)
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 	}
