@@ -168,7 +168,7 @@ const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
 					<DropdownList ref={dropdownListRef} role="listbox">
 						{modelSearchResults.map((item, index) => (
 							<DropdownItem
-								isSelected={index === selectedIndex}
+								$isSelected={index === selectedIndex}
 								key={item.id}
 								onClick={() => {
 									handleModelChange(item.id)
@@ -210,13 +210,13 @@ const DropdownList = styled.div`
 	border-bottom-right-radius: 3px;
 `
 
-const DropdownItem = styled.div<{ isSelected: boolean }>`
+const DropdownItem = styled.div<{ $isSelected: boolean }>`
 	padding: 5px 10px;
 	cursor: pointer;
 	word-break: break-all;
 	white-space: normal;
 
-	background-color: ${({ isSelected }) => (isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
+	background-color: ${({ $isSelected }) => ($isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
 
 	&:hover {
 		background-color: var(--vscode-list-activeSelectionBackground);

@@ -63,10 +63,10 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 
 					if (clineError?.isErrorType(ClineErrorType.RateLimit)) {
 						return (
-							<p className="m-0 whitespace-pre-wrap text-error wrap-anywhere">
+							<div className="m-0 whitespace-pre-wrap text-error wrap-anywhere">
 								{errorMessage}
 								{requestId && <div>Request ID: {requestId}</div>}
-							</p>
+							</div>
 						)
 					}
 
@@ -100,7 +100,7 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 					}
 
 					return (
-						<p className="m-0 whitespace-pre-wrap text-error wrap-anywhere flex flex-col gap-3">
+						<div className="m-0 whitespace-pre-wrap text-error wrap-anywhere flex flex-col gap-3">
 							{/* Display the well-formatted error extracted from the ClineError instance */}
 
 							<header>
@@ -129,7 +129,7 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 							<div className="mt-4">
 								<span className="text-description">(Click "Retry" below)</span>
 							</div>
-						</p>
+						</div>
 					)
 				}
 

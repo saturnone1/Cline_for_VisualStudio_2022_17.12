@@ -68,7 +68,9 @@ interface ApiOptionsProps {
 // This is necessary to ensure dropdown opens downward, important for when this is used in popup
 export const DROPDOWN_Z_INDEX = OPENROUTER_MODEL_PICKER_Z_INDEX + 2 // Higher than the OpenRouterModelPicker's and ModelSelectorTooltip's z-index
 
-export const DropdownContainer = styled.div<{ zIndex?: number }>`
+export const DropdownContainer = styled.div.withConfig({
+	shouldForwardProp: (prop) => prop !== "zIndex",
+})<{ zIndex?: number }>`
 	position: relative;
 	z-index: ${(props) => props.zIndex || DROPDOWN_Z_INDEX};
 
@@ -329,8 +331,8 @@ const ApiOptions = ({
 						<ProviderDropdownList ref={dropdownListRef} role="listbox">
 							{providerSearchResults.map((item, index) => (
 								<ProviderDropdownItem
+									$isSelected={index === selectedIndex}
 									data-testid={`provider-option-${item.value}`}
-									isSelected={index === selectedIndex}
 									key={item.value}
 									onClick={() => handleProviderChange(item.value)}
 									onMouseEnter={() => setSelectedIndex(index)}
@@ -558,13 +560,13 @@ const ProviderDropdownList = styled.div`
 	border-bottom-right-radius: 3px;
 `
 
-const ProviderDropdownItem = styled.div<{ isSelected: boolean }>`
+const ProviderDropdownItem = styled.div<{ $isSelected: boolean }>`
 	padding: 5px 10px;
 	cursor: pointer;
 	word-break: break-all;
 	white-space: normal;
 
-	background-color: ${({ isSelected }) => (isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
+	background-color: ${({ $isSelected }) => ($isSelected ? "var(--vscode-list-activeSelectionBackground)" : "inherit")};
 
 	&:hover {
 		background-color: var(--vscode-list-activeSelectionBackground);

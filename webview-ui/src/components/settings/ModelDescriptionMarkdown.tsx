@@ -5,11 +5,10 @@ import { cn } from "@/lib/utils"
 
 interface ModelDescriptionMarkdownProps {
 	markdown?: string
-	key: string
 	isPopup?: boolean
 }
 
-export const ModelDescriptionMarkdown = memo(({ markdown, key, isPopup }: ModelDescriptionMarkdownProps) => {
+export const ModelDescriptionMarkdown = memo(({ markdown, isPopup }: ModelDescriptionMarkdownProps) => {
 	// Update the markdown content when the prop changes
 	const [reactContent, setMarkdown] = useRemark()
 	const contentRef = useRef<HTMLDivElement>(null)
@@ -32,7 +31,7 @@ export const ModelDescriptionMarkdown = memo(({ markdown, key, isPopup }: ModelD
 	}, [reactContent, isExpanded])
 
 	return (
-		<div className="inline-block mb-2 description line-clamp-3" key={key}>
+		<div className="inline-block mb-2 description line-clamp-3">
 			<div className="relative wrap-anywhere overflow-y-hidden">
 				<div
 					className={cn("overflow-hidden text-sm line-clamp-3", {
