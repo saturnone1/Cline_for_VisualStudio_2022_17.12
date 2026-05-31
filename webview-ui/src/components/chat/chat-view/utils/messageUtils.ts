@@ -45,6 +45,33 @@ function isMeaninglessToolMessage(message: ClineMessage): boolean {
 	}
 }
 
+function readApiRequestText(message: ClineMessage): string {
+	if (message.say !== "api_req_started") {
+		return ""
+	}
+
+	try {
+		const parsed = JSON.parse(message.text || "{}") as { request?: string }
+		return String(parsed.request || message.text || "").replace(/\s+/g, " ").trim()
+	} catch {
+		return String(message.text || "").replace(/\s+/g, " ").trim()
+	}
+}
+
+function isVsClineSdkProgressApiRequest(message: ClineMessage): boolean {
+	const request = readApiRequestText(message)
+	return (
+		request.includes("모델 진행 중") ||
+		request.includes("Cline read ") ||
+		request.includes("Cline ran ") ||
+		request.includes("Cline performed ") ||
+		request.includes("Cline used ") ||
+		request.includes("Cline edited ") ||
+		request.includes("Cline created ") ||
+		request.includes("Cline deleted ")
+	)
+}
+
 /**
  * Check if a message group is a tool group (array with _isToolGroup marker)
  */
@@ -96,6 +123,9 @@ export function filterVisibleMessages(messages: ClineMessage[]): ClineMessage[] 
 				// api_req_started rows only render visible content for errors/cancels.
 				// Reasoning has its own standalone ChatRows. Everything else renders
 				// as invisible padding. Filter out unless there's an error.
+				if (isVsClineSdkProgressApiRequest(message)) {
+					break
+				}
 				try {
 					const info = JSON.parse(message.text || "{}")
 					if (info.cancelReason || info.streamingFailedMessage) {

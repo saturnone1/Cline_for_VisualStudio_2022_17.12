@@ -221,6 +221,13 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 	const isStreaming = message.partial === true
 	const isError = message?.ask ? errorTypes.includes(message.ask) : false
 
+	// Terminal task states must win over stale/accidental partial flags. The
+	// SDK bridge may receive completion before a final state refresh, and Cline's
+	// normal lifecycle treats completion as user-interactable, not cancellable.
+	if (message.type === "say" && message.say === "completion_result") {
+		return BUTTON_CONFIGS.completion_result
+	}
+
 	// Special case: command_output should show "Proceed While Running" button even while streaming
 	// This allows terminal output to stream while still showing the action button
 	if (message.type === "ask" && message.ask === "command_output") {
@@ -293,11 +300,6 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 			default:
 				return BUTTON_CONFIGS.tool_approve
 		}
-	}
-
-	// Handle say messages (typically don't require buttons except in special cases)
-	if (message.type === "say" && message.say === "completion_result") {
-		return BUTTON_CONFIGS.completion_result
 	}
 
 	if (message.type === "say" && message.say === "api_req_started" && isStreaming) {
