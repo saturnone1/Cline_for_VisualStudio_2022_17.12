@@ -2493,6 +2493,12 @@ export class VisualStudioWebviewRouter {
 			this.taskSnapshots.delete(currentTaskId)
 			this.taskSnapshots.set(sessionId, snapshot)
 		}
+		const progressMessages = this.sessionProgressMessages.get(currentTaskId)
+		if (progressMessages) {
+			this.sessionProgressMessages.delete(currentTaskId)
+			const existing = this.sessionProgressMessages.get(sessionId) || []
+			this.sessionProgressMessages.set(sessionId, [...existing, ...progressMessages].slice(-20))
+		}
 		this.state.currentTaskItem = { ...this.state.currentTaskItem, id: sessionId }
 		this.state.taskHistory = this.state.taskHistory.map((item) =>
 			String(item.id || "") === currentTaskId ? { ...item, id: sessionId } : item,

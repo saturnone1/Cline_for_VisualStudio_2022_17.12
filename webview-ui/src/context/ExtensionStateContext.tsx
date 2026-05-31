@@ -1,7 +1,7 @@
 import { DEFAULT_AUTO_APPROVAL_SETTINGS } from "@shared/AutoApprovalSettings"
 import { findLastIndex } from "@shared/array"
 import { DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettings"
-import { DEFAULT_PLATFORM, type ExtensionState } from "@shared/ExtensionMessage"
+import { DEFAULT_PLATFORM, type ClineMessage, type ExtensionState } from "@shared/ExtensionMessage"
 import { DEFAULT_FOCUS_CHAIN_SETTINGS } from "@shared/FocusChainSettings"
 import { DEFAULT_MCP_DISPLAY_MODE } from "@shared/McpDisplayMode"
 import type { UserInfo } from "@shared/proto/cline/account"
@@ -27,6 +27,47 @@ import {
 import { Environment } from "../../../src/shared/config-types"
 import type { McpMarketplaceCatalog, McpServer, McpViewTab } from "../../../src/shared/mcp"
 import { McpServiceClient, ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpc-client"
+
+function normalizeMessageText(value: unknown) {
+	return String(value ?? "").replace(/\s+/g, " ").trim()
+}
+
+function isSdkProgressMessage(message: ClineMessage) {
+	return (
+		message.type === "say" &&
+		(message.say === "reasoning" ||
+			(message.say === "api_req_started" && normalizeMessageText(message.text).includes("모델 진행 중")))
+	)
+}
+
+function sdkProgressMessageKey(message: ClineMessage) {
+	const reasoning = normalizeMessageText((message as ClineMessage & { reasoning?: string }).reasoning)
+	const text = normalizeMessageText(message.text)
+	return `${message.say}:${reasoning || text}`
+}
+
+function mergeLiveProgressMessages(previous: ClineMessage[], incoming: ClineMessage[]) {
+	const incomingKeys = new Set(incoming.filter(isSdkProgressMessage).map(sdkProgressMessageKey))
+	const preserved = previous
+		.filter(isSdkProgressMessage)
+		.filter((message) => !incomingKeys.has(sdkProgressMessageKey(message)))
+		.map((message) => ({
+			...message,
+			partial: false,
+			isCollapsed: true,
+			isExpanded: false,
+		}))
+
+	if (preserved.length > 0) {
+		console.debug("[VSCLINE_STATE] preserved progress messages from live state", {
+			preserved: preserved.length,
+			incoming: incoming.length,
+			previous: previous.length,
+		})
+	}
+
+	return [...incoming, ...preserved].sort((a, b) => (a.ts || 0) - (b.ts || 0))
+}
 
 export interface ExtensionStateContextType extends ExtensionState {
 	didHydrateState: boolean
@@ -365,10 +406,16 @@ export const ExtensionStateContextProvider: React.FC<{
 							const shouldUpdateAutoApproval = incomingVersion > currentVersion
 							// HACK: Preserve clineMessages if the same active task sends an empty snapshot.
 							// Do not preserve messages when the host intentionally clears the task to return home.
-							if (stateData.currentTaskItem?.id && stateData.currentTaskItem.id === prevState.currentTaskItem?.id) {
+							const sameActiveTask =
+								!!stateData.currentTaskItem?.id &&
+								(stateData.currentTaskItem.id === prevState.currentTaskItem?.id ||
+									(!!stateData.currentTaskItem.task &&
+										stateData.currentTaskItem.task === prevState.currentTaskItem?.task))
+							if (sameActiveTask) {
 								stateData.clineMessages = stateData.clineMessages?.length
 									? stateData.clineMessages
 									: prevState.clineMessages
+								stateData.clineMessages = mergeLiveProgressMessages(prevState.clineMessages, stateData.clineMessages ?? [])
 							}
 
 							const newState = {
@@ -521,9 +568,21 @@ export const ExtensionStateContextProvider: React.FC<{
 						if (lastIndex !== -1) {
 							const newClineMessages = [...prevState.clineMessages]
 							newClineMessages[lastIndex] = partialMessage
+							if (isSdkProgressMessage(partialMessage)) {
+								console.debug("[VSCLINE_STATE] updated progress partial", {
+									ts: partialMessage.ts,
+									length: normalizeMessageText((partialMessage as ClineMessage & { reasoning?: string }).reasoning || partialMessage.text).length,
+								})
+							}
 							return { ...prevState, clineMessages: newClineMessages }
 						}
 						if (prevState.currentTaskItem) {
+							if (isSdkProgressMessage(partialMessage)) {
+								console.debug("[VSCLINE_STATE] appended progress partial", {
+									ts: partialMessage.ts,
+									length: normalizeMessageText((partialMessage as ClineMessage & { reasoning?: string }).reasoning || partialMessage.text).length,
+								})
+							}
 							return { ...prevState, clineMessages: [...prevState.clineMessages, partialMessage] }
 						}
 						return prevState
