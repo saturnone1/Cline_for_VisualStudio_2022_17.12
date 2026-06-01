@@ -123,14 +123,14 @@ describe("getButtonConfig", () => {
 	})
 
 	// Test API request states
-	it("returns api_req_active config for api_req_started say message", () => {
+	it("does not show cancel for completed api_req_started say message", () => {
 		const apiReqMessage: ClineMessage = {
 			type: "say",
 			say: "api_req_started",
 			ts: Date.now(),
 		}
 		const config = getButtonConfig(apiReqMessage)
-		expect(config).toEqual(BUTTON_CONFIGS.api_req_active)
+		expect(config).toEqual(BUTTON_CONFIGS.default)
 	})
 
 	// Test mode parameter (though not extensively used in the current implementation)

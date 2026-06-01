@@ -8,6 +8,7 @@ const MAX_STRING_CHARS = 4096
 const MAX_ARRAY_ITEMS = 50
 const MAX_OBJECT_KEYS = 80
 const MAX_DEPTH = 8
+const VERBOSE_INTERACTION_LOG = process.env.VSCLINE_VERBOSE_INTERACTION_LOG === "1"
 
 const SENSITIVE_KEYS = [
 	"apikey",
@@ -21,12 +22,15 @@ const SENSITIVE_KEYS = [
 
 export function logInteraction(direction: string, event: string, payload?: unknown) {
 	try {
+		if (shouldSkipDefaultLog(direction, event, payload)) {
+			return
+		}
 		const entry = {
 			at: new Date().toISOString(),
 			source: "sidecar",
 			direction,
 			event,
-			payload: sanitize(payload, 0),
+			payload: sanitize(compactPayload(direction, event, payload), 0),
 		}
 		let line = JSON.stringify(entry)
 		if (line.length > MAX_LINE_CHARS) {
@@ -39,6 +43,96 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 	} catch {
 		// Diagnostics must never interfere with the extension.
 	}
+}
+
+function shouldSkipDefaultLog(direction: string, event: string, payload: unknown) {
+	if (VERBOSE_INTERACTION_LOG) {
+		return false
+	}
+
+	if (event === "jsonrpc.line" || event === "jsonrpc.response.result" || event === "partialMessage" || event === "taskActivity") {
+		return true
+	}
+
+	if (event === "webview.postMessage" || event === "webview.message.batchItem") {
+		return true
+	}
+
+	if (event.endsWith(".result") && isPostedWebviewResult(payload)) {
+		return true
+	}
+
+	if (event === "sdk.event" && isHighFrequencySdkEvent(payload)) {
+		return true
+	}
+
+	return false
+}
+
+function compactPayload(direction: string, event: string, payload: unknown) {
+	if (event === "webview.message" && typeof payload === "string") {
+		return summarizeWebviewMessage(payload)
+	}
+
+	if (event === "state.broadcast") {
+		const record = asRecord(payload)
+		const messages = Array.isArray(record.messages) ? record.messages : []
+		return {
+			count: record.count,
+			messages: messages.slice(0, 4),
+			truncatedMessages: Math.max(0, messages.length - 4),
+		}
+	}
+
+	if (direction === "host->sidecar" && event === "webview.message.result") {
+		const record = asRecord(payload)
+		const webviewMessages = Array.isArray(record.webviewMessages) ? record.webviewMessages : []
+		return {
+			handled: record.handled,
+			webviewMessageCount: webviewMessages.length,
+		}
+	}
+
+	return payload
+}
+
+function summarizeWebviewMessage(rawJson: string) {
+	const parsed = tryParseJson(rawJson)
+	const record = asRecord(parsed)
+	const request = asRecord(record.grpc_request)
+	const cancel = asRecord(record.grpc_request_cancel)
+	return {
+		type: getString(record, "type"),
+		service: getString(request, "service"),
+		method: getString(request, "method"),
+		requestId: getString(request, "request_id") || getString(request, "requestId") || getString(cancel, "request_id"),
+		isStreaming: request.is_streaming === true || request.isStreaming === true,
+		rawLength: rawJson.length,
+	}
+}
+
+function isPostedWebviewResult(payload: unknown) {
+	const result = asRecord(asRecord(payload).result)
+	return result.posted === true && Object.keys(result).length <= 1
+}
+
+function isHighFrequencySdkEvent(payload: unknown) {
+	const record = asRecord(payload)
+	if (getString(record, "type") !== "agent_event") {
+		return false
+	}
+
+	const event = asRecord(record.event)
+	const type = getString(event, "type")
+	const contentType = getString(event, "contentType")
+	if ((type === "content_update" || type === "content_delta") && (contentType === "text" || contentType === "reasoning")) {
+		return true
+	}
+	return type === "content_start" ||
+		type === "content_end" ||
+		type === "iteration_start" ||
+		type === "iteration_end" ||
+		type === "usage"
 }
 
 function getLogPath() {
@@ -97,6 +191,15 @@ function sanitize(value: unknown, depth: number): unknown {
 		result.__truncatedKeys = entries.length - MAX_OBJECT_KEYS
 	}
 	return result
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function getString(record: Record<string, unknown>, key: string) {
+	const value = record[key]
+	return typeof value === "string" ? value : ""
 }
 
 function tryParseJson(value: string) {

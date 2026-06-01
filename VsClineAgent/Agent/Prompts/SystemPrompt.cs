@@ -360,7 +360,7 @@ Your final result description here
             {
                 foreach (var command in activeCommands.OrderBy(command => command.StartedAt))
                 {
-                    sb.AppendLine($"- PID {command.ProcessId}: {command.Command} (cwd: {command.WorkingDirectory})");
+                    sb.AppendLine($"- {command.CommandId} on {command.TerminalId}: {command.Command} (PID {command.ProcessId}, cwd: {command.WorkingDirectory}, status: {command.Status})");
                 }
             }
             else

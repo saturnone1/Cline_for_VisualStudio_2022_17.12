@@ -89,6 +89,14 @@ class VisualStudioWorkspaceClient {
 		return this.bridge.cancelCommands()
 	}
 
+	getTerminalState(_request: unknown) {
+		return this.bridge.getTerminalState()
+	}
+
+	getUnretrievedTerminalOutput(request: { afterSequence?: number }) {
+		return this.bridge.getUnretrievedTerminalOutput(request.afterSequence || 0)
+	}
+
 	saveOpenDocumentIfDirty(request: { filePath?: string }) {
 		return this.bridge.saveOpenDocumentIfDirty(request.filePath || "")
 	}

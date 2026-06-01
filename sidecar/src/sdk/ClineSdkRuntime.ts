@@ -7,6 +7,7 @@ import { VisualStudioHostProvider } from "../host/VisualStudioHostProvider"
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
 type CoreSessionEvent = Parameters<ClineCoreInstance["subscribe"]>[0] extends (event: infer T) => void ? T : unknown
+type McpManagerInstance = InstanceType<ClineSdkModule["InMemoryMcpManager"]>
 export type ToolApprovalResult = { approved: boolean; reason?: string }
 export type AskQuestionResult = string
 
@@ -24,6 +25,9 @@ export class ClineSdkRuntime {
 	private readonly host: VisualStudioHostProvider
 	private core: ClineCoreInstance | null = null
 	private starting: Promise<ClineCoreInstance> | null = null
+	private mcpManager: McpManagerInstance | null = null
+	private mcpStarting: Promise<McpManagerInstance> | null = null
+	private mcpSettingsPath: string | null = null
 	private activeSessionId: string | null = null
 	private lastError: string | undefined
 
@@ -109,6 +113,7 @@ export class ClineSdkRuntime {
 				enableTools: config.enableTools !== false,
 				enableSpawnAgent: config.enableSpawnAgent === true,
 				enableAgentTeams: config.enableAgentTeams === true,
+				extraTools: await this.createMcpExtraTools(),
 				systemPrompt,
 			},
 			prompt: stringValue(request.prompt) || "",
@@ -282,13 +287,249 @@ export class ClineSdkRuntime {
 		return core.settings.toggle(asRecord(params) as any)
 	}
 
+	async getMcpSettingsPath() {
+		const sdk = await importClineSdk()
+		return this.resolveMcpSettingsPath(sdk)
+	}
+
+	async listMcpServers() {
+		const sdk = await importClineSdk()
+		const manager = await this.ensureMcpManager()
+		await this.registerMcpServersFromSettings(sdk, manager)
+		const settings = this.loadMcpSettings(sdk)
+		const registrations = sdk.resolveMcpServerRegistrations({ filePath: this.resolveMcpSettingsPath(sdk) })
+		const snapshots = new Map(manager.listServers().map((server) => [server.name, server]))
+		const oauthStatuses = new Map(sdk.listMcpServerOAuthStatuses({ filePath: this.resolveMcpSettingsPath(sdk) }).map((status) => [status.serverName, status]))
+
+		const servers = []
+		for (const registration of registrations) {
+			const snapshot = snapshots.get(registration.name)
+			const config = asRecord(settings.mcpServers?.[registration.name])
+			const timeout = numberValue(config.timeout) || numberValue(asRecord(registration.metadata).timeout)
+			const disabled = registration.disabled === true || config.disabled === true
+			let tools: Array<Record<string, unknown>> = []
+			let error = snapshot?.lastError || ""
+			let status = disabled ? "disconnected" : snapshot?.status || "disconnected"
+
+			if (!disabled) {
+				try {
+					const listedTools = await manager.listTools(registration.name)
+					tools = listedTools.map((tool) => ({
+						name: tool.name,
+						description: tool.description || "",
+						inputSchema: JSON.stringify(tool.inputSchema || {}),
+						autoApprove: isToolAutoApproved(config, tool.name),
+					}))
+					status = "connected"
+				} catch (toolError) {
+					error = toolError instanceof Error ? toolError.message : String(toolError)
+					status = "disconnected"
+				}
+			}
+
+			const oauth = oauthStatuses.get(registration.name)
+			servers.push({
+				name: registration.name,
+				config: JSON.stringify(toDisplayMcpConfig(registration as unknown as Record<string, unknown>, config)),
+				status: toProtoMcpStatus(status),
+				error,
+				tools,
+				resources: [],
+				resourceTemplates: [],
+				prompts: [],
+				disabled,
+				timeout,
+				oauthRequired: oauth?.oauthSupported === true && oauth.oauthConfigured !== true,
+				oauthAuthStatus: oauth?.oauthConfigured ? "authenticated" : oauth?.oauthSupported ? "unauthenticated" : undefined,
+			})
+		}
+
+		return servers
+	}
+
+	async getMcpServersResponse() {
+		const mcpServers = await this.listMcpServers()
+		return { mcpServers, servers: mcpServers }
+	}
+
+	async authenticateMcpServer(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+
+		const sdk = await importClineSdk()
+		const filePath = this.resolveMcpSettingsPath(sdk)
+		this.ensureMcpSettingsFile(filePath)
+
+		await sdk.authorizeMcpServerOAuth({
+			serverName: name,
+			filePath,
+			clientName: "VsClineAgent",
+			clientVersion: this.readSdkVersion() || "0.0.0",
+			callbackHost: "127.0.0.1",
+			timeoutMs: readPositiveIntEnv("VSCLINE_MCP_OAUTH_TIMEOUT_MS", 300000),
+			openUrl: async (url: string) => {
+				this.logSdkMessage("info", "Opening MCP OAuth URL", { serverName: name })
+				await this.host.envClient.openExternal({ value: url })
+			},
+			onServerListening: (info: unknown) => {
+				this.logSdkMessage("info", "MCP OAuth callback server listening", info)
+			},
+			onServerClose: (info: unknown) => {
+				this.logSdkMessage("info", "MCP OAuth callback server closed", info)
+			},
+		})
+
+		await this.reloadMcpServers()
+		return this.getMcpServersResponse()
+	}
+
+	async addRemoteMcpServer(params: unknown) {
+		const request = asRecord(params)
+		const serverName = stringValue(request.serverName) || stringValue(request.name)
+		const serverUrl = stringValue(request.serverUrl) || stringValue(request.url)
+		const transportType = stringValue(request.transportType) === "sse" ? "sse" : "streamableHttp"
+		if (!serverName) {
+			throw new Error("MCP server name is required.")
+		}
+		if (!serverUrl) {
+			throw new Error("MCP server URL is required.")
+		}
+
+		new URL(serverUrl)
+		const sdk = await importClineSdk()
+		const settings = this.loadMcpSettings(sdk)
+		settings.mcpServers[serverName] = {
+			transport: {
+				type: transportType,
+				url: serverUrl,
+			},
+			disabled: false,
+			timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
+		} as any
+		await this.saveMcpSettings(sdk, settings)
+		await this.reloadMcpServers()
+		return this.getMcpServersResponse()
+	}
+
+	async setMcpServerDisabled(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+		const disabled = request.disabled === true
+		const sdk = await importClineSdk()
+		sdk.setMcpServerDisabled({ filePath: this.resolveMcpSettingsPath(sdk), name, disabled })
+		const manager = await this.ensureMcpManager()
+		await manager.setServerDisabled(name, disabled).catch(() => undefined)
+		await this.reloadMcpServers()
+		return this.getMcpServersResponse()
+	}
+
+	async updateMcpTimeout(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
+		const timeout = numberValue(request.timeout)
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+		if (!timeout || timeout <= 0) {
+			throw new Error("MCP timeout must be a positive number of seconds.")
+		}
+
+		const sdk = await importClineSdk()
+		const settings = this.loadMcpSettings(sdk)
+		const current = asRecord(settings.mcpServers[name])
+		if (Object.keys(current).length === 0) {
+			throw new Error(`MCP server not found: ${name}`)
+		}
+		settings.mcpServers[name] = { ...current, timeout } as any
+		await this.saveMcpSettings(sdk, settings)
+		await this.reloadMcpServers()
+		return this.getMcpServersResponse()
+	}
+
+	async deleteMcpServer(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+		const sdk = await importClineSdk()
+		const settings = this.loadMcpSettings(sdk)
+		delete settings.mcpServers[name]
+		await this.saveMcpSettings(sdk, settings)
+		const manager = await this.ensureMcpManager()
+		await manager.unregisterServer(name).catch(() => undefined)
+		await this.reloadMcpServers()
+		return this.getMcpServersResponse()
+	}
+
+	async restartMcpServer(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+		const manager = await this.ensureMcpManager()
+		await this.reloadMcpServers()
+		await manager.disconnectServer(name).catch(() => undefined)
+		await manager.connectServer(name).catch(() => undefined)
+		await manager.refreshTools(name).catch(() => undefined)
+		return this.getMcpServersResponse()
+	}
+
+	async toggleMcpToolAutoApprove(params: unknown) {
+		const request = asRecord(params)
+		const name = stringValue(request.serverName) || stringValue(request.name)
+		const toolNames = stringArrayValue(request.toolNames)
+		const autoApprove = request.autoApprove === true
+		if (!name) {
+			throw new Error("MCP server name is required.")
+		}
+
+		const sdk = await importClineSdk()
+		const settings = this.loadMcpSettings(sdk)
+		const current = asRecord(settings.mcpServers[name])
+		if (Object.keys(current).length === 0) {
+			throw new Error(`MCP server not found: ${name}`)
+		}
+		const metadata = asRecord(current.metadata)
+		const autoApproveTools = new Set(stringArrayValue(metadata.autoApproveTools))
+		for (const toolName of toolNames) {
+			if (autoApprove) {
+				autoApproveTools.add(toolName)
+			} else {
+				autoApproveTools.delete(toolName)
+			}
+		}
+		settings.mcpServers[name] = {
+			...current,
+			metadata: {
+				...metadata,
+				autoApproveTools: [...autoApproveTools],
+			},
+		} as any
+		await this.saveMcpSettings(sdk, settings)
+		return this.getMcpServersResponse()
+	}
+
 	async dispose() {
 		const core = this.core
+		const mcpManager = this.mcpManager
 		this.core = null
 		this.starting = null
+		this.mcpManager = null
+		this.mcpStarting = null
 		this.activeSessionId = null
 		if (core) {
 			await core.dispose("Visual Studio sidecar disconnected")
+		}
+		if (mcpManager) {
+			await mcpManager.dispose().catch(() => undefined)
 		}
 	}
 
@@ -316,6 +557,7 @@ export class ClineSdkRuntime {
 
 	private async createCore() {
 		const sdk = await importClineSdk()
+		await this.ensureMcpManager()
 		const defaultExecutors = sdk.createDefaultExecutors({
 			applyPatch: { restrictToCwd: true },
 		})
@@ -375,7 +617,7 @@ export class ClineSdkRuntime {
 							const result = await this.host.workspaceClient.executeCommandInTerminal({
 								command: commandText,
 								cwd: commandCwd,
-								timeoutSeconds: 120,
+								timeoutSeconds: readPositiveIntEnv("VSCLINE_COMMAND_TIMEOUT_SECONDS", 120),
 							})
 							if (abortSignal?.aborted) {
 								throw new Error("Command was cancelled.")
@@ -489,6 +731,116 @@ export class ClineSdkRuntime {
 		return core
 	}
 
+	private async createMcpExtraTools() {
+		const sdk = await importClineSdk()
+		const manager = await this.ensureMcpManager()
+		const registrations = sdk.resolveMcpServerRegistrations({ filePath: this.resolveMcpSettingsPath(sdk) })
+		const tools = []
+		for (const registration of registrations) {
+			if (registration.disabled) {
+				continue
+			}
+			try {
+				tools.push(
+					...(await sdk.createMcpTools({
+						serverName: registration.name,
+						provider: manager,
+					})),
+				)
+			} catch (error) {
+				this.logSdkMessage("warn", `Failed to create MCP tools for ${registration.name}`, {
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+		}
+		return tools.length > 0 ? tools : undefined
+	}
+
+	private async ensureMcpManager() {
+		if (this.mcpManager) {
+			return this.mcpManager
+		}
+		if (!this.mcpStarting) {
+			this.mcpStarting = this.createMcpManager()
+				.then((manager) => {
+					this.mcpManager = manager
+					return manager
+				})
+				.catch((error) => {
+					this.mcpStarting = null
+					throw error
+				})
+		}
+		return this.mcpStarting
+	}
+
+	private async createMcpManager() {
+		const sdk = await importClineSdk()
+		const settingsPath = this.resolveMcpSettingsPath(sdk)
+		this.ensureMcpSettingsFile(settingsPath)
+		const manager = new sdk.InMemoryMcpManager({
+			clientFactory: sdk.createDefaultMcpServerClientFactory({
+				settingsPath,
+				clientName: "VsClineAgent",
+				clientVersion: this.readSdkVersion() || "0.0.0",
+			}),
+		})
+		await this.registerMcpServersFromSettings(sdk, manager)
+		return manager
+	}
+
+	private async reloadMcpServers() {
+		const sdk = await importClineSdk()
+		const manager = await this.ensureMcpManager()
+		for (const server of manager.listServers()) {
+			await manager.unregisterServer(server.name).catch(() => undefined)
+		}
+		await this.registerMcpServersFromSettings(sdk, manager)
+	}
+
+	private async registerMcpServersFromSettings(sdk: ClineSdkModule, manager: McpManagerInstance) {
+		const settingsPath = this.resolveMcpSettingsPath(sdk)
+		this.ensureMcpSettingsFile(settingsPath)
+		const registrations = sdk.resolveMcpServerRegistrations({ filePath: settingsPath })
+		const existing = new Set(manager.listServers().map((server) => server.name))
+		for (const registration of registrations) {
+			if (!existing.has(registration.name)) {
+				await manager.registerServer(registration)
+			}
+		}
+		return registrations
+	}
+
+	private resolveMcpSettingsPath(sdk: ClineSdkModule) {
+		if (!this.mcpSettingsPath) {
+			this.mcpSettingsPath = sdk.resolveDefaultMcpSettingsPath()
+		}
+		this.ensureMcpSettingsFile(this.mcpSettingsPath)
+		return this.mcpSettingsPath
+	}
+
+	private loadMcpSettings(sdk: ClineSdkModule) {
+		const filePath = this.resolveMcpSettingsPath(sdk)
+		this.ensureMcpSettingsFile(filePath)
+		const settings = sdk.loadMcpSettingsFile({ filePath }) as { mcpServers: Record<string, Record<string, unknown>> }
+		settings.mcpServers = asRecord(settings.mcpServers) as Record<string, Record<string, unknown>>
+		return settings
+	}
+
+	private async saveMcpSettings(sdk: ClineSdkModule, settings: { mcpServers: Record<string, unknown> }) {
+		const filePath = this.resolveMcpSettingsPath(sdk)
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+		await fs.promises.writeFile(filePath, `${JSON.stringify({ mcpServers: settings.mcpServers || {} }, null, 2)}\n`, "utf8")
+	}
+
+	private ensureMcpSettingsFile(filePath: string) {
+		if (fs.existsSync(filePath)) {
+			return
+		}
+		fs.mkdirSync(path.dirname(filePath), { recursive: true })
+		fs.writeFileSync(filePath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`, "utf8")
+	}
+
 	private logSdkMessage(level: string, message: string, metadata?: unknown) {
 		this.host.envClient.debugLog({
 			message: `[Cline SDK:${level}] ${message}${metadata ? ` ${JSON.stringify(metadata)}` : ""}`,
@@ -548,9 +900,13 @@ function normalizeCommandResultForSdk(result: unknown) {
 
 	const stdout = typeof record.stdout === "string" ? record.stdout : undefined
 	const stderr = typeof record.stderr === "string" ? record.stderr : undefined
+	const backgroundNote =
+		record.background === true
+			? `Command is still running in the Visual Studio terminal session (${stringValue(record.terminalId) || "terminal"}). Use terminal state/output if more output is needed.`
+			: undefined
 	return JSON.stringify({
 		...record,
-		stdout: stdout === undefined ? undefined : truncateText(stdout, limit),
+		stdout: stdout === undefined ? backgroundNote : truncateText([backgroundNote, stdout].filter(Boolean).join("\n"), limit),
 		stderr: stderr === undefined ? undefined : truncateText(stderr, Math.min(limit, 8000)),
 	})
 }
@@ -590,6 +946,34 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 function stringArrayValue(value: unknown) {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : []
+}
+
+function isToolAutoApproved(serverConfig: Record<string, unknown>, toolName: string) {
+	const metadata = asRecord(serverConfig.metadata)
+	return stringArrayValue(metadata.autoApproveTools).includes(toolName)
+}
+
+function toDisplayMcpConfig(registration: Record<string, unknown>, serverConfig: Record<string, unknown>) {
+	const transport = asRecord(registration.transport) || asRecord(serverConfig.transport)
+	const metadata = asRecord(registration.metadata)
+	const timeout = numberValue(serverConfig.timeout) || numberValue(metadata.timeout)
+	return {
+		...transport,
+		...(timeout ? { timeout } : {}),
+		...(serverConfig.disabled === true || registration.disabled === true ? { disabled: true } : {}),
+	}
+}
+
+function toProtoMcpStatus(status: string) {
+	switch (status) {
+		case "connected":
+			return "MCP_SERVER_STATUS_CONNECTED"
+		case "connecting":
+			return "MCP_SERVER_STATUS_CONNECTING"
+		case "disconnected":
+		default:
+			return "MCP_SERVER_STATUS_DISCONNECTED"
+	}
 }
 
 function agentMode(value: unknown): "act" | "plan" | undefined {

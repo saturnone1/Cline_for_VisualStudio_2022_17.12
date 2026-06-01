@@ -55,12 +55,15 @@ export class VisualStudioWebviewRouter {
 	private messageSequence = 0
 	private activePartialTextTs: number | null = null
 	private activeAssistantTextBuffer = ""
-	private activeStatusTextTs: number | null = null
 	private activeReasoningTextTs: number | null = null
 	private activeFoldedReasoningText = ""
 	private activeFoldedActivityText = ""
+	private activeTerminalActivityText = ""
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
+	private terminalStateTimer: NodeJS.Timeout | null = null
+	private terminalStatePolling = false
+	private lastTerminalOutputSequence = 0
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private readonly lastPartialMessageKeys = new Map<string, string>()
@@ -269,9 +272,6 @@ export class VisualStudioWebviewRouter {
 				return
 			}
 			this.noteTaskActivity(status || type)
-			if (status && status !== "idle") {
-				this.addApiRequestStarted(status, { partial: true })
-			}
 			this.broadcastState().catch((error) => console.error(error))
 			return
 		}
@@ -378,6 +378,14 @@ export class VisualStudioWebviewRouter {
 		if (key === "UiService.subscribeToPartialMessage") {
 			this.partialMessageStreamRequestIds.add(requestId)
 			return grpcHandled()
+		}
+
+		if (key === "McpService.subscribeToMcpServers") {
+			return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), true))
+		}
+
+		if (key === "McpService.subscribeToMcpMarketplaceCatalog") {
+			return grpcHandled(grpcResponse(requestId, this.getMcpMarketplaceResponse(), true))
 		}
 
 		if (key === "OcaAccountService.ocaSubscribeToAuthStatusUpdate") {
@@ -692,21 +700,44 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "McpService.getLatestMcpServers":
-				return grpcHandled(grpcResponse(requestId, { mcpServers: [], servers: [] }, false))
+				return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), false))
 
 			case "McpService.refreshMcpMarketplace":
-				return grpcHandled(grpcResponse(requestId, { catalog: [], items: [] }, false))
+				return grpcHandled(grpcResponse(requestId, this.getMcpMarketplaceResponse(), false))
 
 			case "McpService.addRemoteMcpServer":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().addRemoteMcpServer(message), false))
+
 			case "McpService.openMcpSettings":
-			case "McpService.updateMcpTimeout":
-			case "McpService.restartMcpServer":
-			case "McpService.deleteMcpServer":
-			case "McpService.toggleToolAutoApprove":
-			case "McpService.toggleMcpServer":
-			case "McpService.authenticateMcpServer":
-			case "McpService.downloadMcp":
+				await this.openMcpSettingsFile()
 				return grpcHandled(grpcResponse(requestId, {}, false))
+
+			case "McpService.updateMcpTimeout":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().updateMcpTimeout(message), false))
+
+			case "McpService.restartMcpServer":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().restartMcpServer(message), false))
+
+			case "McpService.deleteMcpServer":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().deleteMcpServer(message), false))
+
+			case "McpService.toggleToolAutoApprove":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().toggleMcpToolAutoApprove(message), false))
+
+			case "McpService.toggleMcpServer":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().setMcpServerDisabled(message), false))
+
+			case "McpService.authenticateMcpServer":
+				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().authenticateMcpServer(message), false))
+
+			case "McpService.downloadMcp":
+				return grpcHandled(
+					grpcError(
+						requestId,
+						"MCP marketplace installation is not implemented in the Visual Studio port yet. Add stdio/SSE/streamable HTTP servers from the MCP configuration file or Add Server tab.",
+						false,
+					),
+				)
 
 			case "TaskService.toggleTaskFavorite":
 				this.toggleTaskFavorite(getString(message, "taskId"), asRecord(message).isFavorited === true)
@@ -723,32 +754,55 @@ export class VisualStudioWebviewRouter {
 		return workspaceRoots[0] || String(this.state.currentTaskItem?.cwdOnTaskInitialization || process.cwd())
 	}
 
+	private requireClineSdk() {
+		if (!this.clineSdk) {
+			throw new Error("Cline SDK runtime is not attached.")
+		}
+		return this.clineSdk
+	}
+
+	private async getMcpServersResponse() {
+		return this.requireClineSdk().getMcpServersResponse()
+	}
+
+	private getMcpMarketplaceResponse() {
+		const catalog = { items: [] }
+		return { catalog, items: catalog.items }
+	}
+
+	private async openMcpSettingsFile() {
+		const filePath = await this.requireClineSdk().getMcpSettingsPath()
+		await VisualStudioHostProvider.create(this.connection).windowClient.openFile({ filePath })
+	}
+
 	private clearLiveInteractionState(reason: string) {
 		const hadState =
 			!!this.pendingApproval ||
 			!!this.pendingQuestion ||
 			!!this.activePartialTextTs ||
-			!!this.activeStatusTextTs ||
 			!!this.activeReasoningTextTs ||
 			!!this.activeToolActivityTs ||
 			this.activeToolActivityEntries.length > 0 ||
 			!!this.activeAssistantTextBuffer ||
 			!!this.activeFoldedReasoningText ||
-			!!this.activeFoldedActivityText
+			!!this.activeFoldedActivityText ||
+			!!this.activeTerminalActivityText ||
+			!!this.terminalStateTimer
 
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
+		this.stopTerminalStatePolling()
 		this.pendingApproval?.resolve({ approved: false, reason: `Cleared by ${reason}.` })
 		this.pendingApproval = null
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.activePartialTextTs = null
 		this.activeAssistantTextBuffer = ""
-		this.activeStatusTextTs = null
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
+		this.activeTerminalActivityText = ""
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 
@@ -779,10 +833,10 @@ export class VisualStudioWebviewRouter {
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
+		this.activeTerminalActivityText = ""
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
-		this.addApiRequestStarted("Cline SDK started.")
 		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
 		if (options.broadcast !== false) {
@@ -980,7 +1034,6 @@ export class VisualStudioWebviewRouter {
 			...this.state.taskHistory.filter((item) => item.id !== sessionId),
 		]
 		this.noteTaskActivity("resume-session")
-		this.addApiRequestStarted("Cline SDK session resumed.", { partial: true })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
 
@@ -1035,7 +1088,6 @@ export class VisualStudioWebviewRouter {
 			this.finishSdkTask(sessionId, finishReason)
 		} else {
 			this.finalizeOpenPartialMessages()
-			this.removeActiveStatusText()
 			this.addCompletionResultMarker(finishReason)
 		}
 
@@ -1074,7 +1126,6 @@ export class VisualStudioWebviewRouter {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
-		this.removeActiveStatusText()
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
@@ -1244,7 +1295,7 @@ export class VisualStudioWebviewRouter {
 		if (activeSessionId === taskId && this.activePartialTextTs) {
 			return
 		}
-		if (activeSessionId === taskId && (this.activeReasoningTextTs || this.activeToolActivityTs || this.activeStatusTextTs)) {
+		if (activeSessionId === taskId && (this.activeReasoningTextTs || this.activeToolActivityTs)) {
 			return
 		}
 
@@ -1525,7 +1576,7 @@ export class VisualStudioWebviewRouter {
 			getString(payload, "teamName") ||
 			"Team progress updated."
 		this.noteTaskActivity("team_progress")
-		this.upsertStatusText(message)
+		logInteraction("sidecar", "teamProgress", { message: truncateText(message, 500) })
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
 	}
@@ -1550,9 +1601,7 @@ export class VisualStudioWebviewRouter {
 		const prompts = Array.isArray(payload.prompts) ? payload.prompts : []
 		this.noteTaskActivity("pending_prompts")
 		if (prompts.length > 0) {
-			this.upsertStatusText(`Pending prompts: ${prompts.length}`)
-		} else {
-			this.removeActiveStatusText()
+			logInteraction("sidecar", "pendingPrompts", { count: prompts.length })
 		}
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
@@ -1562,7 +1611,7 @@ export class VisualStudioWebviewRouter {
 		const prompt = getString(payload, "prompt")
 		this.noteTaskActivity("pending_prompt_submitted")
 		if (prompt) {
-			this.upsertStatusText(`Queued prompt: ${truncateText(prompt, 160)}`)
+			logInteraction("sidecar", "pendingPromptSubmitted", { prompt: truncateText(prompt, 160) })
 		}
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
@@ -1589,8 +1638,6 @@ export class VisualStudioWebviewRouter {
 					this.upsertAssistantTextFromEvent(accumulated, delta)
 				}
 				shouldBroadcastState = false
-			} else if (!this.state.clineMessages.some((message) => message.say === "api_req_started" && message.partial === true)) {
-				this.addApiRequestStarted("Cline SDK is thinking...", { partial: true })
 			}
 		}
 
@@ -1662,6 +1709,14 @@ export class VisualStudioWebviewRouter {
 			this.clearReasoningStatus()
 			this.clearPartialIdleWatchdog()
 			this.activePartialTextTs = null
+			const toolName = getString(event, "toolName")
+			if (toolName === "bash" || toolName === "run_commands") {
+				const command = getCommandText(asRecord(event.input))
+				if (command) {
+					this.recordToolActivity("executeCommand", JSON.stringify({ tool: "executeCommand", command }))
+				}
+				this.startTerminalStatePolling()
+			}
 		}
 
 		if (type === "content_end" && contentType === "tool") {
@@ -1670,6 +1725,12 @@ export class VisualStudioWebviewRouter {
 			const toolName = getString(event, "toolName")
 			const error = getString(event, "error")
 			const isCommand = toolName === "bash" || toolName === "run_commands"
+			if (isCommand) {
+				this.stopTerminalStatePolling()
+				this.pollTerminalState().catch((pollError) =>
+					logInteraction("sidecar", "terminalStateFinalPollFailed", { message: stringify(pollError) }),
+				)
+			}
 			const mappedToolName = mapToolName(toolName)
 			const input = asRecord(event.input)
 			const trackedPath =
@@ -1714,7 +1775,11 @@ export class VisualStudioWebviewRouter {
 		if (type === "content_update" && contentType === "tool") {
 			this.noteTaskActivity("content_update:tool")
 			this.clearReasoningStatus()
-			const toolName = mapToolName(getString(event, "toolName"))
+			const rawToolName = getString(event, "toolName")
+			if (rawToolName === "bash" || rawToolName === "run_commands") {
+				this.startTerminalStatePolling()
+			}
+			const toolName = mapToolName(rawToolName)
 			const update = event.update
 			if (update !== undefined) {
 				this.rememberToolSummary(
@@ -1729,21 +1794,14 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (type === "iteration_start") {
-			const iteration = getNumber(event, "iteration")
 			this.noteTaskActivity("iteration_start")
-			this.upsertStatusText(iteration ? `Cline SDK iteration ${iteration} started.` : "Cline SDK iteration started.")
 		}
 
 		if (type === "iteration_end") {
-			const iteration = getNumber(event, "iteration")
 			this.noteTaskActivity("iteration_end")
+			const iteration = getNumber(event, "iteration")
 			const toolCallCount = getNumber(event, "toolCallCount") || 0
 			const hadToolCalls = asRecord(event).hadToolCalls === true || toolCallCount > 0
-			this.upsertStatusText(
-				iteration
-					? `Cline SDK iteration ${iteration} finished. Tool calls: ${toolCallCount}.`
-					: `Cline SDK iteration finished. Tool calls: ${toolCallCount}.`,
-			)
 			if (
 				!hadToolCalls &&
 				!this.hasCompletionResultAfterLastUserMessage() &&
@@ -1767,7 +1825,7 @@ export class VisualStudioWebviewRouter {
 			if (message) {
 				const text = reason ? `${message}\n\nReason: ${reason}` : message
 				if (noticeType === "status") {
-					this.upsertStatusText(text)
+					logInteraction("sidecar", "sdkStatusNotice", { text })
 				} else {
 					this.addMessage({ type: "say", say: "text", text })
 				}
@@ -2049,7 +2107,6 @@ export class VisualStudioWebviewRouter {
 	private addAssistantTextResult(text: string) {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
-		this.removeActiveStatusText()
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
@@ -2102,7 +2159,6 @@ export class VisualStudioWebviewRouter {
 		} else {
 			logInteraction("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		}
-		this.removeActiveStatusText()
 		this.finalizeOpenPartialMessages()
 		this.addCompletionResultMarker(status)
 	}
@@ -2298,6 +2354,57 @@ export class VisualStudioWebviewRouter {
 		this.activeToolActivityTs = this.activeReasoningTextTs
 	}
 
+	private startTerminalStatePolling() {
+		if (this.terminalStateTimer) {
+			return
+		}
+
+		this.pollTerminalState().catch((error) => logInteraction("sidecar", "terminalStatePollFailed", { message: stringify(error) }))
+		this.terminalStateTimer = setInterval(() => {
+			this.pollTerminalState().catch((error) => logInteraction("sidecar", "terminalStatePollFailed", { message: stringify(error) }))
+		}, readPositiveIntEnv("VSCLINE_TERMINAL_STATE_POLL_MS", 2500))
+	}
+
+	private stopTerminalStatePolling() {
+		if (this.terminalStateTimer) {
+			clearInterval(this.terminalStateTimer)
+			this.terminalStateTimer = null
+		}
+		this.terminalStatePolling = false
+	}
+
+	private async pollTerminalState() {
+		if (this.terminalStatePolling) {
+			return
+		}
+		this.terminalStatePolling = true
+		try {
+			const workspace = VisualStudioHostProvider.create(this.connection).workspaceClient
+			const state = asRecord(await workspace.getTerminalState({}))
+			const activeCommands = Array.isArray(state.activeCommands) ? state.activeCommands.map(asRecord) : []
+			const recentCommands = Array.isArray(state.recentCommands) ? state.recentCommands.map(asRecord) : []
+			const outputResult = asRecord(await workspace.getUnretrievedTerminalOutput({ afterSequence: this.lastTerminalOutputSequence }))
+			const lines = Array.isArray(outputResult.lines) ? outputResult.lines.map(asRecord) : []
+			for (const line of lines) {
+				const sequence = getNumber(line, "sequence") || 0
+				if (sequence > this.lastTerminalOutputSequence) {
+					this.lastTerminalOutputSequence = sequence
+				}
+			}
+
+			const text = buildTerminalActivityText(activeCommands, recentCommands, lines, state)
+			if (!text) {
+				return
+			}
+
+			this.activeTerminalActivityText = text
+			this.upsertFoldedProgressMessage()
+			this.updateCurrentTaskItem()
+		} finally {
+			this.terminalStatePolling = false
+		}
+	}
+
 	private finishActiveToolActivity() {
 		if (!this.activeToolActivityTs && this.activeToolActivityEntries.length === 0) {
 			return
@@ -2342,48 +2449,6 @@ export class VisualStudioWebviewRouter {
 			return ""
 		}
 		return getString(this.state.clineMessages.find((item) => item.ts === this.activePartialTextTs), "text")
-	}
-
-	private addApiRequestStarted(request: string, options: { partial?: boolean } = {}) {
-		const text = JSON.stringify({
-			request,
-			tokensIn: 0,
-			tokensOut: 0,
-			cacheWrites: 0,
-			cacheReads: 0,
-			cost: 0,
-		})
-		if (options.partial === true) {
-			for (let index = this.state.clineMessages.length - 1; index >= 0; index--) {
-				const message = this.state.clineMessages[index]
-				if (message.say === "api_req_started" && message.partial === true) {
-					this.upsertMessage(numberValue(message.ts) || Date.now(), {
-						type: "say",
-						say: "api_req_started",
-						text,
-						partial: true,
-						isCollapsed: true,
-						isExpanded: false,
-					})
-					return
-				}
-			}
-		}
-
-		if (this.state.clineMessages.slice(-3).some((message) =>
-			message.say === "api_req_started" && normalizeTranscriptText(getString(message, "text")) === normalizeTranscriptText(text)
-		)) {
-			return
-		}
-
-		this.addMessage({
-			type: "say",
-			say: "api_req_started",
-			text,
-			partial: options.partial === true ? true : undefined,
-			isCollapsed: options.partial === true ? true : undefined,
-			isExpanded: options.partial === true ? false : undefined,
-		})
 	}
 
 	private upsertPartialText(text: string) {
@@ -2483,7 +2548,13 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private upsertFoldedProgressMessage() {
-		const foldedText = [this.activeFoldedActivityText, this.activeFoldedReasoningText].filter(Boolean).join("\n\n")
+		const foldedText = [
+			this.activeFoldedActivityText,
+			this.activeTerminalActivityText,
+			this.activeFoldedReasoningText,
+		]
+			.filter(Boolean)
+			.join("\n\n")
 		if (!foldedText.trim()) {
 			return
 		}
@@ -2525,6 +2596,7 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private finishFoldedReasoningText() {
+		this.stopTerminalStatePolling()
 		if (!this.activeReasoningTextTs) {
 			return
 		}
@@ -2540,6 +2612,7 @@ export class VisualStudioWebviewRouter {
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
+		this.activeTerminalActivityText = ""
 	}
 
 	private getCurrentSessionId() {
@@ -2549,6 +2622,7 @@ export class VisualStudioWebviewRouter {
 	private finalizeOpenPartialMessages() {
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
+		this.stopTerminalStatePolling()
 		let changed = false
 		this.state.clineMessages = this.state.clineMessages.filter((message) => {
 			if (message.partial !== true) {
@@ -2558,7 +2632,7 @@ export class VisualStudioWebviewRouter {
 			if (message.say === "api_req_started" && isPlaceholderApiRequest(getString(message, "text"))) {
 				Object.assign(message, {
 					text: JSON.stringify({
-						request: "모델 진행 중",
+						request: "모델 진행 기록",
 						tokensIn: 0,
 						tokensOut: 0,
 						cacheWrites: 0,
@@ -2590,6 +2664,7 @@ export class VisualStudioWebviewRouter {
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
+		this.activeTerminalActivityText = ""
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 	}
@@ -2605,9 +2680,6 @@ export class VisualStudioWebviewRouter {
 			}
 
 			logInteraction("sidecar", "partialIdleNotice", { timeoutMs, textLength: text.length })
-			this.upsertStatusText(
-				`모델 응답 일부를 수신한 뒤 ${Math.round(timeoutMs / 1000)}초 동안 새 본문이 없습니다. 요청은 계속 열려 있으며, 필요하면 사용자가 직접 Cancel로 중단할 수 있습니다.`,
-			)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}, timeoutMs)
@@ -2641,7 +2713,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		const intervalMs = readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 1500)
+		const intervalMs = readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)
 		const now = Date.now()
 		const elapsed = now - this.lastPartialStateBroadcastAt
 		if (elapsed >= intervalMs) {
@@ -2663,7 +2735,6 @@ export class VisualStudioWebviewRouter {
 		}
 		this.lastTaskActivityAt = Date.now()
 		this.lastTaskActivityReason = reason
-		this.removeActiveStatusText()
 		logInteraction("sidecar", "taskActivity", { reason })
 		if (this.hasCompletionResultAfterLastUserMessage() || isTerminalSdkStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
 			this.clearTaskIdleWatchdog()
@@ -2693,8 +2764,6 @@ export class VisualStudioWebviewRouter {
 
 				const text = `Cline SDK 응답을 기다리는 중입니다. 마지막 활동 후 ${Math.round(idleForMs / 1000)}초가 지났습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}`
 				logInteraction("sidecar", "taskIdleNotice", { noticeMs, idleForMs, reason: this.lastTaskActivityReason })
-				this.upsertStatusText(text)
-				this.broadcastState().catch((error) => console.error(error))
 			}, noticeMs)
 		}
 		this.taskIdleTimer = setTimeout(() => {
@@ -2708,9 +2777,6 @@ export class VisualStudioWebviewRouter {
 			}
 
 			logInteraction("sidecar", "taskIdleLongRunning", { timeoutMs, idleForMs, reason: this.lastTaskActivityReason })
-			this.upsertStatusText(
-				`Cline SDK가 ${Math.round(idleForMs / 1000)}초 동안 새 진행 이벤트를 보내지 않았습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}. 요청은 강제 종료하지 않고 유지합니다.`,
-			)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}, timeoutMs)
@@ -2725,32 +2791,6 @@ export class VisualStudioWebviewRouter {
 			clearTimeout(this.taskIdleTimer)
 			this.taskIdleTimer = null
 		}
-	}
-
-	private upsertStatusText(text: string) {
-		if (!this.activeStatusTextTs) {
-			this.activeStatusTextTs = Date.now() + this.messageSequence++
-			this.state.clineMessages.push({
-				ts: this.activeStatusTextTs,
-				type: "say",
-				say: "text",
-				text,
-				partial: true,
-			})
-			return
-		}
-
-		this.upsertMessage(this.activeStatusTextTs, { type: "say", say: "text", text, partial: true })
-	}
-
-	private removeActiveStatusText() {
-		if (!this.activeStatusTextTs) {
-			return
-		}
-
-		const ts = this.activeStatusTextTs
-		this.state.clineMessages = this.state.clineMessages.filter((message) => message.ts !== ts)
-		this.activeStatusTextTs = null
 	}
 
 	private describeTaskActivityReason(reason: string) {
@@ -3177,7 +3217,12 @@ function isPlaceholderApiRequest(text: string) {
 	const parsed = asRecord(tryParseJson(text) ?? {})
 	const request = getString(parsed, "request") || text
 	const normalized = request.replace(/\s+/g, " ").trim().toLowerCase()
-	return normalized === "cline sdk is thinking..." || normalized === "thinking" || normalized === "모델 진행 중"
+	return (
+		normalized === "cline sdk is thinking..." ||
+		normalized === "thinking" ||
+		normalized === "모델 진행 중" ||
+		normalized === "모델 진행 기록"
+	)
 }
 
 function truncateText(value: string, maxChars: number) {
@@ -3375,9 +3420,23 @@ function summarizeCommandOutput(output: unknown) {
 			const stdout = sanitizeConsoleOutput(getString(result, "stdout"))
 			const stderr = sanitizeConsoleOutput(getString(result, "stderr"))
 			const exitCode = result.exitCode
+			const commandId = getString(result, "commandId")
+			const terminalId = getString(result, "terminalId")
+			const durationMs = numberValue(result.durationMs)
+			const status = getString(result, "status")
+			const background = result.background === true
+			const isHot = result.isHot === true
 			const parts = [
 				getString(record, "query"),
+				commandId ? `commandId=${commandId}` : "",
+				terminalId ? `terminal=${terminalId}` : "",
+				status ? `status=${status}` : "",
 				typeof exitCode === "number" ? `exitCode=${exitCode}` : "",
+				durationMs !== undefined ? `durationMs=${durationMs}` : "",
+				background ? "background=true" : "",
+				isHot ? "hotProcess=true" : "",
+				result.stdoutTruncated === true ? "stdout truncated" : "",
+				result.stderrTruncated === true ? "stderr truncated" : "",
 				stdout ? `stdout:\n${truncateText(stdout, 1200)}` : "",
 				stderr ? `stderr:\n${truncateText(stderr, 800)}` : "",
 			]
@@ -3396,14 +3455,15 @@ function summarizeCommandLabel(output: unknown) {
 			const result = asRecord(tryParseJson(getString(record, "result")) ?? record.result)
 			const query = getString(record, "query")
 			const exitCode = result.exitCode
-			return [query, typeof exitCode === "number" ? `exitCode=${exitCode}` : ""].filter(Boolean).join(" ")
+			const commandId = getString(result, "commandId")
+			return [query, commandId, typeof exitCode === "number" ? `exitCode=${exitCode}` : ""].filter(Boolean).join(" ")
 		})
 		.filter(Boolean)
 		.join("\n")
 }
 
 function sanitizeConsoleOutput(text: string) {
-	const trimmed = text.trim()
+	const trimmed = stripCommandSentinel(text).trim()
 	if (!trimmed) {
 		return ""
 	}
@@ -3412,6 +3472,13 @@ function sanitizeConsoleOutput(text: string) {
 		return "[console output omitted: text encoding could not be decoded reliably]"
 	}
 	return trimmed
+}
+
+function stripCommandSentinel(text: string) {
+	return text
+		.split(/\r?\n/)
+		.filter((line) => !/(?:^|>)__VSCLINE_COMMAND_DONE__cmd-\d{6}__-?\d+\s*$/.test(line.trim()))
+		.join("\n")
 }
 
 function tryParseJson(value: string) {
@@ -4694,6 +4761,96 @@ function formatToolActivitySection(title: string, values: string[], limit: numbe
 	return `${title}:\n${visible.join("\n")}${hiddenCount > 0 ? `\n- ... ${hiddenCount} more` : ""}`
 }
 
+function buildTerminalActivityText(
+	activeCommands: Record<string, unknown>[],
+	recentCommands: Record<string, unknown>[],
+	outputLines: Record<string, unknown>[],
+	state: Record<string, unknown>,
+) {
+	const commandLimit = readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_COMMANDS", 8)
+	const outputLimit = readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_LINES", 8)
+	const commands = activeCommands
+		.slice(0, commandLimit)
+		.map((command) => {
+			const commandId = getString(command, "commandId")
+			const terminalId = getString(command, "terminalId")
+			const status = getString(command, "status") || "running"
+			const commandText = getString(command, "command")
+			const processId = getNumber(command, "processId")
+			const isHot = command.isHot === true
+			const background = command.background === true
+			const reusable = command.isReusableShell === true
+			const where = [
+				terminalId ? `terminal ${terminalId}` : "",
+				processId ? `pid ${processId}` : "",
+				reusable ? "reused shell" : "",
+				isHot ? "hot process" : "",
+				background ? "background" : "",
+			].filter(Boolean).join(", ")
+			return `- ${[commandId || "command", status, where].filter(Boolean).join(" ")}${commandText ? `: ${commandText}` : ""}`
+		})
+	const completedCommands = recentCommands
+		.slice(-commandLimit)
+		.map((command) => {
+			const commandId = getString(command, "commandId")
+			const terminalId = getString(command, "terminalId")
+			const status = getString(command, "status") || "completed"
+			const commandText = getString(command, "command")
+			const exitCode = getNumber(command, "exitCode")
+			const durationMs = getNumber(command, "durationMs")
+			const timedOut = command.timedOut === true
+			const cancelled = command.cancelled === true
+			const isHot = command.isHot === true
+			const flags = [
+				exitCode !== undefined ? `exit=${exitCode}` : "",
+				durationMs !== undefined ? `${durationMs}ms` : "",
+				timedOut ? "timed out" : "",
+				cancelled ? "cancelled" : "",
+				isHot ? "hot process" : "",
+				terminalId ? `terminal ${terminalId}` : "",
+			].filter(Boolean)
+			return `- ${[commandId || "command", status, flags.length ? `(${flags.join(", ")})` : ""].filter(Boolean).join(" ")}${
+				commandText ? `: ${commandText}` : ""
+			}`
+		})
+	const lines = outputLines
+		.slice(-outputLimit)
+		.map((line) => {
+			const commandId = getString(line, "commandId")
+			const stream = getString(line, "stream") || "stdout"
+			const text = normalizeTerminalOutputText(getString(line, "text"))
+			if (!text) {
+				return ""
+			}
+			const prefix = [commandId, stream].filter(Boolean).join(" ")
+			return `${prefix ? `[${prefix}] ` : ""}${text}`
+		})
+		.filter(Boolean)
+	const hiddenOutputCount = Math.max(0, outputLines.length - lines.length)
+	const shell = getString(state, "shell")
+	const shellState = getString(state, "shellState")
+	const reuseMode = getString(state, "reuseMode")
+	const shellSummary = [shell, shellState, reuseMode].filter(Boolean).join(" / ")
+	const sections = [
+		shellSummary ? `Shell: ${shellSummary}` : "",
+		commands.length ? `Running commands:\n${commands.join("\n")}` : "",
+		completedCommands.length ? `Recent commands:\n${completedCommands.join("\n")}` : "",
+		lines.length ? `Recent terminal output:\n${hiddenOutputCount > 0 ? `- ... ${hiddenOutputCount} earlier lines\n` : ""}${lines.map((line) => `- ${line}`).join("\n")}` : "",
+	].filter(Boolean)
+	if (sections.length === 0) {
+		return ""
+	}
+
+	return truncateText(
+		`터미널 실행 진행 중:\n${sections.join("\n")}`,
+		readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
+	)
+}
+
+function normalizeTerminalOutputText(text: string) {
+	return stripCommandSentinel(text).replace(/\r/g, "").split("\n").map((line) => line.trimEnd()).filter(Boolean).join(" / ")
+}
+
 function toolActivityEntryKey(entry: ToolActivityEntry) {
 	return `${entry.kind}:${entry.label}:${entry.detail || ""}`.toLowerCase()
 }
@@ -5366,9 +5523,10 @@ function createSdkCoverageState(lastError: string | null) {
 			{ id: "streaming", label: "Streaming output", owner: "cline-sdk" },
 			{ id: "checkpoints", label: "Checkpoint restore", owner: "cline-sdk" },
 			{ id: "usage", label: "Token and cost usage", owner: "cline-sdk" },
+			{ id: "mcp", label: "MCP server settings and tools", owner: "cline-sdk" },
 		],
 		partial: [
-			{ id: "mcp", label: "MCP servers and marketplace", owner: "cline-sdk" },
+			{ id: "mcp-marketplace", label: "MCP marketplace install and OAuth", owner: "cline-sdk" },
 			{ id: "browser", label: "Browser/Web tools", owner: "cline-sdk" },
 			{ id: "auth", label: "Cline account and OAuth providers", owner: "cline-sdk" },
 			{ id: "models", label: "Provider catalog refresh", owner: "cline-sdk" },

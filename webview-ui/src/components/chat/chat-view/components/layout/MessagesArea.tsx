@@ -6,7 +6,6 @@ import { StickyUserMessage } from "@/components/chat/task-header/StickyUserMessa
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import type { ChatState, MessageHandlers, ScrollBehavior } from "../../types/chatTypes"
-import { isToolGroup } from "../../utils/messageUtils"
 import { createMessageRenderer } from "../messages/MessageRenderer"
 
 interface MessagesAreaProps {
@@ -30,8 +29,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	chatState,
 	messageHandlers,
 }) => {
-	const { clineMessages, currentTaskItem } = useExtensionState()
-	const lastRawMessage = useMemo(() => clineMessages.at(-1), [clineMessages])
+	const { clineMessages } = useExtensionState()
 
 	const {
 		virtuosoRef,
@@ -62,142 +60,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	}, [scrollToMessage, scrolledPastUserMessageIndex])
 
 	const { expandedRows, inputValue, setActiveQuote } = chatState
-	const lastVisibleRow = useMemo(() => groupedMessages.at(-1), [groupedMessages])
-	const lastVisibleMessage = useMemo(() => {
-		const lastRow = lastVisibleRow
-		if (!lastRow) {
-			return undefined
-		}
-		return Array.isArray(lastRow) ? lastRow.at(-1) : lastRow
-	}, [lastVisibleRow])
-
-	const lastRawMessageLooksActive = useMemo(() => {
-		if (!currentTaskItem) {
-			return false
-		}
-
-		if (!lastRawMessage) {
-			return true
-		}
-
-		if (lastRawMessage.type === "ask") {
-			return false
-		}
-
-		if (lastRawMessage.type === "say" && lastRawMessage.say === "completion_result") {
-			return false
-		}
-
-		if (lastRawMessage.partial === true) {
-			return true
-		}
-
-		if (lastRawMessage.type === "say" && lastRawMessage.say === "api_req_started") {
-			try {
-				const info = JSON.parse(lastRawMessage.text || "{}")
-				return !info.cancelReason && !info.streamingFailedMessage && info.cost == null && info.totalCost == null
-			} catch {
-				return true
-			}
-		}
-
-		return false
-	}, [currentTaskItem, lastRawMessage])
-
-	// Show "Thinking..." until real content starts streaming.
-	// This is the sole early loading indicator - RequestStartRow does NOT duplicate it.
-	// Covers: pre-api_req_started (backend processing) AND post-api_req_started (waiting for model).
-	// Hides once reasoning, tools, text, or any other content message appears.
-	const isWaitingForResponse = useMemo(() => {
-		const lastMsg = modifiedMessages[modifiedMessages.length - 1]
-
-		// Never show thinking while waiting on user input (any ask state).
-		// This includes completion_result, tool approvals, followups, and resume asks.
-		if (lastRawMessage?.type === "ask") {
-			return false
-		}
-		// attempt_completion emits a final say("completion_result") before ask("completion_result").
-		// Treat that final completion message as non-waiting to avoid a brief footer flicker.
-		if (lastRawMessage?.type === "say" && lastRawMessage.say === "completion_result") {
-			return false
-		}
-		if (
-			lastRawMessage?.type === "say" &&
-			lastRawMessage.partial !== true &&
-			["text", "error", "diff_error", "clineignore_error", "info"].includes(lastRawMessage.say || "")
-		) {
-			return false
-		}
-		if (lastRawMessage?.type === "say" && lastRawMessage.say === "api_req_started") {
-			try {
-				const info = JSON.parse(lastRawMessage.text || "{}")
-				if (info.cancelReason === "user_cancelled" || info.streamingFailedMessage || info.cost != null || info.totalCost != null) {
-					return false
-				}
-			} catch {
-				// ignore parse errors
-			}
-		}
-
-		// Always show while task has started but no visible rows are rendered yet.
-		if (groupedMessages.length === 0) {
-			return lastRawMessageLooksActive
-		}
-
-		// Defensive guard for transient states where a grouped row exists
-		// but we still cannot resolve a concrete visible message.
-		if (!lastVisibleMessage) {
-			return true
-		}
-
-		// Tool output may be followed by additional model work.
-		if (lastVisibleRow && isToolGroup(lastVisibleRow)) {
-			return lastRawMessageLooksActive
-		}
-
-		if (!lastMsg) {
-			// No messages after the initial task message - new task just started
-			return true
-		}
-		if (lastMsg.say === "task" || lastMsg.say === "user_feedback" || lastMsg.say === "user_feedback_diff") return true
-		if (lastMsg.say === "api_req_started") {
-			try {
-				const info = JSON.parse(lastMsg.text || "{}")
-				return info.cancelReason !== "user_cancelled" && !info.streamingFailedMessage && info.cost == null && info.totalCost == null
-			} catch {
-				return true
-			}
-		}
-		return lastMsg.partial === true
-	}, [lastRawMessage, groupedMessages.length, lastRawMessageLooksActive, lastVisibleMessage, lastVisibleRow, modifiedMessages])
-
-	// Keep loader in the message flow (not footer). During handoff from waiting -> reasoning stream,
-	// keep the loader mounted until a real reasoning row is visible.
-	const showThinkingLoaderRow = useMemo(() => {
-		const handoffToReasoningPending =
-			lastRawMessage?.type === "say" &&
-			lastRawMessage.say === "reasoning" &&
-			lastRawMessage.partial === true &&
-			lastVisibleMessage?.say !== "reasoning"
-
-		// Mirror the old footer behavior exactly: show whenever waiting logic says so.
-		// Plus a brief handoff guard while grouped rows catch up to raw reasoning stream.
-		return isWaitingForResponse || handoffToReasoningPending
-	}, [isWaitingForResponse, lastRawMessage, lastVisibleMessage?.say])
-
-	const displayedGroupedMessages = useMemo<(ClineMessage | ClineMessage[])[]>(() => {
-		if (!showThinkingLoaderRow) {
-			return groupedMessages
-		}
-		const waitingRow: ClineMessage = {
-			ts: Number.MIN_SAFE_INTEGER,
-			type: "say",
-			say: "reasoning",
-			partial: true,
-			text: "",
-		}
-		return [...groupedMessages, waitingRow]
-	}, [groupedMessages, showThinkingLoaderRow])
+	const displayedGroupedMessages = groupedMessages
 
 	const itemContent = useMemo(
 		() =>

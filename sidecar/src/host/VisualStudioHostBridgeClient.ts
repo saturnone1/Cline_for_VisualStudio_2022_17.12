@@ -21,6 +21,50 @@ export type FileDiagnostics = {
 	}>
 }
 
+export type TerminalOutputLine = {
+	sequence: number
+	commandId: string
+	terminalId: string
+	stream: "stdout" | "stderr" | string
+	text: string
+	at: string
+}
+
+export type RunningCommand = {
+	commandId: string
+	terminalId: string
+	processId: number
+	command: string
+	cwd: string
+	startedAt: string
+	lastOutputAt?: string
+	status: string
+	isReusableShell?: boolean
+	isHot?: boolean
+	background?: boolean
+	shell?: string
+}
+
+export type CompletedCommand = RunningCommand & {
+	completedAt: string
+	exitCode: number
+	timedOut: boolean
+	cancelled: boolean
+	durationMs: number
+	stdoutTruncated?: boolean
+	stderrTruncated?: boolean
+}
+
+export type TerminalState = {
+	activeCommands: RunningCommand[]
+	recentCommands: CompletedCommand[]
+	recentOutput: TerminalOutputLine[]
+	outputSequence: number
+	shell?: string
+	shellState?: string
+	reuseMode?: string
+}
+
 export class VisualStudioHostBridgeClient {
 	constructor(private readonly connection: JsonRpcConnection) {}
 
@@ -124,16 +168,56 @@ export class VisualStudioHostBridgeClient {
 		return sendHostRequest(this.connection, "webview.postMessage", { message })
 	}
 
-	async executeCommandInTerminal(command: string, cwd?: string, timeoutSeconds?: number) {
+	async executeCommandInTerminal(command: string, cwd?: string, timeoutSeconds?: number): Promise<{
+		commandId: string
+		terminalId: string
+		status?: string
+		success: boolean
+		exitCode: number
+		timedOut: boolean
+		cancelled?: boolean
+		background?: boolean
+		isHot?: boolean
+		durationMs: number
+		stdout?: string
+		stderr?: string
+		stdoutTruncated?: boolean
+		stderrTruncated?: boolean
+	}> {
 		return sendHostRequest(this.connection, "workspace.executeCommandInTerminal", {
 			command,
 			cwd,
 			timeoutSeconds,
-		})
+		}) as Promise<{
+			commandId: string
+			terminalId: string
+			status?: string
+			success: boolean
+			exitCode: number
+			timedOut: boolean
+			cancelled?: boolean
+			background?: boolean
+			isHot?: boolean
+			durationMs: number
+			stdout?: string
+			stderr?: string
+			stdoutTruncated?: boolean
+			stderrTruncated?: boolean
+		}>
 	}
 
 	async cancelCommands() {
 		return sendHostRequest(this.connection, "workspace.cancelCommands", null)
+	}
+
+	async getTerminalState(): Promise<TerminalState> {
+		return (await sendHostRequest(this.connection, "workspace.getTerminalState", null)) as TerminalState
+	}
+
+	async getUnretrievedTerminalOutput(afterSequence = 0): Promise<{ lines: TerminalOutputLine[] }> {
+		return (await sendHostRequest(this.connection, "workspace.getUnretrievedTerminalOutput", { afterSequence })) as {
+			lines: TerminalOutputLine[]
+		}
 	}
 
 	async saveOpenDocumentIfDirty(filePath: string) {

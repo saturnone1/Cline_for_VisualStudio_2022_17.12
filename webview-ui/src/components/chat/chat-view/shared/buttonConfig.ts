@@ -218,8 +218,8 @@ function parseApiRequestInfo(message: ClineMessage): Record<string, unknown> {
 }
 
 function isApiRequestStillActive(message: ClineMessage) {
-	if (message.partial === true) {
-		return true
+	if (message.partial !== true) {
+		return false
 	}
 
 	const info = parseApiRequestInfo(message)

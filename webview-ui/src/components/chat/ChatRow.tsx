@@ -78,6 +78,200 @@ type VsClineChangedFile = {
 	deletions: number
 }
 
+type VsCommandOutputSummary = {
+	command: string
+	commandId: string
+	terminalId: string
+	exitCode?: number
+	durationMs?: number
+	stdout: string
+	stderr: string
+	stdoutTruncated: boolean
+	stderrTruncated: boolean
+}
+
+const VsCommandOutputCard = memo(
+	({
+		message,
+		isExpanded,
+		onToggle,
+	}: {
+		message: ClineMessage
+		isExpanded: boolean
+		onToggle: () => void
+	}) => {
+		const commands = useMemo(() => parseVsCommandOutputSummary(message.text || ""), [message.text])
+		const count = commands.length
+
+		if (count === 0) {
+			return (
+				<div className="rounded-sm border border-editor-group-border bg-code overflow-hidden">
+					<button
+						className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-list-hover"
+						onClick={onToggle}
+						type="button">
+						<TerminalIcon className="size-3 shrink-0 opacity-80" />
+						<span className="font-semibold">Command output</span>
+						<div className="grow" />
+						{isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+					</button>
+					{isExpanded && <pre className="m-0 p-3 text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto">{message.text}</pre>}
+				</div>
+			)
+		}
+
+		const failed = commands.some((command) => command.exitCode !== undefined && command.exitCode !== 0)
+		const totalOutputLines = commands.reduce(
+			(total, command) =>
+				total +
+				(command.stdout ? command.stdout.split(/\r?\n/).length : 0) +
+				(command.stderr ? command.stderr.split(/\r?\n/).length : 0),
+			0,
+		)
+
+		return (
+			<div className="rounded-sm border border-editor-group-border bg-code overflow-hidden">
+				<button
+					className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-list-hover"
+					onClick={onToggle}
+					type="button">
+					<TerminalIcon className={cn("size-3 shrink-0", failed ? "text-error" : "text-success")} />
+					<div className="min-w-0">
+						<div className="font-semibold">
+							Ran {count} command{count > 1 ? "s" : ""}
+						</div>
+						<div className="text-xs opacity-70">
+							{failed ? "Some commands failed" : "Completed"}
+							{totalOutputLines > 0 ? ` · ${totalOutputLines} output line${totalOutputLines > 1 ? "s" : ""}` : ""}
+						</div>
+					</div>
+					<div className="grow" />
+					{isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+				</button>
+				{isExpanded && (
+					<div className="divide-y divide-editor-group-border/60">
+						{commands.map((command, index) => (
+							<div className="px-3 py-2" key={`${command.commandId || command.command}-${index}`}>
+								<div className="flex items-center gap-2 text-xs opacity-80 mb-1.5">
+									<span
+										className={cn("inline-block size-2 rounded-full", {
+											"bg-success": command.exitCode === 0,
+											"bg-error": command.exitCode !== undefined && command.exitCode !== 0,
+											"bg-description": command.exitCode === undefined,
+										})}
+									/>
+									{command.commandId && <code>{command.commandId}</code>}
+									{command.terminalId && <span className="truncate">{command.terminalId}</span>}
+									{command.exitCode !== undefined && <span>exit {command.exitCode}</span>}
+									{command.durationMs !== undefined && <span>{formatDuration(command.durationMs)}</span>}
+								</div>
+								<pre className="m-0 mb-2 rounded-xs border border-editor-group-border/60 px-2 py-1.5 text-xs whitespace-pre-wrap break-words">
+									{command.command}
+								</pre>
+								{command.stdout && (
+									<div className="mb-2">
+										<div className="text-xs opacity-70 mb-1">stdout{command.stdoutTruncated ? " (truncated)" : ""}</div>
+										<pre className="m-0 rounded-xs border border-editor-group-border/60 bg-code px-2 py-1.5 text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto">
+											{command.stdout}
+										</pre>
+									</div>
+								)}
+								{command.stderr && (
+									<div>
+										<div className="text-xs opacity-70 mb-1">stderr{command.stderrTruncated ? " (truncated)" : ""}</div>
+										<pre className="m-0 rounded-xs border border-editor-group-border/60 bg-code px-2 py-1.5 text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto">
+											{command.stderr}
+										</pre>
+									</div>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+			</div>
+		)
+	},
+)
+
+function parseVsCommandOutputSummary(text: string): VsCommandOutputSummary[] {
+	const blocks = text
+		.split(/\n{2,}(?=[^\n]+(?:\n|$))/)
+		.map((block) => block.trim())
+		.filter(Boolean)
+
+	return blocks
+		.map(parseVsCommandOutputBlock)
+		.filter((command): command is VsCommandOutputSummary => !!command && !!command.command)
+}
+
+function parseVsCommandOutputBlock(block: string): VsCommandOutputSummary | null {
+	const lines = block.split(/\r?\n/)
+	const result: VsCommandOutputSummary = {
+		command: "",
+		commandId: "",
+		terminalId: "",
+		stdout: "",
+		stderr: "",
+		stdoutTruncated: false,
+		stderrTruncated: false,
+	}
+	let section: "stdout" | "stderr" | null = null
+	const stdoutLines: string[] = []
+	const stderrLines: string[] = []
+
+	for (const line of lines) {
+		if (line === "stdout:") {
+			section = "stdout"
+			continue
+		}
+		if (line === "stderr:") {
+			section = "stderr"
+			continue
+		}
+		if (section === "stdout") {
+			stdoutLines.push(line)
+			continue
+		}
+		if (section === "stderr") {
+			stderrLines.push(line)
+			continue
+		}
+
+		if (line.startsWith("commandId=")) {
+			result.commandId = line.slice("commandId=".length)
+		} else if (line.startsWith("terminal=")) {
+			result.terminalId = line.slice("terminal=".length)
+		} else if (line.startsWith("exitCode=")) {
+			const value = Number.parseInt(line.slice("exitCode=".length), 10)
+			if (Number.isFinite(value)) {
+				result.exitCode = value
+			}
+		} else if (line.startsWith("durationMs=")) {
+			const value = Number.parseInt(line.slice("durationMs=".length), 10)
+			if (Number.isFinite(value)) {
+				result.durationMs = value
+			}
+		} else if (line === "stdout truncated") {
+			result.stdoutTruncated = true
+		} else if (line === "stderr truncated") {
+			result.stderrTruncated = true
+		} else if (!result.command && line.trim()) {
+			result.command = line
+		}
+	}
+
+	result.stdout = stdoutLines.join("\n").trimEnd()
+	result.stderr = stderrLines.join("\n").trimEnd()
+	return result.command || result.commandId || result.stdout || result.stderr ? result : null
+}
+
+function formatDuration(durationMs: number) {
+	if (durationMs < 1000) {
+		return `${durationMs}ms`
+	}
+	return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
+}
+
 const VsClineChangedFilesCard = memo(({ tool }: { tool: ClineSayTool }) => {
 	const files = Array.isArray(tool.files) ? (tool.files as VsClineChangedFile[]) : []
 	const additions = typeof tool.additions === "number" ? tool.additions : files.reduce((sum, file) => sum + (file.additions || 0), 0)
@@ -150,9 +344,6 @@ interface ChatRowProps {
 	onSetQuote: (text: string) => void
 	onCancelCommand?: () => void
 	mode?: Mode
-	reasoningContent?: string
-	responseStarted?: boolean
-	isRequestInProgress?: boolean
 }
 
 export interface QuoteButtonState {
@@ -166,44 +357,6 @@ interface ChatRowContentProps extends Omit<ChatRowProps, "onHeightChange"> {}
 
 export const ProgressIndicator = () => <LoaderCircleIcon className="size-2 mr-2 animate-spin" />
 const InvisibleSpacer = () => <div aria-hidden className="h-px" />
-
-function looksLikeTokenizedReasoningBlock(text: string) {
-	const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-	if (lines.length < 5) {
-		return false
-	}
-
-	const shortLines = lines.filter((line) => line.length <= 16).length
-	const wordLikeShortLines = lines.filter((line) => /^[A-Za-z0-9가-힣'"().,!?-]+$/.test(line) && line.length <= 12).length
-	const avgLength = lines.reduce((total, line) => total + line.length, 0) / lines.length
-	return (shortLines / lines.length >= 0.72 && avgLength <= 12) || wordLikeShortLines / lines.length >= 0.6
-}
-
-function normalizeTokenizedReasoningBlock(text: string) {
-	const tokens = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-	let result = ""
-
-	for (const token of tokens) {
-		if (!result) {
-			result = token
-			continue
-		}
-
-		const previous = result[result.length - 1] || ""
-		const isClosingPunctuation = /^[,.;:!?%)\]}]$/.test(token)
-		const isOpeningPunctuation = /^[(\[{]$/.test(previous)
-		const isSingleHangulContinuation = /^[가-힣]$/.test(previous) && /^[가-힣]$/.test(token)
-		const isQuoteBoundary = previous === "\"" || token === "\"" || previous === "'" || token === "'"
-		const separator = isClosingPunctuation || isOpeningPunctuation || isSingleHangulContinuation || isQuoteBoundary ? "" : " "
-		result += `${separator}${token}`
-	}
-
-	return result
-		.replace(/\s+([,.;:!?%)\]}])/g, "$1")
-		.replace(/([(\[{])\s+/g, "$1")
-		.replace(/\s{2,}/g, " ")
-		.trim()
-}
 
 const ChatRow = memo(
 	(props: ChatRowProps) => {
@@ -252,9 +405,6 @@ export const ChatRowContent = memo(
 		onSetQuote,
 		onCancelCommand,
 		mode,
-		isRequestInProgress,
-		reasoningContent,
-		responseStarted,
 	}: ChatRowContentProps) => {
 		const {
 			backgroundEditEnabled,
@@ -957,14 +1107,11 @@ export const ChatRowContent = memo(
 							<RequestStartRow
 								apiReqStreamingFailedMessage={apiReqStreamingFailedMessage}
 								apiRequestFailedMessage={apiRequestFailedMessage}
-								clineMessages={clineMessages}
 								cost={cost}
 								handleToggle={handleToggle}
 								isExpanded={isExpanded}
 								message={message}
 								mode={mode}
-								reasoningContent={reasoningContent}
-								responseStarted={responseStarted}
 							/>
 						)
 					case "api_req_finished":
@@ -981,6 +1128,8 @@ export const ChatRowContent = memo(
 								</div>
 							</div>
 						)
+					case "command_output":
+						return <VsCommandOutputCard isExpanded={isExpanded} message={message} onToggle={handleToggle} />
 					case "text": {
 						return (
 							<WithCopyButton
@@ -1006,34 +1155,21 @@ export const ChatRowContent = memo(
 					case "reasoning": {
 						const isReasoningStreaming = message.partial === true
 						const reasoningContent = message.reasoning || message.text || ""
-						const isSyntheticThinkingLoader = message.ts === Number.MIN_SAFE_INTEGER
-						const isTokenizedNoise = !isSyntheticThinkingLoader && looksLikeTokenizedReasoningBlock(reasoningContent)
-						const visibleReasoningContent = isTokenizedNoise ? normalizeTokenizedReasoningBlock(reasoningContent) : reasoningContent
-						const hasReasoningText = !!visibleReasoningContent.trim()
-						const title = message.reasoning
-							? isReasoningStreaming
-								? message.text?.trim() || "모델 진행 중"
-								: message.text?.trim() === "모델 진행 중"
-									? "모델 진행 기록"
-									: message.text?.trim() || "모델 진행 기록"
-							: isReasoningStreaming
-								? "Thinking..."
-								: "Thinking"
-						// Show feature tips throughout the entire thinking/reasoning phase
-						const showFeatureTip = isReasoningStreaming && isSyntheticThinkingLoader
+						const hasReasoningText = !!reasoningContent.trim()
+						const title = message.text?.trim() || (isReasoningStreaming ? "모델 진행 중" : "모델 진행 기록")
 						return (
 							<div>
 								<ThinkingRow
-									isExpanded={isSyntheticThinkingLoader ? false : isExpanded}
+									isExpanded={isExpanded}
 									isStreaming={isReasoningStreaming}
 									isVisible={true}
-									onToggle={hasReasoningText && !isSyntheticThinkingLoader ? handleToggle : undefined}
-									reasoningContent={visibleReasoningContent}
+									onToggle={hasReasoningText ? handleToggle : undefined}
+									reasoningContent={reasoningContent}
 									showChevron={hasReasoningText}
 									showTitle={true}
 									title={title}
 								/>
-								{isReasoningStreaming && showFeatureTips !== false && <FeatureTip />}
+								{isReasoningStreaming && showFeatureTips !== false && !hasReasoningText && <FeatureTip />}
 							</div>
 						)
 					}
@@ -1216,7 +1352,7 @@ export const ChatRowContent = memo(
 									)}
 									<div className="flex flex-col bg-quote p-0 rounded-[3px] text-[12px] p-3">
 										<div className="flex items-center mb-1">
-											{isFailed && !isRequestInProgress ? (
+											{isFailed ? (
 												<TriangleAlertIcon className="mr-2 size-2" />
 											) : (
 												<RefreshCwIcon className="mr-2 size-2 animate-spin" />

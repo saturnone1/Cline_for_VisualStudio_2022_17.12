@@ -230,6 +230,10 @@ namespace VsClineAgent.Host
                     return await ExecuteCommandInTerminalAsync(parameters).ConfigureAwait(false);
                 case "workspace.cancelCommands":
                     return await CancelCommandsAsync().ConfigureAwait(false);
+                case "workspace.getTerminalState":
+                    return await GetTerminalStateAsync().ConfigureAwait(false);
+                case "workspace.getUnretrievedTerminalOutput":
+                    return await GetUnretrievedTerminalOutputAsync(parameters).ConfigureAwait(false);
                 case "workspace.saveOpenDocumentIfDirty":
                     return new JObject
                     {
@@ -481,13 +485,20 @@ namespace VsClineAgent.Host
 
             return new JObject
             {
-                ["success"] = !result.TimedOut && result.ExitCode == 0,
+                ["commandId"] = result.CommandId,
+                ["terminalId"] = result.TerminalId,
+                ["status"] = result.Status,
+                ["success"] = !result.TimedOut && !result.Cancelled && result.ExitCode == 0,
                 ["exitCode"] = result.ExitCode,
                 ["timedOut"] = result.TimedOut,
+                ["cancelled"] = result.Cancelled,
+                ["background"] = result.Background,
+                ["isHot"] = result.IsHot,
+                ["durationMs"] = result.DurationMs,
                 ["stdout"] = TruncateCommandOutput(result.StdOut),
                 ["stderr"] = TruncateCommandOutput(result.StdErr),
-                ["stdoutTruncated"] = result.StdOut.Length > MaxCommandOutputChars,
-                ["stderrTruncated"] = result.StdErr.Length > MaxCommandOutputChars
+                ["stdoutTruncated"] = result.StdOutTruncated || result.StdOut.Length > MaxCommandOutputChars,
+                ["stderrTruncated"] = result.StdErrTruncated || result.StdErr.Length > MaxCommandOutputChars
             };
         }
 
@@ -510,6 +521,87 @@ namespace VsClineAgent.Host
             return new JObject
             {
                 ["cancelled"] = cancelled
+            };
+        }
+
+        private async Task<JObject> GetTerminalStateAsync()
+        {
+            var state = await _commandExecutionService.GetTerminalStateAsync().ConfigureAwait(false);
+            return new JObject
+            {
+                ["activeCommands"] = new JArray(state.ActiveCommands.Select(ToRunningCommandJson)),
+                ["recentCommands"] = new JArray(state.RecentCommands.Select(ToCompletedCommandJson)),
+                ["recentOutput"] = new JArray(state.RecentOutput.Select(ToCommandOutputJson)),
+                ["outputSequence"] = state.OutputSequence,
+                ["shell"] = state.Shell,
+                ["shellState"] = state.ShellState,
+                ["reuseMode"] = state.ReuseMode
+            };
+        }
+
+        private async Task<JObject> GetUnretrievedTerminalOutputAsync(JToken? parameters)
+        {
+            var afterSequence = parameters is JObject obj ? obj.Value<long?>("afterSequence") ?? 0 : 0;
+            var lines = await _commandExecutionService.GetUnretrievedOutputAsync(afterSequence).ConfigureAwait(false);
+            return new JObject
+            {
+                ["lines"] = new JArray(lines.Select(ToCommandOutputJson))
+            };
+        }
+
+        private static JObject ToRunningCommandJson(RunningCommandInfo command)
+        {
+            return new JObject
+            {
+                ["commandId"] = command.CommandId,
+                ["terminalId"] = command.TerminalId,
+                ["processId"] = command.ProcessId,
+                ["command"] = command.Command,
+                ["cwd"] = command.WorkingDirectory,
+                ["startedAt"] = command.StartedAt.ToString("O"),
+                ["lastOutputAt"] = command.LastOutputAt?.ToString("O"),
+                ["status"] = command.Status,
+                ["isReusableShell"] = command.IsReusableShell,
+                ["isHot"] = command.IsHot,
+                ["background"] = command.Background,
+                ["shell"] = command.Shell
+            };
+        }
+
+        private static JObject ToCommandOutputJson(CommandOutputLine line)
+        {
+            return new JObject
+            {
+                ["sequence"] = line.Sequence,
+                ["commandId"] = line.CommandId,
+                ["terminalId"] = line.TerminalId,
+                ["stream"] = line.Stream,
+                ["text"] = line.Text,
+                ["at"] = line.At.ToString("O")
+            };
+        }
+
+        private static JObject ToCompletedCommandJson(CompletedCommandInfo command)
+        {
+            return new JObject
+            {
+                ["commandId"] = command.CommandId,
+                ["terminalId"] = command.TerminalId,
+                ["processId"] = command.ProcessId,
+                ["command"] = command.Command,
+                ["cwd"] = command.WorkingDirectory,
+                ["startedAt"] = command.StartedAt.ToString("O"),
+                ["completedAt"] = command.CompletedAt.ToString("O"),
+                ["lastOutputAt"] = command.LastOutputAt?.ToString("O"),
+                ["status"] = command.Status,
+                ["exitCode"] = command.ExitCode,
+                ["timedOut"] = command.TimedOut,
+                ["cancelled"] = command.Cancelled,
+                ["background"] = command.Background,
+                ["isHot"] = command.IsHot,
+                ["durationMs"] = command.DurationMs,
+                ["stdoutTruncated"] = command.StdOutTruncated,
+                ["stderrTruncated"] = command.StdErrTruncated
             };
         }
 

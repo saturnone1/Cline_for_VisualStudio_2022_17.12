@@ -1,12 +1,11 @@
 import { ClineMessage, ClineSayTool } from "@shared/ExtensionMessage"
 import { StringRequest } from "@shared/proto/cline/common"
 import { memo, useCallback, useMemo, useState } from "react"
-import { TypewriterText } from "@/components/chat/TypewriterText"
 import { cleanPathPrefix } from "@/components/common/CodeAccordian"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { FileServiceClient } from "@/services/grpc-client"
-import { getIconByToolName, getToolsNotInCurrentActivities, isLowStakesTool } from "../../utils/messageUtils"
+import { getIconByToolName, isLowStakesTool } from "../../utils/messageUtils"
 
 interface ToolGroupRendererProps {
 	messages: ClineMessage[]
@@ -18,139 +17,20 @@ interface ToolWithReasoning {
 	tool: ClineMessage
 	parsedTool: ClineSayTool
 	reasoning?: string
-	isActive?: boolean
-	activityText?: string
 }
 
 const EXPANDABLE_TOOLS = new Set(["listFilesTopLevel", "listFilesRecursive", "listCodeDefinitionNames", "searchFiles"])
 
-// Helper to format activity text for active items (from RequestStartRow logic)
-const getActivityText = (tool: ClineSayTool): string | null => {
-	const cleanedPath = cleanPathPrefix(tool.path || "")
-	const formatSearchRegex = (regex: string, path: string, filePattern?: string): string => {
-		const cleanedPath = cleanPathPrefix(path)
-		const terms = regex
-			.split("|")
-			.map((t) => t.trim().replace(/\\b/g, "").replace(/\\s\?/g, " "))
-			.filter(Boolean)
-			.join(" | ")
-		return filePattern && filePattern !== "*"
-			? `"${terms}" in ${cleanedPath}/ (${filePattern})`
-			: `"${terms}" in ${cleanedPath}/`
-	}
-
-	switch (tool.tool) {
-		case "readFile": {
-			if (!tool.path) {
-				return null
-			}
-			const lineHint =
-				tool.readLineStart != null && tool.readLineEnd != null ? ` (lines ${tool.readLineStart}-${tool.readLineEnd})` : ""
-			return `Reading ${cleanedPath}${lineHint}...`
-		}
-		case "listFilesTopLevel":
-		case "listFilesRecursive":
-			return tool.path ? `Exploring ${cleanedPath}/...` : null
-		case "searchFiles":
-			return tool.regex && tool.path ? `Searching ${formatSearchRegex(tool.regex, tool.path, tool.filePattern)}...` : null
-		case "listCodeDefinitionNames":
-			return tool.path ? `Analyzing ${cleanedPath}/...` : null
-		default:
-			return null
-	}
-}
-
-// Calculate current activities (from RequestStartRow logic)
-const getCurrentActivities = (allMessages: ClineMessage[]): ClineMessage[] => {
-	// Find current api_req
-	let currentApiReqIndex = -1
-	for (let i = allMessages.length - 1; i >= 0; i--) {
-		const msg = allMessages[i]
-		if (msg.say === "api_req_started" && msg.text) {
-			try {
-				const info = JSON.parse(msg.text)
-				const hasCost = info.cost != null
-				if (!hasCost) {
-					currentApiReqIndex = i
-					break
-				}
-			} catch {
-				// ignore
-			}
-		}
-	}
-
-	if (currentApiReqIndex === -1) {
-		return []
-	}
-
-	// Collect tools AFTER the current api_req_started
-	const activities: ClineMessage[] = []
-	for (let i = currentApiReqIndex + 1; i < allMessages.length; i++) {
-		const msg = allMessages[i]
-		// Only collect tools that are currently executing (ask === "tool")
-		// Skip completed tools (say === "tool") - they should be in the completed list
-		if (msg.say === "tool" || msg.ask !== "tool") {
-			continue
-		}
-		if (isLowStakesTool(msg)) {
-			activities.push(msg)
-		}
-	}
-
-	return activities
-}
-
 /**
  * Renders a collapsible group of low-stakes tool calls.
- * Shows both completed tools AND currently active tools in a unified list (only for last group).
+ * Shows the tool messages exactly as the host normalized them.
  */
-export const ToolGroupRenderer = memo(({ messages, allMessages, isLastGroup }: ToolGroupRendererProps) => {
+export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => {
 	const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({})
 
-	// Filter out tools in the "current activities" range (being shown in loading state)
-	const filteredMessages = useMemo(() => getToolsNotInCurrentActivities(messages, allMessages), [messages, allMessages])
+	const allTools = useMemo(() => buildToolsWithReasoning(messages), [messages])
 
-	// Get current activities (active reading/exploring) - only for last group
-	const currentActivities = useMemo(() => {
-		if (!isLastGroup) {
-			return []
-		}
-		return getCurrentActivities(allMessages)
-	}, [allMessages, isLastGroup])
-
-	// Build completed tool items
-	const completedTools = useMemo(() => buildToolsWithReasoning(filteredMessages), [filteredMessages])
-
-	// Build active tool items
-	const activeTools = useMemo(() => {
-		return currentActivities
-			.map((msg) => {
-				const parsedTool = parseToolSafe(msg.text)
-				return {
-					tool: msg,
-					parsedTool,
-					reasoning: undefined,
-					isActive: true,
-					activityText: getActivityText(parsedTool),
-				}
-			})
-			.filter((item) => item.activityText)
-	}, [currentActivities])
-
-	// Merge: completed items first, then active items (active only added to last group)
-	// Deduplicate - exclude completed items that match active items by path
-	const allTools = useMemo(() => {
-		// Get paths of active items
-		const activePaths = new Set(activeTools.map((item) => item.parsedTool.path).filter(Boolean))
-
-		// Filter out completed items that are also being actively read
-		const dedupedCompleted = completedTools.filter((item) => !activePaths.has(item.parsedTool.path))
-
-		return [...dedupedCompleted, ...activeTools]
-	}, [completedTools, activeTools])
-
-	const summary = getToolGroupSummaryFromParsedTools(completedTools.map((item) => item.parsedTool))
+	const summary = getToolGroupSummaryFromParsedTools(allTools.map((item) => item.parsedTool))
 
 	const handleOpenFile = useCallback((filePath: string) => {
 		FileServiceClient.openFileRelativePath(StringRequest.create({ value: filePath })).catch((err) =>
@@ -174,7 +54,7 @@ export const ToolGroupRenderer = memo(({ messages, allMessages, isLastGroup }: T
 
 			{/* Content - unified list of completed + active tools */}
 			<div className="min-w-0">
-				{allTools.map(({ tool, parsedTool, isActive, activityText }) => {
+				{allTools.map(({ tool, parsedTool }) => {
 					const info = getToolDisplayInfo(parsedTool)
 					if (!info) {
 						return null
@@ -184,26 +64,6 @@ export const ToolGroupRenderer = memo(({ messages, allMessages, isLastGroup }: T
 					const isItemExpanded = expandedItems[tool.ts] ?? false
 					const content = parsedTool.content || null
 
-					// Active items render with "Reading..." TypewriterText (match completed item structure exactly)
-					if (isActive && activityText) {
-						return (
-							<div className="min-w-0" key={tool.ts}>
-								{/* ACTIVE "READING..." ITEM STYLING - Modify vertical spacing here via py-0 and -my-0.5 */}
-								<Button
-									className="flex items-center gap-[3px] text-[13px] text-description py-[1px] min-w-0 max-w-full px-0 leading-tight -my-0.5"
-									disabled
-									size="icon"
-									variant="text">
-									<info.icon className="opacity-70 shrink-0 size-[12px]" />
-									<span className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-left text-[13px]">
-										<TypewriterText speed={15} text={activityText} />
-									</span>{" "}
-								</Button>
-							</div>
-						)
-					}
-
-					// Completed items render normally (clickable)
 					return (
 						<div className="min-w-0" key={tool.ts}>
 							<Button

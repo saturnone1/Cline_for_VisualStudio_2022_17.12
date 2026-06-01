@@ -56,6 +56,8 @@ const ServerRow = ({
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [isDeleting, setIsDeleting] = useState(false)
 	const [isRestarting, setIsRestarting] = useState(false)
+	const [isAuthenticating, setIsAuthenticating] = useState(false)
+	const [authError, setAuthError] = useState<string | null>(null)
 
 	// Check if user is managed by remote config and if this server is remote-managed.
 	// Remote MCP servers from enterprise config are always URL-based (SSE/HTTP).
@@ -183,6 +185,28 @@ const ServerRow = ({
 			})
 	}
 
+	const handleAuthenticate = () => {
+		if (!server.name || isAuthenticating) {
+			return
+		}
+
+		setAuthError(null)
+		setIsAuthenticating(true)
+		McpServiceClient.authenticateMcpServer(StringRequest.create({ value: server.name }))
+			.then((response: McpServers) => {
+				const mcpServers = convertProtoMcpServersToMcpServers(response.mcpServers)
+				setMcpServers(mcpServers)
+			})
+			.catch((error) => {
+				const message = error instanceof Error ? error.message : String(error)
+				setAuthError(message)
+				console.error("Error authenticating MCP server", error)
+			})
+			.finally(() => {
+				setIsAuthenticating(false)
+			})
+	}
+
 	// Helper to extract server URL from config
 	const getServerUrl = (server: McpServer): string | null => {
 		try {
@@ -280,15 +304,17 @@ const ServerRow = ({
 			{server.error ? (
 				<div className="text-sm bg-text-block-background rounded-b-sm">
 					<div className="text-failed-icon mb-2 px-2.5 break-words">{server.error}</div>
+					{authError && <div className="text-failed-icon mb-2 px-2.5 break-words">{authError}</div>}
 					{server.oauthRequired && server.oauthAuthStatus === "unauthenticated" ? (
 						<Button
 							className="m-2.5 mt-0 max-w-[calc(100%-20px)]"
+							disabled={isAuthenticating}
 							onClick={(e) => {
 								e.stopPropagation()
-								McpServiceClient.authenticateMcpServer(StringRequest.create({ value: server.name }))
+								handleAuthenticate()
 							}}
 							variant="default">
-							Authenticate
+							{isAuthenticating ? "Authenticating..." : "Authenticate"}
 						</Button>
 					) : (
 						<Button

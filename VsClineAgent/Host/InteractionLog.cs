@@ -21,13 +21,16 @@ namespace VsClineAgent.Host
         {
             try
             {
+                if (ShouldSkipDefaultLog(eventName, payload))
+                    return;
+
                 var entry = new JObject
                 {
                     ["at"] = DateTimeOffset.Now.ToString("O"),
                     ["source"] = "vsix-host",
                     ["direction"] = direction,
                     ["event"] = eventName,
-                    ["payload"] = Sanitize(payload)
+                    ["payload"] = Sanitize(CompactPayload(eventName, payload))
                 };
 
                 var line = entry.ToString(Formatting.None);
@@ -44,6 +47,48 @@ namespace VsClineAgent.Host
             catch
             {
             }
+        }
+
+        private static bool ShouldSkipDefaultLog(string eventName, object? payload)
+        {
+            if (string.Equals(Environment.GetEnvironmentVariable("VSCLINE_VERBOSE_INTERACTION_LOG"), "1", StringComparison.Ordinal))
+                return false;
+
+            if (eventName == "webview.postMessage" || eventName == "webview.message.batchItem")
+                return true;
+
+            if (eventName == "webview.message.result")
+            {
+                var token = payload as JToken;
+                var webviewMessages = token?["webviewMessages"] as JArray;
+                return webviewMessages != null && webviewMessages.Count > 0;
+            }
+
+            return false;
+        }
+
+        private static object? CompactPayload(string eventName, object? payload)
+        {
+            if (eventName == "webview.message" && payload is string rawJson)
+                return SummarizeWebviewMessage(rawJson);
+
+            return payload;
+        }
+
+        private static JObject SummarizeWebviewMessage(string rawJson)
+        {
+            var parsed = TryParseJson(rawJson) as JObject;
+            var request = parsed?["grpc_request"] as JObject;
+            var cancel = parsed?["grpc_request_cancel"] as JObject;
+            return new JObject
+            {
+                ["type"] = parsed?["type"]?.ToString(),
+                ["service"] = request?["service"]?.ToString(),
+                ["method"] = request?["method"]?.ToString(),
+                ["requestId"] = request?["request_id"]?.ToString() ?? request?["requestId"]?.ToString() ?? cancel?["request_id"]?.ToString(),
+                ["isStreaming"] = request?["is_streaming"]?.Value<bool?>() ?? request?["isStreaming"]?.Value<bool?>() ?? false,
+                ["rawLength"] = rawJson.Length
+            };
         }
 
         private static JToken Sanitize(object? payload)
