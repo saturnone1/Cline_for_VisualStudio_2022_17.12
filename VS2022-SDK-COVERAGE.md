@@ -31,6 +31,33 @@ When adding new parity findings, update this file first. Other Markdown files
 should either link here or document build/architecture details that do not
 belong in the active feature matrix.
 
+## Current Implementation Stages
+
+This is the active planning order for the Visual Studio 2022 port. Historical
+`Phase` notes in `PORT-ARCHITECTURE-PLAN.md` describe how the sidecar migration
+was reached; they are not the current work queue. Marketplace-specific work is
+deferred because the target environment is air-gapped unless a user explicitly
+asks for online marketplace parity.
+
+| Stage | Track | Progress | Current target | Next concrete work |
+| --- | --- | ---: | --- | --- |
+| 1 | Terminal and command execution | 75% | SDK `run_commands` works through reusable VS command-host sessions with ids, cancellation, hot/background detection, and readable command cards. | Add proceed-while-running/attach controls and stronger shell state inspection. |
+| 2 | MCP server connection lifecycle | 70% | Settings-file MCP servers can be registered, listed, toggled, restarted, deleted, connected, and exposed as SDK `extraTools`. | Harden resource/template/prompt listing and lifecycle notifications; keep marketplace install out of the air-gap path. |
+| 3 | Browser tools and web fetch | 35% | Browser settings RPCs, Chrome/Edge discovery, remote debugging probes, and offline-disabled web fetch policy exist. | Build a real Chrome debugging adapter and session action streaming. |
+| 4 | OAuth, account, and provider auth | 20% | Unauthenticated/local provider snapshots are safe; unsupported OAuth flows do not fake success. | Implement Visual Studio-compatible callback handling only for providers required by deployment. |
+| 5 | Checkpoint, diff, review, undo/revert | 65% | `Edited N files` cards, review-on-demand, and snapshot-based undo/revert exist. | Map deeper SDK checkpoint diff/restore metadata and transcript-visible checkpoint comments. |
+| 6 | Worktree | 20% | Reduced list/default responses prevent WebView transport errors. | Implement create/switch/merge/delete and Visual Studio solution reload behavior. |
+| 7 | Hooks, scheduled agents, plugins, subagents | 15% | UI/settings can expose reduced state without claiming runtime parity. | Decide which features stay hidden in air-gap mode, then map hook lifecycle events that are safe to run. |
+| 8 | Provider and model catalog | 35% | Local/OpenAI-compatible/Ollama style configuration works; unsupported catalog streams are explicit reduced/no-op handlers. | Replace fake catalog behavior with clear unsupported states or real provider adapters required by deployment. |
+
+Completion rules:
+
+- A stage only counts as covered when the SDK capability, Visual Studio host
+  adapter, WebView UX, persisted-session behavior, and diagnostics all agree.
+- Reduced/no-op handlers prevent broken UI, but do not count as parity.
+- SDK availability alone is not enough; the Visual Studio port must expose the
+  feature in a way users can operate and debug.
+
 ## Covered Through Cline SDK
 
 - Session lifecycle: start, send, stop, get, update, delete.
@@ -52,12 +79,12 @@ belong in the active feature matrix.
 | Tool approval | Covered | SDK `requestToolApproval` is mapped to WebView approval UI and respects Visual Studio auto-approve settings. |
 | Follow-up questions | Covered | SDK `ask_question` shows a WebView question, waits for option or freeform input, and removes the answered prompt. |
 | File reads/searches | Covered | Host executors resolve paths inside Visual Studio workspace roots; automatic search/listing honors `.clineignore`. |
-| File edits/apply_patch | Covered | SDK edits write through host adapters, snapshot before-content, emit compact change cards, and open VS diffs only on user review. |
+| File edits/apply_patch | Covered | SDK edits write through host adapters, snapshot before-content, emit compact change cards, open VS diffs only on user review, and support card-level Undo/Revert from stored snapshots. |
 | Commands | Partial | SDK `run_commands` executes through reusable Visual Studio command-host shell sessions with command ids, terminal ids, UTF-8 codepage setup, bounded output retention, cancellation, active-command state, hot/background command detection, and recent/unretrieved output RPCs. It is still not a first-class Visual Studio terminal pane integration. |
 | Checkpoints | Partial | SDK restore is wired when checkpoint run metadata exists; checkpoint diff/review parity is still limited. |
 | Rules/workflows/skills settings | Partial | SDK settings can be listed/toggled, but the `skills` execution tool is disabled until approval and execution UX are complete. |
 | MCP | Partial | SDK `InMemoryMcpManager` is wired for settings-file server registration, list, connect/tool discovery, add remote server, toggle, timeout, restart, delete, and per-tool auto-approve metadata. Marketplace install and OAuth callback flows remain reduced. |
-| Browser/web fetch | Partial | `fetch_web_content` is disabled by default for air-gapped use and only enabled by `VSCLINE_ENABLE_WEB_FETCH=1`; full browser-session tooling needs a VSIX Chrome adapter. |
+| Browser/web fetch | Partial | Browser settings RPCs are handled by the sidecar for Chrome/Edge path detection, remote debugging host checks, and reduced relaunch guidance. `fetch_web_content` is disabled by default for air-gapped use and only enabled by `VSCLINE_ENABLE_WEB_FETCH=1`; full browser-session tooling still needs a VSIX Chrome adapter. |
 | Provider catalogs/OAuth | Partial | Local API configuration works for supported providers; remote catalog refresh and OAuth provider setup remain reduced. |
 | Interaction diagnostics | Covered | Host, sidecar, WebView, user input, tool approvals, model/tool events, and responses are written to capped `%LOCALAPPDATA%\VsClineAgent\logs\interaction-*.jsonl` files. |
 
@@ -168,7 +195,7 @@ unless a user report requires an urgent bug fix.
 
 ### 1. Terminal and Command Execution
 
-Status: Partial, active.
+Status: Partial, active. Current progress: 75%.
 
 Current behavior:
 
@@ -194,29 +221,59 @@ Remaining parity:
 
 ### 2. MCP Server and Marketplace Lifecycle
 
-Status: Partial.
+Status: Partial. Current progress: 70% for server connection lifecycle.
+
+Air-gap priority:
+
+- MCP server connection is in scope.
+- Online marketplace catalog/install is deferred unless explicitly requested.
+- OAuth-backed remote MCP approval flows are treated as provider/auth work, not
+  as a blocker for local/server-file MCP operation.
+
+Current behavior:
+
+- SDK/core MCP settings-file servers can be loaded and registered.
+- Server list, add remote server, enable/disable, timeout update, restart,
+  delete, connect, and tool discovery are routed through SDK/core MCP helpers
+  where available.
+- Enabled MCP tools are passed into SDK sessions as `extraTools`.
 
 Remaining parity:
 
-- Marketplace catalog loading/install flow.
-- OAuth authenticate callback flow inside Visual Studio.
 - Resource, resource-template, and prompt listing beyond SDK tool discovery.
+- Stable per-server lifecycle state in WebView while connect/restart/delete is
+  running.
+- OAuth authenticate callback flow inside Visual Studio for remote servers that
+  require it.
+- Marketplace catalog loading/install flow, currently deferred for air-gap.
 - Deeper parity with upstream server lifecycle notifications and remote managed server policies.
 
 ### 3. Browser Tools
 
-Status: Reduced.
+Status: Partial. Current progress: 35%.
+
+Current behavior:
+
+- Browser settings RPCs are routed through the sidecar instead of falling
+  through as unhandled WebView calls.
+- Local Chrome/Edge executable discovery checks configured paths, common
+  Windows install locations, and `CHROME_PATH` / `EDGE_PATH`.
+- Remote debugging connection tests probe `/json/version` with a bounded
+  timeout.
+- Relaunch guidance returns a reduced Visual Studio-specific response instead
+  of pretending to manage Chrome automatically.
 
 Remaining parity:
 
 - Chrome debugging adapter owned by the VSIX/sidecar.
 - Session-based browser actions equivalent to upstream Cline.
 - `fetch_web_content` enablement with clear offline/air-gap policy.
-- Browser lifecycle and connection status surfaced in the WebView.
+- Browser lifecycle, tab state, screenshots, and action streaming surfaced in
+  the WebView.
 
 ### 4. OAuth, Account, and Provider Auth
 
-Status: Reduced or unsupported.
+Status: Reduced or unsupported. Current progress: 20%.
 
 Remaining parity:
 
@@ -227,18 +284,23 @@ Remaining parity:
 
 ### 5. Checkpoint, Diff, Review, Undo/Revert
 
-Status: Partial.
+Status: Partial. Current progress: 65%.
+
+Completed in the VSIX wrapper:
+
+- `Edited N files` cards stay in the task transcript with per-file Review actions.
+- Review opens Visual Studio diffs only after the user selects the card or file.
+- Undo/Revert restores modified/deleted files from stored before snapshots and deletes files that were created by the SDK edit flow.
+- Undo results are recorded back into the task transcript as compact reverted-file cards.
 
 Remaining parity:
 
-- First-class `Edited N files` cards with Review, Undo, and per-file expand.
-- Multi-file review flow that opens VS diffs only when selected.
 - Checkpoint restore/diff metadata closer to upstream `TaskCheckpointManager`.
 - Checkpoint comment/explain UX that is visible in the task transcript.
 
 ### 6. Worktree
 
-Status: Stub/reduced.
+Status: Stub/reduced. Current progress: 20%.
 
 Remaining parity:
 
@@ -248,7 +310,7 @@ Remaining parity:
 
 ### 7. Hooks, Scheduled Agents, Plugins, and Subagents
 
-Status: Mostly not runtime-backed.
+Status: Mostly not runtime-backed. Current progress: 15%.
 
 Remaining parity:
 
@@ -260,7 +322,7 @@ Remaining parity:
 
 ### 8. Provider and Model Catalog
 
-Status: Partial.
+Status: Partial. Current progress: 35%.
 
 Remaining parity:
 
@@ -287,18 +349,23 @@ The WebView should show SDK-owned features as available, partial, or blocked by 
 
 ## Remaining Work
 
-1. Continue the active Terminal and Command Execution track by adding richer
-   Visual Studio terminal-pane integration and proceed-while-running controls on
-   top of the reusable command-host session layer.
-2. Keep `VisualStudioClineBridge` as transport/safe hydration only; do not add
-   new alternate-agent runtime behavior there.
-3. Complete review UX for file changes with undo/revert and multi-file review
-   actions.
-4. Add a Chrome debugging browser adapter for SDK browser/web actions.
-5. Implement real MCP server and marketplace service handlers on top of
-   SDK/core MCP capabilities.
-6. Implement OAuth/account callback handling outside VS Code auth providers.
-7. Complete SDK checkpoint parity by mapping deeper checkpoint diff/review
-   metadata.
-8. Decide whether scheduled agents, plugins, and subagents should be exposed in
-   the Visual Studio UI or explicitly hidden as unsupported features.
+1. Terminal/command execution: add proceed-while-running controls, attach/view
+   running process UX, and stronger shell state inspection.
+2. MCP server connection lifecycle: finish resource/resource-template/prompt
+   listing, WebView lifecycle state, and OAuth callback handling for remote MCP
+   servers that require it. Keep online marketplace install deferred for
+   air-gap unless explicitly requested.
+3. Browser tools: add a Chrome debugging adapter and session-based action
+   streaming for SDK browser/web actions.
+4. OAuth/account/provider auth: implement Visual Studio-compatible callback
+   handling for required providers and propagate real auth state into account
+   controls.
+5. Checkpoint/diff/review: map deeper SDK checkpoint diff/restore metadata and
+   add transcript-visible checkpoint comments/explanations.
+6. Worktree: implement create/switch/merge/delete and Visual Studio solution
+   reload behavior.
+7. Hooks/scheduled agents/plugins/subagents: decide what remains hidden in
+   air-gap mode, then map the supported lifecycle events to real runtime
+   execution.
+8. Provider/model catalog: replace fake catalog substitutions with explicit
+   unsupported states or real provider adapters required by deployment.
