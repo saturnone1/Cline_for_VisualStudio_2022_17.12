@@ -2937,6 +2937,16 @@ export class VisualStudioWebviewRouter {
 	private async clearTask() {
 		const sessionId = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
 
+		if (this.state.currentTaskItem && this.state.clineMessages.length > 0) {
+			const taskId = String(this.state.currentTaskItem.id || sessionId)
+			if (taskId) {
+				this.taskSnapshots.set(taskId, {
+					taskItem: { ...this.state.currentTaskItem },
+					messages: this.state.clineMessages.map((message) => ({ ...message })),
+				})
+			}
+		}
+
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
@@ -2955,6 +2965,22 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async showTaskWithId(taskId: string) {
+		if (String(this.state.currentTaskItem?.id || "") === taskId && this.state.clineMessages.length > 0) {
+			logInteraction("sidecar", "showTaskWithId.currentStateFallback", { sessionId: taskId })
+			await this.broadcastState()
+			return
+		}
+
+		const snapshot = this.taskSnapshots.get(taskId)
+		if (snapshot) {
+			this.clearLiveInteractionState("showTaskWithId:snapshot")
+			this.state.currentTaskItem = { ...snapshot.taskItem }
+			this.state.clineMessages = snapshot.messages.map((message) => ({ ...message }))
+			savePersistedState(this.state)
+			await this.broadcastState()
+			return
+		}
+
 		if (this.clineSdk && taskId) {
 			this.clearLiveInteractionState("showTaskWithId")
 			this.closingSessionIds.delete(taskId)
@@ -2989,23 +3015,6 @@ export class VisualStudioWebviewRouter {
 				})
 			}
 		}
-
-		if (String(this.state.currentTaskItem?.id || "") === taskId && this.state.clineMessages.length > 0) {
-			logInteraction("sidecar", "showTaskWithId.currentStateFallback", { sessionId: taskId })
-			await this.broadcastState()
-			return
-		}
-
-		const snapshot = this.taskSnapshots.get(taskId)
-		if (!snapshot) {
-			return
-		}
-
-		this.clearLiveInteractionState("showTaskWithId:snapshot")
-		this.state.currentTaskItem = { ...snapshot.taskItem }
-		this.state.clineMessages = snapshot.messages.map((message) => ({ ...message }))
-		savePersistedState(this.state)
-		await this.broadcastState()
 	}
 
 	private async deleteTasks(taskIds: string[]) {

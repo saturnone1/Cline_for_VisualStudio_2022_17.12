@@ -34,4 +34,12 @@ if (missing.length > 0) {
 	process.exit(1)
 }
 
+const showTaskWithIdStart = router.indexOf("private async showTaskWithId")
+const snapshotFallback = router.indexOf('this.taskSnapshots.get(taskId)', showTaskWithIdStart)
+const sdkActivation = router.indexOf("this.clineSdk.activateSession(taskId)", showTaskWithIdStart)
+if (showTaskWithIdStart < 0 || snapshotFallback < 0 || sdkActivation < 0 || snapshotFallback > sdkActivation) {
+	console.error("VS2022 SDK parity smoke failed. showTaskWithId must restore cached transcript snapshots before SDK hydration.")
+	process.exit(1)
+}
+
 console.log(`VS2022 SDK parity smoke passed (${requiredMarkers.length} markers).`)
