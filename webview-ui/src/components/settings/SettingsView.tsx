@@ -17,6 +17,7 @@ import { useEvent } from "react-use"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useClineAuth } from "@/context/ClineAuthContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n, type I18nKey } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { StateServiceClient } from "@/services/grpc-client"
 import { isAdminOrOwner } from "../account/helpers"
@@ -113,24 +114,24 @@ type SettingsViewProps = {
 	targetSection?: string
 }
 
-// Helper to render section header - moved outside component for better performance
-const renderSectionHeader = (tabId: string) => {
-	const tab = SETTINGS_TABS.find((t) => t.id === tabId)
-	if (!tab) {
-		return null
-	}
-
-	return (
-		<SectionHeader>
-			<div className="flex items-center gap-2">
-				<tab.icon className="w-4" />
-				<div>{tab.headerText}</div>
-			</div>
-		</SectionHeader>
-	)
-}
-
 const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
+	const { t } = useI18n()
+	const getTabText = useCallback(
+		(tab: SettingsTab) => {
+			const keyById: Record<SettingsTabID, I18nKey> = {
+				"api-config": "settings.tabs.api",
+				features: "settings.tabs.features",
+				browser: "settings.tabs.browser",
+				terminal: "settings.tabs.terminal",
+				general: "settings.tabs.general",
+				"remote-config": "settings.tabs.remoteConfig",
+				about: "settings.tabs.about",
+				debug: "settings.tabs.debug",
+			}
+			return t(keyById[tab.id])
+		},
+		[t],
+	)
 	// Memoize to avoid recreation
 	const TAB_CONTENT_MAP: Record<SettingsTabID, React.FC<any>> = useMemo(
 		() => ({
@@ -146,7 +147,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 		[],
 	) // Empty deps - these imports never change
 
-	const { version, environment, settingsInitialModelTab } = useExtensionState()
+	const { version, environment, settingsInitialModelTab, vsClineSdkCoverage } = useExtensionState()
 	const { activeOrganization } = useClineAuth()
 
 	const [activeTab, setActiveTab] = useState<string>(targetSection || SETTINGS_TABS[0].id)
@@ -225,15 +226,15 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 									},
 								)}>
 								<tab.icon className="w-4 h-4" />
-								<span className="hidden sm:block">{tab.name}</span>
+								<span className="hidden sm:block">{getTabText(tab)}</span>
 							</div>
 						</TooltipTrigger>
-						<TooltipContent side="right">{tab.tooltipText}</TooltipContent>
+						<TooltipContent side="right">{getTabText(tab)}</TooltipContent>
 					</Tooltip>
 				</TabTrigger>
 			)
 		},
-		[activeTab],
+		[activeTab, getTabText],
 	)
 
 	// Memoized active content component
@@ -244,21 +245,37 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 		}
 
 		// Special props for specific components
-		const props: any = { renderSectionHeader }
+		const props: any = {
+			renderSectionHeader: (tabId: string) => {
+				const tab = SETTINGS_TABS.find((t) => t.id === tabId)
+				if (!tab) {
+					return null
+				}
+				return (
+					<SectionHeader>
+						<div className="flex items-center gap-2">
+							<tab.icon className="w-4" />
+							<div>{getTabText(tab)}</div>
+						</div>
+					</SectionHeader>
+				)
+			},
+		}
 		if (activeTab === "debug") {
 			props.onResetState = handleResetState
 		} else if (activeTab === "about") {
 			props.version = version
+			props.sdkCoverage = vsClineSdkCoverage
 		} else if (activeTab === "api-config") {
 			props.initialModelTab = settingsInitialModelTab
 		}
 
 		return <Component {...props} />
-	}, [activeTab, handleResetState, settingsInitialModelTab, version])
+	}, [activeTab, getTabText, handleResetState, settingsInitialModelTab, version, vsClineSdkCoverage])
 
 	return (
 		<Tab>
-			<ViewHeader environment={environment} onDone={onDone} title="Settings" />
+			<ViewHeader environment={environment} onDone={onDone} title={t("settings.title")} />
 
 			<div className="flex flex-1 overflow-hidden">
 				<TabList

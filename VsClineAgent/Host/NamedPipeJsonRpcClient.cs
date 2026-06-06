@@ -21,6 +21,7 @@ namespace VsClineAgent.Host
         private StreamWriter? _writer;
         private int _nextId;
         private CancellationTokenSource? _receiveLoopCancellation;
+        private readonly SemaphoreSlim _inboundRequestSlots = new SemaphoreSlim(4, 4);
 
         public event Func<string, JToken?, Task<JToken?>>? RequestReceived;
 
@@ -95,7 +96,16 @@ namespace VsClineAgent.Host
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
-                    await HandleMessageAsync(JObject.Parse(line), cancellationToken).ConfigureAwait(false);
+                    var message = JObject.Parse(line);
+                    var method = (string?)message["method"];
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        _ = Task.Run(() => HandleMessageAsync(message, cancellationToken), cancellationToken);
+                    }
+                    else
+                    {
+                        await HandleMessageAsync(message, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
@@ -144,6 +154,7 @@ namespace VsClineAgent.Host
             if (string.IsNullOrEmpty(id))
                 return;
 
+            await _inboundRequestSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 var handler = RequestReceived;
@@ -168,6 +179,10 @@ namespace VsClineAgent.Host
                         ["message"] = ex.Message
                     }
                 }, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _inboundRequestSlots.Release();
             }
         }
 
@@ -216,6 +231,7 @@ namespace VsClineAgent.Host
         {
             _receiveLoopCancellation?.Cancel();
             _receiveLoopCancellation?.Dispose();
+            _inboundRequestSlots.Dispose();
             _writeLock.Dispose();
             _writer?.Dispose();
             _reader?.Dispose();

@@ -54,6 +54,12 @@ namespace VsClineAgent.Host
             if (string.Equals(Environment.GetEnvironmentVariable("VSCLINE_VERBOSE_INTERACTION_LOG"), "1", StringComparison.Ordinal))
                 return false;
 
+            if (!string.Equals(Environment.GetEnvironmentVariable("VSCLINE_ENABLE_INTERACTION_LOG"), "1", StringComparison.Ordinal)
+                && eventName.IndexOf("failed", StringComparison.OrdinalIgnoreCase) < 0
+                && eventName.IndexOf("error", StringComparison.OrdinalIgnoreCase) < 0
+                && eventName.IndexOf("slow", StringComparison.OrdinalIgnoreCase) < 0)
+                return true;
+
             if (eventName == "webview.postMessage" || eventName == "webview.message.batchItem")
                 return true;
 

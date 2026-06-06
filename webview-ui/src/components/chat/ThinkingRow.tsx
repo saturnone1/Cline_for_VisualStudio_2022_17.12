@@ -14,6 +14,27 @@ interface ThinkingRowProps {
 	showChevron?: boolean
 }
 
+function isPlaceholderContent(value: string | undefined) {
+	const trimmed = (value || "").trim()
+	return trimmed === "{}" || trimmed === "[]" || trimmed === "null" || trimmed === "undefined"
+}
+
+function isCompletedProgressTitle(value: string | undefined) {
+	const normalized = (value || "").trim().toLowerCase()
+	return (
+		normalized === "파일/도구 처리 기록" ||
+		normalized === "파일 읽기 기록" ||
+		normalized === "터미널 실행 기록" ||
+		normalized === "검색 기록" ||
+		normalized === "응답 준비 기록" ||
+		normalized === "reading files and using tools history" ||
+		normalized === "running terminal history" ||
+		normalized === "preparing response history" ||
+		normalized === "model progress history" ||
+		normalized === "모델 진행 기록"
+	)
+}
+
 export const ThinkingRow = memo(
 	({
 		showTitle = false,
@@ -25,6 +46,7 @@ export const ThinkingRow = memo(
 		isStreaming = false,
 		showChevron = true,
 	}: ThinkingRowProps) => {
+		const safeReasoningContent = isPlaceholderContent(reasoningContent) ? "" : reasoningContent
 		const scrollRef = useRef<HTMLDivElement>(null)
 		const [canScrollUp, setCanScrollUp] = useState(false)
 		const [canScrollDown, setCanScrollDown] = useState(false)
@@ -42,9 +64,13 @@ export const ThinkingRow = memo(
 				scrollRef.current.scrollTop = scrollRef.current.scrollHeight
 			}
 			checkScrollable()
-		}, [reasoningContent, isVisible, isExpanded, isStreaming, checkScrollable])
+		}, [safeReasoningContent, isVisible, isExpanded, isStreaming, checkScrollable])
 
 		if (!isVisible) {
+			return null
+		}
+
+		if (!isStreaming && !safeReasoningContent?.trim() && isCompletedProgressTitle(title)) {
 			return null
 		}
 
@@ -84,7 +110,7 @@ export const ThinkingRow = memo(
 					</Button>
 				) : null}
 
-				{isExpanded && (
+				{isExpanded && safeReasoningContent?.trim() && (
 					<Button
 						className={cn(
 							"flex gap-0 overflow-hidden w-full min-w-0 max-h-0 opacity-0 items-baseline justify-baseline text-left !p-0 !pl-0",
@@ -105,7 +131,7 @@ export const ThinkingRow = memo(
 								)}
 								onScroll={checkScrollable}
 								ref={scrollRef}>
-								<span className="pb-2 block text-sm">{reasoningContent}</span>
+								<span className="pb-1 block text-sm leading-snug">{safeReasoningContent}</span>
 							</div>
 							{canScrollUp && (
 								<div className="absolute top-0 left-0 right-0 h-6 pointer-events-none bg-gradient-to-b from-background to-transparent" />

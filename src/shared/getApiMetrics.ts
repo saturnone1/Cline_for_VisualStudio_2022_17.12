@@ -45,6 +45,9 @@ export function getApiMetrics(messages: ClineMessage[]): ApiMetrics {
 		) {
 			try {
 				const parsedData = JSON.parse(message.text)
+				if (parsedData.usageReliable === false) {
+					return
+				}
 				const { tokensIn, tokensOut, cacheWrites, cacheReads, cost } = parsedData
 
 				if (typeof tokensIn === "number") {
@@ -85,7 +88,10 @@ export function getLastApiReqTotalTokens(messages: ClineMessage[]): number {
 		const msg = messages[i]
 		if (msg.type === "say" && msg.say === "api_req_started" && msg.text) {
 			try {
-				const { tokensIn, tokensOut, cacheWrites, cacheReads } = JSON.parse(msg.text)
+				const { tokensIn, tokensOut, cacheWrites, cacheReads, usageReliable } = JSON.parse(msg.text)
+				if (usageReliable === false) {
+					continue
+				}
 				const total = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 				if (total > 0) {
 					return total

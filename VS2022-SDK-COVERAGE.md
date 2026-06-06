@@ -10,7 +10,7 @@ subagents, checkpoints, and MCP behavior.
 
 ## Summary
 
-All tracked stages are at least 80% covered. A stage only counts when SDK
+All tracked stages are at least 90% covered. A stage only counts when SDK
 capability, Visual Studio host adapter, WebView UX, persisted state, and
 diagnostics agree. Reduced/no-op handlers prevent broken UI, but do not count as
 full parity.
@@ -20,14 +20,14 @@ fetch are opt-in or explicitly disabled unless configured.
 
 | Stage | Track | Coverage | Done | Not Done | Next |
 | --- | --- | ---: | --- | --- | --- |
-| 1 | Terminal and command execution | 85% | Reusable VS command-host sessions, command ids, cancellation, hot/background state, cwd snapshots, unretrieved output, readable command cards, Attach, Continue, and Open Output actions. | Native VS terminal-pane parity and deeper shell environment introspection. | Add host-specific terminal pane affordances where VS APIs allow it. |
-| 2 | MCP server lifecycle | 80% | Settings-file servers register/list/toggle/restart/delete/connect, expose SDK `extraTools`, and surface resource/template/prompt metadata through SDK method detection with fallbacks. | Remote MCP OAuth callback parity and online marketplace install. | Implement deployment-required remote auth only; keep marketplace out of air-gap. |
-| 3 | Browser tools and web fetch | 80% | Browser settings, Chrome/Edge discovery, remote-debug probes, gated `fetch_web_content`, DevTools tab/action/screenshot execution, session/action ids, reconnect phases, timeout cleanup, and transcript rows. | Real Chrome/Edge smoke coverage by default and automatic browser relaunch parity. | Add env-gated real-browser smoke tests and launch/reconnect polish. |
-| 4 | OAuth, account, and provider auth | 80% | Local/API-key snapshots, provider credential save/status/clear, SDK provider fields, OpenAI Codex/OCA/LIG OAuth callback, token exchange, expiry/refresh state, and refresh RPCs. | Deployment-specific account organization, credit, spend-limit, and global Cline account workflows. | Add only provider/account controls required by deployment. |
-| 5 | Checkpoint, diff, review, undo/revert | 80% | Edit cards, review-on-demand, snapshot undo/revert, SDK checkpoint restore, and transcript-visible checkpoint compare comments tied to stored edit snapshots. | True SDK checkpoint diff streams are not exposed by the current SDK. | Replace limitation comments when upstream exposes diff streams. |
-| 6 | Worktree | 80% | Porcelain worktree list, create/delete/merge/switch RPCs, `.worktreeinclude`, dirty/locked/prunable status, changed files, base selection, per-worktree task routing, folder fallback, and merge status/abort/continue. | More host validation for unusual folder-only and conflict states. | Add focused manual/host tests for edge cases. |
-| 7 | Hooks, scheduled agents, plugins, subagents | 80% | Local hooks, transcript hook cards, `PreToolUse` block/input patch/validation/context/structured decision metadata, `.cline/cron` CRUD/manual run/history, local plugin status, and SDK team progress rendering. | Additional upstream hook lifecycle names, scheduler queue controls, and deployment-specific team routing policy. | Extend only required lifecycle/team behaviors. |
-| 8 | Provider and model catalog | 80% | Ollama and OpenAI-compatible refresh, OpenAI/OCA/LIG-compatible API key or OAuth token auth, SDK/provider metadata first, endpoint metadata second, conservative inference last, diagnostics, and honest reduced states. | Provider-specific non-OpenAI catalog APIs not required by deployment. | Add provider APIs only when selected for deployment. |
+| 1 | Terminal and command execution | 92% | Reusable VS command-host sessions, normalized command approval text for string/JSON/array payloads, command ids, cancellation, hot/background state, cwd/env snapshots, unretrieved output, compact command cards, phase-split progress rows, Attach, Continue, and Open Output actions. | Native VS terminal-pane parity and deeper shell environment introspection. | Add host-specific terminal pane affordances where VS APIs allow it. |
+| 2 | MCP server lifecycle | 90% | Settings-file servers register/list/toggle/restart/delete/connect, operation state survives refresh, SDK `extraTools`, SDK resource/template/prompt method detection, reduced fallback reasons, and air-gap marketplace disabled rows. | Remote MCP OAuth callback parity and online marketplace install. | Implement deployment-required remote auth only; keep marketplace out of air-gap. |
+| 3 | Browser tools and web fetch | 90% | Browser settings, Chrome/Edge discovery, remote-debug probes, gated `fetch_web_content`, DevTools session registry, tab reuse, session/action/tab ids, reconnect phases, timeout cleanup, screenshots, diagnostics, and transcript phase rows. | Real Chrome/Edge smoke coverage by default and automatic browser relaunch parity. | Keep real-browser smoke env-gated and polish launch/reconnect behavior. |
+| 4 | OAuth, account, and provider auth | 90% | Local/API-key snapshots, provider credential save/status/clear, SDK provider fields, provider-scoped OpenAI Codex/OCA/LIG OAuth callback, token exchange, expiry/refresh/error state, refresh RPCs, and separated account/provider controls. | Deployment-specific account organization, credit, spend-limit, and global Cline account workflows. | Add only provider/account controls required by deployment. |
+| 5 | Checkpoint, diff, review, undo/revert | 90% | Edit cards, review-on-demand, snapshot undo/revert, SDK checkpoint restore, compare metadata where present, changed-file summaries, and transcript-visible checkpoint comments tied to stored edit snapshots. | True SDK checkpoint diff streams are not exposed by the current SDK. | Replace limitation comments when upstream exposes diff streams. |
+| 6 | Worktree | 90% | Porcelain worktree list, create/delete/merge/switch RPCs, `.worktreeinclude`, dirty/locked/prunable/conflict status, changed files, base selection, per-worktree task cwd/workspace/session metadata, folder fallback, and merge status/abort/continue recovery. | More host validation for unusual folder-only and conflict states. | Add focused manual/host tests for edge cases. |
+| 7 | Hooks, scheduled agents, plugins, subagents | 90% | Local hooks, transcript hook cards, `PreToolUse` block/input patch/validation/context/structured decision metadata, `.cline/cron` CRUD/manual run/history, local plugin discovery/config status, and SDK team progress/result/error rendering. | Additional upstream hook lifecycle names, hosted scheduler queue controls, and deployment-specific team routing policy. | Extend only required lifecycle/team behaviors. |
+| 8 | Provider and model catalog | 90% | Ollama and OpenAI-compatible refresh, authenticated OpenAI/OCA/LIG-compatible API key or OAuth token catalog adapters, SDK/provider metadata first, endpoint metadata second, conservative inference last, one-shot diagnostics, and honest reduced states. | Provider-specific non-OpenAI catalog APIs not required by deployment. | Add provider APIs only when selected for deployment. |
 
 ## UI/UX Parity
 
@@ -39,6 +39,9 @@ Done:
   controls, MCP rows, worktree view, hooks, scheduled-agent, plugin, and
   subagent status surfaces expose real or reduced state instead of transport
   failures.
+- Command approvals now show the actual command line instead of raw JSON
+  descriptors, and activity/terminal progress rows close independently when the
+  task phase changes.
 - Visual Studio limitations are shown as supported, reduced, air-gap disabled,
   or unsupported instead of fake success.
 
@@ -63,10 +66,15 @@ Next:
   Visual Studio command host state are wired through C# host RPCs.
 - Sidecar: SDK runtime feature-detects optional MCP/checkpoint/provider APIs and
   fails closed with explicit diagnostics when missing.
+- Sidecar parity smoke: `npm test` checks terminal, MCP, browser, OAuth,
+  checkpoint, worktree, hook/scheduled/plugin/subagent, and catalog markers.
 - Browser: sidecar-owned DevTools registry tracks action phases, screenshots,
   reconnect state, and session cleanup.
 - Auth/catalog: provider-scoped token state and catalog diagnostics are surfaced
   without faking global account login.
+- WebView tests cover command approval JSON/array normalization, token-bar
+  reliability, auto-approve master gating, preferred language persistence, and
+  feature setting controls.
 - Branding: selected `Signature_PNG` assets are optimized into WebView/VSIX
   assets instead of dumping the full source folder.
 
@@ -77,13 +85,14 @@ Passed on 2026-06-06:
 - `sidecar`: `npm install @cline/sdk@0.0.43`
 - `sidecar`: `npm install`
 - `sidecar`: `npm run check`
+- `sidecar`: `npm test` - 16 parity markers
 - `sidecar`: `npm run build`
 - `webview-ui`: `npm install`
 - `webview-ui`: `npm run build`
-- `webview-ui`: `npm test` - 16 files, 150 tests
+- `webview-ui`: `npm test` - 20 files, 157 tests
 - Visual Studio MSBuild Clean/Rebuild produced
-  `VsClineAgent/bin/Debug/VsClineAgent.vsix` version 1.1.26.
-
+  `VsClineAgent/bin/Debug/VsClineAgent.vsix` version 1.1.37.
+ 
 Observed warnings:
 
 - WebView tests still emit existing React `act(...)` warnings in

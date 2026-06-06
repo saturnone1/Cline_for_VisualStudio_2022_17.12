@@ -42,6 +42,17 @@ type ToolActivityEntry = {
 	detail?: string
 }
 
+type ProgressPhase = "activity" | "terminal" | "reasoning"
+
+type NormalizedUsage = {
+	inputTokens?: number
+	outputTokens?: number
+	cacheReadTokens?: number
+	cacheWriteTokens?: number
+	totalCost?: number
+	reliable: boolean
+}
+
 type HookLifecycleName = "TaskStart" | "TaskResume" | "TaskCancel" | "TaskComplete" | "PreToolUse" | "PostToolUse" | "UserPromptSubmit"
 
 type HookScript = {
@@ -136,6 +147,7 @@ export class VisualStudioWebviewRouter {
 	private activeFoldedReasoningText = ""
 	private activeFoldedActivityText = ""
 	private activeTerminalActivityText = ""
+	private activeProgressPhase: ProgressPhase | null = null
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
 	private terminalStateTimer: NodeJS.Timeout | null = null
@@ -145,6 +157,7 @@ export class VisualStudioWebviewRouter {
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private lastPartialStateBroadcastAt = 0
+	private stateHydrationRefreshInFlight = false
 	private taskIdleNoticeTimer: NodeJS.Timeout | null = null
 	private taskIdleTimer: NodeJS.Timeout | null = null
 	private lastTaskActivityAt = 0
@@ -218,6 +231,7 @@ export class VisualStudioWebviewRouter {
 			})
 		}
 		if (shouldAutoApproveTool(toolName, this.state.autoApprovalSettings)) {
+			await this.notifyAutoApprovedTool(mappedToolName, input)
 			return { approved: true, reason: "Auto-approved by Visual Studio settings." }
 		}
 		const ask = mappedToolName === "executeCommand" ? "command" : "tool"
@@ -225,7 +239,7 @@ export class VisualStudioWebviewRouter {
 			ask === "command"
 				? JSON.stringify({
 						command: getCommandText(input),
-						description: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || "LIG VS wants to run this command.",
+						description: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || "LIG VS가 이 명령을 실행하려고 합니다.",
 					})
 				: JSON.stringify({
 						tool: mappedToolName,
@@ -251,6 +265,27 @@ export class VisualStudioWebviewRouter {
 		return new Promise<ToolApprovalResult>((resolve) => {
 			this.pendingApproval = { resolve }
 		})
+	}
+
+	private async notifyAutoApprovedTool(mappedToolName: string, input: Record<string, unknown>) {
+		const settings = asRecord(this.state.autoApprovalSettings)
+		if (settings.enableNotifications !== true) {
+			return
+		}
+
+		const detail =
+			mappedToolName === "executeCommand"
+				? getCommandText(input)
+				: getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getSearchQuery(input)
+		const suffix = detail ? `: ${truncateForStatus(detail, 120)}` : ""
+		try {
+			await VisualStudioHostProvider.create(this.connection).windowClient.showMessage({
+				message: `LIG VS auto-approved ${mappedToolName}${suffix}`,
+				type: "info",
+			})
+		} catch (error) {
+			logInteraction("sidecar", "autoApproveNotificationFailed", { error: stringify(error) })
+		}
 	}
 
 	async requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> {
@@ -445,6 +480,7 @@ export class VisualStudioWebviewRouter {
 
 	private async handleGrpcRequest(request: GrpcRequest) {
 		logInteraction("webview->sidecar", `${request.service || ""}.${request.method || ""}`, request)
+		const startedAt = Date.now()
 		const service = request.service || ""
 		const method = request.method || ""
 		const requestId = readRequestId(request)
@@ -456,12 +492,17 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (isStreaming) {
-			return await this.handleStreamingRequest(key, requestId)
+			const result = await this.handleStreamingRequest(key, requestId)
+			this.logSlowGrpcRequest(key, startedAt, true)
+			return result
 		}
 
 		try {
-			return await this.handleUnaryRequest(key, requestId, request.message)
+			const result = await this.handleUnaryRequest(key, requestId, request.message)
+			this.logSlowGrpcRequest(key, startedAt, false)
+			return result
 		} catch (error) {
+			this.logSlowGrpcRequest(key, startedAt, false)
 			const message = error instanceof Error ? error.message : String(error)
 			this.addMessage({ type: "say", say: "error", text: message })
 			this.updateCurrentTaskItem()
@@ -473,8 +514,7 @@ export class VisualStudioWebviewRouter {
 	private async handleStreamingRequest(key: string, requestId: string) {
 		if (key === "StateService.subscribeToState") {
 			this.stateStreamRequestIds.add(requestId)
-			await this.refreshTaskHistoryFromSdk()
-			await this.refreshSelectedTaskFromSdk()
+			this.refreshStateStreamsInBackground()
 			return grpcHandled(grpcResponse(requestId, { stateJson: JSON.stringify(this.state) }, true))
 		}
 
@@ -737,7 +777,7 @@ export class VisualStudioWebviewRouter {
 				this.state.mode = this.state.mode === "plan" ? "act" : "plan"
 				savePersistedState(this.state)
 				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
+				return grpcHandled(grpcResponse(requestId, { value: true, mode: this.state.mode }, false))
 
 			case "StateService.updateTelemetrySetting":
 				this.state.telemetrySetting = getString(message, "value") || getString(message, "telemetrySetting") || this.state.telemetrySetting
@@ -950,8 +990,29 @@ export class VisualStudioWebviewRouter {
 			case "FileService.searchCommits":
 				return grpcHandled(grpcResponse(requestId, { results: [], values: [] }, false))
 
-			case "FileService.selectFiles":
-				return grpcHandled(grpcResponse(requestId, { files: [], values: [] }, false))
+			case "FileService.selectFiles": {
+				try {
+					const selected = await host.workspaceClient.selectFiles({
+						allowImages: getBoolean(message, "value") || getBoolean(message, "allowImages"),
+					})
+					return grpcHandled(
+						grpcResponse(
+							requestId,
+							{
+								values1: Array.isArray(selected.values1) ? selected.values1 : selected.images || [],
+								values2: Array.isArray(selected.values2) ? selected.values2 : selected.files || [],
+							},
+							false,
+						),
+					)
+				} catch (error) {
+					await host.windowClient.showMessage({
+						message: `LIG VS could not open the file picker: ${stringify(error)}`,
+						type: "warning",
+					})
+					return grpcHandled(grpcResponse(requestId, { values1: [], values2: [], error: stringify(error) }, false))
+				}
+			}
 
 			case "FileService.openMention":
 			case "FileService.openDiskConversationHistory":
@@ -1104,6 +1165,14 @@ export class VisualStudioWebviewRouter {
 
 			default:
 				return null
+		}
+	}
+
+	private logSlowGrpcRequest(key: string, startedAt: number, streaming: boolean) {
+		const durationMs = Date.now() - startedAt
+		const thresholdMs = readPositiveIntEnv("VSCLINE_SLOW_WEBVIEW_RPC_MS", 750)
+		if (durationMs >= thresholdMs) {
+			logInteraction("sidecar", "webviewRpcSlow", { key, streaming, durationMs, thresholdMs })
 		}
 	}
 
@@ -2459,6 +2528,7 @@ export class VisualStudioWebviewRouter {
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
 		this.activeTerminalActivityText = ""
+		this.activeProgressPhase = null
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
 
@@ -2473,19 +2543,17 @@ export class VisualStudioWebviewRouter {
 		}
 
 		this.closingSessionIds.clear()
-		await this.clineSdk.stop({})
 		const text = getString(message, "text")
 		const images = getStringArray(message, "images")
 		const files = getStringArray(message, "files")
-		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({})
 		const requestedWorkspacePath = getString(message, "workspacePath") || getString(message, "cwd") || getString(message, "worktreePath")
-		const cwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
+		const initialCwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
 			? path.resolve(requestedWorkspacePath)
-			: workspaceRoots[0] || process.cwd()
-		const taskItem = createHistoryItem(createId(), text, cwd, this.getModelId())
+			: process.cwd()
+		const taskItem = createHistoryItem(createId(), text, initialCwd, this.getModelId())
 		if (requestedWorkspacePath) {
-			;(taskItem as Record<string, unknown>).workspacePath = cwd
-			;(taskItem as Record<string, unknown>).worktreePath = cwd
+			;(taskItem as Record<string, unknown>).workspacePath = initialCwd
+			;(taskItem as Record<string, unknown>).worktreePath = initialCwd
 		}
 
 		this.state.clineMessages = []
@@ -2497,32 +2565,102 @@ export class VisualStudioWebviewRouter {
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
 		this.activeTerminalActivityText = ""
+		this.activeProgressPhase = null
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
+		this.upsertFoldedActivityText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
 		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
-		void this.runLifecycleHooks("TaskStart", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
-		void this.runLifecycleHooks("UserPromptSubmit", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
 		if (options.broadcast !== false) {
 			await this.broadcastState()
 		}
 		savePersistedState(this.state)
 
-		this.clineSdk.startSession({
-			prompt: text,
-			cwd,
-			userImages: images,
-			userFiles: files,
-			interactive: true,
-			config: await this.buildSdkConfig(cwd, String(taskItem.id || "")),
-			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
-		}).then((result) => this.completeFromSdkResult(result, String(taskItem.id || ""), "startSession")).catch(async (error) => {
+		void this.prepareAndLaunchNewTask({
+			text,
+			images,
+			files,
+			requestedWorkspacePath,
+			initialCwd,
+			taskItem,
+		})
+	}
+
+	private async prepareAndLaunchNewTask({
+		text,
+		images,
+		files,
+		requestedWorkspacePath,
+		initialCwd,
+		taskItem,
+	}: {
+		text: string
+		images: string[]
+		files: string[]
+		requestedWorkspacePath: string
+		initialCwd: string
+		taskItem: Record<string, unknown>
+	}) {
+		if (!this.clineSdk) {
+			return
+		}
+
+		let cwd = initialCwd
+		try {
+			const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({})
+			cwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
+				? path.resolve(requestedWorkspacePath)
+				: workspaceRoots[0] || initialCwd
+			taskItem.cwdOnTaskInitialization = cwd
+			if (requestedWorkspacePath) {
+				taskItem.workspacePath = cwd
+				taskItem.worktreePath = cwd
+			}
+			this.updateCurrentTaskItem()
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
+			await this.clineSdk.stop({})
+			void this.runLifecycleHooks("TaskStart", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
+			void this.runLifecycleHooks("UserPromptSubmit", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
+			await this.launchSdkStartSession({
+				prompt: text,
+				cwd,
+				userImages: images,
+				userFiles: files,
+				interactive: true,
+			}, cwd, String(taskItem.id || ""), "startSession")
+		} catch (error) {
 			this.clearTaskIdleWatchdog()
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
-		})
+		}
+	}
+
+	private async launchSdkStartSession(
+		params: Record<string, unknown>,
+		cwd: string,
+		sessionId: string,
+		source: string,
+	) {
+		if (!this.clineSdk) {
+			return
+		}
+
+		try {
+			const config = await this.buildSdkConfig(cwd, sessionId)
+			const result = await this.clineSdk.startSession({
+				...params,
+				config,
+				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
+			})
+			await this.completeFromSdkResult(result, sessionId, source)
+		} catch (error) {
+			this.clearTaskIdleWatchdog()
+			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
+			this.updateCurrentTaskItem()
+			await this.broadcastState()
+		}
 	}
 
 	private async sendAskResponse(message: unknown) {
@@ -2552,13 +2690,13 @@ export class VisualStudioWebviewRouter {
 			this.addMessage({
 				type: "say",
 				say: "user_feedback",
-				text: feedback.trim() || (approved ? "Approved" : "Rejected"),
+				text: feedback.trim() || (approved ? "승인됨" : "거부됨"),
 				images: getStringArray(message, "images"),
 				files: getStringArray(message, "files"),
 			})
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
-			pending.resolve({ approved, reason: feedback.trim() || (approved ? "Approved in Visual Studio." : "Rejected in Visual Studio.") })
+			pending.resolve({ approved, reason: feedback.trim() || (approved ? "Visual Studio에서 승인됨." : "Visual Studio에서 거부됨.") })
 			return
 		}
 
@@ -3511,7 +3649,7 @@ export class VisualStudioWebviewRouter {
 		const status = getString(snapshot, "status")
 		const model = asRecord(snapshot.model)
 		const aggregateUsage = asRecord(snapshot.aggregateUsage)
-		const usage = Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage)
+		const usage = normalizeUsageSnapshot(Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage))
 		if (status === "idle") {
 			this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
 		} else {
@@ -3519,11 +3657,11 @@ export class VisualStudioWebviewRouter {
 		}
 		this.updateCurrentTaskItem({
 			modelId: getString(model, "modelId") || undefined,
-			tokensIn: numberValue(usage.inputTokens),
-			tokensOut: numberValue(usage.outputTokens),
-			cacheReads: numberValue(usage.cacheReadTokens),
-			cacheWrites: numberValue(usage.cacheWriteTokens),
-			totalCost: numberValue(usage.totalCost),
+			tokensIn: usage.reliable ? usage.inputTokens : undefined,
+			tokensOut: usage.reliable ? usage.outputTokens : undefined,
+			cacheReads: usage.reliable ? usage.cacheReadTokens : undefined,
+			cacheWrites: usage.reliable ? usage.cacheWriteTokens : undefined,
+			totalCost: usage.reliable ? usage.totalCost : undefined,
 		})
 		if (status && status !== "running" && status !== "pending" && status !== "starting" && status !== "idle") {
 			const activeText = this.getActivePartialText()
@@ -4067,7 +4205,7 @@ export class VisualStudioWebviewRouter {
 					})
 			this.rememberToolSummary(mappedToolName, text)
 			if (isCommand) {
-				this.appendTerminalActivityText(formatCompletedCommandActivity(text))
+				this.appendTerminalActivityText(formatCompletedCommandActivity(text, this.getUiLanguage()))
 				this.moveActiveReasoningToEnd()
 			} else {
 				this.recordToolActivity(mappedToolName, text)
@@ -4168,6 +4306,16 @@ export class VisualStudioWebviewRouter {
 			this.finishFoldedReasoningText()
 			this.clearReasoningStatus()
 			const result = asRecord(event.result)
+			const usage = normalizeUsageSnapshot(asRecord(result.usage || result.aggregateUsage || event.usage))
+			if (usage.reliable) {
+				this.updateCurrentTaskItem({
+					tokensIn: usage.inputTokens,
+					tokensOut: usage.outputTokens,
+					cacheReads: usage.cacheReadTokens,
+					cacheWrites: usage.cacheWriteTokens,
+					totalCost: usage.totalCost,
+				})
+			}
 			const text = getString(result, "outputText")
 			this.finishSdkTask(sessionId, getString(result, "status") || "completed", text)
 		}
@@ -4183,13 +4331,23 @@ export class VisualStudioWebviewRouter {
 		if (type === "usage") {
 			this.noteTaskActivity("usage")
 			const usage = asRecord(event.usage)
-			this.updateCurrentTaskItem({
-				tokensIn: numberValue(event.totalInputTokens) ?? numberValue(usage.inputTokens),
-				tokensOut: numberValue(event.totalOutputTokens) ?? numberValue(usage.outputTokens),
-				cacheReads: numberValue(event.totalCacheReadTokens) ?? numberValue(usage.cacheReadTokens),
-				cacheWrites: numberValue(event.totalCacheWriteTokens) ?? numberValue(usage.cacheWriteTokens),
-				totalCost: numberValue(event.totalCost) ?? numberValue(usage.totalCost) ?? numberValue(usage.cost),
+			const normalizedUsage = normalizeUsageSnapshot({
+				...usage,
+				totalInputTokens: event.totalInputTokens,
+				totalOutputTokens: event.totalOutputTokens,
+				totalCacheReadTokens: event.totalCacheReadTokens,
+				totalCacheWriteTokens: event.totalCacheWriteTokens,
+				totalCost: event.totalCost ?? usage.totalCost ?? usage.cost,
 			})
+			if (normalizedUsage.reliable) {
+				this.updateCurrentTaskItem({
+					tokensIn: normalizedUsage.inputTokens,
+					tokensOut: normalizedUsage.outputTokens,
+					cacheReads: normalizedUsage.cacheReadTokens,
+					cacheWrites: normalizedUsage.cacheWriteTokens,
+					totalCost: normalizedUsage.totalCost,
+				})
+			}
 		}
 
 		if (type === "done") {
@@ -4427,6 +4585,15 @@ export class VisualStudioWebviewRouter {
 		const execution = buildOptionalExecutionConfig()
 		const subagentsEnabled = this.state.subagentsEnabled === true || process.env.VSCLINE_ENABLE_SUBAGENTS === "1"
 		const scheduledAgentsEnabled = this.isScheduledAgentsEnabled()
+		const preferredLanguage = normalizePreferredLanguage(getString(this.state, "preferredLanguage"))
+		const languageInstruction =
+			preferredLanguage === "Korean - 한국어"
+				? "Reply to the user in Korean unless the user explicitly asks for another language."
+				: "Reply to the user in English unless the user explicitly asks for another language."
+		const modeInstruction =
+			this.state.mode === "plan"
+				? "You are in PLAN mode. Do not modify files, run terminal commands, launch browsers, or perform destructive/external actions. Use read-only inspection only when necessary, ask clarifying questions when the requested change is ambiguous, and return a concrete plan for the user to approve before implementation."
+				: "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
 
 		logInteraction("sidecar", "sdkConfig", {
 			providerId: sdkProviderId,
@@ -4444,6 +4611,7 @@ export class VisualStudioWebviewRouter {
 			scheduledAgentsEnabled,
 			oauthConfigured: Object.keys(oauthCredentials).length > 0,
 			execution,
+			preferredLanguage,
 		})
 
 		return {
@@ -4477,8 +4645,9 @@ export class VisualStudioWebviewRouter {
 				enabled: this.state.enableCheckpointsSetting !== false,
 			},
 			...(execution ? { execution } : {}),
+			preferredLanguage,
 			systemPrompt:
-				"You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.",
+				`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`,
 		}
 	}
 
@@ -4549,13 +4718,18 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const normalizedStatus = String(status || "").toLowerCase()
+		const uiLanguage = this.getUiLanguage()
 		const text =
 			normalizedStatus === "cancelled" || normalizedStatus === "stopped" || normalizedStatus === "aborted"
-				? "요청을 취소했습니다."
+				? uiLanguage === "ko" ? "요청을 취소했습니다." : "Request cancelled."
 				: normalizedStatus === "failed" || normalizedStatus === "error"
-					? "작업이 오류 상태로 종료되었습니다."
-					: "Done."
+					? uiLanguage === "ko" ? "작업이 오류 상태로 종료되었습니다." : "Task ended with an error."
+					: uiLanguage === "ko" ? "완료" : "Done."
 		this.addMessage({ type: "say", say: "completion_result", text })
+	}
+
+	private getUiLanguage(): "en" | "ko" {
+		return getString(this.state, "uiLanguage") === "en" ? "en" : "ko"
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {
@@ -4656,6 +4830,10 @@ export class VisualStudioWebviewRouter {
 			"autoApprovalSettings",
 			"mode",
 			"planActSeparateModelsSetting",
+			"uiLanguage",
+			"preferredLanguage",
+			"telemetrySetting",
+			"mcpDisplayMode",
 			"subagentsEnabled",
 			"scheduledAgentsEnabled",
 			"hooksEnabled",
@@ -4758,7 +4936,7 @@ export class VisualStudioWebviewRouter {
 			}
 		}
 
-		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true)
+		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
 		this.activeToolActivityTs = this.activeReasoningTextTs
 	}
@@ -4801,7 +4979,7 @@ export class VisualStudioWebviewRouter {
 				}
 			}
 
-			const text = buildTerminalActivityText(activeCommands, recentCommands, lines, state)
+			const text = buildTerminalActivityText(activeCommands, recentCommands, lines, state, this.getUiLanguage())
 			if (!text) {
 				return
 			}
@@ -4819,7 +4997,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, false)
+		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, false, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
 		this.activeToolActivityTs = null
 		this.activeToolActivityEntries = []
@@ -4909,10 +5087,11 @@ export class VisualStudioWebviewRouter {
 
 	private upsertFoldedReasoningText(text: string) {
 		const normalized = normalizeReasoningTranscriptText(text)
-		if (!normalized) {
+		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
 			return
 		}
 
+		this.beginProgressPhase("reasoning")
 		const capped = truncateText(normalized, readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000))
 		const previous = this.activeFoldedReasoningText
 		const previousNormalized = normalizeTranscriptText(previous)
@@ -4948,20 +5127,22 @@ export class VisualStudioWebviewRouter {
 
 	private upsertFoldedActivityText(text: string) {
 		const normalized = normalizeProgressTranscriptText(text)
-		if (!normalized) {
+		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
 			return
 		}
 
+		this.beginProgressPhase("activity")
 		this.activeFoldedActivityText = truncateText(normalized, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
 		this.upsertFoldedProgressMessage()
 	}
 
 	private appendTerminalActivityText(text: string) {
 		const normalized = normalizeProgressTranscriptText(text)
-		if (!normalized) {
+		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
 			return
 		}
 
+		this.beginProgressPhase("terminal")
 		const previous = this.activeTerminalActivityText
 		const previousNormalized = normalizeTranscriptText(previous)
 		const nextNormalized = normalizeTranscriptText(normalized)
@@ -4976,6 +5157,25 @@ export class VisualStudioWebviewRouter {
 		this.upsertFoldedProgressMessage()
 	}
 
+	private beginProgressPhase(phase: ProgressPhase) {
+		if (!this.activeProgressPhase) {
+			this.activeProgressPhase = phase
+			return
+		}
+		if (this.activeProgressPhase === phase) {
+			return
+		}
+
+		this.finishFoldedReasoningText(false)
+		this.activeFoldedReasoningText = ""
+		this.activeFoldedActivityText = ""
+		this.activeTerminalActivityText = ""
+		this.activeProgressPhase = null
+		this.activeToolActivityTs = null
+		this.activeToolActivityEntries = []
+		this.activeProgressPhase = phase
+	}
+
 	private upsertFoldedProgressMessage() {
 		const foldedText = [
 			this.activeFoldedActivityText,
@@ -4984,7 +5184,7 @@ export class VisualStudioWebviewRouter {
 		]
 			.filter(Boolean)
 			.join("\n\n")
-		if (!foldedText.trim()) {
+		if (!foldedText.trim() || isEmptyTranscriptPlaceholder(foldedText)) {
 			return
 		}
 
@@ -4996,7 +5196,7 @@ export class VisualStudioWebviewRouter {
 				ts: this.activeReasoningTextTs,
 				type: "say",
 				say: "reasoning",
-				text: "모델 진행 중",
+				text: this.getProgressPhaseTitle(),
 				reasoning: foldedText,
 				partial: true,
 				isCollapsed: true,
@@ -5006,7 +5206,7 @@ export class VisualStudioWebviewRouter {
 			this.upsertMessage(this.activeReasoningTextTs, {
 				type: "say",
 				say: "reasoning",
-				text: "모델 진행 중",
+				text: this.getProgressPhaseTitle(),
 				reasoning: foldedText,
 				partial: true,
 				isCollapsed: true,
@@ -5024,24 +5224,61 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private finishFoldedReasoningText() {
-		this.stopTerminalStatePolling()
+	private finishFoldedReasoningText(stopTerminalPolling = true) {
+		if (stopTerminalPolling) {
+			this.stopTerminalStatePolling()
+		}
 		if (!this.activeReasoningTextTs) {
 			return
 		}
 
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
+		if (isEmptyTranscriptPlaceholder(getString(progressMessage, "reasoning") || getString(progressMessage, "text"))) {
+			this.upsertMessage(this.activeReasoningTextTs, {
+				text: "",
+				reasoning: "",
+				partial: false,
+				isCollapsed: true,
+				isExpanded: false,
+			})
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
+			this.activeReasoningTextTs = null
+			this.activeFoldedReasoningText = ""
+			this.activeFoldedActivityText = ""
+			this.activeTerminalActivityText = ""
+			this.activeProgressPhase = null
+			return
+		}
+
 		this.upsertMessage(this.activeReasoningTextTs, {
-			text: "모델 진행 기록",
+			text: this.getProgressPhaseTitle(true),
+			reasoning: sanitizeProgressTranscriptForDisplay(getString(progressMessage, "reasoning")),
 			partial: false,
 			isCollapsed: true,
 			isExpanded: false,
 		})
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
-		this.sendPartialMessage(progressMessage)
+		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
 		this.activeReasoningTextTs = null
 		this.activeFoldedReasoningText = ""
 		this.activeFoldedActivityText = ""
 		this.activeTerminalActivityText = ""
+		this.activeProgressPhase = null
+	}
+
+	private getProgressPhaseTitle(completed = false) {
+		const language = this.state.uiLanguage === "en" ? "en" : "ko"
+		const suffix = completed
+			? language === "ko" ? " 기록" : " history"
+			: language === "ko" ? " 중" : "..."
+		switch (this.activeProgressPhase) {
+			case "terminal":
+				return language === "ko" ? `터미널 실행${suffix}` : `Running terminal${suffix}`
+			case "activity":
+				return language === "ko" ? `파일/도구 처리${suffix}` : `Reading files and using tools${suffix}`
+			case "reasoning":
+			default:
+				return language === "ko" ? `응답 준비${suffix}` : `Preparing response${suffix}`
+		}
 	}
 
 	private getCurrentSessionId() {
@@ -5059,22 +5296,8 @@ export class VisualStudioWebviewRouter {
 			}
 
 			if (message.say === "api_req_started" && isPlaceholderApiRequest(getString(message, "text"))) {
-				Object.assign(message, {
-					text: JSON.stringify({
-						request: "모델 진행 기록",
-						tokensIn: 0,
-						tokensOut: 0,
-						cacheWrites: 0,
-						cacheReads: 0,
-						cost: 0,
-					}),
-					partial: false,
-					isCollapsed: true,
-					isExpanded: false,
-				})
-				this.sendPartialMessage(message)
 				changed = true
-				return true
+				return false
 			}
 
 			message.partial = false
@@ -5498,6 +5721,24 @@ export class VisualStudioWebviewRouter {
 			).catch((error) => console.error(error))
 		}
 	}
+
+	private refreshStateStreamsInBackground() {
+		if (this.stateHydrationRefreshInFlight) {
+			return
+		}
+		this.stateHydrationRefreshInFlight = true
+		void (async () => {
+			try {
+				await this.refreshTaskHistoryFromSdk()
+				await this.refreshSelectedTaskFromSdk()
+				await this.broadcastState()
+			} catch (error) {
+				logInteraction("sidecar", "stateHydrationRefreshFailed", { error: stringify(error) })
+			} finally {
+				this.stateHydrationRefreshInFlight = false
+			}
+		})()
+	}
 }
 
 function shouldLogSdkEventForInteraction(event: unknown) {
@@ -5636,6 +5877,12 @@ function getStringArray(message: unknown, key: string): string[] {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
 }
 
+function getBoolean(message: unknown, key: string): boolean | undefined {
+	const record = asRecord(message)
+	const value = record[key]
+	return typeof value === "boolean" ? value : undefined
+}
+
 function normalizePromptDelivery(value: string): "queue" | "steer" | undefined {
 	return value === "queue" || value === "steer" ? value : undefined
 }
@@ -5644,6 +5891,11 @@ function getNumber(message: unknown, key: string): number | undefined {
 	const record = asRecord(message)
 	const value = record[key]
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function truncateForStatus(value: string, maxLength: number) {
+	const normalized = value.replace(/\s+/g, " ").trim()
+	return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -6415,6 +6667,40 @@ function numberValue(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
+function firstNumberValue(record: Record<string, unknown>, keys: string[]) {
+	for (const key of keys) {
+		const value = numberValue(record[key])
+		if (value !== undefined) {
+			return value
+		}
+	}
+	return undefined
+}
+
+function normalizeUsageSnapshot(value: unknown): NormalizedUsage {
+	const usage = asRecord(value)
+	const normalized: NormalizedUsage = {
+		inputTokens: firstNumberValue(usage, ["inputTokens", "tokensIn", "promptTokens", "totalInputTokens"]),
+		outputTokens: firstNumberValue(usage, ["outputTokens", "tokensOut", "completionTokens", "totalOutputTokens"]),
+		cacheReadTokens: firstNumberValue(usage, ["cacheReadTokens", "cacheReads", "cache_read_tokens", "totalCacheReadTokens"]),
+		cacheWriteTokens: firstNumberValue(usage, [
+			"cacheWriteTokens",
+			"cacheWrites",
+			"cache_creation_input_tokens",
+			"totalCacheWriteTokens",
+		]),
+		totalCost: firstNumberValue(usage, ["totalCost", "cost"]),
+		reliable: false,
+	}
+	normalized.reliable =
+		(normalized.inputTokens || 0) +
+			(normalized.outputTokens || 0) +
+			(normalized.cacheReadTokens || 0) +
+			(normalized.cacheWriteTokens || 0) >
+			0 || (normalized.totalCost || 0) > 0
+	return normalized
+}
+
 function booleanValue(value: unknown): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined
 }
@@ -6582,8 +6868,12 @@ function getCommandText(input: Record<string, unknown>) {
 	if (Array.isArray(commands)) {
 		return commands
 			.map((item) => {
+				if (typeof item === "string") {
+					return item.trim()
+				}
 				const record = asRecord(item)
-				return [getString(record, "command"), ...getStringArray(record, "args")].filter(Boolean).join(" ")
+				const commandText = getString(record, "command") || getString(record, "cmd") || getString(record, "line")
+				return [commandText, ...getStringArray(record, "args")].filter(Boolean).join(" ")
 			})
 			.filter(Boolean)
 			.join(" && ")
@@ -6876,8 +7166,8 @@ function findLastIndex<T>(items: T[], predicate: (item: T) => boolean) {
 function shouldAutoApproveTool(toolName: string, autoApprovalSettings: unknown) {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
-	if (settings.enabled === true) {
-		return true
+	if (settings.enabled !== true) {
+		return false
 	}
 
 	const mapped = mapToolName(toolName)
@@ -6918,6 +7208,7 @@ function normalizeClineMessagePayload(message: Record<string, unknown>) {
 			cacheWrites: 0,
 			cacheReads: 0,
 			cost: 0,
+			usageReliable: false,
 		})
 	}
 
@@ -6988,6 +7279,11 @@ function isEmptyJsonObjectString(value: string) {
 	} catch {
 		return false
 	}
+}
+
+function isEmptyTranscriptPlaceholder(value: string) {
+	const trimmed = value.trim()
+	return trimmed === "{}" || trimmed === "[]" || trimmed === "null" || trimmed === "undefined"
 }
 
 function isEmptyPlainObject(value: unknown) {
@@ -7092,7 +7388,9 @@ function createHistoryItem(id: string, task: string, cwd: string, modelId: strin
 
 function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 	const metadata = asRecord(session.metadata)
-	const usage = asRecord(metadata.usage || metadata.aggregateUsage)
+	const usage = normalizeUsageSnapshot(
+		metadata.aggregateUsage || metadata.usage || session.aggregateUsage || session.usage || asRecord(session.snapshot).aggregateUsage,
+	)
 	const checkpoint = asRecord(metadata.checkpoint)
 	const latestCheckpoint = asRecord(checkpoint.latest)
 	const id = getString(session, "sessionId") || getString(session, "id") || createId()
@@ -7101,11 +7399,11 @@ function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 		id,
 		ts: getNumber(session, "updatedAt") || getNumber(session, "createdAt") || Date.now(),
 		task,
-		tokensIn: getNumber(usage, "inputTokens") || 0,
-		tokensOut: getNumber(usage, "outputTokens") || 0,
-		cacheWrites: getNumber(usage, "cacheWriteTokens") || 0,
-		cacheReads: getNumber(usage, "cacheReadTokens") || 0,
-		totalCost: getNumber(metadata, "totalCost") || getNumber(usage, "totalCost") || 0,
+		tokensIn: usage.inputTokens || 0,
+		tokensOut: usage.outputTokens || 0,
+		cacheWrites: usage.cacheWriteTokens || 0,
+		cacheReads: usage.cacheReadTokens || 0,
+		totalCost: getNumber(metadata, "totalCost") || usage.totalCost || 0,
 		isFavorited: metadata.isFavorited === true,
 		size: getNumber(session, "messageCount") || 0,
 		cwdOnTaskInitialization: getString(session, "cwd") || getString(metadata, "cwd") || process.cwd(),
@@ -7147,6 +7445,7 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 				cacheWrites: 0,
 				cacheReads: 0,
 				cost: 0,
+				usageReliable: false,
 			}),
 			partial: false,
 			isCollapsed: true,
@@ -7807,6 +8106,15 @@ function normalizeProgressTranscriptText(text: string) {
 		.replace(/\n{3,}/g, "\n\n")
 }
 
+function sanitizeProgressTranscriptForDisplay(text: string) {
+	return text
+		.split(/\r?\n/)
+		.filter((line) => !isEmptyTranscriptPlaceholder(line))
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim()
+}
+
 function normalizeAssistantTranscriptText(text: string) {
 	const trimmed = text.trim()
 	if (!trimmed || isEmptyJsonObjectString(trimmed)) {
@@ -8089,7 +8397,7 @@ function toolTranscriptToActivityEntries(text: string): ToolActivityEntry[] {
 	return body ? [{ kind: "tool", label: `${toolMatch[1].trim()}: ${body}` }] : [{ kind: "tool", label: toolMatch[1].trim() }]
 }
 
-function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boolean) {
+function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boolean, language: "en" | "ko" = "ko") {
 	const files = uniqueStrings(entries.filter((entry) => entry.kind === "file").map((entry) => entry.label))
 	const searches = uniqueStrings(entries.filter((entry) => entry.kind === "search").map((entry) =>
 		entry.detail ? `${entry.label} (${entry.detail})` : entry.label,
@@ -8098,31 +8406,31 @@ function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boo
 	const commands = uniqueStrings(entries.filter((entry) => entry.kind === "command").map((entry) => entry.label))
 	const others = uniqueStrings(entries.filter((entry) => entry.kind === "tool").map((entry) => entry.label))
 	const summaryParts = [
-		files.length ? `LIG VS read ${files.length} file${files.length > 1 ? "s" : ""}` : "",
-		searches.length ? `performed ${searches.length} search${searches.length > 1 ? "es" : ""}` : "",
-		edits.length ? `prepared ${edits.length} edit${edits.length > 1 ? "s" : ""}` : "",
-		commands.length ? `ran ${commands.length} command${commands.length > 1 ? "s" : ""}` : "",
-		others.length ? `used ${others.length} tool${others.length > 1 ? "s" : ""}` : "",
+		files.length ? (language === "ko" ? `LIG VS가 파일 ${files.length}개를 읽음` : `LIG VS read ${files.length} file${files.length === 1 ? "" : "s"}`) : "",
+		searches.length ? (language === "ko" ? `검색 ${searches.length}회 수행` : `ran ${searches.length} search${searches.length === 1 ? "" : "es"}`) : "",
+		edits.length ? (language === "ko" ? `편집 ${edits.length}개 준비` : `prepared ${edits.length} edit${edits.length === 1 ? "" : "s"}`) : "",
+		commands.length ? (language === "ko" ? `명령 ${commands.length}개 실행` : `ran ${commands.length} command${commands.length === 1 ? "" : "s"}`) : "",
+		others.length ? (language === "ko" ? `도구 ${others.length}개 사용` : `used ${others.length} tool${others.length === 1 ? "" : "s"}`) : "",
 	].filter(Boolean)
 	const detailLimit = readPositiveIntEnv("VSCLINE_TOOL_ACTIVITY_ITEMS", 40)
 	const sections = [
-		formatToolActivitySection("Files", files, detailLimit),
-		formatToolActivitySection("Searches", searches, detailLimit),
-		formatToolActivitySection("Edits", edits, detailLimit),
-		formatToolActivitySection("Commands", commands, 8),
-		formatToolActivitySection("Tools", others, 12),
+		formatToolActivitySection(language === "ko" ? "파일" : "Files", files, detailLimit, language),
+		formatToolActivitySection(language === "ko" ? "검색" : "Searches", searches, detailLimit, language),
+		formatToolActivitySection(language === "ko" ? "편집" : "Edits", edits, detailLimit, language),
+		formatToolActivitySection(language === "ko" ? "명령" : "Commands", commands, 8, language),
+		formatToolActivitySection(language === "ko" ? "도구" : "Tools", others, 12, language),
 	].filter(Boolean)
 	const body = sections.length ? `\n${sections.join("\n")}` : ""
-	return `${summaryParts.join(", ") || "LIG VS used tools"}:\n${running ? "파일 읽기 진행 중" : "Done."}${body}`
+	return `${summaryParts.join(", ") || (language === "ko" ? "LIG VS가 도구를 사용함" : "LIG VS used tools")}:\n${running ? (language === "ko" ? "진행 중" : "Running") : (language === "ko" ? "완료" : "Done")}${body}`
 }
 
-function formatToolActivitySection(title: string, values: string[], limit: number) {
+function formatToolActivitySection(title: string, values: string[], limit: number, language: "en" | "ko" = "ko") {
 	if (values.length === 0) {
 		return ""
 	}
 	const visible = values.slice(0, Math.max(1, limit)).map((value) => `- ${value}`)
 	const hiddenCount = values.length - visible.length
-	return `${title}:\n${visible.join("\n")}${hiddenCount > 0 ? `\n- ... ${hiddenCount} more` : ""}`
+	return `${title}:\n${visible.join("\n")}${hiddenCount > 0 ? `\n- ... ${language === "ko" ? `${hiddenCount}개 더 있음` : `${hiddenCount} more`}` : ""}`
 }
 
 function buildTerminalActivityText(
@@ -8130,6 +8438,7 @@ function buildTerminalActivityText(
 	recentCommands: Record<string, unknown>[],
 	outputLines: Record<string, unknown>[],
 	state: Record<string, unknown>,
+	language: "en" | "ko" = "ko",
 ) {
 	const commandLimit = readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_COMMANDS", 8)
 	const outputLimit = readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_LINES", 8)
@@ -8154,8 +8463,8 @@ function buildTerminalActivityText(
 				reusable ? "reused shell" : "",
 				isHot ? "hot process" : "",
 				background ? "background" : "",
-				attachable ? "attachable" : "",
-				proceedWhileRunning ? "proceed while running" : "",
+				attachable ? (language === "ko" ? "연결 가능" : "attachable") : "",
+				proceedWhileRunning ? (language === "ko" ? "실행 중 계속 가능" : "proceed while running available") : "",
 			].filter(Boolean).join(", ")
 			return `- ${[commandId || "command", status, where].filter(Boolean).join(" ")}${commandText ? `: ${commandText}` : ""}`
 		})
@@ -8176,8 +8485,8 @@ function buildTerminalActivityText(
 				exitCode !== undefined ? `exit=${exitCode}` : "",
 				durationMs !== undefined ? `${durationMs}ms` : "",
 				cwd ? `cwd ${cwd}` : "",
-				timedOut ? "timed out" : "",
-				cancelled ? "cancelled" : "",
+				timedOut ? (language === "ko" ? "시간 초과" : "timed out") : "",
+				cancelled ? (language === "ko" ? "취소됨" : "cancelled") : "",
 				isHot ? "hot process" : "",
 				terminalId ? `terminal ${terminalId}` : "",
 			].filter(Boolean)
@@ -8211,27 +8520,27 @@ function buildTerminalActivityText(
 		shellState,
 		reuseMode,
 		currentDirectory ? `cwd ${currentDirectory}` : "",
-		attachable ? "attachable" : "",
-		proceedWhileRunning ? "proceed while running available" : "",
-		unretrievedOutputAvailable ? "new output available" : "",
+		attachable ? (language === "ko" ? "연결 가능" : "attachable") : "",
+		proceedWhileRunning ? (language === "ko" ? "실행 중 계속 가능" : "proceed while running available") : "",
+		unretrievedOutputAvailable ? (language === "ko" ? "새 출력 있음" : "new output available") : "",
 	].filter(Boolean).join(" / ")
 	const sections = [
 		shellSummary ? `Shell: ${shellSummary}` : "",
-		commands.length ? `Running commands:\n${commands.join("\n")}` : "",
-		completedCommands.length ? `Recent commands:\n${completedCommands.join("\n")}` : "",
-		lines.length ? `Recent terminal output:\n${hiddenOutputCount > 0 ? `- ... ${hiddenOutputCount} earlier lines\n` : ""}${lines.map((line) => `- ${line}`).join("\n")}` : "",
+		commands.length ? `${language === "ko" ? "실행 중인 명령" : "Running commands"}:\n${commands.join("\n")}` : "",
+		completedCommands.length ? `${language === "ko" ? "최근 명령" : "Recent commands"}:\n${completedCommands.join("\n")}` : "",
+		lines.length ? `${language === "ko" ? "최근 터미널 출력" : "Recent terminal output"}:\n${hiddenOutputCount > 0 ? `- ... ${language === "ko" ? `이전 줄 ${hiddenOutputCount}개` : `${hiddenOutputCount} earlier lines`}\n` : ""}${lines.map((line) => `- ${line}`).join("\n")}` : "",
 	].filter(Boolean)
 	if (sections.length === 0) {
 		return ""
 	}
 
 	return truncateText(
-		`터미널 실행 진행 중:\n${sections.join("\n")}`,
+		`${language === "ko" ? "터미널 실행 진행 중" : "Terminal running"}:\n${sections.join("\n")}`,
 		readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
 	)
 }
 
-function formatCompletedCommandActivity(text: string) {
+function formatCompletedCommandActivity(text: string, language: "en" | "ko" = "ko") {
 	const normalized = normalizeProgressTranscriptText(text)
 	if (!normalized) {
 		return ""
@@ -8244,7 +8553,7 @@ function formatCompletedCommandActivity(text: string) {
 		.slice(0, 8)
 		.join("\n")
 	return truncateText(
-		`터미널 실행 완료:\n- ${commandLine}${outputPreview ? `\nRecent output:\n${outputPreview}` : ""}`,
+		`${language === "ko" ? "터미널 실행 완료" : "Terminal completed"}:\n- ${commandLine}${outputPreview ? `\n${language === "ko" ? "최근 출력" : "Recent output"}:\n${outputPreview}` : ""}`,
 		readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
 	)
 }
@@ -8760,6 +9069,13 @@ function normalizeApiConfiguration(apiConfig: Record<string, unknown>) {
 	return normalized
 }
 
+function normalizePreferredLanguage(value: string) {
+	const normalized = value.trim().toLowerCase()
+	return normalized === "korean" || normalized === "korean - 한국어" || normalized === "한국어"
+		? "Korean - 한국어"
+		: "English"
+}
+
 function resolveOAuthCredentials(apiConfig: Record<string, unknown>, providerId: string) {
 	const field = oauthCredentialsField(providerId)
 	const raw = getString(apiConfig, field)
@@ -8873,10 +9189,10 @@ function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unkn
 	const actions = asRecord(settings.actions)
 	const autoApproveAll = settings.enabled === true
 	const webFetchEnabled = isWebFetchEnabled(browserSettings)
-	const readAuto = autoApproveAll || actions.readFiles === true
-	const editAuto = autoApproveAll || actions.editFiles === true
-	const commandAuto = autoApproveAll || actions.executeAllCommands === true || actions.executeSafeCommands === true
-	const mcpAuto = autoApproveAll || actions.useMcp === true || actions.useMcpServers === true
+	const readAuto = autoApproveAll && actions.readFiles === true
+	const editAuto = autoApproveAll && actions.editFiles === true
+	const commandAuto = autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
+	const mcpAuto = autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
 
 	return {
 		readFile: { enabled: true, autoApprove: readAuto },
@@ -8973,6 +9289,14 @@ function loadInitialState() {
 	if (typeof persisted.planActSeparateModelsSetting === "boolean") {
 		state.planActSeparateModelsSetting = persisted.planActSeparateModelsSetting
 	}
+	if (persisted.uiLanguage === "en" || persisted.uiLanguage === "ko") {
+		state.uiLanguage = persisted.uiLanguage
+	} else if (getString(persisted, "preferredLanguage") === "English") {
+		state.uiLanguage = "en"
+	}
+	if (typeof persisted.preferredLanguage === "string") {
+		state.preferredLanguage = normalizePreferredLanguage(persisted.preferredLanguage)
+	}
 
 	const taskHistory = arrayOfRecords(persisted.taskHistory)
 	if (taskHistory.length > 0) {
@@ -9007,6 +9331,8 @@ function savePersistedState(state: ReturnType<typeof createInitialState>) {
 					apiConfiguration: state.apiConfiguration,
 					autoApprovalSettings: state.autoApprovalSettings,
 					browserSettings: state.browserSettings,
+					uiLanguage: state.uiLanguage,
+					preferredLanguage: state.preferredLanguage,
 					mode: state.mode,
 					planActSeparateModelsSetting: state.planActSeparateModelsSetting,
 					taskHistory: state.taskHistory,
@@ -9564,6 +9890,7 @@ function createInitialState() {
 		autoApprovalSettings: { version: 1, enabled: false, favorites: [], maxRequests: 20, actions: {} },
 		browserSettings,
 		focusChainSettings: { enabled: false, remindClineInterval: 6 },
+		uiLanguage: process.env.VSCLINE_UI_LANGUAGE === "en" ? "en" : "ko",
 		preferredLanguage: "English",
 		mode: "act",
 		platform: "win32",
@@ -9638,18 +9965,27 @@ function createSdkCoverageState(lastError: string | null) {
 			{ id: "settings", label: "Rules, workflows, skills", owner: "cline-sdk" },
 			{ id: "tool-approval", label: "Tool approvals", owner: "cline-sdk" },
 			{ id: "streaming", label: "Streaming output", owner: "cline-sdk" },
-			{ id: "checkpoints", label: "Checkpoint restore", owner: "cline-sdk" },
+			{ id: "terminal-command-host", label: "VS command host attach/continue/cancel", owner: "visual-studio-host" },
+			{ id: "checkpoints", label: "Checkpoint restore and snapshot comments", owner: "cline-sdk" },
 			{ id: "usage", label: "Token and cost usage", owner: "cline-sdk" },
 			{ id: "mcp", label: "MCP server settings and tools", owner: "cline-sdk" },
+			{ id: "browser-devtools", label: "Browser DevTools sessions and phases", owner: "visual-studio-host" },
+			{ id: "auth", label: "Provider-scoped OAuth and token state", owner: "cline-sdk" },
+			{ id: "models", label: "Provider catalog refresh diagnostics", owner: "cline-sdk" },
+			{ id: "worktrees", label: "Worktree routing and merge recovery", owner: "visual-studio-host" },
+			{ id: "hooks", label: "Local lifecycle hooks", owner: "cline-sdk" },
+			{ id: "scheduled-agents", label: "Workspace scheduled agents", owner: "cline-sdk" },
+			{ id: "plugins-local", label: "Local plugin discovery and config status", owner: "cline-sdk" },
+			{ id: "subagents", label: "Subagent and team progress", owner: "cline-sdk" },
 		],
 		partial: [
-			{ id: "mcp-marketplace", label: "MCP marketplace install and OAuth", owner: "cline-sdk" },
-			{ id: "browser", label: "Browser/Web tools", owner: "cline-sdk" },
-			{ id: "auth", label: "LIG VS account and OAuth providers", owner: "cline-sdk" },
-			{ id: "models", label: "Provider catalog refresh", owner: "cline-sdk" },
-			{ id: "hooks", label: "Local lifecycle hooks", owner: "cline-sdk" },
-			{ id: "subagents", label: "Subagents and teams", owner: "cline-sdk" },
-			{ id: "scheduled-agents", label: "Workspace scheduled agents", owner: "cline-sdk" },
+			{ id: "mcp-marketplace", label: "MCP marketplace install", owner: "cline-sdk" },
+			{ id: "remote-mcp-oauth", label: "Remote MCP OAuth callbacks", owner: "cline-sdk" },
+			{ id: "browser-auto-launch", label: "Automatic browser relaunch", owner: "cline-sdk" },
+			{ id: "global-account-billing", label: "Global Cline account billing/org controls", owner: "cline-sdk" },
+			{ id: "sdk-checkpoint-diff-streams", label: "SDK checkpoint diff streams", owner: "cline-sdk" },
+			{ id: "scheduler-queue-controls", label: "Hosted scheduler queue controls", owner: "cline-sdk" },
+			{ id: "provider-specific-catalogs", label: "Non-OpenAI provider-specific catalog APIs", owner: "cline-sdk" },
 		],
 		visualStudioUnsupported: [
 			{

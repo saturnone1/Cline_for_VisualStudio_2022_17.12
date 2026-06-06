@@ -37,4 +37,20 @@ describe("ThinkingRow", () => {
 		fireEvent.click(screen.getByRole("button", { name: /Thinking/i }))
 		expect(onToggle).toHaveBeenCalledTimes(1)
 	})
+
+	it("does not render placeholder reasoning content", () => {
+		render(
+			<ThinkingRow
+				isExpanded={true}
+				isStreaming={false}
+				isVisible={true}
+				reasoningContent="{}"
+				showTitle={true}
+				title="파일/도구 처리 기록"
+			/>,
+		)
+
+		expect(screen.queryByText("{}")).not.toBeInTheDocument()
+		expect(screen.queryByText("파일/도구 처리 기록")).not.toBeInTheDocument()
+	})
 })

@@ -16,6 +16,7 @@ import {
 	NetworkIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useI18n } from "@/i18n"
 import MarkdownBlock from "../common/MarkdownBlock"
 
 interface SubagentStatusRowProps {
@@ -181,9 +182,10 @@ export default function SubagentStatusRow({ message, isLast, lastModifiedMessage
 	const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({})
 	const [expandedPrompts, setExpandedPrompts] = useState<Record<number, boolean>>({})
 	const data = useMemo(() => parseSubagentRowData(message), [message])
+	const { t } = useI18n()
 
 	if (!data) {
-		return <div className="text-foreground opacity-80">Subagent status update unavailable.</div>
+		return <div className="text-foreground opacity-80">{t("subagent.unavailable")}</div>
 	}
 
 	const resumedBeforeNextVisibleMessage =
@@ -197,7 +199,7 @@ export default function SubagentStatusRow({ message, isLast, lastModifiedMessage
 			resumedBeforeNextVisibleMessage)
 
 	const singular = data.items.length === 1
-	const title = singular ? "LIG VS wants to use a subagent:" : "LIG VS wants to use subagents:"
+	const title = singular ? t("subagent.wantsOne") : t("subagent.wantsMany")
 	const isPromptConstructionRow = message.ask === "use_subagents" || message.say === "use_subagents"
 	const toggleItem = (index: number) => {
 		setExpandedItems((prev) => ({

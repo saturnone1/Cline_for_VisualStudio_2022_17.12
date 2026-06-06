@@ -18,6 +18,7 @@ import { getModeSpecificFields, normalizeApiConfiguration } from "@/components/s
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { usePlatform } from "@/context/PlatformContext"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, StateServiceClient } from "@/services/grpc-client"
 import {
@@ -107,6 +108,7 @@ const SwitchContainer = styled.div<{ disabled: boolean }>`
 	transform-origin: right center;
 	margin-left: 0;
 	user-select: none; // Prevent text selection
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
 `
 
 const Slider = styled.div.withConfig({
@@ -116,6 +118,7 @@ const Slider = styled.div.withConfig({
 	height: 100%;
 	width: 50%;
 	background-color: ${(props) => (props.isPlan ? PLAN_MODE_COLOR : ACT_MODE_COLOR)};
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent);
 	transition: transform 0.2s ease;
 	transform: translateX(${(props) => (props.isAct ? "100%" : "0%")});
 `
@@ -224,6 +227,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			navigateToSettingsModelPicker,
 			mcpServers,
 		} = useExtensionState()
+		const { t } = useI18n()
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [gitCommits, setGitCommits] = useState<GitCommit[]>([])
@@ -1044,6 +1048,10 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleContextButtonClick = useCallback(() => {
 			// Focus the textarea first
 			textAreaRef.current?.focus()
+			const openContextMenu = () => {
+				setSelectedType(null)
+				setShowContextMenu(true)
+			}
 
 			// If input is empty, just insert @
 			if (!inputValue.trim()) {
@@ -1055,6 +1063,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				} as React.ChangeEvent<HTMLTextAreaElement>
 				handleInputChange(event)
 				updateHighlights()
+				openContextMenu()
 				return
 			}
 
@@ -1068,6 +1077,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				} as React.ChangeEvent<HTMLTextAreaElement>
 				handleInputChange(event)
 				updateHighlights()
+				openContextMenu()
 				return
 			}
 
@@ -1080,6 +1090,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			} as React.ChangeEvent<HTMLTextAreaElement>
 			handleInputChange(event)
 			updateHighlights()
+			openContextMenu()
 		}, [inputValue, handleInputChange, updateHighlights])
 
 		const handleModelButtonClick = () => {
@@ -1553,11 +1564,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						{/* ButtonGroup - always in DOM but visibility controlled */}
 						<ButtonGroup className="absolute top-0 left-0 right-0 ease-in-out w-full h-5 z-10 flex items-center">
 							<Tooltip>
-								<TooltipContent>Add Context</TooltipContent>
+								<TooltipContent>{t("chat.addContext")}</TooltipContent>
 								<TooltipTrigger>
 									<VSCodeButton
 										appearance="icon"
-										aria-label="Add Context"
+										aria-label={t("chat.addContext")}
 										className="p-0 m-0 flex items-center"
 										data-testid="context-button"
 										onClick={handleContextButtonClick}>
@@ -1569,11 +1580,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							</Tooltip>
 
 							<Tooltip>
-								<TooltipContent>Add Files & Images</TooltipContent>
+								<TooltipContent>{t("chat.addFilesImages")}</TooltipContent>
 								<TooltipTrigger>
 									<VSCodeButton
 										appearance="icon"
-										aria-label="Add Files & Images"
+										aria-label={t("chat.addFilesImages")}
 										className="p-0 m-0 flex items-center"
 										data-testid="files-button"
 										disabled={shouldDisableFilesAndImages}
@@ -1600,7 +1611,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 										onClick={handleModelButtonClick}
 										role="button"
 										tabIndex={0}
-										title="Open API Settings">
+										title={t("chat.openApiSettings")}>
 										<ModelButtonContent className="text-xs">{modelDisplayName}</ModelButtonContent>
 									</ModelDisplayButton>
 								</ModelButtonWrapper>
@@ -1613,25 +1624,29 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							className="text-xs px-2 flex flex-col gap-1"
 							hidden={shownTooltipMode === null}
 							side="top">
-							{`In ${shownTooltipMode === "act" ? "Act" : "Plan"} mode, LIG VS will ${shownTooltipMode === "act" ? "complete the task immediately" : "gather information to architect a plan"}`}
+							{shownTooltipMode === "act" ? t("chat.actModeTooltip") : t("chat.planModeTooltip")}
 							<p className="text-description/80 text-xs mb-0">
-								Toggle w/ <kbd className="text-muted-foreground mx-1">{togglePlanActKeys}</kbd>
+								{t("chat.toggleWith", { keys: "" })}
+								<kbd className="text-muted-foreground mx-1">{togglePlanActKeys}</kbd>
 							</p>
 						</TooltipContent>
 						<TooltipTrigger>
 							<SwitchContainer data-testid="mode-switch" disabled={false} onClick={onModeToggle}>
 								<Slider isAct={mode === "act"} isPlan={mode === "plan"} />
-								{["Plan", "Act"].map((m) => (
+								{(["plan", "act"] as const).map((m) => (
 									<div
-										aria-checked={mode === m.toLowerCase()}
+										aria-checked={mode === m}
+										aria-label={t(mode === m ? "chat.modeActive" : "chat.modeInactive", {
+											mode: m === "plan" ? t("chat.plan") : t("chat.act"),
+										})}
 										className={cn(
-											"pt-0.5 pb-px px-2 z-10 text-xs w-1/2 text-center bg-transparent",
-											mode === m.toLowerCase() ? "text-white" : "text-input-foreground",
+											"pt-0.5 pb-px px-2 z-10 text-xs w-1/2 text-center bg-transparent transition-colors",
+											mode === m ? "text-white font-semibold" : "text-input-foreground",
 										)}
 										onMouseLeave={() => setShownTooltipMode(null)}
-										onMouseOver={() => setShownTooltipMode(m.toLowerCase() === "plan" ? "plan" : "act")}
+										onMouseOver={() => setShownTooltipMode(m)}
 										role="switch">
-										{m}
+										{m === "plan" ? t("chat.plan") : t("chat.act")}
 									</div>
 								))}
 							</SwitchContainer>

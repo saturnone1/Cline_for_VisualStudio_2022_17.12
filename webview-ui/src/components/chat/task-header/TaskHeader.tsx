@@ -14,7 +14,6 @@ import { CheckpointError } from "./CheckpointError"
 import ContextWindow from "./ContextWindow"
 import { FocusChain } from "./FocusChain"
 import { highlightText } from "./Highlights"
-import { SdkCoverageStrip } from "./SdkCoverageStrip"
 
 const IS_DEV = process.env.IS_DEV === '"true"'
 interface TaskHeaderProps {
@@ -57,7 +56,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 		expandTaskHeader: isTaskExpanded,
 		setExpandTaskHeader: setIsTaskExpanded,
 		environment,
-		vsClineSdkCoverage,
+		useAutoCondense,
 	} = useExtensionState()
 
 	const [isHighlightedTextExpanded, setIsHighlightedTextExpanded] = useState(false)
@@ -115,17 +114,16 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	const environmentBorderColor = getEnvironmentColor(environment, "border")
 
 	return (
-		<div className="py-2 px-4 flex flex-col gap-2">
+		<div className="py-1.5 px-3 flex flex-col gap-1.5">
 			{/* Display Checkpoint Error */}
 			<CheckpointError
 				checkpointManagerErrorMessage={checkpointManagerErrorMessage}
 				handleCheckpointSettingsClick={handleCheckpointSettingsClick}
 			/>
-			<SdkCoverageStrip coverage={vsClineSdkCoverage} />
 			{/* Task Header */}
 			<div
 				className={cn(
-					"lig-task-header relative overflow-hidden cursor-pointer flex flex-col gap-1.5 z-10 pt-2 pb-2 px-2 hover:opacity-100",
+					"lig-task-header relative overflow-hidden cursor-pointer flex flex-col gap-1 z-10 pt-1.5 pb-1.5 px-2 hover:opacity-100",
 					{
 						"opacity-100": isTaskExpanded, // No hover effects when expanded
 						"hover:bg-toolbar-hover": !isTaskExpanded, // Hover effects only when collapsed
@@ -220,7 +218,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 							onSendMessage={onSendMessage}
 							tokensIn={tokensIn}
 							tokensOut={tokensOut}
-							useAutoCondense={false} // Disable auto-condense configuration in UI for now
+							useAutoCondense={useAutoCondense === true}
 						/>
 					</div>
 				)}

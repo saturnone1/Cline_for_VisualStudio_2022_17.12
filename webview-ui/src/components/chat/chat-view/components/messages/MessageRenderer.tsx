@@ -84,7 +84,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
 	return (
 		<div
 			className={cn({
-				"pb-2.5": isLastMessage && !footerActive,
+				"pb-1.5": isLastMessage && !footerActive,
 			}, "lig-message-frame")}
 			data-message-kind={messageKind}
 			data-message-ts={messageOrGroup.ts}>

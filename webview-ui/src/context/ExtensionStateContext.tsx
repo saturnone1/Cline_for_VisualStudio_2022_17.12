@@ -234,6 +234,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		autoApprovalSettings: DEFAULT_AUTO_APPROVAL_SETTINGS,
 		browserSettings: DEFAULT_BROWSER_SETTINGS,
 		focusChainSettings: DEFAULT_FOCUS_CHAIN_SETTINGS,
+		uiLanguage: "ko",
 		preferredLanguage: "English",
 		mode: "act",
 		platform: DEFAULT_PLATFORM,
@@ -333,9 +334,6 @@ export const ExtensionStateContextProvider: React.FC<{
 	const settingsButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
 	const worktreesButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
 	const partialMessageUnsubscribeRef = useRef<(() => void) | null>(null)
-	const mcpMarketplaceUnsubscribeRef = useRef<(() => void) | null>(null)
-	const openRouterModelsUnsubscribeRef = useRef<(() => void) | null>(null)
-	const liteLlmModelsUnsubscribeRef = useRef<(() => void) | null>(null)
 	const workspaceUpdatesUnsubscribeRef = useRef<(() => void) | null>(null)
 	const relinquishControlUnsubscribeRef = useRef<(() => void) | null>(null)
 
@@ -367,6 +365,12 @@ export const ExtensionStateContextProvider: React.FC<{
 
 							const newState = {
 								...stateData,
+								uiLanguage:
+									stateData.uiLanguage === "en" || stateData.uiLanguage === "ko"
+										? stateData.uiLanguage
+										: stateData.preferredLanguage === "English"
+											? "en"
+											: "ko",
 								autoApprovalSettings: shouldUpdateAutoApproval
 									? stateData.autoApprovalSettings
 									: prevState.autoApprovalSettings,
@@ -517,13 +521,10 @@ export const ExtensionStateContextProvider: React.FC<{
 							newClineMessages[lastIndex] = partialMessage
 							return { ...prevState, clineMessages: newClineMessages }
 						}
-						console.debug("[VSCLINE_STATE] ignored orphan partial message", {
-							ts: partialMessage.ts,
-							say: partialMessage.say,
-							ask: partialMessage.ask,
-							existingMessages: prevState.clineMessages.length,
-						})
-						return prevState
+						return {
+							...prevState,
+							clineMessages: [...prevState.clineMessages, partialMessage].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)),
+						}
 					})
 				} catch (error) {
 					console.error("Failed to process partial message:", error, protoMessage)
@@ -534,51 +535,6 @@ export const ExtensionStateContextProvider: React.FC<{
 			},
 			onComplete: () => {
 				console.log("[DEBUG] partialMessage subscription completed")
-			},
-		})
-
-		// Subscribe to MCP marketplace catalog updates
-		mcpMarketplaceUnsubscribeRef.current = McpServiceClient.subscribeToMcpMarketplaceCatalog(EmptyRequest.create({}), {
-			onResponse: (catalog) => {
-				console.log("[DEBUG] Received MCP marketplace catalog update from gRPC stream")
-				setMcpMarketplaceCatalog(catalog)
-			},
-			onError: (error) => {
-				console.error("Error in MCP marketplace catalog subscription:", error)
-			},
-			onComplete: () => {
-				console.log("MCP marketplace catalog subscription completed")
-			},
-		})
-
-		// Subscribe to OpenRouter models updates
-		openRouterModelsUnsubscribeRef.current = ModelsServiceClient.subscribeToOpenRouterModels(EmptyRequest.create({}), {
-			onResponse: (response: OpenRouterCompatibleModelInfo) => {
-				const models = fromProtobufModels(response.models)
-				setOpenRouterModels({
-					[openRouterDefaultModelId]: openRouterDefaultModelInfo, // in case the extension sent a model list without the default model
-					...models,
-				})
-			},
-			onError: (error) => {
-				console.error("Error in OpenRouter models subscription:", error)
-			},
-			onComplete: () => {
-				console.log("OpenRouter models subscription completed")
-			},
-		})
-
-		// Subscribe to LiteLLM models updates
-		liteLlmModelsUnsubscribeRef.current = ModelsServiceClient.subscribeToLiteLlmModels(EmptyRequest.create({}), {
-			onResponse: (response: OpenRouterCompatibleModelInfo) => {
-				const models = fromProtobufModels(response.models)
-				setLiteLlmModels(models)
-			},
-			onError: (error) => {
-				console.error("Error in LiteLLM models subscription:", error)
-			},
-			onComplete: () => {
-				console.log("LiteLLM models subscription completed")
 			},
 		})
 
@@ -663,18 +619,6 @@ export const ExtensionStateContextProvider: React.FC<{
 				partialMessageUnsubscribeRef.current()
 				partialMessageUnsubscribeRef.current = null
 			}
-			if (mcpMarketplaceUnsubscribeRef.current) {
-				mcpMarketplaceUnsubscribeRef.current()
-				mcpMarketplaceUnsubscribeRef.current = null
-			}
-			if (openRouterModelsUnsubscribeRef.current) {
-				openRouterModelsUnsubscribeRef.current()
-				openRouterModelsUnsubscribeRef.current = null
-			}
-			if (liteLlmModelsUnsubscribeRef.current) {
-				liteLlmModelsUnsubscribeRef.current()
-				liteLlmModelsUnsubscribeRef.current = null
-			}
 			if (workspaceUpdatesUnsubscribeRef.current) {
 				workspaceUpdatesUnsubscribeRef.current()
 				workspaceUpdatesUnsubscribeRef.current = null
@@ -742,21 +686,29 @@ export const ExtensionStateContextProvider: React.FC<{
 			.catch((error: Error) => console.error("Failed to refresh Vercel AI Gateway models:", error))
 	}, [])
 
-	// Auto-refresh model lists on API key availability
+	// Keep startup light: refresh only the actively selected provider's catalog.
 	useEffect(() => {
-		if (!openRouterModels || Object.keys(openRouterModels).length <= 1) {
+		const activeProviders = new Set([
+			state.apiConfiguration?.actModeApiProvider,
+			state.apiConfiguration?.planModeApiProvider,
+		])
+		if (activeProviders.has("openrouter") && (!openRouterModels || Object.keys(openRouterModels).length <= 1)) {
 			refreshOpenRouterModels()
 		}
-		if (!vercelAiGatewayModels || Object.keys(vercelAiGatewayModels).length === 0) {
+		if (activeProviders.has("vercel-ai-gateway") && (!vercelAiGatewayModels || Object.keys(vercelAiGatewayModels).length === 0)) {
 			refreshVercelAiGatewayModels()
 		}
-		if (state.apiConfiguration?.basetenApiKey) {
+		if (activeProviders.has("baseten") && state.apiConfiguration?.basetenApiKey) {
 			refreshBasetenModels()
 		}
-		if (state.apiConfiguration?.liteLlmApiKey) {
+		if (activeProviders.has("litellm") && state.apiConfiguration?.liteLlmApiKey) {
 			refreshLiteLlmModels()
 		}
 	}, [
+		state.apiConfiguration?.actModeApiProvider,
+		state.apiConfiguration?.planModeApiProvider,
+		openRouterModels,
+		vercelAiGatewayModels,
 		refreshOpenRouterModels,
 		refreshVercelAiGatewayModels,
 		state?.apiConfiguration?.basetenApiKey,

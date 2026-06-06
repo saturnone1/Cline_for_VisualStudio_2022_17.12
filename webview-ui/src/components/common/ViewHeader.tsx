@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/i18n"
 import { getEnvironmentColor } from "@/utils/environmentColors"
 import type { Environment } from "../../../../src/shared/config-types"
 
@@ -17,6 +18,7 @@ type ViewHeaderProps = {
 }
 
 const ViewHeader = ({ title, onDone, showEnvironmentSuffix, environment }: ViewHeaderProps) => {
+	const { t } = useI18n()
 	const showSubtext = showEnvironmentSuffix && environment && environment !== "production"
 	const capitalizedEnv = environment ? ENV_DISPLAY_NAMES[environment] : ""
 	const titleColor = getEnvironmentColor(environment)
@@ -34,7 +36,7 @@ const ViewHeader = ({ title, onDone, showEnvironmentSuffix, environment }: ViewH
 				)}
 			</div>
 			<Button size="header" onClick={onDone}>
-				Done
+				{t("common.done")}
 			</Button>
 		</div>
 	)

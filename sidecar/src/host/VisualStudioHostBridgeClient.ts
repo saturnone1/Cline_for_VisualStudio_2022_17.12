@@ -109,6 +109,15 @@ export class VisualStudioHostBridgeClient {
 		return (await sendHostRequest(this.connection, "workspace.getOpenDocuments", null)) as string[]
 	}
 
+	async selectFiles(allowImages = false): Promise<{ values1?: string[]; values2?: string[]; images?: string[]; files?: string[] }> {
+		return (await sendHostRequest(this.connection, "workspace.selectFiles", { allowImages })) as {
+			values1?: string[]
+			values2?: string[]
+			images?: string[]
+			files?: string[]
+		}
+	}
+
 	async getActiveFile(): Promise<{ path: string | null }> {
 		return (await sendHostRequest(this.connection, "window.getActiveFile", null)) as { path: string | null }
 	}
@@ -137,14 +146,14 @@ export class VisualStudioHostBridgeClient {
 		return sendHostRequest(this.connection, "workspace.createDirectory", { path })
 	}
 
-	async listFiles(path: string, recursive = false, limit = 5000): Promise<{ files: string[]; truncated: boolean }> {
+	async listFiles(path: string, recursive = false, limit = 1500): Promise<{ files: string[]; truncated: boolean }> {
 		return (await sendHostRequest(this.connection, "workspace.listFiles", { path, recursive, limit })) as {
 			files: string[]
 			truncated: boolean
 		}
 	}
 
-	async searchFiles(path: string, query: string, limit = 500): Promise<{ matches: string[]; truncated: boolean }> {
+	async searchFiles(path: string, query: string, limit = 200): Promise<{ matches: string[]; truncated: boolean }> {
 		return (await sendHostRequest(this.connection, "workspace.searchFiles", { path, query, limit })) as {
 			matches: string[]
 			truncated: boolean

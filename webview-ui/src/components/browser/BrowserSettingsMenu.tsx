@@ -28,30 +28,29 @@ export const BrowserSettingsMenu = () => {
 	})
 	const popoverRef = useRef<HTMLDivElement>(null)
 
+	const fetchConnectionInfo = async () => {
+		try {
+			const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
+			setConnectionInfo({
+				isConnected: info.isConnected,
+				isRemote: info.isRemote,
+				host: info.host,
+				path: info.path,
+				browser: info.browser,
+				protocolVersion: info.protocolVersion,
+				tabCount: info.tabCount,
+				activeTabTitle: info.activeTabTitle,
+				activeTabUrl: info.activeTabUrl,
+				error: info.error,
+			})
+		} catch (error) {
+			console.error("Error fetching browser connection info:", error)
+		}
+	}
+
 	// Get actual connection info from the browser session using gRPC
 	useEffect(() => {
-		// Function to fetch connection info
-		;(async () => {
-			try {
-				const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
-				setConnectionInfo({
-					isConnected: info.isConnected,
-					isRemote: info.isRemote,
-					host: info.host,
-					path: info.path,
-					browser: info.browser,
-					protocolVersion: info.protocolVersion,
-					tabCount: info.tabCount,
-					activeTabTitle: info.activeTabTitle,
-					activeTabUrl: info.activeTabUrl,
-					error: info.error,
-				})
-			} catch (error) {
-				console.error("Error fetching browser connection info:", error)
-			}
-		})()
-
-		// No need for message event listeners anymore!
+		fetchConnectionInfo()
 	}, [browserSettings.remoteBrowserHost, browserSettings.remoteBrowserEnabled])
 
 	// Close popover when clicking outside
@@ -83,26 +82,6 @@ export const BrowserSettingsMenu = () => {
 
 		// Request updated connection info when opening the popover using gRPC
 		if (!showInfoPopover) {
-			const fetchConnectionInfo = async () => {
-				try {
-					const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
-					setConnectionInfo({
-						isConnected: info.isConnected,
-						isRemote: info.isRemote,
-						host: info.host,
-						path: info.path,
-						browser: info.browser,
-						protocolVersion: info.protocolVersion,
-						tabCount: info.tabCount,
-						activeTabTitle: info.activeTabTitle,
-						activeTabUrl: info.activeTabUrl,
-						error: info.error,
-					})
-				} catch (error) {
-					console.error("Error fetching browser connection info:", error)
-				}
-			}
-
 			fetchConnectionInfo()
 		}
 	}
@@ -127,37 +106,16 @@ export const BrowserSettingsMenu = () => {
 		}
 	}
 
-	// Check connection status every second to keep icon in sync using gRPC
+	// Keep connection details fresh only while the popover is visible.
 	useEffect(() => {
-		// Function to fetch connection info
-		const fetchConnectionInfo = async () => {
-			try {
-				const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
-				setConnectionInfo({
-					isConnected: info.isConnected,
-					isRemote: info.isRemote,
-					host: info.host,
-					path: info.path,
-					browser: info.browser,
-					protocolVersion: info.protocolVersion,
-					tabCount: info.tabCount,
-					activeTabTitle: info.activeTabTitle,
-					activeTabUrl: info.activeTabUrl,
-					error: info.error,
-				})
-			} catch (error) {
-				console.error("Error fetching browser connection info:", error)
-			}
+		if (!showInfoPopover) {
+			return
 		}
-
-		// Request connection info immediately
 		fetchConnectionInfo()
-
-		// Keep the badge reasonably fresh without hammering the sidecar/WebView bridge.
 		const intervalId = setInterval(fetchConnectionInfo, 5000)
 
 		return () => clearInterval(intervalId)
-	}, [])
+	}, [showInfoPopover])
 
 	return (
 		<div ref={containerRef} style={{ position: "relative", marginTop: "-1px", display: "flex" }}>

@@ -45,8 +45,21 @@ function isMeaninglessToolMessage(message: ClineMessage): boolean {
 	}
 }
 
+function isEmptyJsonPlaceholder(value: string | undefined): boolean {
+	const trimmed = (value || "").trim()
+	return trimmed === "{}" || trimmed === "[]" || trimmed === "null" || trimmed === "undefined"
+}
+
 function isMeaninglessTextMessage(message: ClineMessage): boolean {
-	return message.type === "say" && message.say === "text" && (message.text || "").trim() === "{}"
+	return message.type === "say" && message.say === "text" && isEmptyJsonPlaceholder(message.text)
+}
+
+function isMeaninglessReasoningMessage(message: ClineMessage): boolean {
+	return (
+		message.type === "say" &&
+		message.say === "reasoning" &&
+		isEmptyJsonPlaceholder(message.reasoning || message.text)
+	)
 }
 
 function getApiRequestSummaryText(message: ClineMessage): string {
@@ -96,6 +109,9 @@ export function processMessages(messages: ClineMessage[]): ClineMessage[] {
 export function filterVisibleMessages(messages: ClineMessage[]): ClineMessage[] {
 	return messages.filter((message, index, arr) => {
 		if (isMeaninglessTextMessage(message)) {
+			return false
+		}
+		if (isMeaninglessReasoningMessage(message)) {
 			return false
 		}
 		if (isMeaninglessToolMessage(message)) {

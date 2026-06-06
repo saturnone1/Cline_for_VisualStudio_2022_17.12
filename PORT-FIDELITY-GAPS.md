@@ -19,9 +19,14 @@ Studio parity requires:
 
 - SDK baseline moved to `@cline/sdk` 0.0.43.
 - Terminal command cards expose command ids, cwd/output state, Attach, Continue,
-  and Open Output.
-- MCP settings-file lifecycle routes through SDK helpers where available.
-- Browser/Web fetch paths are gated, diagnostic, and transcript-visible.
+  Open Output, and normalized command text for string/JSON/array payloads.
+- Activity/tool progress and terminal progress split into separate transcript
+  rows so a completed file-read/search phase does not absorb later command
+  output.
+- MCP settings-file lifecycle routes through SDK helpers where available and
+  keeps reduced/operation diagnostics visible after refresh.
+- Browser/Web fetch paths are gated, diagnostic, transcript-visible, and backed
+  by sidecar DevTools session/action/tab ids.
 - OpenAI Codex/OCA/LIG provider auth state tracks token expiry and refresh.
 - Checkpoint compare/restore is visible in the transcript, with SDK diff-stream
   limitations called out.
@@ -39,7 +44,7 @@ Studio parity requires:
   integration.
 - Remote MCP OAuth and marketplace install are not full upstream parity.
 - Browser launch/reconnect automation still needs real Chrome/Edge smoke
-  coverage.
+  coverage outside the default mocked path.
 - Global Cline account organization, credit, and spend-limit flows remain
   deployment-specific.
 - True SDK checkpoint diff streams are blocked until the SDK exposes them.
@@ -62,10 +67,8 @@ Studio parity requires:
 
 ## Next Implementation Order
 
-1. Fix stale C# fallback handlers that still report unsupported for sidecar-owned
-   SDK features.
-2. Add focused host/manual tests for terminal attach/continue, worktree folder
+1. Add focused host/manual tests for terminal attach/continue, worktree folder
    fallback, and merge recovery.
-3. Add real-browser smoke tests behind an environment flag.
-4. Add deployment-selected provider/account APIs only when required.
-5. Re-audit upstream Cline UI after each SDK or upstream baseline update.
+2. Add real-browser smoke tests behind an environment flag.
+3. Add deployment-selected provider/account APIs only when required.
+4. Re-audit upstream Cline UI after each SDK or upstream baseline update.

@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "check": "tsc --noEmit",
+    "test": "node scripts/parity-checks.js",
     "build": "tsc && node scripts/copy-runtime.js"
   },
   "devDependencies": {

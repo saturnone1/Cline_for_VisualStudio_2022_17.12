@@ -6,7 +6,7 @@
 - Baseline commit: `5efa8cfd3f1746ad7dbe72fcdba31eeb7ad858c4`
 - Upstream Cline package version: `3.86.0`
 - Target host: Visual Studio 2022 17.12 VSIX
-- VSIX version: `1.1.26`
+- VSIX version: `1.1.37`
 - SDK baseline: `@cline/sdk` 0.0.43
 - Porting direction: C# VSIX host + WebView2 transport + Node 22 sidecar +
   Cline SDK runtime.
@@ -24,6 +24,8 @@
 - `VisualStudioWebviewRouter`는 SDK session event, WebView service RPC,
   persisted state, diagnostics, browser/MCP/auth/worktree/hook/catalog helpers를
   sidecar에서 소유한다.
+- `VS2022-SDK-COVERAGE.md` 기준 8개 Stage는 각각 90% 이상이며, 남은 gap은
+  Visual Studio 전용 API 차이와 air-gap 정책으로 분리해 추적한다.
 - VSIX는 Node 22.15.0, `cline-sidecar.js`, host bridge, WebView router, bundled
   WebApp, selected LIG assets, and sidecar runtime package artifacts를 포함한다.
 
@@ -90,6 +92,7 @@
 cd Cline_for_VisualStudio_2022_17.12\sidecar
 npm install
 npm run check
+npm test
 npm run build
 ```
 

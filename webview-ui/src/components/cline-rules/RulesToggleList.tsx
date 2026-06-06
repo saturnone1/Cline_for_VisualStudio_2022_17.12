@@ -1,5 +1,6 @@
 import NewRuleRow from "./NewRuleRow"
 import RuleRow from "./RuleRow"
+import { useI18n } from "@/i18n"
 
 const RulesToggleList = ({
 	rules,
@@ -22,6 +23,7 @@ const RulesToggleList = ({
 	isRemote?: boolean
 	alwaysEnabledMap?: Record<string, boolean>
 }) => {
+	const { t } = useI18n()
 	const gapClasses = {
 		small: "gap-0",
 		medium: "gap-2.5",
@@ -52,7 +54,7 @@ const RulesToggleList = ({
 				<>
 					{showNoRules && (
 						<div className="flex flex-col items-center gap-3 my-3 text-(--vscode-descriptionForeground)">
-							{ruleType === "workflow" ? "No workflows found" : "No rules found"}
+							{ruleType === "workflow" ? t("rules.noWorkflows") : t("rules.noRules")}
 						</div>
 					)}
 					{showNewRule && <NewRuleRow isGlobal={isGlobal} ruleType={ruleType} />}

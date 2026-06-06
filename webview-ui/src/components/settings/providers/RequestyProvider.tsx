@@ -4,6 +4,7 @@ import { Mode } from "@shared/storage/types"
 import { VSCodeButton, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { AccountServiceClient } from "@/services/grpc-client"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { DebouncedTextField } from "../common/DebouncedTextField"
@@ -24,6 +25,7 @@ interface RequestyProviderProps {
  */
 export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: RequestyProviderProps) => {
 	const { apiConfiguration } = useExtensionState()
+	const { t } = useI18n()
 	const { handleFieldChange } = useApiConfigurationHandlers()
 
 	const [requestyEndpointSelected, setRequestyEndpointSelected] = useState(!!apiConfiguration?.requestyBaseUrl)
@@ -50,14 +52,14 @@ export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: Req
 									value: apiConfiguration?.requestyBaseUrl || "",
 								}),
 							)
-							setAuthMessage(response?.message || "Requesty API key page opened.")
+							setAuthMessage(response?.message || t("settings.api.apiKeyPageOpened", { provider: "Requesty" }))
 						} catch (error) {
 							console.error("Failed to open Requesty auth:", error)
 							setAuthMessage(error instanceof Error ? error.message : String(error))
 						}
 					}}
 					style={{ margin: "5px 0 0 0" }}>
-					Get Requesty API Key
+					{t("settings.api.getProviderApiKey", { provider: "Requesty" })}
 				</VSCodeButton>
 			)}
 			{authMessage && <p style={{ color: "var(--vscode-descriptionForeground)", fontSize: 12, marginTop: 8 }}>{authMessage}</p>}
@@ -71,7 +73,7 @@ export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: Req
 						handleFieldChange("requestyBaseUrl", undefined)
 					}
 				}}>
-				Use custom base URL
+				{t("settings.api.customBaseUrl")}
 			</VSCodeCheckbox>
 			{requestyEndpointSelected && (
 				<DebouncedTextField
@@ -83,7 +85,7 @@ export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: Req
 							handleFieldChange("requestyBaseUrl", value)
 						}
 					}}
-					placeholder="Custom base URL"
+					placeholder={t("settings.api.customBaseUrlPlaceholder")}
 					style={{ width: "100%", marginBottom: 5 }}
 					type="text"
 				/>

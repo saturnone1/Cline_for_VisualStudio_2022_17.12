@@ -4,6 +4,7 @@ import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import type React from "react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { VirtuosoHandle } from "react-virtuoso"
+import { useI18n } from "@/i18n"
 import { ButtonActionType, getButtonConfig } from "../../shared/buttonConfig"
 import type { ChatState, MessageHandlers } from "../../types/chatTypes"
 
@@ -33,6 +34,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	scrollBehavior,
 }) => {
 	const { inputValue, selectedImages, selectedFiles, setSendingDisabled } = chatState
+	const { language } = useI18n()
 	const [isProcessing, setIsProcessing] = useState(false)
 
 	// Memoize last messages to avoid unnecessary recalculations
@@ -43,8 +45,8 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 
 	// Memoize button configuration to avoid recalculation on every render
 	const buttonConfig = useMemo(() => {
-		return lastMessage ? getButtonConfig(lastMessage, mode) : { sendingDisabled: false, enableButtons: false }
-	}, [lastMessage, mode])
+		return lastMessage ? getButtonConfig(lastMessage, mode, language) : { sendingDisabled: false, enableButtons: false }
+	}, [lastMessage, mode, language])
 
 	// Single effect to handle all configuration updates
 	useEffect(() => {

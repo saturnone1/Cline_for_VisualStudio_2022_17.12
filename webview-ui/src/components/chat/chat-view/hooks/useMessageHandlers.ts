@@ -31,6 +31,24 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		async (text: string, images: string[], files: string[]) => {
 			let messageToSend = text.trim()
 			const hasContent = messageToSend || images.length > 0 || files.length > 0
+			let messageSent = false
+			const markMessageSent = () => {
+				if (messageSent) {
+					return
+				}
+				messageSent = true
+				setInputValue("")
+				setActiveQuote(null)
+				setSendingDisabled(true)
+				setSelectedImages([])
+				setSelectedFiles([])
+				setEnableButtons(false)
+
+				// Reset auto-scroll
+				if ("disableAutoScrollRef" in chatState) {
+					;(chatState as any).disableAutoScrollRef.current = false
+				}
+			}
 
 			// Prepend the active quote if it exists
 			if (activeQuote && hasContent) {
@@ -42,81 +60,68 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 
 			if (hasContent) {
 				console.log("[ChatView] handleSendMessage - Sending message:", messageToSend)
-				let messageSent = false
-
-				if (messages.length === 0) {
-					await TaskServiceClient.newTask(
-						NewTaskRequest.create({
-							text: messageToSend,
-							images,
-							files,
-						}),
-					)
-					messageSent = true
-				} else if (clineAsk) {
-					// For resume_task and resume_completed_task, use yesButtonClicked to match Resume button behavior
-					// This ensures Enter key and Resume button work identically
-					if (clineAsk === "resume_task" || clineAsk === "resume_completed_task") {
-						await TaskServiceClient.askResponse(
-							AskResponseRequest.create({
-								responseType: "yesButtonClicked",
+				try {
+					if (messages.length === 0) {
+						markMessageSent()
+						await TaskServiceClient.newTask(
+							NewTaskRequest.create({
 								text: messageToSend,
 								images,
 								files,
 							}),
 						)
-						messageSent = true
-					} else {
-						// All other ask types use messageResponse
-						switch (clineAsk) {
-							case "followup":
-							case "plan_mode_respond":
-							case "tool":
-							case "browser_action_launch":
-							case "command":
-							case "command_output":
-							case "use_mcp_server":
-							case "use_subagents":
-							case "completion_result":
-							case "mistake_limit_reached":
-							case "api_req_failed":
-							case "new_task":
-							case "condense":
-							case "report_bug":
-								await TaskServiceClient.askResponse(
-									AskResponseRequest.create({
-										responseType: "messageResponse",
-										text: messageToSend,
-										images,
-										files,
-									}),
-								)
-								messageSent = true
-								break
+					} else if (clineAsk) {
+						// For resume_task and resume_completed_task, use yesButtonClicked to match Resume button behavior
+						// This ensures Enter key and Resume button work identically
+						if (clineAsk === "resume_task" || clineAsk === "resume_completed_task") {
+							markMessageSent()
+							await TaskServiceClient.askResponse(
+								AskResponseRequest.create({
+									responseType: "yesButtonClicked",
+									text: messageToSend,
+									images,
+									files,
+								}),
+							)
+						} else {
+							// All other ask types use messageResponse
+							switch (clineAsk) {
+								case "followup":
+								case "plan_mode_respond":
+								case "tool":
+								case "browser_action_launch":
+								case "command":
+								case "command_output":
+								case "use_mcp_server":
+								case "use_subagents":
+								case "completion_result":
+								case "mistake_limit_reached":
+								case "api_req_failed":
+								case "new_task":
+								case "condense":
+								case "report_bug":
+									markMessageSent()
+									await TaskServiceClient.askResponse(
+										AskResponseRequest.create({
+											responseType: "messageResponse",
+											text: messageToSend,
+											images,
+											files,
+										}),
+									)
+									break
+							}
 						}
-					}
-				} else if (messages.length > 0) {
-					// No clineAsk set - check if task is actively running
-					// If so, allow interrupting it with feedback
-					const lastMessage = messages[messages.length - 1]
-					const isTaskRunning =
-						lastMessage.partial === true || (lastMessage.type === "say" && lastMessage.say === "api_req_started")
+					} else if (messages.length > 0) {
+						// No clineAsk set - check if task is actively running
+						// If so, allow interrupting it with feedback
+						const lastMessage = messages[messages.length - 1]
+						const isTaskRunning =
+							lastMessage.partial === true || (lastMessage.type === "say" && lastMessage.say === "api_req_started")
 
-					if (isTaskRunning) {
-						// Task is running - send message as interruption/feedback
-						await TaskServiceClient.askResponse(
-							AskResponseRequest.create({
-								responseType: "messageResponse",
-								text: messageToSend,
-								images,
-								files,
-							}),
-						)
-						messageSent = true
-					} else {
-						// Completed/cancelled tasks should keep their transcript visible and continue through the
-						// host-side SDK session bridge instead of forcing the user to press Start New Task.
-						if (currentTaskItem?.id) {
+						if (isTaskRunning) {
+							// Task is running - send message as interruption/feedback
+							markMessageSent()
 							await TaskServiceClient.askResponse(
 								AskResponseRequest.create({
 									responseType: "messageResponse",
@@ -126,31 +131,39 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 								}),
 							)
 						} else {
-							await TaskServiceClient.newTask(
-								NewTaskRequest.create({
-									text: messageToSend,
-									images,
-									files,
-								}),
-							)
+							// Completed/cancelled tasks should keep their transcript visible and continue through the
+							// host-side SDK session bridge instead of forcing the user to press Start New Task.
+							if (currentTaskItem?.id) {
+								markMessageSent()
+								await TaskServiceClient.askResponse(
+									AskResponseRequest.create({
+										responseType: "messageResponse",
+										text: messageToSend,
+										images,
+										files,
+									}),
+								)
+							} else {
+								markMessageSent()
+								await TaskServiceClient.newTask(
+									NewTaskRequest.create({
+										text: messageToSend,
+										images,
+										files,
+									}),
+								)
+							}
 						}
-						messageSent = true
 					}
-				}
-
-				// Only clear input and disable UI if message was actually sent
-				if (messageSent) {
-					setInputValue("")
-					setActiveQuote(null)
-					setSendingDisabled(true)
-					setSelectedImages([])
-					setSelectedFiles([])
-					setEnableButtons(false)
-
-					// Reset auto-scroll
-					if ("disableAutoScrollRef" in chatState) {
-						;(chatState as any).disableAutoScrollRef.current = false
+				} catch (error) {
+					if (messageSent) {
+						setInputValue(text)
+						setSelectedImages(images)
+						setSelectedFiles(files)
+						setSendingDisabled(false)
+						setEnableButtons(true)
 					}
+					throw error
 				}
 			}
 		},

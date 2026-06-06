@@ -8,10 +8,12 @@ import PopupModalContainer from "@/components/common/PopupModalContainer"
 import ServersToggleList from "@/components/mcp/configuration/tabs/installed/ServersToggleList"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { McpServiceClient } from "@/services/grpc-client"
 
 const ServersToggleModal: React.FC = () => {
 	const { mcpServers, navigateToMcp, setMcpServers } = useExtensionState()
+	const { t } = useI18n()
 	const [isVisible, setIsVisible] = useState(false)
 	const buttonRef = useRef<HTMLDivElement>(null)
 	const modalRef = useRef<HTMLDivElement>(null)
@@ -55,11 +57,11 @@ const ServersToggleModal: React.FC = () => {
 		<div className="inline-flex min-w-0 max-w-full items-center" ref={modalRef}>
 			<div className="inline-flex w-full items-center" ref={buttonRef}>
 				<Tooltip>
-					{!isVisible && <TooltipContent>Manage MCP Servers</TooltipContent>}
+					{!isVisible && <TooltipContent>{t("mcp.manage")}</TooltipContent>}
 					<TooltipTrigger>
 						<VSCodeButton
 							appearance="icon"
-							aria-label={isVisible ? "Hide MCP Servers" : "Show MCP Servers"}
+							aria-label={isVisible ? t("mcp.hide") : t("mcp.show")}
 							className="p-0 m-0 flex items-center"
 							onClick={() => setIsVisible(!isVisible)}>
 							<i className="codicon codicon-server" style={{ fontSize: "12.5px" }} />
@@ -72,10 +74,10 @@ const ServersToggleModal: React.FC = () => {
 				<PopupModalContainer $arrowPosition={arrowPosition} $menuPosition={menuPosition}>
 					<div className="flex-shrink-0 px-3 pt-2">
 						<div className="flex justify-between items-center mb-2.5">
-							<div className="m-0 text-sm font-medium">MCP Servers</div>
+							<div className="m-0 text-sm font-medium">{t("mcp.title")}</div>
 							<VSCodeButton
 								appearance="icon"
-								aria-label="Go to MCP server settings"
+								aria-label={t("mcp.goToSettings")}
 								onClick={() => {
 									setIsVisible(false)
 									navigateToMcp("configure")

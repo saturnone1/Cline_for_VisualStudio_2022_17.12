@@ -1,16 +1,15 @@
 import type { ImgHTMLAttributes } from "react"
 import type { Environment } from "../../../src/shared/config-types"
 import { Environment as EnvironmentValue } from "../../../src/shared/config-types"
-import ligWordmarkBlue from "./lig-wordmark-blue.png"
-import ligWordmarkGray from "./lig-wordmark-gray.png"
-import ligWordmarkWhite from "./lig-wordmark-white.png"
+import ligCiBlack from "./lig-ci-black.png"
+import ligCiWhite from "./lig-ci-white.png"
 
 const ClineLogoVariable = ({
 	alt = "LIG VS",
 	environment,
 	...props
 }: ImgHTMLAttributes<HTMLImageElement> & { environment?: Environment }) => {
-	const source = environment === EnvironmentValue.local ? ligWordmarkBlue : environment === EnvironmentValue.staging ? ligWordmarkGray : ligWordmarkWhite
+	const source = environment === EnvironmentValue.local ? ligCiBlack : ligCiWhite
 
 	return <img alt={alt} src={source} {...props} />
 }

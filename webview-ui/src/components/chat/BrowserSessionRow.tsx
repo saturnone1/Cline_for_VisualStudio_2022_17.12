@@ -11,6 +11,7 @@ import { BrowserSettingsMenu } from "@/components/browser/BrowserSettingsMenu"
 import { ChatRowContent, ProgressIndicator } from "@/components/chat/ChatRow"
 import CodeBlock, { CODE_BLOCK_BG_COLOR } from "@/components/common/CodeBlock"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient } from "@/services/grpc-client"
 
@@ -348,6 +349,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 
 	// Calculate maxWidth
 	const maxWidth = browserSettings.viewport.width < BROWSER_VIEWPORT_PRESETS["Small Desktop (900x600)"].width ? 200 : undefined
+	const { t } = useI18n()
 
 	const [browserSessionRow, { height }] = useSize(
 		// We don't declare a constant for the inline style here because `useSize` will try to modify the style object
@@ -360,7 +362,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 					<span className="codicon codicon-inspect" style={browserIconStyle}></span>
 				)}
 				<span style={approveTextStyle}>
-					{isAutoApproved ? "LIG VS is using the browser:" : "LIG VS wants to use the browser:"}
+					{isAutoApproved ? t("browser.using") : t("browser.wants")}
 				</span>
 			</div>
 			<div
@@ -399,7 +401,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 					}}>
 					{displayState.screenshot ? (
 						<img
-							alt="Browser screenshot"
+							alt={t("browser.screenshotAlt")}
 							onClick={() =>
 								FileServiceClient.openImage(StringRequest.create({ value: displayState.screenshot })).catch(
 									(err) => console.error("Failed to open image:", err),
@@ -440,7 +442,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 							padding: `9px 8px ${consoleLogsExpanded ? 0 : 8}px 8px`,
 						}}>
 						{consoleLogsExpanded ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}
-						<span style={consoleLogsTextStyle}>Console Logs</span>
+						<span style={consoleLogsTextStyle}>{t("browser.consoleLogs")}</span>
 					</div>
 					{consoleLogsExpanded && (
 						<CodeBlock source={`${"```"}shell\n${displayState.consoleLogs || "(No new logs)"}\n${"```"}`} />
@@ -506,6 +508,7 @@ const BrowserSessionRowContent = memo(
 		setMaxActionHeight,
 		onSetQuote,
 	}: BrowserSessionRowContentProps) => {
+		const { t } = useI18n()
 		const handleToggle = useCallback(() => {
 			if (message.say === "api_req_started") {
 				setMaxActionHeight(0)
@@ -517,7 +520,7 @@ const BrowserSessionRowContent = memo(
 			return (
 				<>
 					<div style={headerStyle}>
-						<span style={browserSessionStartedTextStyle}>Browser Session Started</span>
+						<span style={browserSessionStartedTextStyle}>{t("browser.sessionStarted")}</span>
 					</div>
 					<div style={codeBlockContainerStyle}>
 						<CodeBlock forceWrap={true} source={`${"```"}shell\n${message.text}\n${"```"}`} />
@@ -571,20 +574,21 @@ const BrowserSessionRowContent = memo(
 )
 
 const BrowserActionBox = ({ action, coordinate, text }: { action: BrowserAction; coordinate?: string; text?: string }) => {
+	const { language, t } = useI18n()
 	const getBrowserActionText = (action: BrowserAction, coordinate?: string, text?: string) => {
 		switch (action) {
 			case "launch":
-				return `Launch browser at ${text}`
+				return language === "ko" ? `브라우저 열기: ${text}` : `Launch browser at ${text}`
 			case "click":
-				return `Click (${coordinate?.replace(",", ", ")})`
+				return language === "ko" ? `클릭 (${coordinate?.replace(",", ", ")})` : `Click (${coordinate?.replace(",", ", ")})`
 			case "type":
-				return `Type "${text}"`
+				return language === "ko" ? `입력 "${text}"` : `Type "${text}"`
 			case "scroll_down":
-				return "Scroll down"
+				return language === "ko" ? "아래로 스크롤" : "Scroll down"
 			case "scroll_up":
-				return "Scroll up"
+				return language === "ko" ? "위로 스크롤" : "Scroll up"
 			case "close":
-				return "Close browser"
+				return language === "ko" ? "브라우저 닫기" : "Close browser"
 			default:
 				return action
 		}
@@ -594,7 +598,7 @@ const BrowserActionBox = ({ action, coordinate, text }: { action: BrowserAction;
 			<div style={browserActionBoxContainerInnerStyle}>
 				<div style={browseActionRowContainerStyle}>
 					<span style={browseActionRowStyle}>
-						<span style={browseActionTextStyle}>Browse Action: </span>
+						<span style={browseActionTextStyle}>{t("browser.action")} </span>
 						{getBrowserActionText(action, coordinate, text)}
 					</span>
 				</div>

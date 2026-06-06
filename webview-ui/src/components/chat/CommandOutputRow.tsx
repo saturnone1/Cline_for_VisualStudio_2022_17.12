@@ -3,6 +3,7 @@ import { ClineMessage } from "@shared/ExtensionMessage"
 import { StringRequest } from "@shared/proto/cline/common"
 import { memo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient } from "@/services/grpc-client"
 import CodeBlock from "../common/CodeBlock"
@@ -130,13 +131,43 @@ export const CommandOutputRow = memo(
 		isOutputFullyExpanded: boolean
 		setIsOutputFullyExpanded: (expanded: boolean) => void
 	}) => {
+		const { language, t } = useI18n()
+		const parseCommandText = (text: string) => {
+			try {
+				const parsed = JSON.parse(text) as { command?: unknown; commands?: unknown }
+				if (typeof parsed.command === "string" && parsed.command.trim()) {
+					return parsed.command.trim()
+				}
+				if (Array.isArray(parsed.commands)) {
+					const commands = parsed.commands
+						.map((item) => {
+							if (typeof item === "string") {
+								return item.trim()
+							}
+							if (item && typeof item === "object" && "command" in item) {
+								const command = (item as { command?: unknown }).command
+								return typeof command === "string" ? command.trim() : ""
+							}
+							return ""
+						})
+						.filter(Boolean)
+					if (commands.length > 0) {
+						return commands.join(" && ")
+					}
+				}
+			} catch {
+				// Plain command text is the common path.
+			}
+			return text
+		}
+
 		const splitMessage = (text: string) => {
 			const outputIndex = text.indexOf(COMMAND_OUTPUT_STRING)
 			if (outputIndex === -1) {
-				return { command: text, output: "" }
+				return { command: parseCommandText(text), output: "" }
 			}
 			return {
-				command: text.slice(0, outputIndex).trim(),
+				command: parseCommandText(text.slice(0, outputIndex).trim()),
 				output: text
 					.slice(outputIndex + COMMAND_OUTPUT_STRING.length)
 					.trim()
@@ -195,7 +226,7 @@ export const CommandOutputRow = memo(
 										"text-success": isCommandExecuting,
 										"text-editor-warning-foreground": isCommandPending,
 									})}>
-									{getCommandStatusText(isCommandExecuting, isCommandPending, isCommandCompleted)}
+									{getCommandStatusText(isCommandExecuting, isCommandPending, isCommandCompleted, language)}
 								</span>
 							</div>
 							<div className="flex items-center gap-2 shrink-0">
@@ -214,7 +245,7 @@ export const CommandOutputRow = memo(
 										}}
 										size="sm"
 										variant="secondary">
-										{isBackgroundExec ? "cancel" : "stop"}
+										{isBackgroundExec ? t("common.cancel") : language === "ko" ? "중지" : "Stop"}
 									</Button>
 								)}
 							</div>
@@ -237,7 +268,7 @@ export const CommandOutputRow = memo(
 				{requestsApproval && (
 					<div className="flex items-center gap-2.5 p-2 text-[12px] text-editor-warning-foreground">
 						<i className="codicon codicon-warning" />
-						<span>The model has determined this command requires explicit approval.</span>
+						<span>{t("command.approvalRequired")}</span>
 					</div>
 				)}
 			</>
@@ -247,22 +278,15 @@ export const CommandOutputRow = memo(
 
 CommandOutputRow.displayName = "CommandOutputRow"
 
-const CommandStatusMap = {
-	executing: "Running",
-	pending: "Pending",
-	completed: "Completed",
-	skipped: "Skipped",
-}
-
-function getCommandStatusText(isExecuting: boolean, isPending: boolean, isCompleted: boolean): string {
+function getCommandStatusText(isExecuting: boolean, isPending: boolean, isCompleted: boolean, language: "en" | "ko"): string {
 	if (isExecuting) {
-		return CommandStatusMap.executing
+		return language === "ko" ? "실행 중" : "Running"
 	}
 	if (isPending) {
-		return CommandStatusMap.pending
+		return language === "ko" ? "대기 중" : "Pending"
 	}
 	if (isCompleted) {
-		return CommandStatusMap.completed
+		return language === "ko" ? "완료" : "Completed"
 	}
-	return CommandStatusMap.skipped
+	return language === "ko" ? "건너뜀" : "Skipped"
 }

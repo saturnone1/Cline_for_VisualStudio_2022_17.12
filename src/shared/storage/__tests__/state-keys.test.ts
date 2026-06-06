@@ -289,6 +289,7 @@ describe("State Keys Type Safety", () => {
 				{ key: "autoApprovalSettings", expectedType: "object" },
 				{ key: "browserSettings", expectedType: "object" },
 				{ key: "shellIntegrationTimeout", expectedType: "number" },
+				{ key: "uiLanguage", expectedType: "string" },
 				{ key: "preferredLanguage", expectedType: "string" },
 				{ key: "yoloModeToggled", expectedType: "boolean" },
 				{ key: "autoApproveAllToggled", expectedType: "boolean" },
@@ -401,16 +402,18 @@ describe("State Keys Type Safety", () => {
 
 		it("should export usable Settings type", () => {
 			const partialSettings: Partial<Settings> = {
+				uiLanguage: "ko",
 				preferredLanguage: "English",
 				shellIntegrationTimeout: 5000,
 			}
+			expect(partialSettings.uiLanguage).to.equal("ko")
 			expect(partialSettings.preferredLanguage).to.equal("English")
 		})
 
 		it("should export usable key types", () => {
 			// These assignments verify the key types are correctly narrowed
 			const globalKey: GlobalStateKey = "isNewUser"
-			const settingsKey: SettingsKey = "preferredLanguage"
+			const settingsKey: SettingsKey = "uiLanguage"
 			const secretKey: SecretKey = "apiKey"
 			const localKey: LocalStateKey = "localClineRulesToggles"
 
@@ -425,9 +428,11 @@ describe("State Keys Type Safety", () => {
 				// From GlobalState
 				isNewUser: true,
 				// From Settings
+				uiLanguage: "ko",
 				preferredLanguage: "English",
 			}
 			expect(combined.isNewUser).to.equal(true)
+			expect(combined.uiLanguage).to.equal("ko")
 			expect(combined.preferredLanguage).to.equal("English")
 		})
 

@@ -200,14 +200,14 @@ const HookMessage = memo(({ message, CommandOutput }: HookMessageProps) => {
 								flexShrink: 0,
 							}}>
 							{isRunning
-								? "Running"
+								? "실행 중"
 								: isFailed
-									? "Failed"
+									? "실패"
 									: isCancelled
-										? "Aborted"
+										? "중단됨"
 										: isCompleted
-											? "Completed"
-											: "Unknown"}
+											? "완료"
+											: "알 수 없음"}
 						</span>
 						{metadata.exitCode !== undefined && metadata.exitCode !== 0 && (
 							<span

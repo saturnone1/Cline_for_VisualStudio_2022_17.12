@@ -3,6 +3,7 @@ import { StringRequest } from "@shared/proto/cline/common"
 import { memo, useCallback, useMemo, useState } from "react"
 import { cleanPathPrefix } from "@/components/common/CodeAccordian"
 import { Button } from "@/components/ui/button"
+import { useI18n, type UiLanguage } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient } from "@/services/grpc-client"
 import { getIconByToolName, isLowStakesTool } from "../../utils/messageUtils"
@@ -27,10 +28,11 @@ const EXPANDABLE_TOOLS = new Set(["listFilesTopLevel", "listFilesRecursive", "li
  */
 export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => {
 	const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({})
+	const { language } = useI18n()
 
 	const allTools = useMemo(() => buildToolsWithReasoning(messages), [messages])
 
-	const summary = getToolGroupSummaryFromParsedTools(allTools.map((item) => item.parsedTool))
+	const summary = getToolGroupSummaryFromParsedTools(allTools.map((item) => item.parsedTool), language)
 
 	const handleOpenFile = useCallback((filePath: string) => {
 		FileServiceClient.openFileRelativePath(StringRequest.create({ value: filePath })).catch((err) =>
@@ -48,12 +50,15 @@ export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => 
 	}
 
 	return (
-		<div className={cn("lig-tool-group text-description")}>
+		<div className="lig-tool-group rounded-sm border border-editor-group-border bg-code/70 px-2.5 py-2 text-description">
 			{/* Header */}
-			<div className="text-[13px] text-description font-semibold mb-1.5">{summary}</div>
+			<div className="flex items-center gap-1.5 text-[13px] text-foreground font-semibold mb-1.5">
+				<i className="codicon codicon-files text-description" />
+				<span>{summary}</span>
+			</div>
 
 			{/* Content - unified list of completed + active tools */}
-			<div className="min-w-0">
+			<div className="min-w-0 flex flex-col gap-1">
 				{allTools.map(({ tool, parsedTool }) => {
 					const info = getToolDisplayInfo(parsedTool)
 					if (!info) {
@@ -67,11 +72,11 @@ export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => 
 					return (
 						<div className="min-w-0" key={tool.ts}>
 							<Button
-								className="flex items-center gap-1.5 cursor-pointer text-[13px] text-description py-0.5 hover:text-link min-w-0 max-w-full px-0 leading-tight"
+								className="flex items-center gap-1.5 cursor-pointer text-[13px] text-description py-1 hover:text-link min-w-0 max-w-full px-1.5 leading-tight rounded-sm hover:bg-toolbar-hover-background"
 								onClick={() => (isExpandable ? handleItemToggle(tool.ts) : handleOpenFile(info.path))}
 								size="icon"
 								variant="text">
-								<info.icon className="opacity-70 shrink-0 size-[12px]" />
+								<info.icon className="opacity-80 shrink-0 size-[13px]" />
 								<span
 									className={cn(
 										"flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-left [direction:rtl] text-[13px]",
@@ -197,8 +202,8 @@ function formatSearchDisplay(regex: string, path: string, filePattern?: string):
 		.map((t) => t.trim().replace(/\\b/g, "").replace(/\\s\?/g, " "))
 		.filter(Boolean)
 
-	const termDisplay = terms.length > 3 ? `${terms.length} patterns` : `"${terms.join(" | ")}"`
-	let result = `${termDisplay} in ${cleanPathPrefix(path)}/`
+	const termDisplay = terms.length > 3 ? `패턴 ${terms.length}개` : `"${terms.join(" | ")}"`
+	let result = `${cleanPathPrefix(path)}/에서 ${termDisplay}`
 
 	if (filePattern && filePattern !== "*") {
 		result += ` (${filePattern})`
@@ -210,7 +215,7 @@ function formatSearchDisplay(regex: string, path: string, filePattern?: string):
 /**
  * Get summary label for a tool group - shows what's been added to context.
  */
-export function getToolGroupSummaryFromParsedTools(tools: ClineSayTool[]): string {
+export function getToolGroupSummaryFromParsedTools(tools: ClineSayTool[], language: UiLanguage = "ko"): string {
 	const counts = { read: 0, list: 0, search: 0, def: 0 }
 
 	for (const tool of tools) {
@@ -231,21 +236,26 @@ export function getToolGroupSummaryFromParsedTools(tools: ClineSayTool[]): strin
 		}
 	}
 
-	const parts: string[] = []
-	const action = counts.read > 0 || counts.list > 0 ? " read " : " "
-
+	const readParts: string[] = []
 	if (counts.read > 0) {
-		parts.push(`${counts.read} file${counts.read > 1 ? "s" : ""}`)
+		readParts.push(language === "ko" ? `파일 ${counts.read}개` : `${counts.read} file${counts.read === 1 ? "" : "s"}`)
 	}
 	if (counts.list > 0) {
-		parts.push(`${counts.list} folder${counts.list > 1 ? "s" : ""}`)
+		readParts.push(language === "ko" ? `폴더 ${counts.list}개` : `${counts.list} folder${counts.list === 1 ? "" : "s"}`)
 	}
 	if (counts.def > 0) {
-		parts.push(`${counts.def} definition${counts.def > 1 ? "s" : ""}`)
+		readParts.push(language === "ko" ? `정의 ${counts.def}개` : `${counts.def} definition set${counts.def === 1 ? "" : "s"}`)
+	}
+	const parts: string[] = []
+	if (readParts.length > 0) {
+		parts.push(language === "ko" ? `${readParts.join(", ")} 확인` : `checked ${readParts.join(", ")}`)
 	}
 	if (counts.search > 0) {
-		parts.push(`performed ${counts.search} search${counts.search > 1 ? "es" : ""}`)
+		parts.push(language === "ko" ? `검색 ${counts.search}회 수행` : `ran ${counts.search} search${counts.search === 1 ? "" : "es"}`)
 	}
 
-	return parts.length === 0 ? "Context" : "LIG VS" + action + parts.join(", ")
+	if (parts.length === 0) {
+		return language === "ko" ? "컨텍스트" : "Context"
+	}
+	return language === "ko" ? `LIG VS가 ${parts.join(", ")}` : `LIG VS ${parts.join(", ")}`
 }

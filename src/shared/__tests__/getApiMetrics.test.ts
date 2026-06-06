@@ -69,6 +69,27 @@ describe("getApiMetrics", () => {
 		assert.equal(metrics.totalTokensOut, 0)
 		assert.equal(metrics.totalCost, 0)
 	})
+
+	it("ignores explicit unreliable placeholder usage payloads", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({
+					tokensIn: 999,
+					tokensOut: 999,
+					cost: 1,
+					usageReliable: false,
+				}),
+			},
+		]
+
+		const metrics = getApiMetrics(messages)
+		assert.equal(metrics.totalTokensIn, 0)
+		assert.equal(metrics.totalTokensOut, 0)
+		assert.equal(metrics.totalCost, 0)
+	})
 })
 
 describe("getLastApiReqTotalTokens", () => {
@@ -99,5 +120,32 @@ describe("getLastApiReqTotalTokens", () => {
 
 		const total = getLastApiReqTotalTokens(messages)
 		assert.equal(total, 23)
+	})
+
+	it("skips unreliable placeholder payloads when finding the latest usage", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({
+					tokensIn: 11,
+					tokensOut: 7,
+				}),
+			},
+			{
+				ts: 2,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({
+					tokensIn: 0,
+					tokensOut: 0,
+					usageReliable: false,
+				}),
+			},
+		]
+
+		const total = getLastApiReqTotalTokens(messages)
+		assert.equal(total, 18)
 	})
 })

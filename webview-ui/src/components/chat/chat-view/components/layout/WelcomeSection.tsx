@@ -14,6 +14,7 @@ import { SuggestedTasks } from "@/components/welcome/SuggestedTasks"
 import CreateWorktreeModal from "@/components/worktrees/CreateWorktreeModal"
 import { useClineAuth } from "@/context/ClineAuthContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { AccountServiceClient, StateServiceClient, UiServiceClient, WorktreeServiceClient } from "@/services/grpc-client"
 import { convertBannerData } from "@/utils/bannerUtils"
 import { getCurrentPlatform } from "@/utils/platformUtils"
@@ -31,6 +32,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 	taskHistory,
 	shouldShowQuickWins,
 }) => {
+	const { t } = useI18n()
 	const { lastDismissedInfoBannerVersion, lastDismissedCliBannerVersion, lastDismissedModelBannerVersion, dismissedBanners } =
 		useExtensionState()
 
@@ -295,7 +297,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 												<div className="flex items-center gap-1.5 text-xs">
 													<GitBranch className="w-3 h-3 stroke-[2.5] flex-shrink-0" />
 													<span className="break-all text-center">
-														<span className="font-semibold">Current:</span>{" "}
+														<span className="font-semibold">{t("home.branch")}:</span>{" "}
 														{currentWorktree.branch || "detached HEAD"}
 													</span>
 												</div>
@@ -305,7 +307,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 											</button>
 										</TooltipTrigger>
 										<TooltipContent side="bottom">
-											View and manage git worktrees. Great for running parallel LIG VS tasks.
+											{t("home.branch")} / Worktrees
 										</TooltipContent>
 									</Tooltip>
 								)}

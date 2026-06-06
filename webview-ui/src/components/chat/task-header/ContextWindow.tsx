@@ -92,11 +92,11 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 	}, [])
 
 	const tokenData = useMemo(() => {
-		if (!contextWindow) {
+		if (contextWindow <= 0 || lastApiReqTotalTokens <= 0) {
 			return null
 		}
 		return {
-			percentage: (lastApiReqTotalTokens / contextWindow) * 100,
+			percentage: Math.min(100, (lastApiReqTotalTokens / contextWindow) * 100),
 			max: contextWindow,
 			used: lastApiReqTotalTokens,
 		}
@@ -142,13 +142,14 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 		<div className="flex flex-col my-1.5" onMouseLeave={debounceCloseHover}>
 			<div className="flex gap-1 flex-row @max-xs:flex-col @max-xs:items-start items-center text-sm">
 				<div className="flex items-center gap-1.5 flex-1 whitespace-nowrap">
-					<span className="cursor-pointer text-sm" title="Current tokens used in this request">
+					<span className="cursor-pointer text-sm" title="Tokens reported for the most recent completed API request">
 						{formatTokenNumber(tokenData.used)}
 					</span>
 					<div className="flex relative items-center gap-1 flex-1 w-full h-full" onMouseEnter={() => setIsOpened(true)}>
 						<HoverCard>
 							<HoverCardContent className="bg-menu rounded-xs shadow-sm">
 								<ContextWindowSummary
+									autoCompactEnabled={useAutoCondense}
 									cacheReads={cacheReads}
 									cacheWrites={cacheWrites}
 									contextWindow={tokenData.max}
@@ -179,7 +180,7 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 						{formatTokenNumber(tokenData.max)}
 					</span>
 				</div>
-				<CompactTaskButton onClick={handleCompactClick} />
+				<CompactTaskButton onClick={handleCompactClick} showLabel />
 			</div>
 			{confirmationNeeded && <ConfirmationDialog onCancel={handleCancel} onConfirm={handleConfirm} />}
 		</div>

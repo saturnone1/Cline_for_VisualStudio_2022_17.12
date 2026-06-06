@@ -2,6 +2,7 @@ import { StringRequest } from "@shared/proto/cline/common"
 import { GetTaskHistoryRequest } from "@shared/proto/cline/task"
 import { memo, useEffect, useMemo, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { TaskServiceClient } from "@/services/grpc-client"
 
 type HistoryPreviewProps = {
@@ -10,6 +11,7 @@ type HistoryPreviewProps = {
 
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 	const { didHydrateState, taskHistory } = useExtensionState()
+	const { language, t } = useI18n()
 	const [loadedHistory, setLoadedHistory] = useState<typeof taskHistory>([])
 	const [hasLoadedHistory, setHasLoadedHistory] = useState(false)
 
@@ -55,7 +57,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 
 	const formatDate = (timestamp: number) => {
 		const date = new Date(timestamp)
-		return date?.toLocaleString("en-US", {
+		return date?.toLocaleString(language === "ko" ? "ko-KR" : "en-US", {
 			month: "short",
 			day: "numeric",
 		})
@@ -163,16 +165,16 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 							fontSize: "0.85em",
 							textTransform: "uppercase",
 						}}>
-						Recent
+						{language === "ko" ? "최근 작업" : "Recent"}
 					</span>
 				</div>
 				{visibleTasks.length > 0 && (
 					<button
-						aria-label="View all history"
+						aria-label={t("home.viewAll")}
 						className="history-view-all-btn"
 						onClick={() => showHistoryView()}
 						type="button">
-						View All
+						{t("home.viewAll")}
 						<span className="codicon codicon-chevron-right" />
 					</button>
 				)}
@@ -186,7 +188,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								<div className="history-task-content">
 									{item.isFavorited && (
 										<span
-											aria-label="Favorited"
+											aria-label={t("history.favoritesOnly")}
 											className="codicon codicon-star-full"
 											style={{
 												color: "var(--vscode-button-background)",
@@ -212,7 +214,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								fontSize: "var(--vscode-font-size)",
 								padding: "10px 0",
 							}}>
-							No recent tasks
+							{language === "ko" ? "최근 작업이 없습니다" : "No recent tasks"}
 						</div>
 					) : (
 						<div
@@ -222,7 +224,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								fontSize: "var(--vscode-font-size)",
 								padding: "10px 0",
 							}}>
-							Loading recent tasks...
+							{language === "ko" ? "최근 작업 불러오는 중..." : "Loading recent tasks..."}
 						</div>
 					)}
 				</div>

@@ -789,6 +789,12 @@ namespace VsClineAgent.Bridge
                 _state["preferredLanguage"] = message.Value<string>("preferredLanguage") ?? "English";
             }
 
+            if (message["uiLanguage"] != null)
+            {
+                var uiLanguage = message.Value<string>("uiLanguage");
+                _state["uiLanguage"] = string.Equals(uiLanguage, "en", StringComparison.OrdinalIgnoreCase) ? "en" : "ko";
+            }
+
             if (message["mode"] != null)
             {
                 _state["mode"] = message.Value<string>("mode") ?? "act";
@@ -4277,6 +4283,7 @@ namespace VsClineAgent.Bridge
                     ["enabled"] = false,
                     ["remindClineInterval"] = 6
                 },
+                ["uiLanguage"] = "ko",
                 ["preferredLanguage"] = "English",
                 ["mode"] = "act",
                 ["platform"] = "win32",

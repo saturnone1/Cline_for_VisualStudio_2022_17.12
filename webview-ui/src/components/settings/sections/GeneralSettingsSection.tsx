@@ -1,6 +1,7 @@
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import PreferredLanguageSetting from "../PreferredLanguageSetting"
 import Section from "../Section"
 import { updateSetting } from "../utils/settingsHandlers"
@@ -11,6 +12,7 @@ interface GeneralSettingsSectionProps {
 
 const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionProps) => {
 	const { telemetrySetting, remoteConfigSettings } = useExtensionState()
+	const { t } = useI18n()
 
 	return (
 		<div>
@@ -21,7 +23,7 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 				<div className="mb-[5px]">
 					<Tooltip>
 						<TooltipContent hidden={remoteConfigSettings?.telemetrySetting === undefined}>
-							This setting is managed by your organization's remote configuration
+							{t("settings.remoteLocked")}
 						</TooltipContent>
 						<TooltipTrigger asChild>
 							<div className="flex items-center gap-2 mb-[5px]">
@@ -32,7 +34,7 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 										const checked = e.target.checked === true
 										updateSetting("telemetrySetting", checked ? "enabled" : "disabled")
 									}}>
-									Allow error and usage reporting
+									{t("settings.general.telemetry")}
 								</VSCodeCheckbox>
 								{!!remoteConfigSettings?.telemetrySetting && (
 									<i className="codicon codicon-lock text-description text-sm" />
@@ -42,22 +44,21 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 					</Tooltip>
 
 					<p className="text-sm mt-[5px] text-description">
-						Help improve LIG VS by sending usage data and error reports. No code, prompts, or personal information are
-						ever sent. See our{" "}
+						{t("settings.general.telemetryHelp")}{" "}
 						<VSCodeLink
 							className="text-inherit"
 							href="https://docs.cline.bot/more-info/telemetry"
 							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							telemetry overview
+							{t("settings.general.telemetryOverview")}
 						</VSCodeLink>{" "}
-						and{" "}
+						{" / "}
 						<VSCodeLink
 							className="text-inherit"
 							href="https://cline.bot/privacy"
 							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							privacy policy
+							{t("settings.general.privacyPolicy")}
 						</VSCodeLink>{" "}
-						for more details.
+						{t("settings.general.moreDetails")}
 					</p>
 				</div>
 			</Section>

@@ -47,6 +47,7 @@ import McpResponseDisplay from "@/components/mcp/chat-display/McpResponseDisplay
 import McpResourceRow from "@/components/mcp/configuration/tabs/installed/server-row/McpResourceRow"
 import McpToolRow from "@/components/mcp/configuration/tabs/installed/server-row/McpToolRow"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, UiServiceClient } from "@/services/grpc-client"
 import { findMatchingResourceOrTemplate, getMcpServerDisplayName } from "@/utils/mcp"
@@ -69,6 +70,45 @@ import { ThinkingRow } from "./ThinkingRow"
 import UserMessage from "./UserMessage"
 
 const HEADER_CLASSNAMES = "flex items-center gap-2.5 mb-3"
+
+function getProgressRowTitle(content: string, isStreaming: boolean) {
+	const normalized = content.trim()
+	if (!normalized) {
+		return ""
+	}
+	if (normalized.startsWith("터미널 실행 진행 중") || normalized.startsWith("터미널 실행 완료")) {
+		return isStreaming ? "터미널 실행 진행 중" : "터미널 실행 기록"
+	}
+	if (normalized.includes("파일 읽기 진행 중") || normalized.includes("LIG VS가 파일") || normalized.startsWith("LIG VS read")) {
+		return isStreaming ? "파일 읽기 진행 중" : "파일 읽기 기록"
+	}
+	if (normalized.includes("performed") || normalized.includes("Searches:")) {
+		return isStreaming ? "검색 진행 중" : "검색 기록"
+	}
+	if (normalized.includes("prepared") || normalized.includes("Edits:")) {
+		return isStreaming ? "파일 편집 준비 중" : "파일 편집 기록"
+	}
+	return ""
+}
+
+function isEmptyJsonPlaceholder(value: string | undefined) {
+	const trimmed = (value || "").trim()
+	return trimmed === "{}" || trimmed === "[]" || trimmed === "null" || trimmed === "undefined"
+}
+
+function isCompletedProgressTitle(value: string | undefined) {
+	const normalized = (value || "").trim().toLowerCase()
+	return (
+		normalized === "파일/도구 처리 기록" ||
+		normalized === "파일 읽기 기록" ||
+		normalized === "터미널 실행 기록" ||
+		normalized === "검색 기록" ||
+		normalized === "응답 준비 기록" ||
+		normalized === "reading files and using tools history" ||
+		normalized === "running terminal history" ||
+		normalized === "preparing response history"
+	)
+}
 
 type VsClineChangedFile = {
 	filePath: string
@@ -108,6 +148,7 @@ const VsCommandOutputCard = memo(
 		isExpanded: boolean
 		onToggle: () => void
 	}) => {
+		const { t, language } = useI18n()
 		const commands = useMemo(() => parseVsCommandOutputSummary(message.text || ""), [message.text])
 		const [actionMessage, setActionMessage] = useState("")
 		const count = commands.length
@@ -139,7 +180,7 @@ const VsCommandOutputCard = memo(
 						onClick={onToggle}
 						type="button">
 						<TerminalIcon className="size-3 shrink-0 opacity-80" />
-						<span className="font-semibold">Command output</span>
+						<span className="font-semibold">{t("command.output")}</span>
 						<div className="grow" />
 						{isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
 					</button>
@@ -168,18 +209,18 @@ const VsCommandOutputCard = memo(
 					<TerminalIcon className={cn("size-3 shrink-0", failed ? "text-error" : running ? "text-editor-warning-foreground" : "text-success")} />
 					<div className="min-w-0">
 						<div className="font-semibold">
-							{running ? "Running" : "Ran"} {count} command{count > 1 ? "s" : ""}
+							{language === "ko" ? `${running ? "실행 중인 명령" : "실행한 명령"} ${count}개` : `${running ? "Running commands" : "Ran commands"} ${count}`}
 						</div>
 						<div className="text-xs opacity-70">
-							{failed ? "Some commands failed" : running ? "Attachable Visual Studio command host session" : "Completed"}
+							{failed ? (language === "ko" ? "일부 명령 실패" : "Some commands failed") : running ? "Visual Studio command host session" : t("common.completed")}
 							{totalOutputLines > 0 ? ` · ${totalOutputLines} output line${totalOutputLines > 1 ? "s" : ""}` : ""}
-							{proceedAvailable ? " · proceed while running available" : ""}
+							{proceedAvailable ? ` · ${t("command.proceedAvailable")}` : ""}
 						</div>
 					</div>
 					<div className="grow" />
 					{running && (
 						<span className="rounded-xs border border-editor-group-border px-2 py-1 text-xs opacity-80">
-							{isExpanded ? "Viewing live output" : "View live output"}
+							{isExpanded ? t("command.viewingLive") : t("command.viewLive")}
 						</span>
 					)}
 					{isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
@@ -204,7 +245,7 @@ const VsCommandOutputCard = memo(
 									{command.background && <span>background</span>}
 									{command.hotProcess && <span>hot</span>}
 									{command.attachable && <span>attachable</span>}
-									{command.proceedWhileRunning && <span>proceed while running</span>}
+									{command.proceedWhileRunning && <span>{t("command.proceedAvailable")}</span>}
 								</div>
 								{(command.currentDirectory || command.cwd) && (
 									<div className="text-xs opacity-70 mb-1.5 truncate">cwd {command.currentDirectory || command.cwd}</div>
@@ -461,10 +502,10 @@ const VsClineRevertedFilesCard = memo(({ tool }: { tool: ClineSayTool }) => {
 		<div className="rounded-sm border border-editor-group-border bg-code overflow-hidden">
 			<div className="flex items-center gap-2 px-3 py-2 border-b border-editor-group-border">
 				<Undo2Icon className="size-3 shrink-0" />
-				<div className="font-bold text-foreground">Undid {files.length} file{files.length === 1 ? "" : "s"}</div>
+				<div className="font-bold text-foreground">파일 {files.length}개 되돌림</div>
 			</div>
 			<div className="px-3 py-2 text-xs text-description">
-				<div>{tool.content || "Reverted LIG VS changes."}</div>
+				<div>{tool.content || "LIG VS 변경사항을 되돌렸습니다."}</div>
 				{files.length > 0 && (
 					<ul className="mt-2 space-y-1">
 						{files.slice(0, 8).map((file) => (
@@ -474,7 +515,7 @@ const VsClineRevertedFilesCard = memo(({ tool }: { tool: ClineSayTool }) => {
 				)}
 				{skipped.length > 0 && (
 					<div className="mt-2 text-error">
-						Skipped {skipped.length}: {skipped.map((item) => cleanPathPrefix(item.filePath || "")).filter(Boolean).join(", ")}
+						건너뜀 {skipped.length}개: {skipped.map((item) => cleanPathPrefix(item.filePath || "")).filter(Boolean).join(", ")}
 					</div>
 				)}
 			</div>
@@ -565,6 +606,7 @@ export const ChatRowContent = memo(
 			clineMessages,
 			showFeatureTips,
 		} = useExtensionState()
+		const { t, language } = useI18n()
 		const [seeNewChangesDisabled, setSeeNewChangesDisabled] = useState(false)
 		const [explainChangesDisabled, setExplainChangesDisabled] = useState(false)
 		const [quoteButtonState, setQuoteButtonState] = useState<QuoteButtonState>({
@@ -728,12 +770,12 @@ export const ChatRowContent = memo(
 				case "mistake_limit_reached":
 					return [
 						<CircleXIcon className="text-error size-2" />,
-						<span className="text-error font-bold">LIG VS is having trouble...</span>,
+						<span className="text-error font-bold">{language === "ko" ? "LIG VS가 문제를 처리하는 중입니다..." : "LIG VS is having trouble..."}</span>,
 					]
 				case "command":
 					return [
 						<TerminalIcon className="text-foreground size-2" />,
-						<span className="font-bold text-foreground">LIG VS wants to execute this command:</span>,
+						<span className="font-bold text-foreground">{t("command.title")}</span>,
 					]
 				case "use_mcp_server":
 					const mcpServerUse = JSON.parse(message.text || "{}") as ClineAskUseMcpServer
@@ -744,17 +786,17 @@ export const ChatRowContent = memo(
 							<span className="codicon codicon-server text-foreground mb-[-1.5px]" />
 						),
 						<span className="ph-no-capture font-bold text-foreground break-words">
-							LIG VS wants to {mcpServerUse.type === "use_mcp_tool" ? "use a tool" : "access a resource"} on the{" "}
+							LIG VS가{" "}
 							<code className="break-all">
 								{getMcpServerDisplayName(mcpServerUse.serverName, mcpMarketplaceCatalog)}
 							</code>{" "}
-							MCP server:
+							MCP 서버에서 {mcpServerUse.type === "use_mcp_tool" ? "도구를 사용하려고 합니다:" : "리소스에 접근하려고 합니다:"}
 						</span>,
 					]
 				case "completion_result":
 					return [
 						<span className="codicon codicon-check text-success mb-[-1.5px]" />,
-						<span className="text-success font-bold">Task Completed</span>,
+						<span className="text-success font-bold">작업 완료</span>,
 					]
 				case "api_req_started":
 					// API request rows no longer render the request payload/cost accordion.
@@ -763,7 +805,7 @@ export const ChatRowContent = memo(
 				case "followup":
 					return [
 						<span className="codicon codicon-question text-foreground mb-[-1.5px]" />,
-						<span className="font-bold text-foreground">LIG VS has a question:</span>,
+						<span className="font-bold text-foreground">LIG VS 질문:</span>,
 					]
 				default:
 					return [null, null]
@@ -845,14 +887,14 @@ export const ChatRowContent = memo(
 					const content = tool?.content || ""
 					const isApplyingPatch = content?.startsWith("%%bash") && !content.endsWith("*** End Patch\nEOF")
 					const editToolTitle = isApplyingPatch
-						? "LIG VS is creating patches to edit this file:"
-						: "LIG VS wants to edit this file:"
+						? t("tool.filePatch")
+						: t("tool.fileEdit")
 					return (
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								<PencilIcon className="size-2" />
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This file is outside of your workspace")}
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.file"))}
 								<span style={{ fontWeight: "bold" }}>{editToolTitle}</span>
 							</div>
 							{backgroundEditEnabled && tool.path && tool.content ? (
@@ -879,8 +921,8 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								<SquareMinusIcon className="size-2" />
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This file is outside of your workspace")}
-								<span style={{ fontWeight: "bold" }}>LIG VS wants to delete this file:</span>
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.file"))}
+								<span style={{ fontWeight: "bold" }}>{t("tool.fileDelete")}</span>
 							</div>
 							<CodeAccordian
 								// isLoading={message.partial}
@@ -897,8 +939,8 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								<FilePlus2Icon className="size-2" />
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This file is outside of your workspace")}
-								<span className="font-bold">LIG VS wants to create a new file:</span>
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.file"))}
+								<span className="font-bold">{t("tool.fileCreate")}</span>
 							</div>
 							{backgroundEditEnabled && tool.path && tool.content ? (
 								<DiffEditRow patch={tool.content} path={tool.path} startLineNumbers={tool.startLineNumbers} />
@@ -920,8 +962,8 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								{isImage ? <ImageUpIcon className="size-2" /> : <FileCode2Icon className="size-2" />}
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This file is outside of your workspace")}
-								<span className="font-bold">LIG VS wants to read this file:</span>
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.file"))}
+								<span className="font-bold">{t("tool.fileRead")}</span>
 							</div>
 							<div className="bg-code rounded-sm overflow-hidden border border-editor-group-border">
 								<div
@@ -957,12 +999,10 @@ export const ChatRowContent = memo(
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								{toolIcon("folder-opened")}
-								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This is outside of your workspace")}
+									{tool.operationIsLocatedInWorkspace === false &&
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.path"))}
 								<span style={{ fontWeight: "bold" }}>
-									{message.type === "ask"
-										? "LIG VS wants to view the top level files in this directory:"
-										: "LIG VS viewed the top level files in this directory:"}
+									{message.type === "ask" ? t("tool.listTop.ask") : t("tool.listTop.done")}
 								</span>
 							</div>
 							<CodeAccordian
@@ -979,12 +1019,10 @@ export const ChatRowContent = memo(
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								{toolIcon("folder-opened")}
-								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This is outside of your workspace")}
+									{tool.operationIsLocatedInWorkspace === false &&
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.path"))}
 								<span style={{ fontWeight: "bold" }}>
-									{message.type === "ask"
-										? "LIG VS wants to recursively view all files in this directory:"
-										: "LIG VS recursively viewed all files in this directory:"}
+									{message.type === "ask" ? t("tool.listRecursive.ask") : t("tool.listRecursive.done")}
 								</span>
 							</div>
 							<CodeAccordian
@@ -1001,12 +1039,10 @@ export const ChatRowContent = memo(
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								{toolIcon("file-code")}
-								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This file is outside of your workspace")}
+									{tool.operationIsLocatedInWorkspace === false &&
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.file"))}
 								<span style={{ fontWeight: "bold" }}>
-									{message.type === "ask"
-										? "LIG VS wants to view source code definition names used in this directory:"
-										: "LIG VS viewed source code definition names used in this directory:"}
+									{message.type === "ask" ? t("tool.definitions.ask") : t("tool.definitions.done")}
 								</span>
 							</div>
 							<CodeAccordian
@@ -1023,9 +1059,17 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								{toolIcon("search")}
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This is outside of your workspace")}
+									toolIcon("sign-out", "yellow", -90, t("tool.outsideWorkspace.path"))}
 								<span className="font-bold">
-									LIG VS wants to search this directory for <code className="break-all">{tool.regex}</code>:
+									{language === "ko" ? (
+										<>
+											LIG VS가 이 폴더에서 <code className="break-all">{tool.regex}</code> 항목을 검색하려고 합니다:
+										</>
+									) : (
+										<>
+											LIG VS wants to search this directory for <code className="break-all">{tool.regex}</code>:
+										</>
+									)}
 								</span>
 							</div>
 							<SearchResultsDisplay
@@ -1042,11 +1086,11 @@ export const ChatRowContent = memo(
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								<FoldVerticalIcon className="size-2" />
-								<span className="font-bold">LIG VS is condensing the conversation:</span>
+								<span className="font-bold">{t("tool.condensing")}</span>
 							</div>
 							<div className="bg-code overflow-hidden border border-editor-group-border rounded-[3px]">
 								<div
-									aria-label={isExpanded ? "Collapse summary" : "Expand summary"}
+									aria-label={language === "ko" ? (isExpanded ? "요약 접기" : "요약 펼치기") : isExpanded ? "Collapse summary" : "Expand summary"}
 									className="text-description py-2 px-2.5 cursor-pointer select-none"
 									onClick={handleToggle}
 									onKeyDown={(e) => {
@@ -1060,7 +1104,7 @@ export const ChatRowContent = memo(
 									{isExpanded ? (
 										<div>
 											<div className="flex items-center mb-2">
-												<span className="font-bold mr-1">Summary:</span>
+												<span className="font-bold mr-1">{t("tool.summary")}</span>
 												<div className="grow" />
 												<ChevronDownIcon className="my-0.5 shrink-0 size-4" />
 											</div>
@@ -1084,11 +1128,9 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								<Link2Icon className="size-2" />
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This URL is external")}
+									toolIcon("sign-out", "yellow", -90, language === "ko" ? "외부 URL입니다" : "This URL is external")}
 								<span className="font-bold">
-									{message.type === "ask"
-										? "LIG VS wants to fetch content from this URL:"
-										: "LIG VS fetched content from this URL:"}
+									{message.type === "ask" ? t("tool.webFetch.ask") : t("tool.webFetch.done")}
 								</span>
 							</div>
 							<div
@@ -1113,11 +1155,9 @@ export const ChatRowContent = memo(
 							<div className={HEADER_CLASSNAMES}>
 								<SearchIcon className="size-2 rotate-90" />
 								{tool.operationIsLocatedInWorkspace === false &&
-									toolIcon("sign-out", "yellow", -90, "This search is external")}
+									toolIcon("sign-out", "yellow", -90, language === "ko" ? "외부 검색입니다" : "This search is external")}
 								<span className="font-bold">
-									{message.type === "ask"
-										? "LIG VS wants to search the web for:"
-										: "LIG VS searched the web for:"}
+									{message.type === "ask" ? t("tool.webSearch.ask") : t("tool.webSearch.done")}
 								</span>
 							</div>
 							<div className="bg-code border border-editor-group-border overflow-hidden rounded-xs select-text py-[9px] px-2.5">
@@ -1132,7 +1172,7 @@ export const ChatRowContent = memo(
 						<div>
 							<div className={HEADER_CLASSNAMES}>
 								<LightbulbIcon className="size-2" />
-								<span className="font-bold">LIG VS loaded the skill:</span>
+								<span className="font-bold">{t("tool.skillLoaded")}</span>
 							</div>
 							<div className="bg-code border border-editor-group-border overflow-hidden rounded-xs py-[9px] px-2.5">
 								<span className="ph-no-capture font-medium">{tool.path}</span>
@@ -1235,7 +1275,7 @@ export const ChatRowContent = memo(
 								</div>
 								{useMcpServer.arguments && useMcpServer.arguments !== "{}" && (
 									<div className="mt-2">
-										<div className="mb-1 opacity-80 uppercase">Arguments</div>
+										<div className="mb-1 opacity-80 uppercase">{t("tool.arguments")}</div>
 										<CodeAccordian
 											code={useMcpServer.arguments}
 											isExpanded={true}
@@ -1275,7 +1315,7 @@ export const ChatRowContent = memo(
 							<div className="flex items-start gap-2 py-2.5 px-3 bg-quote rounded-sm text-base text-foreground opacity-90 mb-2">
 								<BellIcon className="mt-0.5 size-2 text-notification-foreground shrink-0" />
 								<div className="break-words flex-1">
-									<span className="font-medium">MCP Notification: </span>
+									<span className="font-medium">{t("mcp.notification")} </span>
 									<span className="ph-no-capture">{message.text}</span>
 								</div>
 							</div>
@@ -1306,9 +1346,15 @@ export const ChatRowContent = memo(
 					}
 					case "reasoning": {
 						const isReasoningStreaming = message.partial === true
-						const reasoningContent = message.reasoning || message.text || ""
+						const rawReasoningContent = message.reasoning || message.text || ""
+						const reasoningContent = isEmptyJsonPlaceholder(rawReasoningContent) ? "" : rawReasoningContent
 						const hasReasoningText = !!reasoningContent.trim()
-						const title = message.text?.trim() || (isReasoningStreaming ? "모델 진행 중" : "모델 진행 기록")
+						const contentTitle = getProgressRowTitle(reasoningContent, isReasoningStreaming)
+						const titleFallback = isEmptyJsonPlaceholder(message.text) ? "" : message.text?.trim()
+						if (!hasReasoningText && !isReasoningStreaming && (!titleFallback || isCompletedProgressTitle(titleFallback))) {
+							return <InvisibleSpacer />
+						}
+						const title = contentTitle || titleFallback || (isReasoningStreaming ? "모델 진행 중" : "모델 진행 기록")
 						return (
 							<div className="lig-reasoning-row">
 								<ThinkingRow
@@ -1457,6 +1503,10 @@ export const ChatRowContent = memo(
 						const hasChanges = message.text?.endsWith(COMPLETION_RESULT_CHANGES_FLAG) ?? false
 						const text = hasChanges ? message.text?.slice(0, -COMPLETION_RESULT_CHANGES_FLAG.length) : message.text
 
+						if (!hasChanges) {
+							return <div className="text-sm text-description py-0.5">{text || t("task.done")}</div>
+						}
+
 						return (
 							<CompletionOutputRow
 								explainChangesDisabled={explainChangesDisabled}
@@ -1604,6 +1654,9 @@ export const ChatRowContent = memo(
 						if (message.text) {
 							const hasChanges = message.text.endsWith(COMPLETION_RESULT_CHANGES_FLAG) ?? false
 							const text = hasChanges ? message.text.slice(0, -COMPLETION_RESULT_CHANGES_FLAG.length) : message.text
+							if (!hasChanges) {
+								return <div className="text-sm text-description py-0.5">{text || t("task.done")}</div>
+							}
 							return (
 								<CompletionOutputRow
 									explainChangesDisabled={explainChangesDisabled}
@@ -1678,7 +1731,7 @@ export const ChatRowContent = memo(
 							<div>
 								<div className={HEADER_CLASSNAMES}>
 									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS wants to start a new task:</span>
+									<span className="text-foreground font-bold">LIG VS가 새 작업을 시작하려고 합니다:</span>
 								</div>
 								<NewTaskPreview context={message.text || ""} />
 							</div>
@@ -1688,7 +1741,7 @@ export const ChatRowContent = memo(
 							<div>
 								<div className={HEADER_CLASSNAMES}>
 									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS wants to condense your conversation:</span>
+									<span className="text-foreground font-bold">LIG VS가 대화를 압축하려고 합니다:</span>
 								</div>
 								<NewTaskPreview context={message.text || ""} />
 							</div>
@@ -1698,7 +1751,7 @@ export const ChatRowContent = memo(
 							<div>
 								<div className={HEADER_CLASSNAMES}>
 									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS wants to create a Github issue:</span>
+									<span className="text-foreground font-bold">LIG VS가 GitHub 이슈를 만들려고 합니다:</span>
 								</div>
 								<ReportBugPreview data={message.text || ""} />
 							</div>

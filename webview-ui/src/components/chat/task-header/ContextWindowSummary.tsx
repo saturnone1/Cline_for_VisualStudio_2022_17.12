@@ -19,6 +19,7 @@ interface TaskContextWindowButtonsProps extends TokenUsageInfoProps {
 	percentage: number
 	tokenUsed: number
 	contextWindow: number
+	autoCompactEnabled?: boolean
 	autoCompactThreshold?: number
 	isThresholdChanged?: boolean
 	isThresholdFadingOut?: boolean
@@ -67,12 +68,13 @@ const TOKEN_DETAILS_CONFIG: Omit<TokenDetail, "value">[] = [
 ]
 
 const TokenUsageDetails = memo<TokenUsageInfoProps>(({ tokensIn, tokensOut, cacheWrites, cacheReads }) => {
+	const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 	const contextTokenDetails = useMemo(() => {
 		const values = [tokensIn, tokensOut, cacheWrites || 0, cacheReads || 0]
 		return TOKEN_DETAILS_CONFIG.map((config, index) => ({ ...config, value: values[index] })).filter((item) => item.value)
 	}, [tokensIn, tokensOut, cacheWrites, cacheReads])
 
-	if (!tokensIn) {
+	if (totalTokens <= 0) {
 		return <div>No token usage data available</div>
 	}
 
@@ -97,6 +99,7 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 	cacheWrites,
 	cacheReads,
 	percentage,
+	autoCompactEnabled = false,
 	autoCompactThreshold = 0,
 }) => {
 	// Accordion state
@@ -137,6 +140,12 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 						</p>
 					</div>
 				</AccordionItem>
+			)}
+
+			{autoCompactEnabled && autoCompactThreshold <= 0 && (
+				<div className="rounded border border-[var(--vscode-widget-border)] p-1 text-xs text-muted-foreground">
+					Auto Compact is enabled, but automatic prompts require reliable usage and a configured threshold.
+				</div>
 			)}
 
 			<AccordionItem

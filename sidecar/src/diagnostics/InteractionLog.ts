@@ -9,6 +9,7 @@ const MAX_ARRAY_ITEMS = 50
 const MAX_OBJECT_KEYS = 80
 const MAX_DEPTH = 8
 const VERBOSE_INTERACTION_LOG = process.env.VSCLINE_VERBOSE_INTERACTION_LOG === "1"
+const ENABLE_INTERACTION_LOG = VERBOSE_INTERACTION_LOG || process.env.VSCLINE_ENABLE_INTERACTION_LOG === "1"
 
 const SENSITIVE_KEYS = [
 	"apikey",
@@ -22,6 +23,9 @@ const SENSITIVE_KEYS = [
 
 export function logInteraction(direction: string, event: string, payload?: unknown) {
 	try {
+		if (!ENABLE_INTERACTION_LOG && !isImportantDiagnosticEvent(event)) {
+			return
+		}
 		if (shouldSkipDefaultLog(direction, event, payload)) {
 			return
 		}
@@ -43,6 +47,11 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 	} catch {
 		// Diagnostics must never interfere with the extension.
 	}
+}
+
+function isImportantDiagnosticEvent(event: string) {
+	const normalized = event.toLowerCase()
+	return normalized.includes("failed") || normalized.includes("error") || normalized.includes("slow")
 }
 
 function shouldSkipDefaultLog(direction: string, event: string, payload: unknown) {

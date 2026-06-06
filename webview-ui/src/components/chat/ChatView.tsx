@@ -4,7 +4,7 @@ import { combineErrorRetryMessages } from "@shared/combineErrorRetryMessages"
 import { combineHookSequences } from "@shared/combineHookSequences"
 import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useMount } from "react-use"
 import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -186,9 +186,11 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	const { selectedModelInfo } = useMemo(() => {
 		return normalizeApiConfiguration(apiConfiguration, mode)
 	}, [apiConfiguration, mode])
+	const [filePickerStatus, setFilePickerStatus] = useState("")
 
 	const selectFilesAndImages = useCallback(async () => {
 		try {
+			setFilePickerStatus("")
 			const response = await FileServiceClient.selectFiles(
 				BooleanRequest.create({
 					value: selectedModelInfo.supportsImages,
@@ -212,15 +214,23 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 
 					// Use remaining slots for files
 					const remainingSlots = availableSlots - imagesToAdd
+					const filesToAdd = Math.min(response.values2.length, remainingSlots)
 					if (remainingSlots > 0) {
-						setSelectedFiles((prevFiles) => [...prevFiles, ...response.values2.slice(0, remainingSlots)])
+						setSelectedFiles((prevFiles) => [...prevFiles, ...response.values2.slice(0, filesToAdd)])
 					}
+					const skipped = response.values1.length + response.values2.length - imagesToAdd - filesToAdd
+					setFilePickerStatus(skipped > 0 ? `Attached files. ${skipped} item(s) were skipped because the limit is reached.` : "")
+				} else {
+					setFilePickerStatus("Attachment limit reached.")
 				}
+			} else {
+				setFilePickerStatus("No files selected.")
 			}
 		} catch (error) {
 			console.error("Error selecting images & files:", error)
+			setFilePickerStatus("Could not open file picker. Check the Visual Studio status bar for details.")
 		}
-	}, [selectedModelInfo.supportsImages])
+	}, [selectedFiles.length, selectedImages.length, selectedModelInfo.supportsImages, setSelectedFiles, setSelectedImages])
 
 	const shouldDisableFilesAndImages = selectedImages.length + selectedFiles.length >= MAX_IMAGES_AND_FILES_PER_MESSAGE
 
@@ -387,6 +397,11 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					}}
 					task={task}
 				/>
+				{filePickerStatus && (
+					<div className="px-3.5 pb-1 text-xs text-(--vscode-descriptionForeground)" role="status">
+						{filePickerStatus}
+					</div>
+				)}
 				<InputSection
 					chatState={chatState}
 					messageHandlers={messageHandlers}

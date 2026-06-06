@@ -3,6 +3,7 @@ import { PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useClickAway } from "react-use"
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { FileServiceClient } from "@/services/grpc-client"
 
@@ -33,6 +34,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 	disabledReason,
 	workspaceName,
 }) => {
+	const { t } = useI18n()
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [filename, setFilename] = useState("")
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -96,7 +98,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 			if (ruleType === "skill") {
 				// Validate skill name - only allow alphanumeric, dashes, underscores
 				if (!/^[a-zA-Z0-9_-]+$/.test(trimmedFilename)) {
-					setError("Skill name can only contain letters, numbers, dashes, and underscores")
+					setError(t("rules.skillNameError"))
 					return
 				}
 
@@ -111,7 +113,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 					setError(null)
 					setIsExpanded(false)
 				} catch (err) {
-					setError(err instanceof Error ? err.message : "Failed to create skill")
+					setError(err instanceof Error ? err.message : t("rules.skillCreateFailed"))
 				}
 				return
 			}
@@ -119,7 +121,7 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 			const extension = getExtension(trimmedFilename)
 
 			if (!isValidExtension(extension)) {
-				setError("Only .md, .txt, or no file extension allowed")
+				setError(t("rules.extensionError"))
 				return
 			}
 
@@ -172,15 +174,15 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 					{ruleType === "hook" ? (
 						<>
 							<label className="sr-only" htmlFor="hook-type-select">
-								Select hook type to create
+								{t("rules.newHookSelect")}
 							</label>
 							<span className="sr-only" id="hook-select-description">
-								Choose a hook type to create. Hooks execute at specific points in Cline's lifecycle. Available:{" "}
+								{t("rules.newHookDescription")}{" "}
 								{availableHookTypes.map((h) => h.name).join(", ")}
 							</span>
 							<select
 								aria-describedby="hook-select-description"
-								aria-label="Select hook type to create"
+								aria-label={t("rules.newHookSelect")}
 								className="flex-1 bg-input-background text-input-foreground border-0 outline-0 rounded focus:outline-none focus:ring-0 focus:border-transparent px-2 cursor-pointer"
 								disabled={disabled || availableHookTypes.length === 0}
 								id="hook-type-select"
@@ -205,10 +207,10 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 								value="">
 								<option disabled value="">
 									{disabled
-										? "Hooks unavailable in Visual Studio port"
+										? (disabledReason ?? t("rules.hooksUnavailable"))
 										: availableHookTypes.length === 0
-											? "All hooks created"
-											: "New hook..."}
+											? t("rules.allHooksCreated")
+											: t("rules.newHook")}
 								</option>
 								{availableHookTypes.map((hook) => (
 									<option key={hook.name} title={hook.description} value={hook.name}>
@@ -230,15 +232,15 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 								placeholder={
 									isExpanded
 										? ruleType === "workflow"
-											? "workflow-name (.md, .txt, or no extension)"
+											? t("rules.workflowPlaceholder")
 											: ruleType === "skill"
-												? "skill-name (letters, numbers, dashes, underscores)"
-												: "rule-name (.md, .txt, or no extension)"
+												? t("rules.skillPlaceholder")
+												: t("rules.rulePlaceholder")
 										: ruleType === "workflow"
-											? "New workflow file..."
+											? t("rules.newWorkflow")
 											: ruleType === "skill"
-												? "New skill..."
-												: "New rule file..."
+												? t("rules.newSkill")
+												: t("rules.newRule")
 								}
 								ref={inputRef}
 								type="text"
@@ -249,13 +251,13 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 								aria-label={
 									isExpanded
 										? ruleType === "skill"
-											? "Create skill"
-											: "Create file"
+											? t("rules.createSkill")
+											: t("rules.createFile")
 										: ruleType === "workflow"
-											? "New workflow file..."
+											? t("rules.newWorkflow")
 											: ruleType === "skill"
-												? "New skill..."
-												: "New rule file..."
+												? t("rules.newSkill")
+												: t("rules.newRule")
 								}
 								className="mx-0.5"
 								onClick={(e) => {

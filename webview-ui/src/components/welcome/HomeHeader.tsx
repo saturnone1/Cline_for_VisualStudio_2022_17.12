@@ -1,7 +1,7 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import ClineLogoVariable from "@/assets/ClineLogoVariable"
-import ligCiColor02 from "@/assets/lig-ci-color02.jpg"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { UiServiceClient } from "@/services/grpc-client"
 
 interface HomeHeaderProps {
@@ -10,6 +10,7 @@ interface HomeHeaderProps {
 
 const HomeHeader = ({ shouldShowQuickWins = false }: HomeHeaderProps) => {
 	const { environment, lazyTeammateModeEnabled } = useExtensionState()
+	const { language } = useI18n()
 
 	const handleTakeATour = async () => {
 		try {
@@ -19,12 +20,18 @@ const HomeHeader = ({ shouldShowQuickWins = false }: HomeHeaderProps) => {
 		}
 	}
 
-	const headingText = lazyTeammateModeEnabled ? "LIG VS is ready" : "What can I do for you?"
+	const headingText =
+		language === "ko"
+			? lazyTeammateModeEnabled
+				? "LIG VS가 준비되었습니다"
+				: "무엇을 도와드릴까요?"
+			: lazyTeammateModeEnabled
+				? "LIG VS is ready"
+				: "What can I do for you?"
 
 	return (
 		<div className="flex flex-col items-center mb-5">
 			<div className="my-7 flex flex-col items-center gap-3">
-				<img alt="" className="h-14 w-full max-w-[210px] object-contain opacity-90" src={ligCiColor02} />
 				<ClineLogoVariable className="h-14 w-52 object-contain" environment={environment} />
 			</div>
 			<div className="text-center flex items-center justify-center px-4">
@@ -36,7 +43,7 @@ const HomeHeader = ({ shouldShowQuickWins = false }: HomeHeaderProps) => {
 						className="flex items-center gap-2 px-4 py-2 rounded-full border border-border-panel bg-white/2 hover:bg-list-background-hover transition-colors duration-150 ease-in-out text-code-foreground text-sm font-medium cursor-pointer"
 						onClick={handleTakeATour}
 						type="button">
-						Take a Tour
+						{language === "ko" ? "둘러보기" : "Take a Tour"}
 						<span className="codicon codicon-play scale-90" />
 					</button>
 				</div>

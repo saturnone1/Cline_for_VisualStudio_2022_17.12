@@ -48,6 +48,20 @@ describe("filterVisibleMessages", () => {
 
 		expect(visible).toHaveLength(0)
 	})
+
+	it("hides completed empty reasoning placeholders", () => {
+		const visible = filterVisibleMessages([
+			{
+				...createReasoningMessage(1, "파일 읽기 기록"),
+				reasoning: "{}",
+				partial: false,
+			},
+			createReasoningMessage(2, "실제 파일 읽기 내용"),
+		])
+
+		expect(visible).toHaveLength(1)
+		expect(visible[0]).toMatchObject({ type: "say", say: "reasoning", text: "실제 파일 읽기 내용" })
+	})
 })
 
 describe("groupLowStakesTools", () => {

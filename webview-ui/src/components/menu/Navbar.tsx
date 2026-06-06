@@ -3,6 +3,7 @@ import { useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TaskServiceClient } from "@/services/grpc-client"
+import { useI18n } from "@/i18n"
 import { useExtensionState } from "../../context/ExtensionStateContext"
 
 // Custom MCP Server Icon component using VSCode codicon
@@ -15,13 +16,14 @@ const McpServerIcon = ({ className, size }: { className?: string; size?: number 
 
 export const Navbar = () => {
 	const { navigateToHistory, navigateToSettings, navigateToAccount, navigateToMcp, navigateToChat } = useExtensionState()
+	const { t } = useI18n()
 
 	const SETTINGS_TABS = useMemo(
 		() => [
 			{
 				id: "chat",
 				name: "Chat",
-				tooltip: "New Task",
+				tooltip: t("nav.newTask"),
 				icon: PlusIcon,
 				navigate: () => {
 					// Close the current task, then navigate to the chat view
@@ -35,33 +37,33 @@ export const Navbar = () => {
 			{
 				id: "mcp",
 				name: "MCP",
-				tooltip: "MCP Servers",
+				tooltip: t("mcp.title"),
 				icon: McpServerIcon,
 				navigate: navigateToMcp,
 			},
 			{
 				id: "history",
 				name: "History",
-				tooltip: "History",
+				tooltip: t("nav.history"),
 				icon: HistoryIcon,
 				navigate: navigateToHistory,
 			},
 			{
 				id: "account",
 				name: "Account",
-				tooltip: "Account",
+				tooltip: t("nav.account"),
 				icon: UserCircleIcon,
 				navigate: navigateToAccount,
 			},
 			{
 				id: "settings",
 				name: "Settings",
-				tooltip: "Settings",
+				tooltip: t("nav.settings"),
 				icon: SettingsIcon,
 				navigate: navigateToSettings,
 			},
 		],
-		[navigateToAccount, navigateToChat, navigateToHistory, navigateToMcp, navigateToSettings],
+		[navigateToAccount, navigateToChat, navigateToHistory, navigateToMcp, navigateToSettings, t],
 	)
 
 	return (

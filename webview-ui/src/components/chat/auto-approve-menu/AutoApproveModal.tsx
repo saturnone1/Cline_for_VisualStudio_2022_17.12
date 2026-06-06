@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react"
 import { useClickAway } from "react-use"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useAutoApproveActions } from "@/hooks/useAutoApproveActions"
+import { useI18n } from "@/i18n"
 import { getAsVar, VSC_DESCRIPTION_FOREGROUND, VSC_TITLEBAR_INACTIVE_FOREGROUND } from "@/utils/vscStyles"
 import AutoApproveMenuItem from "./AutoApproveMenuItem"
 import { updateAutoApproveSettings } from "./AutoApproveSettingsAPI"
@@ -20,6 +21,7 @@ interface AutoApproveModalProps {
 const AutoApproveModal: React.FC<AutoApproveModalProps> = ({ isVisible, setIsVisible, buttonRef, ACTION_METADATA }) => {
 	const { autoApprovalSettings } = useExtensionState()
 	const { isChecked, updateAction } = useAutoApproveActions()
+	const { t } = useI18n()
 	const modalRef = useRef<HTMLDivElement>(null)
 	const itemsContainerRef = useRef<HTMLDivElement>(null)
 	const [containerWidth, setContainerWidth] = useState(0)
@@ -72,16 +74,21 @@ const AutoApproveModal: React.FC<AutoApproveModalProps> = ({ isVisible, setIsVis
 					maxHeight: "60vh",
 				}}>
 				<div className="mb-2.5 text-muted-foreground text-xs cursor-pointer" onClick={() => setIsVisible(false)}>
-					Let LIG VS take these actions without asking for approval.{" "}
+					{t("autoApprove.description")}{" "}
 					<a
 						className="text-link hover:text-link-hover"
 						href="https://docs.cline.bot/features/auto-approve#auto-approve"
 						rel="noopener"
 						style={{ fontSize: "inherit" }}
 						target="_blank">
-						Docs
+						{t("autoApprove.docs")}
 					</a>
 				</div>
+				{!autoApprovalSettings.enabled && (
+					<div className="mb-2 text-xs" style={{ color: "var(--vscode-notificationsWarningIcon-foreground)" }}>
+						{t("autoApprove.offWarning")}
+					</div>
+				)}
 
 				<div
 					className="relative mb-2 w-full"
@@ -129,11 +136,11 @@ const AutoApproveModal: React.FC<AutoApproveModalProps> = ({ isVisible, setIsVis
 								enableNotifications: checked,
 							})
 						}}>
-						<span className="text-sm">Enable notifications</span>
+						<span className="text-sm">{t("autoApprove.notifications")}</span>
 					</VSCodeCheckbox>
 				</div>
 				<div className="mt-1 text-xs text-muted-foreground">
-					Notifications may show abbreviated tool details for safety and privacy.
+					{t("autoApprove.notificationsHelp")}
 				</div>
 			</div>
 		</div>

@@ -101,11 +101,15 @@ class VisualStudioWorkspaceClient {
 	}
 
 	listFiles(request: { path?: string; recursive?: boolean; limit?: number }) {
-		return this.bridge.listFiles(request.path || "", request.recursive === true, request.limit)
+		return this.bridge.listFiles(request.path || "", request.recursive === true, clampLimit(request.limit, 1500, 5000))
 	}
 
 	searchFiles(request: { path?: string; query?: string; limit?: number }) {
-		return this.bridge.searchFiles(request.path || "", request.query || "", request.limit)
+		return this.bridge.searchFiles(request.path || "", request.query || "", clampLimit(request.limit, 200, 1000))
+	}
+
+	selectFiles(request: { allowImages?: boolean; value?: boolean }) {
+		return this.bridge.selectFiles(request.allowImages === true || request.value === true)
 	}
 
 	executeCommandInTerminal(request: { command?: string; cwd?: string; timeoutSeconds?: number }) {
@@ -161,6 +165,13 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 	const value = Number.parseInt(raw, 10)
 	return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function clampLimit(value: number | undefined, fallback: number, max: number) {
+	if (!Number.isFinite(value) || !value || value <= 0) {
+		return fallback
+	}
+	return Math.min(Math.floor(value), max)
 }
 
 class VisualStudioWindowClient {

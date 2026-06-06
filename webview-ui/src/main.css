@@ -116,19 +116,19 @@ vscode-tag {
 }
 
 .lig-transcript {
-	padding: 0 14px 10px 14px;
+	padding: 0 12px 6px 12px;
 	scrollbar-color: color-mix(in srgb, var(--vscode-scrollbarSlider-background, #797979) 70%, transparent) transparent;
 	user-select: text;
 }
 
 .lig-message-frame {
-	margin: 7px 0;
+	margin: 4px 0;
 	user-select: text;
 }
 
 .lig-assistant-message {
 	max-width: 980px;
-	padding: 2px 4px;
+	padding: 1px 3px;
 	color: color-mix(in srgb, var(--vscode-foreground) 96%, white);
 	user-select: text;
 }
@@ -142,12 +142,12 @@ vscode-tag {
 }
 
 .lig-assistant-message .inline-markdown-block {
-	line-height: 1.48;
+	line-height: 1.38;
 }
 
 .lig-assistant-message .inline-markdown-block p {
-	margin-block-start: 0.55em;
-	margin-block-end: 0.55em;
+	margin-block-start: 0.35em;
+	margin-block-end: 0.35em;
 }
 
 .lig-assistant-message .inline-markdown-block table {
@@ -182,15 +182,15 @@ vscode-tag {
 }
 
 .lig-tool-group {
-	padding: 8px 10px;
-	margin: 8px 0;
+	padding: 6px 8px;
+	margin: 5px 0;
 	color: var(--lig-text-muted);
 }
 
 .lig-progress-row,
 .lig-reasoning-row {
-	padding: 7px 10px;
-	margin: 8px 0;
+	padding: 5px 8px;
+	margin: 5px 0;
 }
 
 .lig-thinking-row button {

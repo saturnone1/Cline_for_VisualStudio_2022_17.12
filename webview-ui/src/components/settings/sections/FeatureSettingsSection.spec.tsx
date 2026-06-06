@@ -33,7 +33,7 @@ describe("FeatureSettingsSection", () => {
 	it("renders Hooks feature toggle", () => {
 		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
 
-		expect(screen.getByText("Hooks")).toBeTruthy()
+		expect(screen.getByText("훅")).toBeTruthy()
 
 		const advancedSection = container.querySelector("#advanced-features")
 		const agentSection = container.querySelector("#agent-features")
@@ -45,7 +45,7 @@ describe("FeatureSettingsSection", () => {
 	it("renders Feature Tips toggle in the Editor section", () => {
 		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
 
-		expect(screen.getByText("Feature Tips")).toBeTruthy()
+		expect(screen.getByText("기능 팁")).toBeTruthy()
 
 		const editorSection = container.querySelector("#optional-features")
 		const agentSection = container.querySelector("#agent-features")

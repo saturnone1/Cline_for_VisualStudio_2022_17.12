@@ -4,11 +4,11 @@
   <Metadata>
     <Identity Id="VsClineAgent.3F8C2A1D-E7B4-4F9E-A8C5-6D2B1F7E3A04"
               Language="en-US"
-              Version="1.1.26"
+              Version="1.1.43"
               Publisher="Developer" />
     <DisplayName>LIG VS</DisplayName>
     <Description xml:space="preserve">AI coding agent for Visual Studio, powered by local/offline runtimes</Description>
-    <Icon>Assets\lig-wordmark-white.png</Icon>
+    <Icon>Assets\lig-ci-white.png</Icon>
     <Tags>ai,agent,coding,ollama,llm,airgap</Tags>
     <ProjectType>Other</ProjectType>
   </Metadata>

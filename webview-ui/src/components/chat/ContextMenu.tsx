@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cleanPathPrefix } from "@/components/common/CodeAccordian"
 import ScreenReaderAnnounce from "@/components/common/ScreenReaderAnnounce"
 import { useMenuAnnouncement } from "@/hooks/useMenuAnnouncement"
+import { useI18n } from "@/i18n"
 import { ContextMenuOptionType, ContextMenuQueryItem, getContextMenuOptions, SearchResult } from "@/utils/context-mentions"
 
 interface ContextMenuProps {
@@ -27,6 +28,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 	dynamicSearchResults = [],
 	isLoading = false,
 }) => {
+	const { language, t } = useI18n()
 	const menuRef = useRef<HTMLDivElement>(null)
 
 	// State to show delayed loading indicator
@@ -95,11 +97,24 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
 	// Shared label definitions for simple option types
 	const SIMPLE_OPTION_LABELS: Partial<Record<ContextMenuOptionType, string>> = {
-		[ContextMenuOptionType.Problems]: "Problems",
-		[ContextMenuOptionType.Terminal]: "Terminal",
-		[ContextMenuOptionType.URL]: "Paste URL to fetch contents",
-		[ContextMenuOptionType.NoResults]: "No results found",
+		[ContextMenuOptionType.Problems]: t("context.problems"),
+		[ContextMenuOptionType.Terminal]: t("context.terminal"),
+		[ContextMenuOptionType.URL]: t("context.url"),
+		[ContextMenuOptionType.NoResults]: t("context.noResults"),
 	}
+	const localizeOptionText = useCallback(
+		(value?: string) => {
+			if (!value || language !== "ko") return value
+			if (value === "Working changes") return "작업 중 변경사항"
+			if (value === "Current uncommitted changes") return "현재 커밋되지 않은 변경사항"
+			if (value === "Git Commits") return t("context.gitCommits")
+			if (value === "Search repository history") return "저장소 히스토리 검색"
+			if (value.startsWith("Commit ")) return value.replace(/^Commit /, "커밋 ")
+			if (value === "Git commit hash") return "Git 커밋 해시"
+			return value
+		},
+		[language, t],
+	)
 
 	// Get accessible label for an option (used for screen readers and aria-label)
 	const getOptionLabel = useCallback((option: ContextMenuQueryItem): string => {
@@ -112,19 +127,19 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 		switch (option.type) {
 			case ContextMenuOptionType.Git:
 				if (option.value) {
-					return `${option.label}${option.description ? `, ${option.description}` : ""}`
+					return `${localizeOptionText(option.label)}${option.description ? `, ${localizeOptionText(option.description)}` : ""}`
 				}
-				return "Git Commits"
+				return t("context.gitCommits")
 			case ContextMenuOptionType.File:
 			case ContextMenuOptionType.Folder:
 				if (option.value) {
 					return option.label || option.value
 				}
-				return `Add ${option.type === ContextMenuOptionType.File ? "File" : "Folder"}`
+				return option.type === ContextMenuOptionType.File ? t("context.addFile") : t("context.addFolder")
 			default:
-				return option.label || option.value || ""
+				return localizeOptionText(option.label) || option.value || ""
 		}
-	}, [])
+	}, [SIMPLE_OPTION_LABELS, localizeOptionText, t])
 
 	const renderOptionContent = (option: ContextMenuQueryItem) => {
 		// Handle simple label types
@@ -139,7 +154,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 					return (
 						<div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 							<span className="ph-no-capture" style={{ lineHeight: "1.2" }}>
-								{option.label}
+								{localizeOptionText(option.label)}
 							</span>
 							<span
 								className="ph-no-capture"
@@ -151,12 +166,12 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 									textOverflow: "ellipsis",
 									lineHeight: "1.2",
 								}}>
-								{option.description}
+								{localizeOptionText(option.description)}
 							</span>
 						</div>
 					)
 				}
-				return <span>Git Commits</span>
+				return <span>{t("context.gitCommits")}</span>
 			case ContextMenuOptionType.File:
 			case ContextMenuOptionType.Folder:
 				if (option.value) {
@@ -182,7 +197,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						</>
 					)
 				}
-				return <span>Add {option.type === ContextMenuOptionType.File ? "File" : "Folder"}</span>
+				return <span>{option.type === ContextMenuOptionType.File ? t("context.addFile") : t("context.addFolder")}</span>
 			default:
 				return null
 		}
@@ -251,7 +266,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						? `context-menu-item-${selectedIndex}`
 						: undefined
 				}
-				aria-label="Context mentions"
+				aria-label={t("context.aria")}
 				ref={menuRef}
 				role="listbox"
 				style={{
@@ -276,7 +291,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 							opacity: 0.7,
 						}}>
 						<i className="codicon codicon-loading codicon-modifier-spin" style={{ fontSize: "14px" }} />
-						<span>Searching...</span>
+						<span>{t("context.searching")}</span>
 					</div>
 				)}
 				{filteredOptions.map((option, index) => {

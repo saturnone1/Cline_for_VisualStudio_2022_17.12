@@ -9,6 +9,7 @@
 		"build:test": "tsc -b && vite build -- --dev-build",
 		"preview": "vite preview",
 		"lint": "biome lint --changed --no-errors-on-unmatched",
+		"i18n:audit": "node scripts/i18n-audit.mjs",
 		"test": "vitest run",
 		"test:watch": "vitest dev",
 		"test:coverage": "vitest run --coverage",

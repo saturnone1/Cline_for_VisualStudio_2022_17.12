@@ -44,6 +44,7 @@ export interface ExtensionState {
 	autoApprovalSettings: AutoApprovalSettings
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string
+	uiLanguage?: "en" | "ko"
 	preferredLanguage?: string
 	mode: Mode
 	checkpointManagerErrorMessage?: string
@@ -393,6 +394,7 @@ export interface ClineApiReqInfo {
 	cacheWrites?: number
 	cacheReads?: number
 	cost?: number
+	usageReliable?: boolean
 	cancelReason?: ClineApiReqCancelReason
 	streamingFailedMessage?: string
 	retryStatus?: {

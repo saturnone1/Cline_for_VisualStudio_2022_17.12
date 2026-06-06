@@ -268,6 +268,7 @@ const USER_SETTINGS_FIELDS = {
 	scheduledAgentsEnabled: { default: false as boolean },
 	clineWebToolsEnabled: { default: true as boolean },
 	worktreesEnabled: { default: false as boolean },
+	uiLanguage: { default: "ko" as "en" | "ko" },
 	preferredLanguage: { default: "English" as string },
 	mode: { default: "act" as Mode },
 	focusChainSettings: { default: DEFAULT_FOCUS_CHAIN_SETTINGS as FocusChainSettings },

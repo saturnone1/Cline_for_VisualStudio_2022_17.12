@@ -12,9 +12,9 @@
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>VsClineAgent</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
-    <AssemblyVersion>1.1.26.0</AssemblyVersion>
-    <FileVersion>1.1.26.0</FileVersion>
-    <Version>1.1.26</Version>
+    <AssemblyVersion>1.1.43.0</AssemblyVersion>
+    <FileVersion>1.1.43.0</FileVersion>
+    <Version>1.1.43</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <!-- VSIX 생성 설정 -->
@@ -119,7 +119,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
-    <Content Include="Assets\lig-wordmark-white.png">
+    <Content Include="Assets\lig-ci-white.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
@@ -144,6 +144,24 @@
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
   </ItemGroup>
+
+  <Target Name="PrepareSidecarRuntimeFallback" BeforeTargets="GetVsixSourceItems">
+    <MakeDir Directories="Sidecar\runtime;Sidecar\runtime\diagnostics;Sidecar\runtime\host;Sidecar\runtime\ipc;Sidecar\runtime\sdk;Sidecar\runtime\webview" />
+    <Copy SourceFiles="Sidecar\cline-sidecar.js" DestinationFiles="Sidecar\runtime\cline-sidecar.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\node.exe" DestinationFiles="Sidecar\runtime\node.exe" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\diagnostics\InteractionLog.js" DestinationFiles="Sidecar\runtime\diagnostics\InteractionLog.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\host\VisualStudioHostBridgeClient.js" DestinationFiles="Sidecar\runtime\host\VisualStudioHostBridgeClient.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\host\VisualStudioHostProvider.js" DestinationFiles="Sidecar\runtime\host\VisualStudioHostProvider.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\ipc\types.js" DestinationFiles="Sidecar\runtime\ipc\types.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\sdk\ClineSdkRuntime.js" DestinationFiles="Sidecar\runtime\sdk\ClineSdkRuntime.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Sidecar\webview\VisualStudioWebviewRouter.js" DestinationFiles="Sidecar\runtime\webview\VisualStudioWebviewRouter.js" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Include="Sidecar\runtime\**">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

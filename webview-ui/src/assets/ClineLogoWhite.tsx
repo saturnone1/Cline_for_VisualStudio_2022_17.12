@@ -1,7 +1,7 @@
 import type { ImgHTMLAttributes } from "react"
-import ligWordmarkWhite from "./lig-wordmark-white.png"
+import ligCiWhite from "./lig-ci-white.png"
 
 const ClineLogoWhite = ({ alt = "LIG VS", ...props }: ImgHTMLAttributes<HTMLImageElement>) => (
-	<img alt={alt} src={ligWordmarkWhite} {...props} />
+	<img alt={alt} src={ligCiWhite} {...props} />
 )
 export default ClineLogoWhite

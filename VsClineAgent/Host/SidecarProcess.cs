@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 using VsClineAgent.Services;
 
@@ -49,10 +50,17 @@ namespace VsClineAgent.Host
             _postToWebviewAsync = postToWebviewAsync;
             InteractionLog.Write("host->sidecar", "webview.message", rawJson);
 
+            var stopwatch = Stopwatch.StartNew();
             var result = await _client.SendRequestAsync(
                 "webview.message",
                 new { rawJson },
                 cancellationToken).ConfigureAwait(false) as JObject;
+            stopwatch.Stop();
+            WriteSlowTrace("webview.message.slow", stopwatch.ElapsedMilliseconds, new JObject
+            {
+                ["rawLength"] = rawJson.Length,
+                ["handled"] = result?.Value<bool?>("handled")
+            });
             InteractionLog.Write("sidecar->host", "webview.message.result", result);
 
             if (result == null)
@@ -76,16 +84,16 @@ namespace VsClineAgent.Host
             if (IsRunning)
                 return "already-running";
 
+            var stopwatch = Stopwatch.StartNew();
             var pipeName = @"\\.\pipe\VsClineAgent-" + Guid.NewGuid().ToString("N");
             var sidecarDirectory = Path.Combine(_assemblyDirectory, "Sidecar");
             var runtimeDirectory = PrepareSidecarRuntime(sidecarDirectory);
             var scriptPath = Path.Combine(runtimeDirectory, "cline-sidecar.js");
-            var bundledNodePath = Path.Combine(sidecarDirectory, "node.exe");
-            var nodePath = File.Exists(bundledNodePath) ? bundledNodePath : "node";
+            var nodePath = ResolveBundledNodePath(sidecarDirectory);
             _logFilePath = GetSidecarLogPath();
 
             if (!File.Exists(scriptPath))
-                throw new FileNotFoundException("Cline sidecar entrypoint was not found.", scriptPath);
+                throw new FileNotFoundException(BuildMissingEntrypointDiagnostic(sidecarDirectory, runtimeDirectory), scriptPath);
 
             CaptureSidecarLine("sidecar:start", "node=" + nodePath);
             CaptureSidecarLine("sidecar:start", "script=" + scriptPath);
@@ -139,7 +147,27 @@ namespace VsClineAgent.Host
                 throw new InvalidOperationException(BuildStartupDiagnostic("Cline sidecar did not become ready.", ex), ex);
             }
 
+            stopwatch.Stop();
+            WriteSlowTrace("sidecar.start.slow", stopwatch.ElapsedMilliseconds, new JObject
+            {
+                ["status"] = ((JObject?)result)?["status"]?.ToString() ?? "unknown",
+                ["runtime"] = runtimeDirectory
+            }, 1500);
             return ((JObject?)result)?["status"]?.ToString() ?? "unknown";
+        }
+
+        private static void WriteSlowTrace(string eventName, long durationMs, JObject payload, int thresholdMs = 750)
+        {
+            var configured = Environment.GetEnvironmentVariable("VSCLINE_SLOW_HOST_REQUEST_MS");
+            if (int.TryParse(configured, out var parsed) && parsed > 0)
+                thresholdMs = parsed;
+
+            if (durationMs < thresholdMs)
+                return;
+
+            payload["durationMs"] = durationMs;
+            payload["thresholdMs"] = thresholdMs;
+            InteractionLog.Write("host", eventName, payload);
         }
 
         private async Task<JToken?> HandleSidecarRequestAsync(string method, JToken? parameters)
@@ -189,6 +217,8 @@ namespace VsClineAgent.Host
                     return ListFiles(parameters);
                 case "workspace.searchFiles":
                     return SearchFiles(parameters);
+                case "workspace.selectFiles":
+                    return SelectFiles(parameters);
                 case "window.showMessage":
                     await _editorService.SetStatusBarAsync(GetStringParameter(parameters, "message")).ConfigureAwait(false);
                     return new JObject { ["shown"] = true };
@@ -487,7 +517,7 @@ namespace VsClineAgent.Host
             }
 
             var recursive = parameters is JObject obj && obj.Value<bool?>("recursive") == true;
-            var limit = Math.Max(1, GetIntParameter(parameters, "limit") ?? 5000);
+            var limit = Math.Max(1, GetIntParameter(parameters, "limit") ?? 1500);
             var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = new JArray();
             var ignoreRules = LoadClineIgnoreRules(root);
@@ -536,7 +566,7 @@ namespace VsClineAgent.Host
                 };
             }
 
-            var limit = Math.Max(1, GetIntParameter(parameters, "limit") ?? 500);
+            var limit = Math.Max(1, GetIntParameter(parameters, "limit") ?? 200);
             var matches = new JArray();
             var ignoreRules = LoadClineIgnoreRules(root);
             var count = 0;
@@ -573,6 +603,53 @@ namespace VsClineAgent.Host
                 ["matches"] = matches,
                 ["truncated"] = truncated
             };
+        }
+
+        private static JObject SelectFiles(JToken? parameters)
+        {
+            var allowImages = GetBoolParameter(parameters, "allowImages") || GetBoolParameter(parameters, "value");
+            return InvokeOnUiThread(() =>
+            {
+                var dialog = new OpenFileDialog
+                {
+                    Multiselect = true,
+                    CheckFileExists = true,
+                    Title = "Select files for LIG VS"
+                };
+
+                var imagePaths = new JArray();
+                var filePaths = new JArray();
+
+                if (dialog.ShowDialog() == true)
+                {
+                    foreach (var fileName in dialog.FileNames)
+                    {
+                        if (allowImages && IsImagePath(fileName))
+                            imagePaths.Add(fileName);
+                        else
+                            filePaths.Add(fileName);
+                    }
+                }
+
+                return new JObject
+                {
+                    ["values1"] = imagePaths,
+                    ["values2"] = filePaths,
+                    ["images"] = new JArray(imagePaths),
+                    ["files"] = new JArray(filePaths)
+                };
+            });
+        }
+
+        private static bool IsImagePath(string path)
+        {
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            return extension == ".png" ||
+                   extension == ".jpg" ||
+                   extension == ".jpeg" ||
+                   extension == ".gif" ||
+                   extension == ".webp" ||
+                   extension == ".bmp";
         }
 
         private static string GetStringParameter(JToken? parameters, string name)
@@ -901,9 +978,15 @@ namespace VsClineAgent.Host
             var parts = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             return parts.Any(part =>
                 string.Equals(part, ".git", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, ".vs", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, ".vscode", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "node_modules", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "bin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(part, "obj", StringComparison.OrdinalIgnoreCase));
+                string.Equals(part, "obj", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, "dist", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, "coverage", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, "WebView2Runtime", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(part, "Sidecar", StringComparison.OrdinalIgnoreCase));
         }
 
         private sealed class ClineIgnoreRule
@@ -1122,6 +1205,7 @@ namespace VsClineAgent.Host
         private static string PrepareSidecarRuntime(string packagedSidecarDirectory)
         {
             var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
+            var runtimeSourceDirectory = ResolvePackagedRuntimeDirectory(packagedSidecarDirectory);
             var runtimeVersion = GetRuntimeCacheVersion();
             var cacheRoot = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1132,12 +1216,12 @@ namespace VsClineAgent.Host
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
             var expectedStamp = GetArchiveStamp(nodeModulesZip);
-            var expectedRuntimeStamp = GetRuntimeStamp(packagedSidecarDirectory);
+            var expectedRuntimeStamp = GetRuntimeStamp(runtimeSourceDirectory);
 
             if (!File.Exists(runtimeStampPath) ||
                 !string.Equals(File.ReadAllText(runtimeStampPath), expectedRuntimeStamp, StringComparison.Ordinal))
             {
-                CopyRuntimeFiles(packagedSidecarDirectory, cacheRoot);
+                CopyRuntimeFiles(runtimeSourceDirectory, cacheRoot);
                 File.WriteAllText(runtimeStampPath, expectedRuntimeStamp);
             }
 
@@ -1157,6 +1241,40 @@ namespace VsClineAgent.Host
             }
 
             return cacheRoot;
+        }
+
+        private static string ResolvePackagedRuntimeDirectory(string packagedSidecarDirectory)
+        {
+            var rootEntrypoint = Path.Combine(packagedSidecarDirectory, "cline-sidecar.js");
+            if (File.Exists(rootEntrypoint))
+                return packagedSidecarDirectory;
+
+            var nestedRuntimeDirectory = Path.Combine(packagedSidecarDirectory, "runtime");
+            var nestedEntrypoint = Path.Combine(nestedRuntimeDirectory, "cline-sidecar.js");
+            return File.Exists(nestedEntrypoint) ? nestedRuntimeDirectory : packagedSidecarDirectory;
+        }
+
+        private static string ResolveBundledNodePath(string packagedSidecarDirectory)
+        {
+            var rootNodePath = Path.Combine(packagedSidecarDirectory, "node.exe");
+            if (File.Exists(rootNodePath))
+                return rootNodePath;
+
+            var runtimeNodePath = Path.Combine(packagedSidecarDirectory, "runtime", "node.exe");
+            return File.Exists(runtimeNodePath) ? runtimeNodePath : "node";
+        }
+
+        private static string BuildMissingEntrypointDiagnostic(string packagedSidecarDirectory, string runtimeDirectory)
+        {
+            var packagedEntrypoint = Path.Combine(packagedSidecarDirectory, "cline-sidecar.js");
+            var packagedRuntimeEntrypoint = Path.Combine(packagedSidecarDirectory, "runtime", "cline-sidecar.js");
+            var cachedEntrypoint = Path.Combine(runtimeDirectory, "cline-sidecar.js");
+            return "Cline sidecar entrypoint was not found. Checked: "
+                + packagedEntrypoint
+                + "; "
+                + packagedRuntimeEntrypoint
+                + "; "
+                + cachedEntrypoint;
         }
 
         private static string GetRuntimeCacheVersion()

@@ -8,6 +8,7 @@ import { GroupedVirtuoso } from "react-virtuoso"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { TaskServiceClient } from "@/services/grpc-client"
 import { formatSize } from "@/utils/format"
 import ViewHeader from "../common/ViewHeader"
@@ -25,19 +26,10 @@ const isToday = (timestamp: number): boolean => {
 	return today.toDateString() === date.toDateString()
 }
 
-const HISTORY_FILTERS = {
-	newest: "Newest",
-	oldest: "Oldest",
-	mostExpensive: "Most Expensive",
-	mostTokens: "Most Tokens",
-	mostRelevant: "Most Relevant",
-	workspaceOnly: "Workspace Only",
-	favoritesOnly: "Favorites Only",
-}
-
 const HistoryView = ({ onDone }: HistoryViewProps) => {
 	const extensionStateContext = useExtensionState()
 	const { taskHistory, onRelinquishControl, environment } = extensionStateContext
+	const { language, t } = useI18n()
 	const [searchQuery, setSearchQuery] = useState("")
 	const [sortOption, setSortOption] = useState<SortOption>("newest")
 	const [lastNonRelevantSort, setLastNonRelevantSort] = useState<SortOption | null>("newest")
@@ -268,10 +260,10 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 
 		const groups: { tasks: any[]; label: string }[] = []
 		if (todayTasks.length > 0) {
-			groups.push({ tasks: todayTasks, label: "Today" })
+			groups.push({ tasks: todayTasks, label: t("history.today") })
 		}
 		if (olderTasks.length > 0) {
-			groups.push({ tasks: olderTasks, label: "Older" })
+			groups.push({ tasks: olderTasks, label: t("history.older") })
 		}
 
 		return {
@@ -279,7 +271,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 			groupCounts: groups.map((g) => g.tasks.length),
 			groupLabels: groups.map((g) => g.label),
 		}
-	}, [taskHistorySearchResults, sortOption])
+	}, [taskHistorySearchResults, sortOption, t])
 
 	// Calculate total size of selected items
 	const selectedItemsSize = useMemo(() => {
@@ -304,7 +296,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 	return (
 		<div className="fixed overflow-hidden inset-0 flex flex-col w-full">
 			{/* HEADER */}
-			<ViewHeader environment={environment} onDone={onDone} title="History" />
+			<ViewHeader environment={environment} onDone={onDone} title={t("history.title")} />
 
 			{/* FILTERS */}
 			<div className="flex flex-col gap-3 px-3">
@@ -321,12 +313,12 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 								setSortOption("mostRelevant")
 							}
 						}}
-						placeholder="Fuzzy search history..."
+						placeholder={t("history.search")}
 						value={searchQuery}>
 						<div className="codicon codicon-search opacity-80 mt-0.5 !text-sm" slot="start" />
 						{searchQuery && (
 							<div
-								aria-label="Clear search"
+								aria-label={t("history.clearSearch")}
 								className="input-icon-button codicon codicon-close flex justify-center items-center h-full"
 								onClick={() => setSearchQuery("")}
 								slot="end"
@@ -364,7 +356,15 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							<FunnelIcon className="!size-2 text-foreground" />
 						</SelectTrigger>
 						<SelectContent position="popper">
-							{Object.entries(HISTORY_FILTERS).map(([key, value]) => {
+							{Object.entries({
+								newest: t("history.newest"),
+								oldest: t("history.oldest"),
+								mostExpensive: t("history.mostExpensive"),
+								mostTokens: t("history.mostTokens"),
+								mostRelevant: t("history.mostRelevant"),
+								workspaceOnly: t("history.workspaceOnly"),
+								favoritesOnly: t("history.favoritesOnly"),
+							}).map(([key, value]) => {
 								const isSortOption = ["newest", "oldest", "mostExpensive", "mostTokens", "mostRelevant"].includes(
 									key,
 								)
@@ -433,26 +433,26 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 			<div className="p-2.5 border-t border-t-border-panel">
 				<div className="flex gap-2.5 mb-2.5">
 					<Button className="flex-1" onClick={() => handleBatchHistorySelect(true)} variant="secondary">
-						Select All
+						{t("history.selectAll")}
 					</Button>
 					<Button className="flex-1" onClick={() => handleBatchHistorySelect(false)} variant="secondary">
-						Select None
+						{t("history.selectNone")}
 					</Button>
 				</div>
 				{selectedItems.length > 0 ? (
 					<Button
-						aria-label="Delete selected items"
+						aria-label={t("history.deleteSelectedAria")}
 						className="w-full"
 						onClick={() => {
 							handleDeleteSelectedHistoryItems(selectedItems)
 						}}
 						variant="danger">
-						Delete {selectedItems.length > 1 ? selectedItems.length : ""} Selected
+						{t("history.deleteSelected", { count: selectedItems.length })}
 						{selectedItemsSize > 0 ? ` (${formatSize(selectedItemsSize)})` : ""}
 					</Button>
 				) : (
 					<Button
-						aria-label="Delete all history"
+						aria-label={t("history.deleteAllAria")}
 						className="w-full"
 						disabled={deleteAllDisabled || taskHistory.length === 0}
 						onClick={async () => {
@@ -470,7 +470,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							}
 						}}
 						variant="danger">
-						Delete All History{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
+						{t("history.deleteAll")}{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
 					</Button>
 				)}
 			</div>

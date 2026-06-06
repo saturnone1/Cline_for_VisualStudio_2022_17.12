@@ -10,6 +10,7 @@ import { normalizeApiConfiguration } from "@/components/settings/utils/providerU
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { ModelsServiceClient } from "@/services/grpc-client"
 import { OPENROUTER_MODEL_PICKER_Z_INDEX } from "./OpenRouterModelPicker"
 import { AIhubmixProvider } from "./providers/AihubmixProvider"
@@ -92,6 +93,7 @@ const ApiOptions = ({
 }: ApiOptionsProps) => {
 	// Use full context state for immediate save payload
 	const { apiConfiguration, remoteConfigSettings } = useExtensionState()
+	const { t } = useI18n()
 
 	const { selectedProvider } = normalizeApiConfiguration(apiConfiguration, currentMode)
 
@@ -250,6 +252,31 @@ const ApiOptions = ({
 		}
 	}, [selectedIndex])
 
+	const selectedProviderConfigStatus = useMemo(() => {
+		const config = apiConfiguration as Record<string, unknown> | undefined
+		if (!config) {
+			return t("settings.api.configMissing")
+		}
+
+		const providerToken = selectedProvider.toLowerCase().replace(/[^a-z0-9]/g, "")
+		const configured = Object.entries(config).some(([key, value]) => {
+			if (value === undefined || value === null || value === "" || value === false) {
+				return false
+			}
+			const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+			return (
+				normalizedKey.includes(providerToken) &&
+				(normalizedKey.includes("apikey") ||
+					normalizedKey.includes("baseurl") ||
+					normalizedKey.includes("modelid") ||
+					normalizedKey.includes("oauth") ||
+					normalizedKey.includes("token"))
+			)
+		})
+
+		return configured ? t("settings.api.configSaved") : t("settings.api.configEmpty")
+	}, [apiConfiguration, selectedProvider, t])
+
 	/*
 	VSCodeDropdown has an open bug where dynamically rendered options don't auto select the provided value prop. You can see this for yourself by comparing  it with normal select/option elements, which work as expected.
 	https://github.com/microsoft/vscode-webview-ui-toolkit/issues/433
@@ -275,16 +302,16 @@ const ApiOptions = ({
 						<TooltipTrigger>
 							<div className="flex items-center gap-2 mb-1">
 								<label htmlFor="api-provider">
-									<span style={{ fontWeight: 500 }}>API Provider</span>
+									<span style={{ fontWeight: 500 }}>{t("settings.api.provider")}</span>
 								</label>
 								<i className="codicon codicon-lock text-description text-sm" />
 							</div>
 						</TooltipTrigger>
-						<TooltipContent>Provider options are managed by your organization's remote configuration</TooltipContent>
+						<TooltipContent>{t("settings.api.providerManaged")}</TooltipContent>
 					</Tooltip>
 				) : (
 					<label htmlFor="api-provider">
-						<span style={{ fontWeight: 500 }}>API Provider</span>
+						<span style={{ fontWeight: 500 }}>{t("settings.api.provider")}</span>
 					</label>
 				)}
 				<ProviderDropdownWrapper ref={dropdownRef}>
@@ -300,7 +327,7 @@ const ApiOptions = ({
 							setIsDropdownVisible(true)
 						}}
 						onKeyDown={handleKeyDown}
-						placeholder="Search and select provider..."
+						placeholder={t("settings.api.searchProvider")}
 						role="combobox"
 						style={{
 							width: "100%",
@@ -311,7 +338,7 @@ const ApiOptions = ({
 						value={searchTerm}>
 						{searchTerm && searchTerm !== currentProviderLabel && (
 							<div
-								aria-label="Clear search"
+								aria-label={t("settings.api.clearSearch")}
 								className="input-icon-button codicon codicon-close"
 								onClick={() => {
 									setSearchTerm("")
@@ -346,6 +373,7 @@ const ApiOptions = ({
 						</ProviderDropdownList>
 					)}
 				</ProviderDropdownWrapper>
+				<div className="mt-1 text-xs text-description">{selectedProviderConfigStatus}</div>
 			</DropdownContainer>
 
 			{apiConfiguration && selectedProvider === "hicap" && (
