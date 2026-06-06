@@ -2,6 +2,7 @@ import { BooleanRequest, EmptyRequest } from "@shared/proto/cline/common"
 import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { memo, useEffect, useState } from "react"
 import ClineLogoWhite from "@/assets/ClineLogoWhite"
+import ligCiColor01 from "@/assets/lig-ci-color01.jpg"
 import ApiOptions from "@/components/settings/ApiOptions"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { AccountServiceClient, StateServiceClient } from "@/services/grpc-client"
@@ -39,10 +40,11 @@ const WelcomeView = memo(() => {
 	return (
 		<div className="fixed inset-0 p-0 flex flex-col">
 			<div className="h-full px-5 overflow-auto flex flex-col gap-2.5">
-				<h2 className="text-lg font-semibold">Hi, I'm Cline</h2>
-				<div className="flex justify-center my-5">
-					<ClineLogoWhite className="size-16" />
+				<div className="flex flex-col items-center gap-3 my-5">
+					<img alt="" className="h-16 w-full max-w-[220px] object-contain opacity-95" src={ligCiColor01} />
+					<ClineLogoWhite className="h-12 w-52 object-contain" />
 				</div>
+				<h2 className="text-lg font-semibold">Hi, I'm LIG VS</h2>
 				<p>
 					I can do all kinds of tasks thanks to breakthroughs in{" "}
 					<VSCodeLink className="inline" href="https://www.anthropic.com/claude/sonnet">
@@ -54,8 +56,7 @@ const WelcomeView = memo(() => {
 				</p>
 
 				<p className="text-(--vscode-descriptionForeground)">
-					Sign up for an account to get started for free, or use an API key that provides access to models like Claude
-					Sonnet.
+					Sign in to use account-based providers, or configure your own API key for local and enterprise models.
 				</p>
 
 				<VSCodeButton appearance="primary" className="w-full mt-1" disabled={isLoading} onClick={handleLogin}>

@@ -8,6 +8,13 @@ interface ConnectionInfo {
 	isConnected: boolean
 	isRemote: boolean
 	host?: string
+	path?: string
+	browser?: string
+	protocolVersion?: string
+	tabCount?: number
+	activeTabTitle?: string
+	activeTabUrl?: string
+	error?: string
 }
 
 export const BrowserSettingsMenu = () => {
@@ -26,13 +33,18 @@ export const BrowserSettingsMenu = () => {
 		// Function to fetch connection info
 		;(async () => {
 			try {
-				console.log("[DEBUG] SENDING BROWSER CONNECTION INFO REQUEST")
 				const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
-				console.log("[DEBUG] GOT BROWSER REPLY:", info, typeof info)
 				setConnectionInfo({
 					isConnected: info.isConnected,
 					isRemote: info.isRemote,
 					host: info.host,
+					path: info.path,
+					browser: info.browser,
+					protocolVersion: info.protocolVersion,
+					tabCount: info.tabCount,
+					activeTabTitle: info.activeTabTitle,
+					activeTabUrl: info.activeTabUrl,
+					error: info.error,
 				})
 			} catch (error) {
 				console.error("Error fetching browser connection info:", error)
@@ -78,6 +90,13 @@ export const BrowserSettingsMenu = () => {
 						isConnected: info.isConnected,
 						isRemote: info.isRemote,
 						host: info.host,
+						path: info.path,
+						browser: info.browser,
+						protocolVersion: info.protocolVersion,
+						tabCount: info.tabCount,
+						activeTabTitle: info.activeTabTitle,
+						activeTabUrl: info.activeTabUrl,
+						error: info.error,
 					})
 				} catch (error) {
 					console.error("Error fetching browser connection info:", error)
@@ -118,6 +137,13 @@ export const BrowserSettingsMenu = () => {
 					isConnected: info.isConnected,
 					isRemote: info.isRemote,
 					host: info.host,
+					path: info.path,
+					browser: info.browser,
+					protocolVersion: info.protocolVersion,
+					tabCount: info.tabCount,
+					activeTabTitle: info.activeTabTitle,
+					activeTabUrl: info.activeTabUrl,
+					error: info.error,
 				})
 			} catch (error) {
 				console.error("Error fetching browser connection info:", error)
@@ -127,8 +153,8 @@ export const BrowserSettingsMenu = () => {
 		// Request connection info immediately
 		fetchConnectionInfo()
 
-		// Set up interval to refresh every second
-		const intervalId = setInterval(fetchConnectionInfo, 1000)
+		// Keep the badge reasonably fresh without hammering the sidecar/WebView bridge.
+		const intervalId = setInterval(fetchConnectionInfo, 5000)
 
 		return () => clearInterval(intervalId)
 	}, [])
@@ -192,6 +218,36 @@ export const BrowserSettingsMenu = () => {
 							<div className="flex-none w-[90px] font-medium">Remote Host:</div>
 							{/* InfoValue - Flexible value container */}
 							<div className="flex-1 break-words">{connectionInfo.host}</div>
+						</div>
+					)}
+					{connectionInfo.isConnected && connectionInfo.path && (
+						<div className="flex flex-wrap whitespace-nowrap mb-1">
+							<div className="flex-none w-[90px] font-medium">Path:</div>
+							<div className="flex-1 break-words">{connectionInfo.path}</div>
+						</div>
+					)}
+					{connectionInfo.isConnected && connectionInfo.browser && (
+						<div className="flex flex-wrap whitespace-nowrap mb-1">
+							<div className="flex-none w-[90px] font-medium">Browser:</div>
+							<div className="flex-1 break-words">{connectionInfo.browser}</div>
+						</div>
+					)}
+					{connectionInfo.isConnected && connectionInfo.isRemote && (
+						<div className="flex flex-wrap whitespace-nowrap mb-1">
+							<div className="flex-none w-[90px] font-medium">Tabs:</div>
+							<div className="flex-1 break-words">{connectionInfo.tabCount ?? 0}</div>
+						</div>
+					)}
+					{connectionInfo.isConnected && connectionInfo.activeTabTitle && (
+						<div className="flex flex-wrap whitespace-nowrap mb-1">
+							<div className="flex-none w-[90px] font-medium">Active tab:</div>
+							<div className="flex-1 break-words">{connectionInfo.activeTabTitle}</div>
+						</div>
+					)}
+					{!connectionInfo.isConnected && connectionInfo.error && (
+						<div className="flex flex-wrap mb-1">
+							<div className="flex-none w-[90px] font-medium">Reason:</div>
+							<div className="flex-1 break-words">{connectionInfo.error}</div>
 						</div>
 					)}
 				</div>

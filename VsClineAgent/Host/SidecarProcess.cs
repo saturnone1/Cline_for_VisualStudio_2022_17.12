@@ -181,6 +181,8 @@ namespace VsClineAgent.Host
                     return ReadTextFile(parameters);
                 case "workspace.writeTextFile":
                     return WriteTextFile(parameters);
+                case "workspace.deleteFile":
+                    return DeleteFile(parameters);
                 case "workspace.createDirectory":
                     return CreateDirectory(parameters);
                 case "workspace.listFiles":
@@ -244,8 +246,15 @@ namespace VsClineAgent.Host
                     await _editorService.ExecuteCommandAsync("View.ErrorList").ConfigureAwait(false);
                     return new JObject { ["success"] = true };
                 case "workspace.openTerminalPanel":
-                    await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
-                    return new JObject { ["success"] = true };
+                    return await OpenTerminalPanelAsync(parameters).ConfigureAwait(false);
+                case "workspace.attachTerminalCommand":
+                    return await AttachTerminalCommandAsync(parameters).ConfigureAwait(false);
+                case "workspace.continueTerminalCommand":
+                    return await ContinueTerminalCommandAsync(parameters).ConfigureAwait(false);
+                case "workspace.openSolution":
+                    return await OpenSolutionAsync(parameters).ConfigureAwait(false);
+                case "workspace.openFolder":
+                    return await OpenFolderAsync(parameters).ConfigureAwait(false);
                 case "diff.openDiff":
                     return await OpenDiffAsync(parameters).ConfigureAwait(false);
                 case "diff.closeAllDiffs":
@@ -308,6 +317,110 @@ namespace VsClineAgent.Host
             return new JObject { ["fileDiagnostics"] = fileDiagnostics };
         }
 
+        private async Task<JObject> OpenSolutionAsync(JToken? parameters)
+        {
+            var solutionPath = GetStringParameter(parameters, "solutionPath");
+            var newWindow = GetBoolParameter(parameters, "newWindow");
+            if (string.IsNullOrWhiteSpace(solutionPath) || !File.Exists(solutionPath))
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = "Solution file was not found.",
+                    ["solutionPath"] = solutionPath ?? ""
+                };
+            }
+
+            try
+            {
+                if (newWindow)
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "devenv.exe",
+                        Arguments = QuoteArgument(solutionPath),
+                        UseShellExecute = true,
+                        WindowStyle = ProcessWindowStyle.Normal
+                    });
+                }
+                else
+                {
+                    await _editorService.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
+                }
+
+                return new JObject
+                {
+                    ["success"] = true,
+                    ["solutionPath"] = solutionPath,
+                    ["newWindow"] = newWindow
+                };
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = ex.Message,
+                    ["solutionPath"] = solutionPath,
+                    ["newWindow"] = newWindow
+                };
+            }
+        }
+
+        private async Task<JObject> OpenFolderAsync(JToken? parameters)
+        {
+            var folderPath = GetStringParameter(parameters, "folderPath");
+            if (string.IsNullOrWhiteSpace(folderPath))
+                folderPath = GetStringParameter(parameters, "path");
+            var newWindow = GetBoolParameter(parameters, "newWindow");
+            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = "Folder was not found.",
+                    ["folderPath"] = folderPath ?? ""
+                };
+            }
+
+            try
+            {
+                if (newWindow)
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "devenv.exe",
+                        Arguments = QuoteArgument(folderPath),
+                        UseShellExecute = true,
+                        WindowStyle = ProcessWindowStyle.Normal
+                    });
+                }
+                else
+                {
+                    await _editorService.ExecuteCommandAsync("File.OpenFolder", QuoteVsCommandArgument(folderPath)).ConfigureAwait(false);
+                }
+
+                return new JObject
+                {
+                    ["success"] = true,
+                    ["folderPath"] = folderPath,
+                    ["newWindow"] = newWindow,
+                    ["folderOnly"] = true
+                };
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = ex.Message,
+                    ["folderPath"] = folderPath,
+                    ["newWindow"] = newWindow,
+                    ["folderOnly"] = true
+                };
+            }
+        }
+
         private static JObject ReadTextFile(JToken? parameters)
         {
             var path = GetStringParameter(parameters, "path");
@@ -338,6 +451,16 @@ namespace VsClineAgent.Host
                 Directory.CreateDirectory(directory);
 
             File.WriteAllText(path, GetStringParameter(parameters, "content"));
+            return new JObject { ["success"] = true };
+        }
+
+        private static JObject DeleteFile(JToken? parameters)
+        {
+            var path = GetStringParameter(parameters, "path");
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return new JObject { ["success"] = false };
+
+            File.Delete(path);
             return new JObject { ["success"] = true };
         }
 
@@ -466,6 +589,16 @@ namespace VsClineAgent.Host
                 : null;
         }
 
+        private static bool GetBoolParameter(JToken? parameters, string name)
+        {
+            return parameters is JObject obj && obj.Value<bool?>(name) == true;
+        }
+
+        private static string QuoteArgument(string value)
+        {
+            return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
+        }
+
         private async Task<JObject> ExecuteCommandInTerminalAsync(JToken? parameters)
         {
             var command = GetStringParameter(parameters, "command");
@@ -494,7 +627,10 @@ namespace VsClineAgent.Host
                 ["cancelled"] = result.Cancelled,
                 ["background"] = result.Background,
                 ["isHot"] = result.IsHot,
+                ["attachable"] = result.Background,
+                ["proceedWhileRunningAvailable"] = result.Background || result.IsHot,
                 ["durationMs"] = result.DurationMs,
+                ["currentDirectory"] = result.CurrentDirectory,
                 ["stdout"] = TruncateCommandOutput(result.StdOut),
                 ["stderr"] = TruncateCommandOutput(result.StdErr),
                 ["stdoutTruncated"] = result.StdOutTruncated || result.StdOut.Length > MaxCommandOutputChars,
@@ -530,12 +666,17 @@ namespace VsClineAgent.Host
             return new JObject
             {
                 ["activeCommands"] = new JArray(state.ActiveCommands.Select(ToRunningCommandJson)),
+                ["backgroundCommands"] = new JArray(state.BackgroundCommands.Select(ToRunningCommandJson)),
                 ["recentCommands"] = new JArray(state.RecentCommands.Select(ToCompletedCommandJson)),
                 ["recentOutput"] = new JArray(state.RecentOutput.Select(ToCommandOutputJson)),
                 ["outputSequence"] = state.OutputSequence,
                 ["shell"] = state.Shell,
                 ["shellState"] = state.ShellState,
-                ["reuseMode"] = state.ReuseMode
+                ["reuseMode"] = state.ReuseMode,
+                ["currentDirectory"] = state.CurrentDirectory,
+                ["unretrievedOutputAvailable"] = state.UnretrievedOutputAvailable,
+                ["attachable"] = state.Attachable,
+                ["proceedWhileRunningAvailable"] = state.ProceedWhileRunningAvailable
             };
         }
 
@@ -549,6 +690,98 @@ namespace VsClineAgent.Host
             };
         }
 
+        private async Task<JObject> OpenTerminalPanelAsync(JToken? parameters)
+        {
+            await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
+            var commandId = GetStringParameter(parameters, "commandId");
+            var terminalId = GetStringParameter(parameters, "terminalId");
+            if (!string.IsNullOrWhiteSpace(commandId) || !string.IsNullOrWhiteSpace(terminalId))
+            {
+                return await BuildTerminalCommandActionResultAsync(
+                    commandId,
+                    terminalId,
+                    "Visual Studio command output pane was opened.").ConfigureAwait(false);
+            }
+
+            return new JObject { ["success"] = true };
+        }
+
+        private async Task<JObject> AttachTerminalCommandAsync(JToken? parameters)
+        {
+            await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
+            return await BuildTerminalCommandActionResultAsync(
+                GetStringParameter(parameters, "commandId"),
+                GetStringParameter(parameters, "terminalId"),
+                "Attached to Visual Studio command host output.").ConfigureAwait(false);
+        }
+
+        private async Task<JObject> ContinueTerminalCommandAsync(JToken? parameters)
+        {
+            await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
+            return await BuildTerminalCommandActionResultAsync(
+                GetStringParameter(parameters, "commandId"),
+                GetStringParameter(parameters, "terminalId"),
+                "Continuing while command runs in the Visual Studio command host.").ConfigureAwait(false);
+        }
+
+        private async Task<JObject> BuildTerminalCommandActionResultAsync(string commandId, string terminalId, string message)
+        {
+            var state = await _commandExecutionService.GetTerminalStateAsync().ConfigureAwait(false);
+            var active = state.ActiveCommands.FirstOrDefault(command =>
+                MatchesTerminalCommand(command.CommandId, command.TerminalId, commandId, terminalId));
+            var completed = state.RecentCommands.LastOrDefault(command =>
+                MatchesTerminalCommand(command.CommandId, command.TerminalId, commandId, terminalId));
+            var afterSequence = Math.Max(0, state.OutputSequence - 200);
+            var output = await _commandExecutionService.GetUnretrievedOutputAsync(afterSequence).ConfigureAwait(false);
+            var filteredOutput = output
+                .Where(line => string.IsNullOrWhiteSpace(commandId) || string.Equals(line.CommandId, commandId, StringComparison.OrdinalIgnoreCase))
+                .Where(line => string.IsNullOrWhiteSpace(terminalId) || string.Equals(line.TerminalId, terminalId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            return new JObject
+            {
+                ["success"] = active != null || completed != null || string.IsNullOrWhiteSpace(commandId),
+                ["message"] = active != null || completed != null || string.IsNullOrWhiteSpace(commandId)
+                    ? message
+                    : "No matching Visual Studio command host session was found.",
+                ["command"] = active != null
+                    ? ToRunningCommandJson(active)
+                    : completed != null
+                        ? ToCompletedCommandJson(completed)
+                        : null,
+                ["state"] = ToTerminalStateJson(state),
+                ["lines"] = new JArray(filteredOutput.Select(ToCommandOutputJson))
+            };
+        }
+
+        private static bool MatchesTerminalCommand(string candidateCommandId, string candidateTerminalId, string commandId, string terminalId)
+        {
+            var commandMatches = string.IsNullOrWhiteSpace(commandId) ||
+                string.Equals(candidateCommandId, commandId, StringComparison.OrdinalIgnoreCase);
+            var terminalMatches = string.IsNullOrWhiteSpace(terminalId) ||
+                string.Equals(candidateTerminalId, terminalId, StringComparison.OrdinalIgnoreCase);
+            return commandMatches && terminalMatches;
+        }
+
+        private static JObject ToTerminalStateJson(TerminalStateInfo state)
+        {
+            return new JObject
+            {
+                ["activeCommands"] = new JArray(state.ActiveCommands.Select(ToRunningCommandJson)),
+                ["backgroundCommands"] = new JArray(state.BackgroundCommands.Select(ToRunningCommandJson)),
+                ["recentCommands"] = new JArray(state.RecentCommands.Select(ToCompletedCommandJson)),
+                ["recentOutput"] = new JArray(state.RecentOutput.Select(ToCommandOutputJson)),
+                ["outputSequence"] = state.OutputSequence,
+                ["shell"] = state.Shell,
+                ["shellState"] = state.ShellState,
+                ["reuseMode"] = state.ReuseMode,
+                ["currentDirectory"] = state.CurrentDirectory,
+                ["unretrievedOutputAvailable"] = state.UnretrievedOutputAvailable,
+                ["attachable"] = state.Attachable,
+                ["proceedWhileRunningAvailable"] = state.ProceedWhileRunningAvailable
+            };
+        }
+
         private static JObject ToRunningCommandJson(RunningCommandInfo command)
         {
             return new JObject
@@ -558,12 +791,15 @@ namespace VsClineAgent.Host
                 ["processId"] = command.ProcessId,
                 ["command"] = command.Command,
                 ["cwd"] = command.WorkingDirectory,
+                ["currentDirectory"] = command.CurrentDirectory,
                 ["startedAt"] = command.StartedAt.ToString("O"),
                 ["lastOutputAt"] = command.LastOutputAt?.ToString("O"),
                 ["status"] = command.Status,
                 ["isReusableShell"] = command.IsReusableShell,
                 ["isHot"] = command.IsHot,
                 ["background"] = command.Background,
+                ["attachable"] = command.Attachable,
+                ["proceedWhileRunningAvailable"] = command.ProceedWhileRunningAvailable,
                 ["shell"] = command.Shell
             };
         }
@@ -590,6 +826,7 @@ namespace VsClineAgent.Host
                 ["processId"] = command.ProcessId,
                 ["command"] = command.Command,
                 ["cwd"] = command.WorkingDirectory,
+                ["currentDirectory"] = command.CurrentDirectory,
                 ["startedAt"] = command.StartedAt.ToString("O"),
                 ["completedAt"] = command.CompletedAt.ToString("O"),
                 ["lastOutputAt"] = command.LastOutputAt?.ToString("O"),

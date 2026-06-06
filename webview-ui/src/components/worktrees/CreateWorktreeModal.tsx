@@ -1,6 +1,6 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import { CreateWorktreeRequest, SwitchWorktreeRequest } from "@shared/proto/cline/worktree"
-import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeCheckbox, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { AlertCircle, AlertTriangle, Loader2, X } from "lucide-react"
 import { memo, useCallback, useEffect, useState } from "react"
 import { WorktreeServiceClient } from "@/services/grpc-client"
@@ -10,13 +10,18 @@ interface CreateWorktreeModalProps {
 	onClose: () => void
 	/** When true, opens the worktree in a new window after creation */
 	openAfterCreate?: boolean
+	onOperationChange?: (isOperating: boolean) => void
 	/** Called after successful creation (and opening if openAfterCreate is true) */
-	onSuccess?: () => void
+	onSuccess?: (message?: string) => void
 }
 
-const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess }: CreateWorktreeModalProps) => {
+const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onOperationChange, onSuccess }: CreateWorktreeModalProps) => {
 	const [newWorktreePath, setNewWorktreePath] = useState("")
 	const [newBranchName, setNewBranchName] = useState("")
+	const [baseBranch, setBaseBranch] = useState("")
+	const [branches, setBranches] = useState<string[]>([])
+	const [baseBranches, setBaseBranches] = useState<string[]>([])
+	const [createNewBranch, setCreateNewBranch] = useState(true)
 	const [isCreating, setIsCreating] = useState(false)
 	const [createError, setCreateError] = useState<string | null>(null)
 	const [isLoadingDefaults, setIsLoadingDefaults] = useState(false)
@@ -32,6 +37,9 @@ const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess
 			])
 			setNewBranchName(defaults.suggestedBranch)
 			setNewWorktreePath(defaults.suggestedPath)
+			setBaseBranch(defaults.baseBranch || defaults.currentBranch || "HEAD")
+			setBranches(Array.isArray(defaults.branches) ? defaults.branches : [])
+			setBaseBranches(Array.isArray(defaults.baseBranches) ? defaults.baseBranches : [])
 			setHasWorktreeInclude(includeStatus.exists)
 		} catch (err) {
 			console.error("Failed to load worktree defaults:", err)
@@ -51,6 +59,10 @@ const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess
 		if (!open) {
 			setNewWorktreePath("")
 			setNewBranchName("")
+			setBaseBranch("")
+			setBranches([])
+			setBaseBranches([])
+			setCreateNewBranch(true)
 			setCreateError(null)
 			setHasWorktreeInclude(null)
 		}
@@ -62,13 +74,15 @@ const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess
 		}
 
 		setIsCreating(true)
+		onOperationChange?.(true)
 		setCreateError(null)
 		try {
 			const result = await WorktreeServiceClient.createWorktree(
 				CreateWorktreeRequest.create({
 					path: newWorktreePath,
 					branch: newBranchName,
-					createNewBranch: true,
+					baseBranch,
+					createNewBranch,
 				}),
 			)
 
@@ -77,22 +91,40 @@ const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess
 			} else {
 				// If openAfterCreate is true, open the worktree in a new window
 				if (openAfterCreate && result.worktree?.path) {
-					await WorktreeServiceClient.switchWorktree(
+					const switchResult = await WorktreeServiceClient.switchWorktree(
 						SwitchWorktreeRequest.create({
 							path: result.worktree.path,
 							newWindow: true,
 						}),
 					)
+					if (!switchResult.success) {
+						setCreateError(switchResult.message || "Worktree was created, but opening it failed.")
+						return
+					}
 				}
-				onSuccess?.()
+				onSuccess?.(result.message || "Worktree created.")
 				onClose()
 			}
 		} catch (err) {
 			setCreateError(err instanceof Error ? err.message : "Failed to create worktree")
 		} finally {
 			setIsCreating(false)
+			onOperationChange?.(false)
 		}
-	}, [newWorktreePath, newBranchName, openAfterCreate, onSuccess, onClose])
+	}, [newWorktreePath, newBranchName, baseBranch, createNewBranch, openAfterCreate, onOperationChange, onSuccess, onClose])
+
+	const handleCreateModeChange = useCallback(
+		(checked: boolean) => {
+			setCreateNewBranch(checked)
+			if (!checked) {
+				setNewBranchName(branches.includes(baseBranch) ? baseBranch : branches[0] || "")
+			} else if (!newBranchName || baseBranches.includes(newBranchName)) {
+				const rootName = newWorktreePath.trim().split(/[\\/]/).filter(Boolean).pop() || "worktree"
+				setNewBranchName(`feature/${rootName}-task`)
+			}
+		},
+		[baseBranch, baseBranches, branches, newBranchName, newWorktreePath],
+	)
 
 	if (!open) {
 		return null
@@ -143,31 +175,79 @@ const CreateWorktreeModal = ({ open, onClose, openAfterCreate = false, onSuccess
 				)}
 				<div className="flex flex-col">
 					<div>
-						<label className="block text-sm font-medium mb-1">Branch Name *</label>
-						<VSCodeTextField
-							className="w-full"
-							onInput={(e) => setNewBranchName((e.target as HTMLInputElement).value)}
-							placeholder="feature/my-feature"
-							value={newBranchName}>
-							{newBranchName && (
-								<div
-									aria-label="Clear"
-									className="input-icon-button codicon codicon-close"
-									onClick={() => setNewBranchName("")}
-									slot="end"
-									style={{
-										display: "flex",
-										justifyContent: "center",
-										alignItems: "center",
-										height: "100%",
-									}}
-								/>
-							)}
-						</VSCodeTextField>
+						<label className="flex items-center gap-2 text-sm font-medium mb-2">
+							<VSCodeCheckbox
+								checked={createNewBranch}
+								onChange={(e) => handleCreateModeChange((e.target as HTMLInputElement).checked)}
+							/>
+							Create a new branch
+						</label>
+						<label className="block text-sm font-medium mb-1">{createNewBranch ? "New Branch Name *" : "Existing Branch *"}</label>
+						{createNewBranch ? (
+							<VSCodeTextField
+								className="w-full"
+								onInput={(e) => setNewBranchName((e.target as HTMLInputElement).value)}
+								placeholder="feature/my-feature"
+								value={newBranchName}>
+								{newBranchName && (
+									<div
+										aria-label="Clear"
+										className="input-icon-button codicon codicon-close"
+										onClick={() => setNewBranchName("")}
+										slot="end"
+										style={{
+											display: "flex",
+											justifyContent: "center",
+											alignItems: "center",
+											height: "100%",
+										}}
+									/>
+								)}
+							</VSCodeTextField>
+						) : (
+							<select
+								className="w-full bg-[var(--vscode-dropdown-background)] text-[var(--vscode-dropdown-foreground)] border border-[var(--vscode-dropdown-border)] rounded px-2 py-1"
+								onChange={(e) => setNewBranchName(e.target.value)}
+								value={newBranchName}>
+								{newBranchName && !branches.includes(newBranchName) && <option value={newBranchName}>{newBranchName}</option>}
+								{branches.map((branch) => (
+									<option key={branch} value={branch}>
+										{branch}
+									</option>
+								))}
+							</select>
+						)}
 						<p className="text-xs text-[var(--vscode-descriptionForeground)] mt-1">
-							Your new copy will be checked out to this branch.
+							{createNewBranch
+								? "Your new copy will create and check out this branch."
+								: "Your new copy will check out an existing local branch."}
 						</p>
+						{!createNewBranch && branches.length === 0 && (
+							<p className="text-xs text-[var(--vscode-inputValidation-warningForeground)] mt-1">
+								No local branches were reported by git.
+							</p>
+						)}
 					</div>
+					{createNewBranch && (
+						<div>
+							<label className="block text-sm font-medium mb-1">Base Branch</label>
+							<select
+								className="w-full bg-[var(--vscode-dropdown-background)] text-[var(--vscode-dropdown-foreground)] border border-[var(--vscode-dropdown-border)] rounded px-2 py-1"
+								onChange={(e) => setBaseBranch(e.target.value)}
+								value={baseBranch}>
+								{baseBranch && !baseBranches.includes(baseBranch) && <option value={baseBranch}>{baseBranch}</option>}
+								{baseBranches.map((branch) => (
+									<option key={branch} value={branch}>
+										{branch}
+									</option>
+								))}
+								<option value="HEAD">HEAD</option>
+							</select>
+							<p className="text-xs text-[var(--vscode-descriptionForeground)] mt-1">
+								The new branch will be created from this base.
+							</p>
+						</div>
+					)}
 					<div>
 						<label className="block text-sm font-medium mb-1">Folder Path *</label>
 						<VSCodeTextField

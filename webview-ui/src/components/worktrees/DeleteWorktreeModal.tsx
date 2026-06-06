@@ -6,25 +6,32 @@ import { Button } from "@/components/ui/button"
 interface DeleteWorktreeModalProps {
 	open: boolean
 	onClose: () => void
-	onConfirm: (deleteBranch: boolean) => Promise<void>
+	onConfirm: (deleteBranch: boolean, force: boolean) => Promise<string | null>
 	worktreePath: string
 	branchName: string
+	statusSummary?: string
 }
 
-const DeleteWorktreeModal = ({ open, onClose, onConfirm, worktreePath, branchName }: DeleteWorktreeModalProps) => {
+const DeleteWorktreeModal = ({ open, onClose, onConfirm, worktreePath, branchName, statusSummary = "" }: DeleteWorktreeModalProps) => {
 	const [isDeleting, setIsDeleting] = useState(false)
 	const [deleteBranch, setDeleteBranch] = useState(false)
+	const [forceDelete, setForceDelete] = useState(false)
+	const [deleteError, setDeleteError] = useState("")
 
 	const handleDelete = useCallback(async () => {
 		setIsDeleting(true)
+		setDeleteError("")
 		try {
-			await onConfirm(deleteBranch)
-			onClose()
+			const failureMessage = await onConfirm(deleteBranch, forceDelete)
+			if (!failureMessage) {
+				onClose()
+			} else {
+				setDeleteError(failureMessage)
+			}
 		} finally {
 			setIsDeleting(false)
-			setDeleteBranch(false)
 		}
-	}, [onConfirm, onClose, deleteBranch])
+	}, [onConfirm, onClose, deleteBranch, forceDelete])
 
 	if (!open) {
 		return null
@@ -59,6 +66,11 @@ const DeleteWorktreeModal = ({ open, onClose, onConfirm, worktreePath, branchNam
 					This will delete the worktree directory at{" "}
 					<span className="font-semibold text-[var(--vscode-foreground)] break-all">{worktreePath}</span>
 				</p>
+				{statusSummary && statusSummary !== "clean" && (
+					<p className="text-sm text-[var(--vscode-inputValidation-warningForeground)] mt-0 mb-3">
+						Current status: {statusSummary}
+					</p>
+				)}
 
 				<label className="flex items-center gap-2 cursor-pointer mb-3">
 					<VSCodeCheckbox
@@ -69,11 +81,21 @@ const DeleteWorktreeModal = ({ open, onClose, onConfirm, worktreePath, branchNam
 						Also delete branch <span className="font-semibold">{branchName}</span>
 					</span>
 				</label>
+				<label className="flex items-center gap-2 cursor-pointer mb-3">
+					<VSCodeCheckbox
+						checked={forceDelete}
+						onChange={(e) => setForceDelete((e.target as HTMLInputElement).checked)}
+					/>
+					<span className="text-sm">Force delete if the worktree is dirty</span>
+				</label>
 
-				{deleteBranch && (
+				{(deleteBranch || forceDelete) && (
 					<p className="text-sm text-[var(--vscode-inputValidation-warningForeground)] mt-0 mb-3">
-						Warning: Unpushed commits on this branch will be lost.
+						Warning: uncommitted changes or unpushed commits can be lost.
 					</p>
+				)}
+				{deleteError && (
+					<p className="text-sm text-[var(--vscode-errorForeground)] mt-0 mb-3">{deleteError}</p>
 				)}
 
 				{/* Buttons */}

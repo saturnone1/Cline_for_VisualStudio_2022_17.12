@@ -1,6 +1,7 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { AccountServiceClient } from "@/services/grpc-client"
 import { useOpenRouterKeyInfo } from "../../ui/hooks/useOpenRouterKeyInfo"
@@ -60,6 +61,7 @@ interface OpenRouterProviderProps {
 export const OpenRouterProvider = ({ showModelOptions, isPopup, currentMode }: OpenRouterProviderProps) => {
 	const { apiConfiguration } = useExtensionState()
 	const { handleFieldChange } = useApiConfigurationHandlers()
+	const [authMessage, setAuthMessage] = useState("")
 
 	return (
 		<div>
@@ -82,14 +84,19 @@ export const OpenRouterProvider = ({ showModelOptions, isPopup, currentMode }: O
 						appearance="secondary"
 						onClick={async () => {
 							try {
-								await AccountServiceClient.openrouterAuthClicked(EmptyRequest.create())
+								const response = await AccountServiceClient.openrouterAuthClicked(EmptyRequest.create())
+								setAuthMessage(response?.message || "OpenRouter API key page opened.")
 							} catch (error) {
 								console.error("Failed to open OpenRouter auth:", error)
+								setAuthMessage(error instanceof Error ? error.message : String(error))
 							}
 						}}
 						style={{ margin: "5px 0 0 0" }}>
 						Get OpenRouter API Key
 					</VSCodeButton>
+				)}
+				{authMessage && (
+					<p style={{ color: "var(--vscode-descriptionForeground)", fontSize: 12, marginTop: 8 }}>{authMessage}</p>
 				)}
 				<p
 					style={{

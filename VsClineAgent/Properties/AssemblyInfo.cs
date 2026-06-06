@@ -1,12 +1,12 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("VsClineAgent")]
-[assembly: AssemblyDescription("Cline SDK wrapper for Visual Studio")]
+[assembly: AssemblyTitle("LIG VS")]
+[assembly: AssemblyDescription("AI coding agent for Visual Studio")]
 [assembly: AssemblyCompany("Developer")]
-[assembly: AssemblyProduct("VS AI Agent (Cline Port)")]
+[assembly: AssemblyProduct("LIG VS")]
 [assembly: AssemblyCopyright("Copyright 2026")]
 [assembly: ComVisible(false)]
-[assembly: AssemblyVersion("1.1.20.0")]
-[assembly: AssemblyFileVersion("1.1.20.0")]
-[assembly: AssemblyInformationalVersion("1.1.20")]
+[assembly: AssemblyVersion("1.1.26.0")]
+[assembly: AssemblyFileVersion("1.1.26.0")]
+[assembly: AssemblyInformationalVersion("1.1.26")]

@@ -1,9 +1,15 @@
 import fs from "node:fs"
+import childProcess from "node:child_process"
+import http from "node:http"
 import path from "node:path"
+import { randomUUID } from "node:crypto"
+import { promisify } from "node:util"
 import { VisualStudioHostProvider } from "../host/VisualStudioHostProvider"
 import { sendHostRequest, type JsonRpcConnection } from "../ipc/types"
 import type { AskQuestionResult, ClineSdkRuntime, ToolApprovalResult } from "../sdk/ClineSdkRuntime"
 import { logInteraction } from "../diagnostics/InteractionLog"
+
+const execFile = promisify(childProcess.execFile)
 
 export type WebviewEnvelope = {
 	type?: string
@@ -36,11 +42,82 @@ type ToolActivityEntry = {
 	detail?: string
 }
 
+type HookLifecycleName = "TaskStart" | "TaskResume" | "TaskCancel" | "TaskComplete" | "PreToolUse" | "PostToolUse" | "UserPromptSubmit"
+
+type HookScript = {
+	name: HookLifecycleName
+	source: "global" | "workspace"
+	path: string
+	enabled: boolean
+}
+
+type HookExecutionResult = {
+	hook: HookScript
+	exitCode: number
+	stdout: string
+	stderr: string
+	error?: string
+	jsonResponse?: Record<string, unknown>
+}
+
+type PreToolUseDecision = {
+	blocked: boolean
+	reason: string
+	inputPatch?: Record<string, unknown>
+	replaceInput?: boolean
+	validationMessage?: string
+	contextPatch?: Record<string, unknown>
+	structuredDecision?: Record<string, unknown>
+}
+
+type OAuthCallbackSession = {
+	provider: string
+	state: string
+	callbackUrl: string
+	authorizationUrl?: string
+	createdAt: number
+	status: "pending" | "received" | "configured" | "error"
+	code?: string
+	token?: string
+	refreshToken?: string
+	tokenType?: string
+	expiresAt?: number
+	error?: string
+	message?: string
+	rawQuery?: Record<string, string>
+	tokenExchangeSupported?: boolean
+	tokenExchange?: OAuthTokenExchangeConfig
+	tokenResponse?: Record<string, unknown>
+}
+
+type OAuthTokenExchangeConfig = {
+	tokenUrl: string
+	clientId: string
+	clientSecret?: string
+	scope?: string
+	codeVerifier?: string
+	authMethod?: string
+}
+
+type BrowserSessionRecord = {
+	sessionId: string
+	host: string
+	tabId?: string
+	url?: string
+	title?: string
+	createdAt: number
+	lastActionAt: number
+	lastActionId?: string
+	lastPhase?: string
+	reconnectReason?: string
+}
+
 export class VisualStudioWebviewRouter {
 	private clineSdk: ClineSdkRuntime | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly taskSnapshots = new Map<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>()
+	private readonly lastStateBroadcastKeys = new Map<string, string>()
 	private readonly state: ReturnType<typeof createInitialState>
 	private pendingApproval:
 		| {
@@ -81,6 +158,10 @@ export class VisualStudioWebviewRouter {
 	private changeSummaryTimer: NodeJS.Timeout | null = null
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
+	private oauthCallbackServer: http.Server | null = null
+	private oauthCallbackPort = 0
+	private readonly oauthCallbackSessions = new Map<string, OAuthCallbackSession>()
+	private readonly browserSessions = new Map<string, BrowserSessionRecord>()
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -106,12 +187,36 @@ export class VisualStudioWebviewRouter {
 		this.clineSdk = clineSdk
 	}
 
+	isScheduledAgentsEnabled() {
+		return this.state.scheduledAgentsEnabled === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"
+	}
+
 	async requestToolApproval(request: unknown): Promise<ToolApprovalResult> {
 		logInteraction("sdk->sidecar", "toolApproval.request", request)
 		const approvalRequest = asRecord(request)
 		const toolName = getString(approvalRequest, "toolName") || getString(approvalRequest, "name") || getString(approvalRequest, "tool")
 		const input = asRecord(approvalRequest.input || approvalRequest.params || approvalRequest.arguments)
 		const mappedToolName = mapToolName(toolName)
+		const hookDecision = await this.runPreToolUseHooks({
+			sessionId: this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""),
+			toolName,
+			mappedToolName,
+			input,
+			approvalRequest,
+		})
+		if (hookDecision.blocked) {
+			return { approved: false, reason: hookDecision.reason || "Blocked by PreToolUse hook." }
+		}
+		if (hookDecision.inputPatch && Object.keys(hookDecision.inputPatch).length > 0) {
+			applyPreToolUseInputPatch(input, approvalRequest, hookDecision)
+			logInteraction("sidecar", "preToolUseInputPatched", {
+				toolName,
+				mappedToolName,
+				replaceInput: hookDecision.replaceInput === true,
+				keys: Object.keys(hookDecision.inputPatch),
+				reason: hookDecision.reason || undefined,
+			})
+		}
 		if (shouldAutoApproveTool(toolName, this.state.autoApprovalSettings)) {
 			return { approved: true, reason: "Auto-approved by Visual Studio settings." }
 		}
@@ -120,7 +225,7 @@ export class VisualStudioWebviewRouter {
 			ask === "command"
 				? JSON.stringify({
 						command: getCommandText(input),
-						description: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || "Cline wants to run this command.",
+						description: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || "LIG VS wants to run this command.",
 					})
 				: JSON.stringify({
 						tool: mappedToolName,
@@ -135,7 +240,7 @@ export class VisualStudioWebviewRouter {
 					})
 
 		if (this.pendingApproval) {
-			this.pendingApproval.resolve({ approved: false, reason: "Superseded by a newer Cline tool approval request." })
+			this.pendingApproval.resolve({ approved: false, reason: "Superseded by a newer LIG VS tool approval request." })
 			this.pendingApproval = null
 		}
 
@@ -173,7 +278,9 @@ export class VisualStudioWebviewRouter {
 	}
 
 	handleSdkEvent(event: unknown) {
-		logInteraction("sdk->sidecar", "sdk.event", summarizeSdkEventForLog(event))
+		if (shouldLogSdkEventForInteraction(event)) {
+			logInteraction("sdk->sidecar", "sdk.event", summarizeSdkEventForLog(event))
+		}
 		const record = asRecord(event)
 		const type = getString(record, "type")
 		const payload = asRecord(record.payload)
@@ -272,7 +379,7 @@ export class VisualStudioWebviewRouter {
 				return
 			}
 			this.noteTaskActivity(status || type)
-			this.broadcastState().catch((error) => console.error(error))
+			this.schedulePartialStateBroadcast()
 			return
 		}
 
@@ -372,7 +479,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (key === "AccountService.subscribeToAuthStatusUpdate") {
-			return grpcHandled(grpcResponse(requestId, { loggedIn: false, user: null }, true))
+			return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), true))
 		}
 
 		if (key === "UiService.subscribeToPartialMessage") {
@@ -389,7 +496,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (key === "OcaAccountService.ocaSubscribeToAuthStatusUpdate") {
-			return grpcHandled(grpcResponse(requestId, { loggedIn: false, user: null }, true))
+			return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), true))
 		}
 
 		if (this.inertStreams.has(key)) {
@@ -427,10 +534,162 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "WebService.checkIsImageUrl":
-				return grpcHandled(grpcResponse(requestId, { value: false }, false))
+				return grpcHandled(grpcResponse(requestId, await checkIsImageUrl(getString(message, "value") || getString(message, "url")), false))
 
 			case "WebService.fetchOpenGraphData":
-				return grpcHandled(grpcResponse(requestId, {}, false))
+				return grpcHandled(grpcResponse(requestId, await fetchOpenGraphData(getString(message, "value") || getString(message, "url")), false))
+
+			case "AccountService.getRedirectUrl":
+				return grpcHandled(grpcResponse(requestId, await this.createOAuthCallbackBridgeResponse(message, "account"), false))
+
+			case "AccountService.getUserOrganizations":
+				return grpcHandled(grpcResponse(requestId, { organizations: [] }, false))
+
+			case "AccountService.getUserCredits":
+			case "AccountService.getOrganizationCredits":
+				return grpcHandled(grpcResponse(requestId, { credits: 0, balance: 0, value: 0 }, false))
+
+			case "AccountService.setUserOrganization":
+			case "AccountService.submitLimitIncreaseRequest":
+				return grpcHandled(grpcResponse(requestId, createVisualStudioAuthUnsupportedResponse("account"), false))
+
+			case "AccountService.accountLoginClicked":
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("account"), false))
+
+			case "AccountService.accountLogoutClicked":
+				this.state.openAiCodexIsAuthenticated = false
+				this.clearOAuthCredential("account")
+				this.clearOAuthCredential("openai-codex")
+				savePersistedState(this.state)
+				await this.broadcastState()
+				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
+
+			case "AccountService.openrouterAuthClicked":
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("openrouter", message), false))
+
+			case "AccountService.requestyAuthClicked":
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("requesty", message), false))
+
+			case "AccountService.hicapAuthClicked":
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("hicap", message), false))
+
+			case "AccountService.openAiCodexSignIn":
+				this.state.openAiCodexIsAuthenticated = false
+				await this.broadcastState()
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("openAiCodex", message), false))
+
+			case "AccountService.openAiCodexSignOut":
+				this.state.openAiCodexIsAuthenticated = false
+				this.clearOAuthCredential("openai-codex")
+				savePersistedState(this.state)
+				await this.broadcastState()
+				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false), ...this.buildStateMessages())
+
+			case "AccountService.saveProviderCredential":
+			case "AccountService.storeProviderCredential":
+			case "AccountService.saveProviderToken":
+				return grpcHandled(grpcResponse(requestId, await this.saveProviderCredential(message), false), ...this.buildStateMessages())
+
+			case "AccountService.getProviderCredentialStatus":
+			case "AccountService.getProviderAuthStatus":
+				return grpcHandled(grpcResponse(requestId, this.getProviderCredentialStatus(message), false))
+
+			case "AccountService.refreshProviderCredential":
+			case "AccountService.refreshProviderToken":
+			case "AccountService.refreshOAuthCredential":
+				return grpcHandled(grpcResponse(requestId, await this.refreshOAuthCredential(message), false), ...this.buildStateMessages())
+
+			case "AccountService.getProviderConfigFields":
+			case "AccountService.getProviderAuthRequirements":
+				return grpcHandled(grpcResponse(requestId, await this.getProviderConfigFields(message), false))
+
+			case "AccountService.getOAuthCallbackStatus":
+			case "AccountService.getProviderOAuthCallbackStatus":
+				return grpcHandled(grpcResponse(requestId, this.getOAuthCallbackStatus(message), false))
+
+			case "AccountService.submitOAuthCallback":
+			case "AccountService.completeOAuthCallback":
+			case "AccountService.saveOAuthCallback":
+				return grpcHandled(grpcResponse(requestId, await this.submitOAuthCallback(message), false), ...this.buildStateMessages())
+
+			case "AccountService.clearProviderCredential":
+			case "AccountService.deleteProviderCredential":
+			case "AccountService.clearProviderToken":
+				return grpcHandled(grpcResponse(requestId, await this.clearProviderCredential(message), false), ...this.buildStateMessages())
+
+			case "OcaAccountService.ocaAccountLoginClicked":
+				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("oca", message), false))
+
+			case "OcaAccountService.ocaAccountLogoutClicked":
+				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
+
+			case "BrowserService.getDetectedChromePath": {
+				const detectedPath = resolveBrowserExecutablePath(getString(asRecord(this.state.browserSettings), "chromeExecutablePath"))
+				return grpcHandled(grpcResponse(requestId, { path: detectedPath, isBundled: false }, false))
+			}
+
+			case "BrowserService.getBrowserConnectionInfo":
+				return grpcHandled(grpcResponse(requestId, await this.getBrowserConnectionInfo(), false))
+
+			case "BrowserService.testBrowserConnection": {
+				const hostValue = getString(message, "value") || getString(message, "host") || getString(message, "url")
+				const debugInfo = await fetchBrowserDebugInfo(hostValue)
+				const success = Boolean(debugInfo.success)
+				return grpcHandled(
+					grpcResponse(
+						requestId,
+						{
+							success,
+							message: success
+								? `Browser connection successful.${debugInfo.browser ? ` ${debugInfo.browser}` : ""}`
+								: debugInfo.error || "Unable to reach the configured browser host.",
+							host: debugInfo.host || normalizeBrowserDebugHost(hostValue),
+							browser: debugInfo.browser || "",
+							protocolVersion: debugInfo.protocolVersion || "",
+							tabCount: debugInfo.tabCount ?? 0,
+							activeTabTitle: debugInfo.activeTabTitle || "",
+							activeTabUrl: debugInfo.activeTabUrl || "",
+							webFetchEnabled: isWebFetchEnabled(this.state.browserSettings),
+							webFetchDisabledReason: webFetchDisabledReason(this.state.browserSettings),
+							browserToolUseDisabled: asRecord(this.state.browserSettings).disableToolUse === true,
+						},
+						false,
+					),
+				)
+			}
+
+			case "BrowserService.discoverBrowser":
+				return grpcHandled(grpcResponse(requestId, await this.discoverBrowser(), false))
+
+			case "BrowserService.relaunchChromeDebugMode": {
+				const browserSettings = asRecord(this.state.browserSettings)
+				const host = getString(browserSettings, "remoteBrowserHost") || "http://localhost:9222"
+				return grpcHandled(
+					grpcResponse(
+						requestId,
+						{
+							success: false,
+							value:
+								"Automatic Chrome relaunch is not implemented in the Visual Studio host yet. " +
+								`Launch Chrome or Edge manually with remote debugging enabled, for example: chrome.exe --remote-debugging-port=9222, then reconnect to ${host}.`,
+							message:
+								"Automatic Chrome relaunch is not implemented in the Visual Studio host yet. " +
+								`Launch Chrome or Edge manually with remote debugging enabled, then reconnect to ${host}.`,
+						},
+						false,
+					),
+				)
+			}
+
+			case "BrowserService.listBrowserTabs":
+				return grpcHandled(grpcResponse(requestId, await this.listBrowserTabs(), false))
+
+			case "BrowserService.captureScreenshot":
+				return grpcHandled(grpcResponse(requestId, await this.captureBrowserScreenshot(message), false))
+
+			case "BrowserService.performBrowserAction":
+			case "BrowserService.executeBrowserAction":
+				return grpcHandled(grpcResponse(requestId, await this.performBrowserAction(message), false))
 
 			case "StateService.getAvailableTerminalProfiles":
 				return grpcHandled(
@@ -446,6 +705,24 @@ export class VisualStudioWebviewRouter {
 						},
 						false,
 					),
+				)
+
+			case "TerminalService.openTerminalPanel":
+			case "UiService.openTerminalPanel":
+				return grpcHandled(grpcResponse(requestId, await host.workspaceClient.openTerminalPanel(asRecord(message)), false))
+
+			case "TerminalService.attachTerminalCommand":
+			case "UiService.attachTerminalCommand":
+				return grpcHandled(
+					grpcResponse(requestId, await host.workspaceClient.attachTerminalCommand(asRecord(message)), false),
+					...this.buildStateMessages(),
+				)
+
+			case "TerminalService.continueTerminalCommand":
+			case "UiService.continueTerminalCommand":
+				return grpcHandled(
+					grpcResponse(requestId, await host.workspaceClient.continueTerminalCommand(asRecord(message)), false),
+					...this.buildStateMessages(),
 				)
 
 			case "StateService.updateSettings":
@@ -567,7 +844,7 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, { value: true }, false))
 
 			case "CheckpointsService.checkpointDiff":
-				return grpcHandled(grpcResponse(requestId, { text: "Checkpoint diff is owned by the Cline SDK session store in this VSIX wrapper." }, false))
+				return grpcHandled(grpcResponse(requestId, await this.describeCheckpointDiff(message), false), ...this.buildStateMessages())
 
 			case "FileService.refreshRules":
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
@@ -592,12 +869,47 @@ export class VisualStudioWebviewRouter {
 				await this.toggleSdkSetting("skills", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
 
+			case "FileService.refreshHooks":
+				return grpcHandled(grpcResponse(requestId, await this.refreshHookSettings(), false))
+
+			case "FileService.createHook":
+				return grpcHandled(grpcResponse(requestId, await this.createHook(message), false))
+
+			case "FileService.deleteHook":
+				return grpcHandled(grpcResponse(requestId, await this.deleteHook(message), false))
+
+			case "FileService.toggleHook":
+				return grpcHandled(grpcResponse(requestId, await this.toggleHook(message), false))
+
+			case "ScheduledAgentsService.listSpecs":
+			case "ScheduledAgentsService.listScheduledAgents":
+			case "AutomationService.listScheduledAgents":
+				return grpcHandled(grpcResponse(requestId, await this.listScheduledAgentSpecs(), false))
+
+			case "ScheduledAgentsService.createSpec":
+			case "ScheduledAgentsService.updateSpec":
+			case "ScheduledAgentsService.saveSpec":
+			case "AutomationService.saveScheduledAgent":
+				return grpcHandled(grpcResponse(requestId, await this.saveScheduledAgentSpec(message), false))
+
+			case "ScheduledAgentsService.deleteSpec":
+			case "ScheduledAgentsService.deleteScheduledAgent":
+			case "AutomationService.deleteScheduledAgent":
+				return grpcHandled(grpcResponse(requestId, await this.deleteScheduledAgentSpec(message), false))
+
+			case "ScheduledAgentsService.runSpec":
+			case "ScheduledAgentsService.runScheduledAgent":
+			case "AutomationService.runScheduledAgent":
+				return grpcHandled(grpcResponse(requestId, await this.runScheduledAgentSpec(message), false), ...this.buildStateMessages())
+
+			case "PluginService.listPlugins":
+			case "PluginService.getPluginConfigStatus":
+			case "PluginsService.listPlugins":
+			case "PluginsService.getPluginConfigStatus":
+				return grpcHandled(grpcResponse(requestId, await this.getLocalPluginConfigStatus(), false))
+
 			case "FileService.createRuleFile":
 			case "FileService.deleteRuleFile":
-			case "FileService.refreshHooks":
-			case "FileService.createHook":
-			case "FileService.deleteHook":
-			case "FileService.toggleHook":
 			case "FileService.createSkillFile":
 			case "FileService.deleteSkillFile":
 				return grpcHandled(grpcResponse(requestId, {}, false))
@@ -605,7 +917,7 @@ export class VisualStudioWebviewRouter {
 			case "FileService.openVsClineDiff": {
 				const leftPath = getString(message, "leftPath") || getString(message, "beforePath")
 				const rightPath = getString(message, "rightPath") || getString(message, "afterPath") || getString(message, "filePath")
-				const title = getString(message, "title") || (rightPath ? `Cline change: ${path.basename(rightPath)}` : "Cline change")
+				const title = getString(message, "title") || (rightPath ? `LIG VS change: ${path.basename(rightPath)}` : "LIG VS change")
 				if (leftPath && rightPath) {
 					await VisualStudioHostProvider.create(this.connection).diffClient.openDiff({ leftPath, rightPath, title })
 				} else if (rightPath) {
@@ -614,7 +926,13 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 			}
 
+			case "FileService.revertVsClineChanges":
+				return grpcHandled(grpcResponse(requestId, await this.revertVsClineChanges(message), false), ...this.buildStateMessages())
+
 			case "FileService.copyToClipboard":
+				await VisualStudioHostProvider.create(this.connection).envClient.clipboardWriteText({
+					value: getString(message, "value") || getString(message, "text"),
+				})
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "FileService.ifFileExistsRelativePath": {
@@ -664,40 +982,80 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, { values }, false))
 			}
 
-			case "ModelsService.getVsCodeLmModels":
-			case "ModelsService.getSapAiCoreModels":
 			case "ModelsService.getLmStudioModels":
-			case "ModelsService.getAihubmixModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("lmstudio", asRecord(message)), false))
+
 			case "ModelsService.refreshOpenAiModels":
-			case "ModelsService.refreshOcaModels":
-			case "ModelsService.refreshOpenRouterModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("openai-compatible", asRecord(message)), false))
+
 			case "ModelsService.refreshLiteLlmModelsRpc":
-			case "ModelsService.refreshHicapModels":
-			case "ModelsService.refreshBasetenModelsRpc":
-			case "ModelsService.refreshVercelAiGatewayModelsRpc":
-			case "ModelsService.refreshClineModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("litellm", asRecord(message)), false))
+
+			case "ModelsService.refreshOpenRouterModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("openrouter", asRecord(message)), false))
+
 			case "ModelsService.refreshRequestyModels":
-			case "ModelsService.refreshHuggingFaceModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("requesty", asRecord(message)), false))
+
 			case "ModelsService.refreshGroqModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("groq", asRecord(message)), false))
+
+			case "ModelsService.refreshVercelAiGatewayModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("vercel-ai-gateway", asRecord(message)), false))
+
+			case "ModelsService.refreshHicapModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("hicap", asRecord(message)), false))
+
+			case "ModelsService.getAihubmixModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("aihubmix", asRecord(message)), false))
+
+			case "ModelsService.refreshOcaModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("oca", asRecord(message)), false))
+
+			case "ModelsService.refreshBasetenModelsRpc":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("baseten", asRecord(message)), false))
+
+			case "ModelsService.refreshHuggingFaceModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("huggingface", asRecord(message)), false))
+
+			case "ModelsService.getSapAiCoreModels":
+				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("sapaicore", asRecord(message)), false))
+
+			case "ModelsService.getVsCodeLmModels":
+			case "ModelsService.refreshClineModelsRpc":
 			case "ModelsService.refreshClineRecommendedModelsRpc":
-				return grpcHandled(grpcResponse(requestId, this.createCurrentModelCatalog(), false))
+				return grpcHandled(grpcResponse(requestId, this.createUnsupportedModelCatalog(key), false))
 
 			case "WorktreeService.listWorktrees":
-				return grpcHandled(grpcResponse(requestId, { worktrees: [], items: [] }, false))
+				return grpcHandled(grpcResponse(requestId, await this.listWorktrees(), false))
 
 			case "WorktreeService.getWorktreeDefaults":
-				return grpcHandled(grpcResponse(requestId, { branch: "", baseBranch: "", cwd: await this.getPrimaryWorkspaceRoot() }, false))
+				return grpcHandled(grpcResponse(requestId, await this.getWorktreeDefaults(), false))
 
 			case "WorktreeService.getWorktreeIncludeStatus":
-				return grpcHandled(grpcResponse(requestId, { enabled: false, included: false }, false))
+				return grpcHandled(grpcResponse(requestId, await this.getWorktreeIncludeStatus(), false))
 
 			case "WorktreeService.createWorktreeInclude":
+				return grpcHandled(grpcResponse(requestId, await this.createWorktreeInclude(message), false))
+
 			case "WorktreeService.createWorktree":
+				return grpcHandled(grpcResponse(requestId, await this.createWorktree(message), false))
+
 			case "WorktreeService.switchWorktree":
+				return grpcHandled(grpcResponse(requestId, await this.switchWorktree(message), false))
+
 			case "WorktreeService.mergeWorktree":
+				return grpcHandled(grpcResponse(requestId, await this.mergeWorktree(message), false))
+
+			case "WorktreeService.recoverMerge":
+			case "WorktreeService.mergeRecovery":
+				return grpcHandled(grpcResponse(requestId, await this.recoverWorktreeMerge(message), false))
+
 			case "WorktreeService.deleteWorktree":
+				return grpcHandled(grpcResponse(requestId, await this.deleteWorktree(message), false))
+
 			case "WorktreeService.trackWorktreeViewOpened":
-				return grpcHandled(grpcResponse(requestId, {}, false))
+				return grpcHandled(grpcResponse(requestId, { success: true }, false))
 
 			case "McpService.getLatestMcpServers":
 				return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), false))
@@ -749,14 +1107,1312 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
+	private async handleAccountAuthAction(provider: string, message: unknown = {}) {
+		const request = asRecord(message)
+		const credential = extractProviderCredentialValue(request)
+		if (credential) {
+			return this.saveProviderCredential({ ...request, provider, value: credential, source: "auth_action" })
+		}
+
+		const bridge = isOAuthBridgeProvider(provider) ? await this.ensureOAuthCallbackBridge(provider, request) : null
+		const authInfo = createProviderAuthInfo(provider, message, bridge)
+		if (authInfo.url) {
+			await VisualStudioHostProvider.create(this.connection).envClient.openExternal({ value: authInfo.url })
+		}
+		if (authInfo.message) {
+			await VisualStudioHostProvider.create(this.connection).windowClient.showMessage({ message: authInfo.message, type: authInfo.supported ? "info" : "warning" })
+		}
+		if (provider === "openAiCodex") {
+			this.state.openAiCodexIsAuthenticated = false
+			await this.broadcastState()
+		}
+		logInteraction("sidecar", "accountAuthAction", {
+			provider,
+			supported: authInfo.supported,
+			url: authInfo.url || undefined,
+			reason: getString(authInfo, "reason") || undefined,
+		})
+		return {
+			...createUnauthenticatedAccountState(),
+			...authInfo,
+		}
+	}
+
+	private async createOAuthCallbackBridgeResponse(message: unknown, fallbackProvider: string) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || fallbackProvider)
+		const bridge = await this.ensureOAuthCallbackBridge(provider || fallbackProvider, request)
+		return {
+			success: true,
+			supported: true,
+			provider: bridge.provider,
+			value: bridge.authorizationUrl || bridge.callbackUrl,
+			url: bridge.authorizationUrl || undefined,
+			authorizationUrl: bridge.authorizationUrl || undefined,
+			redirectUrl: bridge.callbackUrl,
+			callbackUrl: bridge.callbackUrl,
+			state: bridge.state,
+			authStatus: "pending",
+			tokenExchangeSupported: bridge.tokenExchangeSupported === true,
+			message: bridge.authorizationUrl
+				? `${providerAuthLabel(bridge.provider)} OAuth authorization URL is ready. Complete sign-in in the browser and return to LIG VS through the localhost callback.`
+				: `${providerAuthLabel(bridge.provider)} OAuth callback bridge is ready. Configure a provider authorization URL to open sign-in automatically.`,
+		}
+	}
+
+	private async ensureOAuthCallbackBridge(provider: string, request: Record<string, unknown> = {}): Promise<OAuthCallbackSession> {
+		this.pruneOAuthCallbackSessions()
+		if (!this.oauthCallbackServer) {
+			await this.startOAuthCallbackServer()
+		}
+
+		const normalizedProvider = normalizeProviderValue(provider) || "account"
+		const state = randomUUID()
+		const callbackUrl = `http://127.0.0.1:${this.oauthCallbackPort}/oauth/callback?provider=${encodeURIComponent(normalizedProvider)}&state=${encodeURIComponent(state)}`
+		const authorization = createOAuthAuthorizationRequest(normalizedProvider, callbackUrl, state, request)
+		const session: OAuthCallbackSession = {
+			provider: normalizedProvider,
+			state,
+			callbackUrl,
+			authorizationUrl: authorization.url || undefined,
+			createdAt: Date.now(),
+			status: "pending",
+			tokenExchangeSupported: authorization.tokenExchangeSupported,
+			tokenExchange: authorization.tokenExchange || undefined,
+			message: authorization.url ? "Waiting for OAuth provider authorization and redirect." : "Waiting for OAuth provider redirect.",
+		}
+		this.oauthCallbackSessions.set(state, session)
+		logInteraction("sidecar", "oauthCallbackBridgeReady", {
+			provider: normalizedProvider,
+			state,
+			port: this.oauthCallbackPort,
+			hasAuthorizationUrl: Boolean(authorization.url),
+			tokenExchangeSupported: authorization.tokenExchangeSupported,
+		})
+		return session
+	}
+
+	private async startOAuthCallbackServer() {
+		const preferredPort = readOptionalPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT") || 0
+		const server = http.createServer((request, response) => {
+			this.handleOAuthCallbackHttpRequest(request, response)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			const onError = (error: Error) => {
+				server.off("listening", onListening)
+				reject(error)
+			}
+			const onListening = () => {
+				server.off("error", onError)
+				resolve()
+			}
+			server.once("error", onError)
+			server.once("listening", onListening)
+			server.listen(preferredPort, "127.0.0.1")
+		})
+
+		const address = server.address()
+		this.oauthCallbackServer = server
+		this.oauthCallbackPort = typeof address === "object" && address ? address.port : preferredPort
+		logInteraction("sidecar", "oauthCallbackServerListening", { port: this.oauthCallbackPort })
+	}
+
+	private handleOAuthCallbackHttpRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+		const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`)
+		if (!["/oauth/callback", "/auth/callback", "/callback"].includes(requestUrl.pathname)) {
+			response.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
+			response.end("Not found")
+			return
+		}
+
+		const result = this.recordOAuthCallbackFromUrl(requestUrl)
+		response.writeHead(result.success ? 200 : 400, { "content-type": "text/html; charset=utf-8" })
+		response.end(
+			`<!doctype html><html><body><h3>LIG VS OAuth callback</h3><p>${escapeHtml(result.message)}</p><p>You can close this browser tab.</p></body></html>`,
+		)
+		if (result.success) {
+			const state = requestUrl.searchParams.get("state") || parseUrlFragmentParams(requestUrl).get("state") || ""
+			const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(result.provider || "")
+			if (session) {
+				this.completeOAuthCallbackSession(session)
+					.catch((error) => {
+						session.status = "error"
+						session.error = stringify(error)
+						session.message = `OAuth token exchange failed: ${session.error}`
+						logInteraction("sidecar", "oauthTokenExchangeFailed", { provider: session.provider, state: session.state, error: session.error })
+					})
+					.finally(() => this.broadcastState().catch((error) => console.error(error)))
+				return
+			}
+		}
+		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private recordOAuthCallbackFromUrl(url: URL) {
+		const hashParams = parseUrlFragmentParams(url)
+		const query = {
+			...Object.fromEntries(Array.from(url.searchParams.entries()).map(([key, value]) => [key, value])),
+			...Object.fromEntries(Array.from(hashParams.entries()).map(([key, value]) => [key, value])),
+		}
+		const state = url.searchParams.get("state") || hashParams.get("state") || ""
+		const provider = normalizeProviderValue(url.searchParams.get("provider") || hashParams.get("provider") || "") || "account"
+		const code = url.searchParams.get("code") || hashParams.get("code") || ""
+		const token =
+			url.searchParams.get("access_token") ||
+			hashParams.get("access_token") ||
+			url.searchParams.get("token") ||
+			hashParams.get("token") ||
+			url.searchParams.get("api_key") ||
+			hashParams.get("api_key") ||
+			url.searchParams.get("key") ||
+			hashParams.get("key") ||
+			""
+		const error = url.searchParams.get("error") || hashParams.get("error") || ""
+		const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(provider)
+		if (!session) {
+			return { success: false, message: "No matching LIG VS OAuth callback request is pending." }
+		}
+
+		session.status = error ? "error" : "received"
+		session.code = code || undefined
+		session.token = token || undefined
+		session.error = error || undefined
+		session.rawQuery = query
+		session.message = error
+			? `OAuth callback failed: ${error}`
+			: token
+				? "OAuth callback received a token. Credential storage will use the provider API-key field when available."
+				: code
+					? "OAuth callback received an authorization code. Provider-specific token exchange is still required."
+					: "OAuth callback was received, but it did not include a code or token."
+		logInteraction("sidecar", "oauthCallbackReceived", {
+			provider: session.provider,
+			state: session.state,
+			status: session.status,
+			hasCode: Boolean(code),
+			hasToken: Boolean(token),
+			error: error || undefined,
+		})
+		return { success: true, provider: session.provider, state: session.state, message: session.message }
+	}
+
+	private async completeOAuthCallbackSession(session: OAuthCallbackSession) {
+		if (session.status === "error") {
+			return { success: false, message: session.message || session.error || "OAuth callback failed." }
+		}
+
+		if (!session.token && session.code && session.tokenExchange) {
+			await this.exchangeOAuthCodeForToken(session)
+		}
+
+		if (session.token) {
+			return this.persistOAuthTokenSession(session)
+		}
+
+		return {
+			success: false,
+			provider: session.provider,
+			authStatus: session.status,
+			message: session.message || "OAuth callback did not provide a token.",
+		}
+	}
+
+	private async exchangeOAuthCodeForToken(session: OAuthCallbackSession) {
+		if (!session.code || !session.tokenExchange) {
+			return
+		}
+
+		const exchange = session.tokenExchange
+		const body = new URLSearchParams()
+		body.set("grant_type", "authorization_code")
+		body.set("code", session.code)
+		body.set("redirect_uri", session.callbackUrl)
+		body.set("client_id", exchange.clientId)
+		if (exchange.clientSecret && exchange.authMethod !== "client_secret_basic") {
+			body.set("client_secret", exchange.clientSecret)
+		}
+		if (exchange.scope) {
+			body.set("scope", exchange.scope)
+		}
+		if (exchange.codeVerifier) {
+			body.set("code_verifier", exchange.codeVerifier)
+		}
+
+		const headers: Record<string, string> = {
+			"content-type": "application/x-www-form-urlencoded",
+			accept: "application/json",
+		}
+		if (exchange.clientSecret && exchange.authMethod === "client_secret_basic") {
+			headers.authorization = `Basic ${Buffer.from(`${exchange.clientId}:${exchange.clientSecret}`).toString("base64")}`
+		}
+
+		logInteraction("sidecar", "oauthTokenExchangeStarted", {
+			provider: session.provider,
+			state: session.state,
+			tokenUrl: redactUrl(exchange.tokenUrl),
+			authMethod: exchange.authMethod || "client_secret_post",
+		})
+
+		const response = await fetch(exchange.tokenUrl, { method: "POST", headers, body })
+		const text = await response.text()
+		const parsed = asRecord(tryParseJson(text) ?? {})
+		if (!response.ok) {
+			const error = getString(parsed, "error_description") || getString(parsed, "error") || truncateText(text, 500)
+			throw new Error(`Token endpoint returned HTTP ${response.status}: ${error || response.statusText}`)
+		}
+
+		const accessToken = getString(parsed, "access_token") || getString(parsed, "token")
+		if (!accessToken) {
+			throw new Error("Token endpoint response did not include access_token.")
+		}
+
+		const expiresIn = getNumber(parsed, "expires_in")
+		session.token = accessToken
+		session.refreshToken = getString(parsed, "refresh_token") || undefined
+		session.tokenType = getString(parsed, "token_type") || undefined
+		session.expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : undefined
+		session.tokenResponse = parsed
+		session.status = "received"
+		session.message = "OAuth token exchange completed. Saving credential for LIG VS."
+		logInteraction("sidecar", "oauthTokenExchangeCompleted", {
+			provider: session.provider,
+			state: session.state,
+			hasRefreshToken: Boolean(session.refreshToken),
+			expiresIn: expiresIn || undefined,
+		})
+	}
+
+	private async persistOAuthTokenSession(session: OAuthCallbackSession) {
+		const field = providerCredentialField(session.provider)
+		if (field) {
+			const result = await this.saveProviderCredential({ provider: session.provider, value: session.token, source: "oauth_callback" })
+			session.status = "configured"
+			session.message = getString(result, "message") || "OAuth credential was saved."
+			return result
+		}
+
+		if (isOAuthTokenBlobProvider(session.provider)) {
+			const credentials = {
+				provider: session.provider,
+				accessToken: session.token,
+				refreshToken: session.refreshToken || undefined,
+				tokenType: session.tokenType || undefined,
+				expiresAt: session.expiresAt || undefined,
+				receivedAt: Date.now(),
+				tokenResponse: session.tokenResponse || undefined,
+			}
+			this.state.apiConfiguration = normalizeApiConfiguration({
+				...this.state.apiConfiguration,
+				[oauthCredentialsField(session.provider)]: JSON.stringify(credentials),
+			}) as typeof this.state.apiConfiguration
+			if (normalizeProviderValue(session.provider) === "openai-codex") {
+				this.state.openAiCodexIsAuthenticated = true
+			}
+			savePersistedState(this.state)
+			await this.broadcastState()
+			session.status = "configured"
+			session.message = `${providerAuthLabel(session.provider)} OAuth credential was saved to local LIG VS settings.`
+			logInteraction("sidecar", "oauthTokenBlobSaved", {
+				provider: session.provider,
+				state: session.state,
+				hasRefreshToken: Boolean(session.refreshToken),
+			})
+			return {
+				success: true,
+				provider: session.provider,
+				authStatus: "configured",
+				isAuthenticated: true,
+				hasCredential: true,
+				message: session.message,
+			}
+		}
+
+		session.status = "received"
+		session.message = `${providerAuthLabel(session.provider)} OAuth token was received, but LIG VS has no credential storage mapping for this provider yet.`
+		return {
+			success: false,
+			provider: session.provider,
+			authStatus: "unsupported",
+			hasToken: true,
+			message: session.message,
+		}
+	}
+
+	private clearOAuthCredential(provider: string) {
+		const field = oauthCredentialsField(provider)
+		const next = { ...this.state.apiConfiguration } as Record<string, unknown>
+		delete next[field]
+		this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
+	}
+
+	private getOAuthCallbackStatus(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || "account")
+		const state = getString(request, "state")
+		const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(provider)
+		if (!session) {
+			return {
+				success: false,
+				provider,
+				authStatus: "unauthenticated",
+				message: "No OAuth callback request is pending for this provider.",
+			}
+		}
+
+		return {
+			success: true,
+			provider: session.provider,
+			state: session.state,
+			callbackUrl: session.callbackUrl,
+			authorizationUrl: session.authorizationUrl || undefined,
+			redirectUrl: session.callbackUrl,
+			authStatus: session.status,
+			hasCode: Boolean(session.code),
+			hasToken: Boolean(session.token),
+			error: session.error || undefined,
+			message: session.message || "",
+			tokenExchangeSupported: session.tokenExchangeSupported === true,
+		}
+	}
+
+	private async submitOAuthCallback(message: unknown) {
+		const request = asRecord(message)
+		const callbackUrl = getString(request, "callbackUrl") || getString(request, "url") || getString(request, "value")
+		if (!callbackUrl) {
+			return { success: false, message: "OAuth callback URL is required.", authStatus: "unknown" }
+		}
+
+		let parsedUrl: URL
+		try {
+			parsedUrl = new URL(callbackUrl)
+		} catch {
+			return { success: false, message: "OAuth callback URL is invalid.", authStatus: "unknown" }
+		}
+		const result = this.recordOAuthCallbackFromUrl(parsedUrl)
+		const hashParams = parseUrlFragmentParams(parsedUrl)
+		const provider = normalizeProviderValue(parsedUrl.searchParams.get("provider") || hashParams.get("provider") || getString(request, "provider") || "account")
+		const session = this.latestOAuthCallbackSession(provider)
+		if (result.success && session) {
+			const completion = await this.completeOAuthCallbackSession(session)
+			return {
+				...this.getOAuthCallbackStatus({ provider, state: session.state }),
+				...completion,
+				success: typeof completion.success === "boolean" ? completion.success : result.success,
+				message: getString(completion, "message") || result.message,
+			}
+		}
+
+		return {
+			...this.getOAuthCallbackStatus({ provider, state: session?.state }),
+			success: result.success,
+			message: result.message,
+		}
+	}
+
+	private latestOAuthCallbackSession(provider: string) {
+		const normalizedProvider = normalizeProviderValue(provider) || "account"
+		return Array.from(this.oauthCallbackSessions.values())
+			.filter((session) => session.provider === normalizedProvider)
+			.sort((left, right) => right.createdAt - left.createdAt)[0]
+	}
+
+	private pruneOAuthCallbackSessions() {
+		const cutoff = Date.now() - readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000)
+		for (const [state, session] of this.oauthCallbackSessions) {
+			if (session.createdAt < cutoff) {
+				this.oauthCallbackSessions.delete(state)
+			}
+		}
+	}
+
+	private async saveProviderCredential(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
+		if (!provider) {
+			return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		}
+
+		const credential = extractProviderCredentialValue(request)
+		if (!credential) {
+			return { success: false, provider, message: "Credential value is required.", authStatus: "unauthenticated" }
+		}
+
+		const field = providerCredentialField(provider)
+		if (!field) {
+			return {
+				success: false,
+				provider,
+				message: `${providerAuthLabel(provider)} credential storage is not mapped for the Visual Studio host yet.`,
+				authStatus: "unsupported",
+			}
+		}
+
+		const update: Record<string, unknown> = {
+			[field]: credential,
+		}
+		const baseUrl = getString(request, "baseUrl") || getString(request, "url") || getString(request, "endpoint")
+		const baseUrlField = providerBaseUrlField(provider)
+		if (baseUrl && baseUrlField) {
+			update[baseUrlField] = baseUrl
+		}
+
+		this.state.apiConfiguration = normalizeApiConfiguration({
+			...this.state.apiConfiguration,
+			...update,
+		}) as typeof this.state.apiConfiguration
+		savePersistedState(this.state)
+		await this.broadcastState()
+
+		logInteraction("sidecar", "providerCredentialSaved", {
+			provider,
+			field,
+			hasBaseUrl: Boolean(baseUrl && baseUrlField),
+			source: getString(request, "source") || undefined,
+		})
+
+		return {
+			success: true,
+			provider,
+			authStatus: "configured",
+			isAuthenticated: true,
+			field,
+			hasCredential: true,
+			message: `${providerAuthLabel(provider)} credential was saved to local LIG VS settings.`,
+		}
+	}
+
+	private getProviderCredentialStatus(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
+		if (!provider) {
+			return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		}
+
+		const field = providerCredentialField(provider)
+		const baseUrlField = providerBaseUrlField(provider)
+		const apiConfig = asRecord(this.state.apiConfiguration)
+		const credential = field ? getString(apiConfig, field) : ""
+		const oauthCredentials = resolveOAuthCredentials(apiConfig, provider)
+		const hasOAuthCredential = Object.keys(oauthCredentials).length > 0
+		const oauthState = describeOAuthCredentialState(oauthCredentials)
+		const envCredential = resolveProviderEnvApiKey(provider)
+		const baseUrl = (baseUrlField ? getString(apiConfig, baseUrlField) : "") || resolveProviderEnvBaseUrl(provider)
+		return {
+			success: true,
+			provider,
+			supported: Boolean(field) || isOAuthTokenBlobProvider(provider),
+			authStatus: credential || hasOAuthCredential ? "configured" : envCredential ? "environment" : field || isOAuthTokenBlobProvider(provider) ? "unauthenticated" : "unsupported",
+			isAuthenticated: Boolean(credential || hasOAuthCredential || envCredential),
+			hasCredential: Boolean(credential || hasOAuthCredential),
+			hasOAuthCredential,
+			oauthExpiresAt: oauthState.expiresAt,
+			oauthRefreshStatus: oauthState.refreshStatus,
+			oauthRefreshSupported: oauthState.refreshSupported && hasConfiguredOAuthTokenExchange(provider),
+			oauthRefreshRequired: oauthState.refreshStatus === "expired",
+			hasEnvironmentCredential: Boolean(envCredential),
+			field: field || (isOAuthTokenBlobProvider(provider) ? oauthCredentialsField(provider) : undefined),
+			baseUrl: baseUrl || undefined,
+			baseUrlField: baseUrlField || undefined,
+			sdkProviderId: normalizeSdkProviderId(provider),
+		}
+	}
+
+	private async refreshOAuthCredential(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
+		if (!provider) {
+			return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		}
+		if (!["openai-codex", "oca", "account", "lig"].includes(provider)) {
+			return {
+				success: false,
+				provider,
+				authStatus: "unsupported",
+				message: `${providerAuthLabel(provider)} OAuth refresh is not required for this Visual Studio deployment scope.`,
+			}
+		}
+
+		const credentials = resolveOAuthCredentials(asRecord(this.state.apiConfiguration), provider)
+		const refreshToken = getString(credentials, "refreshToken") || getString(credentials, "refresh_token")
+		if (!refreshToken) {
+			return {
+				...this.getProviderCredentialStatus({ provider }),
+				success: false,
+				message: `${providerAuthLabel(provider)} has no stored refresh token.`,
+			}
+		}
+		const tokenExchange = createOAuthTokenExchangeConfig(provider, request)
+		if (!tokenExchange) {
+			return {
+				...this.getProviderCredentialStatus({ provider }),
+				success: false,
+				message: `${providerAuthLabel(provider)} refresh requires a configured token endpoint and client id.`,
+			}
+		}
+
+		const refreshed = await refreshOAuthToken(provider, refreshToken, tokenExchange)
+		const merged = {
+			...credentials,
+			...refreshed,
+			provider,
+			refreshToken: getString(refreshed, "refreshToken") || refreshToken,
+			receivedAt: Date.now(),
+		}
+		this.state.apiConfiguration = normalizeApiConfiguration({
+			...this.state.apiConfiguration,
+			[oauthCredentialsField(provider)]: JSON.stringify(merged),
+		}) as typeof this.state.apiConfiguration
+		if (provider === "openai-codex") {
+			this.state.openAiCodexIsAuthenticated = true
+		}
+		savePersistedState(this.state)
+		await this.broadcastState()
+		logInteraction("sidecar", "oauthTokenRefreshed", {
+			provider,
+			expiresAt: numberValue(merged.expiresAt) || undefined,
+			hasRefreshToken: Boolean(getString(merged, "refreshToken")),
+		})
+		return {
+			...this.getProviderCredentialStatus({ provider }),
+			success: true,
+			authStatus: "configured",
+			message: `${providerAuthLabel(provider)} OAuth credential was refreshed.`,
+		}
+	}
+
+	private async getProviderConfigFields(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
+		if (!provider) {
+			return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		}
+
+		const sdkProviderId = normalizeSdkProviderId(provider)
+		const credentialStatus = this.getProviderCredentialStatus({ provider })
+		try {
+			const sdk = await import("@cline/sdk")
+			const fields =
+				typeof sdk.getProviderConfigFields === "function"
+					? sdk.getProviderConfigFields(sdkProviderId)
+					: createFallbackProviderConfigFields(provider)
+			const fieldsRecord = asRecord(fields)
+			const authMethod = getString(fieldsRecord, "authMethod") || "api-key"
+			const supportsLocalCredential = Boolean(providerCredentialField(provider))
+			const supported = authMethod === "oauth" ? isOAuthBridgeProvider(provider) : authMethod === "api-key" ? supportsLocalCredential : true
+			const message =
+				authMethod === "oauth"
+					? hasConfiguredOAuthTokenExchange(provider)
+						? `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can open configured authorization URLs, receive localhost callback redirects, exchange authorization codes at the configured token endpoint, and store local OAuth credentials.`
+						: `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can receive localhost callback redirects; set provider OAuth token endpoint and client metadata to enable local token exchange.`
+					: authMethod === "local"
+						? `${providerAuthLabel(provider)} is a local/provider-managed auth flow. LIG VS will report readiness but does not fake sign-in.`
+						: `${providerAuthLabel(provider)} can be configured with local credentials in LIG VS settings.`
+
+			return {
+				...credentialStatus,
+				success: true,
+				provider,
+				sdkProviderId,
+				supported,
+				authMethod,
+				fields: fieldsRecord.fields || {},
+				description: getString(fieldsRecord, "description"),
+				callbackSupported: authMethod === "oauth" ? isOAuthBridgeProvider(provider) : undefined,
+				authorizationUrlSupported: authMethod === "oauth" ? hasConfiguredOAuthAuthorizationUrl(provider) : undefined,
+				tokenExchangeSupported: authMethod === "oauth" ? hasConfiguredOAuthTokenExchange(provider) : undefined,
+				message,
+			}
+		} catch (error) {
+			const fallback = createFallbackProviderConfigFields(provider)
+			return {
+				...credentialStatus,
+				success: true,
+				provider,
+				sdkProviderId,
+				supported: Boolean(providerCredentialField(provider)),
+				authMethod: fallback.authMethod,
+				fields: fallback.fields,
+				message: `Using fallback provider auth metadata for ${providerAuthLabel(provider)} because SDK provider metadata could not be loaded.`,
+				error: error instanceof Error ? error.message : String(error),
+			}
+		}
+	}
+
+	private async clearProviderCredential(message: unknown) {
+		const request = asRecord(message)
+		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
+		if (!provider) {
+			return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		}
+
+		const field = providerCredentialField(provider)
+		if (!field) {
+			return { success: false, provider, message: `${providerAuthLabel(provider)} credential storage is not mapped.`, authStatus: "unsupported" }
+		}
+
+		const nextConfig = { ...asRecord(this.state.apiConfiguration) }
+		delete nextConfig[field]
+		if (request.clearBaseUrl === true) {
+			const baseUrlField = providerBaseUrlField(provider)
+			if (baseUrlField) {
+				delete nextConfig[baseUrlField]
+			}
+		}
+		this.state.apiConfiguration = normalizeApiConfiguration(nextConfig) as typeof this.state.apiConfiguration
+		savePersistedState(this.state)
+		await this.broadcastState()
+
+		logInteraction("sidecar", "providerCredentialCleared", { provider, field })
+		return {
+			success: true,
+			provider,
+			authStatus: "unauthenticated",
+			isAuthenticated: false,
+			hasCredential: false,
+			message: `${providerAuthLabel(provider)} credential was removed from local LIG VS settings.`,
+		}
+	}
+
 	private async getPrimaryWorkspaceRoot() {
 		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({}).catch(() => [])
 		return workspaceRoots[0] || String(this.state.currentTaskItem?.cwdOnTaskInitialization || process.cwd())
 	}
 
+	private async runGit(args: string[], cwd: string) {
+		try {
+			const result = await execFile("git", args, {
+				cwd,
+				windowsHide: true,
+				timeout: 60_000,
+				maxBuffer: 1024 * 1024 * 8,
+			})
+			return { success: true, stdout: result.stdout || "", stderr: result.stderr || "", exitCode: 0 }
+		} catch (error) {
+			const record = asRecord(error)
+			return {
+				success: false,
+				stdout: getString(record, "stdout"),
+				stderr: getString(record, "stderr") || getString(record, "message"),
+				exitCode: getNumber(record, "code") ?? 1,
+			}
+		}
+	}
+
+	private async isGitAvailable() {
+		const result = await this.runGit(["--version"], process.cwd())
+		return result.success
+	}
+
+	private async getGitRoot(workspaceRoot = "") {
+		const root = workspaceRoot || (await this.getPrimaryWorkspaceRoot())
+		if (!root || !fs.existsSync(root)) {
+			return { workspaceRoot: root, gitRoot: "", error: "No workspace root is available.", errorKind: "workspace_missing" }
+		}
+
+		if (!(await this.isGitAvailable())) {
+			return { workspaceRoot: root, gitRoot: "", error: "Git is not available on PATH.", errorKind: "git_missing" }
+		}
+
+		const result = await this.runGit(["rev-parse", "--show-toplevel"], root)
+		if (!result.success) {
+			return { workspaceRoot: root, gitRoot: "", error: result.stderr || "Workspace is not a git repository.", errorKind: "repo_missing" }
+		}
+
+		return { workspaceRoot: root, gitRoot: result.stdout.trim(), error: "", errorKind: "" }
+	}
+
+	private async listWorktrees() {
+		const { workspaceRoot, gitRoot, error, errorKind } = await this.getGitRoot()
+		if (!gitRoot) {
+			this.setWorktreesFeatureFlag(false)
+			logInteraction("sidecar", "worktreeListFailed", { errorKind, error })
+			return {
+				worktrees: [],
+				items: [],
+				isGitRepo: false,
+				isMultiRoot: false,
+				isSubfolder: false,
+				gitRootPath: "",
+				error,
+				errorKind,
+			}
+		}
+
+		const result = await this.runGit(["worktree", "list", "--porcelain"], gitRoot)
+		if (!result.success) {
+			this.setWorktreesFeatureFlag(false)
+			logInteraction("sidecar", "worktreeListFailed", {
+				errorKind: "worktree_list_failed",
+				gitRoot,
+				stderr: truncateText(result.stderr, 1000),
+			})
+			return {
+				worktrees: [],
+				items: [],
+				isGitRepo: true,
+				isMultiRoot: false,
+				isSubfolder: !samePath(gitRoot, workspaceRoot),
+				gitRootPath: gitRoot,
+				error: result.stderr || "Failed to list git worktrees.",
+				errorKind: "worktree_list_failed",
+			}
+		}
+
+		const currentRoot = await this.getCurrentGitRoot(gitRoot)
+		const worktrees = await Promise.all(
+			parseGitWorktreePorcelain(result.stdout).map(async (worktree) => this.enrichWorktree(worktree, currentRoot || gitRoot)),
+		)
+		this.setWorktreesFeatureFlag(true)
+		logInteraction("sidecar", "worktreeListSucceeded", { gitRoot, count: worktrees.length })
+		return {
+			worktrees,
+			items: worktrees,
+			isGitRepo: true,
+			isMultiRoot: false,
+			isSubfolder: !samePath(gitRoot, workspaceRoot),
+			gitRootPath: gitRoot,
+			error: "",
+			errorKind: "",
+		}
+	}
+
+	private async enrichWorktree(worktree: Record<string, unknown>, currentRoot: string) {
+		const worktreePath = getString(worktree, "path")
+		const status = worktreePath ? await this.getWorktreeStatus(worktreePath) : { dirty: false, statusSummary: "" }
+		return {
+			...worktree,
+			...status,
+			isCurrent: samePath(worktreePath, currentRoot),
+		}
+	}
+
+	private async getWorktreeStatus(worktreePath: string) {
+		if (!worktreePath || !fs.existsSync(worktreePath)) {
+			return { dirty: false, statusSummary: "missing", statusEntries: [], conflictCount: 0 }
+		}
+
+		const status = await this.runGit(["status", "--porcelain"], worktreePath)
+		if (!status.success) {
+			return { dirty: false, statusSummary: status.stderr || "status unavailable", statusEntries: [], conflictCount: 0 }
+		}
+
+		const lines = status.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+		if (lines.length === 0) {
+			return { dirty: false, statusSummary: "clean", statusEntries: [], conflictCount: 0 }
+		}
+
+		const staged = lines.filter((line) => line[0] && line[0] !== "?" && line[0] !== " ").length
+		const unstaged = lines.filter((line) => line[1] && line[1] !== " ").length
+		const untracked = lines.filter((line) => line.startsWith("??")).length
+		const conflicted = lines.filter((line) => /^([ADU]{2}|DD|AA|DU|UD|UA|AU)$/.test(line.slice(0, 2))).length
+		const statusEntries = lines.slice(0, 50).map((line) => ({
+			code: line.slice(0, 2),
+			path: line.slice(3).trim() || line,
+		}))
+		const parts = [
+			`${lines.length} change${lines.length === 1 ? "" : "s"}`,
+			staged ? `${staged} staged` : "",
+			unstaged ? `${unstaged} unstaged` : "",
+			untracked ? `${untracked} untracked` : "",
+			conflicted ? `${conflicted} conflict${conflicted === 1 ? "" : "s"}` : "",
+		].filter(Boolean)
+		return { dirty: true, statusSummary: parts.join(", "), statusEntries, conflictCount: conflicted }
+	}
+
+	private async getCurrentGitRoot(fallbackRoot: string) {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const current = await this.getGitRoot(workspaceRoot)
+		return current.gitRoot || fallbackRoot
+	}
+
+	private setWorktreesFeatureFlag(enabled: boolean) {
+		const current = asRecord(this.state.worktreesEnabled)
+		this.state.worktreesEnabled = {
+			...current,
+			user: current.user !== false,
+			featureFlag: enabled,
+		}
+	}
+
+	private async getWorktreeDefaults() {
+		const { workspaceRoot, gitRoot } = await this.getGitRoot()
+		const root = gitRoot || workspaceRoot || process.cwd()
+		const branchResult = await this.runGit(["branch", "--show-current"], root)
+		const baseBranch = branchResult.success ? branchResult.stdout.trim() : ""
+		const branches = await this.getLocalBranchCandidates(root)
+		const baseBranches = await this.getBaseBranchCandidates(root)
+		const rootName = path.basename(root.replace(/[\\/]+$/, "")) || "worktree"
+		const parent = path.dirname(root)
+		return {
+			branch: "",
+			baseBranch,
+			currentBranch: baseBranch,
+			branches,
+			baseBranches,
+			cwd: root,
+			suggestedBranch: `feature/${rootName}-task`,
+			suggestedPath: path.join(parent, `${rootName}-worktree`),
+			recommendedPath: path.join(parent, `${rootName}-worktree`),
+		}
+	}
+
+	private async getLocalBranchCandidates(root: string) {
+		const result = await this.runGit(["branch", "--format=%(refname:short)"], root)
+		if (!result.success) {
+			return []
+		}
+		return uniqueSortedLines(result.stdout)
+	}
+
+	private async getBaseBranchCandidates(root: string) {
+		const result = await this.runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes"], root)
+		if (!result.success) {
+			return this.getLocalBranchCandidates(root)
+		}
+		return uniqueSortedLines(result.stdout).filter((branch) => !/\/HEAD$/.test(branch))
+	}
+
+	private async getWorktreeIncludeStatus() {
+		const { workspaceRoot, gitRoot } = await this.getGitRoot()
+		const root = gitRoot || workspaceRoot
+		const worktreeIncludePath = root ? path.join(root, ".worktreeinclude") : ""
+		const gitignorePath = root ? path.join(root, ".gitignore") : ""
+		return {
+			enabled: !!root,
+			included: !!worktreeIncludePath && fs.existsSync(worktreeIncludePath),
+			exists: !!worktreeIncludePath && fs.existsSync(worktreeIncludePath),
+			hasGitignore: !!gitignorePath && fs.existsSync(gitignorePath),
+			gitignoreContent: gitignorePath && fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, "utf8") : "",
+		}
+	}
+
+	private async createWorktreeInclude(message: unknown) {
+		const { workspaceRoot, gitRoot } = await this.getGitRoot()
+		const root = gitRoot || workspaceRoot
+		if (!root) {
+			return { success: false, message: "No workspace root is available to create .worktreeinclude." }
+		}
+
+		const targetPath = path.join(root, ".worktreeinclude")
+		fs.writeFileSync(targetPath, getString(message, "content"), "utf8")
+		return { success: true, message: ".worktreeinclude created successfully.", path: targetPath }
+	}
+
+	private async createWorktree(message: unknown) {
+		const request = asRecord(message)
+		const { gitRoot, error } = await this.getGitRoot()
+		if (!gitRoot) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "no_git_root", error })
+			return { success: false, message: error || "Worktrees require a git repository." }
+		}
+
+		const rawPath = getString(request, "path")
+		const branch = getString(request, "branch") || getString(request, "branchName")
+		if (!rawPath || !branch) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "missing_path_or_branch", gitRoot })
+			return { success: false, message: "Both a worktree folder path and branch name are required." }
+		}
+		const targetPath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(gitRoot, rawPath)
+		const baseBranch = getString(request, "baseBranch") || (await this.getWorktreeDefaults()).baseBranch || "HEAD"
+		logInteraction("sidecar", "worktreeCreateStarted", {
+			gitRoot,
+			targetPath,
+			branch,
+			baseBranch,
+			createNewBranch: request.createNewBranch !== false,
+		})
+		if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-") || branch.includes("..") || branch.endsWith("/")) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "invalid_branch", branch })
+			return { success: false, message: `Invalid branch name: ${branch}` }
+		}
+		if (fs.existsSync(targetPath)) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "target_exists", targetPath })
+			return { success: false, message: `Worktree folder already exists: ${targetPath}` }
+		}
+		const existingList = await this.listWorktrees()
+		const existingWorktree = existingList.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), targetPath))
+		if (existingWorktree) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "registered_target_exists", targetPath })
+			return { success: false, message: `A git worktree is already registered at ${targetPath}` }
+		}
+		if (isPathInside(targetPath, gitRoot)) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "inside_repo", targetPath, gitRoot })
+			return { success: false, message: "Create the worktree outside the current repository folder." }
+		}
+		const parentWorktree = existingList.worktrees.find((item: Record<string, unknown>) => {
+			const existingPath = getString(item, "path")
+			return existingPath && isPathInside(targetPath, existingPath)
+		})
+		if (parentWorktree) {
+			logInteraction("sidecar", "worktreeCreateFailed", {
+				reason: "inside_existing_worktree",
+				targetPath,
+				parentWorktree: getString(parentWorktree, "path"),
+			})
+			return { success: false, message: `Create the worktree outside existing worktree folders. Parent worktree: ${getString(parentWorktree, "path")}` }
+		}
+		const branchExists = await this.branchExists(gitRoot, branch)
+		if (request.createNewBranch !== false && branchExists) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "branch_exists", branch })
+			return { success: false, message: `Branch already exists: ${branch}. Choose existing-branch mode or enter a new branch name.` }
+		}
+		if (request.createNewBranch === false && !branchExists) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "branch_missing", branch })
+			return { success: false, message: `Branch does not exist: ${branch}. Choose new-branch mode or create the branch first.` }
+		}
+
+		const args = ["worktree", "add"]
+		if (request.createNewBranch !== false) {
+			args.push("-b", branch)
+		} else {
+			args.push("--checkout")
+		}
+		args.push(targetPath, request.createNewBranch === false ? branch : baseBranch)
+		const result = await this.runGit(args, gitRoot)
+		if (!result.success) {
+			logInteraction("sidecar", "worktreeCreateFailed", { reason: "git_failed", stderr: truncateText(result.stderr, 1000) })
+			return { success: false, message: classifyWorktreeGitError(result.stderr, "create") }
+		}
+
+		await this.copyWorktreeIncludeFiles(gitRoot, targetPath)
+		const list = await this.listWorktrees()
+		const worktree = list.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), targetPath))
+		logInteraction("sidecar", "worktreeCreateSucceeded", { targetPath, branch, baseBranch })
+		return { success: true, message: `Worktree created for ${branch} at ${targetPath}.`, worktree, worktrees: list.worktrees }
+	}
+
+	private async branchExists(gitRoot: string, branch: string) {
+		const local = await this.runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], gitRoot)
+		return local.success
+	}
+
+	private async copyWorktreeIncludeFiles(gitRoot: string, targetPath: string) {
+		const includePath = path.join(gitRoot, ".worktreeinclude")
+		if (!fs.existsSync(includePath)) {
+			return
+		}
+		const entries = fs
+			.readFileSync(includePath, "utf8")
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter((line) => line && !line.startsWith("#"))
+		for (const entry of entries) {
+			const source = path.resolve(gitRoot, entry)
+			const destination = path.resolve(targetPath, entry)
+			if (!isPathInside(source, gitRoot) || !isPathInside(destination, targetPath) || !fs.existsSync(source)) {
+				continue
+			}
+			fs.cpSync(source, destination, { recursive: true, force: false, errorOnExist: false })
+		}
+	}
+
+	private async switchWorktree(message: unknown) {
+		const request = asRecord(message)
+		const requestedPath = getString(request, "path")
+		if (!requestedPath) {
+			logInteraction("sidecar", "worktreeSwitchFailed", { reason: "missing_path" })
+			return { success: false, message: "Worktree path is required." }
+		}
+		const targetPath = path.resolve(requestedPath)
+		if (!fs.existsSync(targetPath)) {
+			logInteraction("sidecar", "worktreeSwitchFailed", { reason: "missing_folder", targetPath })
+			return { success: false, message: `Worktree folder does not exist: ${targetPath}` }
+		}
+
+		const solutionCandidates = findSolutions(targetPath)
+		if (solutionCandidates.length > 1 && !getString(request, "solutionPath")) {
+			logInteraction("sidecar", "worktreeSwitchNeedsSolutionChoice", { targetPath, count: solutionCandidates.length })
+			return {
+				success: false,
+				message: "Multiple .sln files were found. Choose a solution to open.",
+				path: targetPath,
+				solutionCandidates,
+			}
+		}
+		const requestedSolution = getString(request, "solutionPath")
+		const solution = requestedSolution && solutionCandidates.some((candidate) => samePath(candidate, requestedSolution))
+			? requestedSolution
+			: solutionCandidates[0] || ""
+		if (!solution) {
+			logInteraction("sidecar", "worktreeSwitchFolderFallbackStarted", { targetPath, newWindow: request.newWindow === true })
+			const folderResult = asRecord(await VisualStudioHostProvider.create(this.connection).workspaceClient.openFolder({
+				folderPath: targetPath,
+				newWindow: request.newWindow === true,
+			}))
+			return {
+				success: folderResult.success !== false,
+				message: getString(folderResult, "message") ||
+					(request.newWindow === true
+						? `Folder-only worktree opened in a new Visual Studio window: ${targetPath}`
+						: `Folder-only worktree opened in this Visual Studio window: ${targetPath}`),
+				path: targetPath,
+				workspacePath: targetPath,
+				folderOnly: true,
+				folderOpenFallback: true,
+				solutionCandidates: [],
+			}
+		}
+
+		logInteraction("sidecar", "worktreeSwitchStarted", { targetPath, solution, newWindow: request.newWindow === true })
+		const hostResult = asRecord(await VisualStudioHostProvider.create(this.connection).workspaceClient.openSolution({
+			solutionPath: solution,
+			newWindow: request.newWindow === true,
+		}))
+		if (hostResult.success === false) {
+			logInteraction("sidecar", "worktreeSwitchFailed", {
+				reason: "host_failed",
+				targetPath,
+				solution,
+				message: getString(hostResult, "message"),
+			})
+			return {
+				success: false,
+				message: getString(hostResult, "message") || "Visual Studio could not open the selected worktree solution.",
+				path: targetPath,
+				solutionPath: solution,
+				solutionCandidates,
+			}
+		}
+		logInteraction("sidecar", "worktreeSwitchSucceeded", { targetPath, solution, newWindow: request.newWindow === true })
+		return {
+			success: true,
+			message: request.newWindow === true
+				? `Worktree opened in a new Visual Studio window: ${solution}`
+				: `Worktree opened in this Visual Studio window: ${solution}`,
+			path: targetPath,
+			workspacePath: targetPath,
+			solutionPath: solution,
+			solutionCandidates,
+		}
+	}
+
+	private async deleteWorktree(message: unknown) {
+		const request = asRecord(message)
+		const { gitRoot, error } = await this.getGitRoot()
+		if (!gitRoot) {
+			logInteraction("sidecar", "worktreeDeleteFailed", { reason: "no_git_root", error })
+			return { success: false, message: error || "Worktrees require a git repository." }
+		}
+
+		const requestedPath = getString(request, "path")
+		if (!requestedPath) {
+			logInteraction("sidecar", "worktreeDeleteFailed", { reason: "missing_path", gitRoot })
+			return { success: false, message: "Worktree path is required." }
+		}
+		const targetPath = path.resolve(requestedPath)
+		const force = request.force === true
+		logInteraction("sidecar", "worktreeDeleteStarted", {
+			gitRoot,
+			targetPath,
+			force,
+			deleteBranch: request.deleteBranch === true,
+			branchName: getString(request, "branchName"),
+		})
+		const status = await this.getWorktreeStatus(targetPath)
+		if (!force && status.dirty) {
+			logInteraction("sidecar", "worktreeDeleteFailed", { reason: "dirty", targetPath, statusSummary: status.statusSummary })
+			return { success: false, message: `Cannot delete a worktree with uncommitted changes (${status.statusSummary}). Commit/stash changes or retry with force.`, dirty: true, statusSummary: status.statusSummary }
+		}
+
+		const removeArgs = ["worktree", "remove"]
+		if (force) {
+			removeArgs.push("--force")
+		}
+		removeArgs.push(targetPath)
+		const removed = await this.runGit(removeArgs, gitRoot)
+		if (!removed.success) {
+			logInteraction("sidecar", "worktreeDeleteFailed", { reason: "git_failed", targetPath, stderr: truncateText(removed.stderr, 1000) })
+			return { success: false, message: classifyWorktreeGitError(removed.stderr, "delete") }
+		}
+
+		const branchName = getString(request, "branchName")
+		if (request.deleteBranch === true && branchName) {
+			const deleted = await this.runGit(["branch", "-D", branchName], gitRoot)
+			if (!deleted.success) {
+				logInteraction("sidecar", "worktreeDeleteBranchFailed", {
+					targetPath,
+					branchName,
+					stderr: truncateText(deleted.stderr, 1000),
+				})
+				return { success: true, warning: deleted.stderr || branchName, message: `Worktree deleted, but branch deletion failed: ${deleted.stderr || branchName}` }
+			}
+		}
+
+		logInteraction("sidecar", "worktreeDeleteSucceeded", { targetPath, branchName: branchName || undefined })
+		return { success: true, message: `Worktree deleted: ${targetPath}.`, ...(await this.listWorktrees()) }
+	}
+
+	private async mergeWorktree(message: unknown) {
+		const request = asRecord(message)
+		const { gitRoot, error } = await this.getGitRoot()
+		if (!gitRoot) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "no_git_root", error })
+			return { success: false, message: error || "Worktrees require a git repository.", hasConflicts: false, conflictingFiles: [] }
+		}
+
+		const requestedPath = getString(request, "worktreePath") || getString(request, "path")
+		if (!requestedPath) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "missing_path", gitRoot })
+			return { success: false, message: "Worktree path is required.", hasConflicts: false, conflictingFiles: [] }
+		}
+		const worktreePath = path.resolve(requestedPath)
+		const targetBranch = getString(request, "targetBranch") || (await this.getWorktreeDefaults()).baseBranch || "main"
+		const sourceBranch = await this.getBranchForWorktree(worktreePath)
+		logInteraction("sidecar", "worktreeMergeStarted", {
+			sourceWorktreePath: worktreePath,
+			sourceBranch,
+			targetWorktreePath: gitRoot,
+			targetBranch,
+			deleteAfterMerge: request.deleteAfterMerge === true,
+		})
+		if (!sourceBranch) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "source_branch_missing", worktreePath })
+			return { success: false, message: "Cannot merge a detached or unknown worktree branch.", hasConflicts: false, conflictingFiles: [] }
+		}
+
+		const sourceStatus = await this.getWorktreeStatus(worktreePath)
+		if (sourceStatus.dirty) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "source_dirty", worktreePath, statusSummary: sourceStatus.statusSummary })
+			return { success: false, message: `Cannot merge while the source worktree has uncommitted changes (${sourceStatus.statusSummary}).`, hasConflicts: false, conflictingFiles: [], sourceBranch, targetBranch }
+		}
+
+		const rootStatus = await this.getWorktreeStatus(gitRoot)
+		if (rootStatus.dirty) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "target_dirty", gitRoot, statusSummary: rootStatus.statusSummary })
+			return { success: false, message: `Cannot merge while the target worktree has uncommitted changes (${rootStatus.statusSummary}).`, hasConflicts: false, conflictingFiles: [], sourceBranch, targetBranch }
+		}
+
+		const checkout = await this.runGit(["checkout", targetBranch], gitRoot)
+		if (!checkout.success) {
+			logInteraction("sidecar", "worktreeMergeFailed", { reason: "checkout_failed", targetBranch, stderr: truncateText(checkout.stderr, 1000) })
+			return {
+				success: false,
+				message: classifyWorktreeGitError(checkout.stderr || `Failed to checkout ${targetBranch}.`, "merge"),
+				hasConflicts: false,
+				conflictingFiles: [],
+				sourceBranch,
+				targetBranch,
+				sourceWorktreePath: worktreePath,
+				targetWorktreePath: gitRoot,
+			}
+		}
+
+		const merge = await this.runGit(["merge", "--no-ff", sourceBranch], gitRoot)
+		if (!merge.success) {
+			const conflicts = await this.getConflictFiles(gitRoot)
+			const recoveryCommands = [
+				"git status --short",
+				"git diff --name-only --diff-filter=U",
+				"git merge --abort",
+				`git checkout ${targetBranch}`,
+			]
+			logInteraction("sidecar", "worktreeMergeFailed", {
+				reason: conflicts.length > 0 ? "conflict" : "merge_failed",
+				sourceBranch,
+				targetBranch,
+				conflictCount: conflicts.length,
+				stderr: truncateText(merge.stderr, 1000),
+			})
+			return {
+				success: false,
+				message: merge.stderr || "Merge failed.",
+				hasConflicts: conflicts.length > 0,
+				conflictingFiles: conflicts,
+				recoveryState: conflicts.length > 0 ? "merge_conflict" : "merge_failed",
+				recoveryCommands,
+				recoveryPrompt: `Merge conflict while merging ${sourceBranch} from ${worktreePath} into ${targetBranch} at ${gitRoot}. Conflicts: ${conflicts.join(", ") || "(unknown)"}.`,
+				sourceBranch,
+				targetBranch,
+				sourceWorktreePath: worktreePath,
+				targetWorktreePath: gitRoot,
+			}
+		}
+
+		let warning = ""
+		if (request.deleteAfterMerge === true) {
+			const deleteResult = asRecord(await this.deleteWorktree({ path: worktreePath, force: false, deleteBranch: false }))
+			if (deleteResult.success === false) {
+				warning = getString(deleteResult, "message") || "Merge succeeded, but the source worktree could not be deleted."
+			}
+		}
+
+		logInteraction("sidecar", "worktreeMergeSucceeded", { sourceBranch, targetBranch, warning: warning || undefined })
+		return {
+			success: true,
+			message: warning ? `Merged ${sourceBranch} into ${targetBranch}. ${warning}` : `Merged ${sourceBranch} into ${targetBranch}.`,
+			hasConflicts: false,
+			conflictingFiles: [],
+			sourceBranch,
+			targetBranch,
+			sourceWorktreePath: worktreePath,
+			targetWorktreePath: gitRoot,
+			warning,
+		}
+	}
+
+	private async getBranchForWorktree(worktreePath: string) {
+		const list = await this.listWorktrees()
+		const match = list.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), worktreePath))
+		return getString(match, "branch")
+	}
+
+	private async getConflictFiles(gitRoot: string) {
+		const result = await this.runGit(["diff", "--name-only", "--diff-filter=U"], gitRoot)
+		return result.success
+			? result.stdout
+					.split(/\r?\n/)
+					.map((line) => line.trim())
+					.filter(Boolean)
+			: []
+	}
+
+	private async recoverWorktreeMerge(message: unknown) {
+		const request = asRecord(message)
+		const action = normalizeMergeRecoveryAction(getString(request, "action") || getString(request, "value") || "status")
+		const requestedPath = getString(request, "targetWorktreePath") || getString(request, "workspacePath") || getString(request, "path")
+		const { gitRoot, error } = await this.getGitRoot(requestedPath)
+		if (!gitRoot) {
+			return { success: false, action, message: error || "Worktrees require a git repository.", conflictingFiles: [] }
+		}
+
+		if (action === "abort") {
+			const result = await this.runGit(["merge", "--abort"], gitRoot)
+			return {
+				success: result.success,
+				action,
+				message: result.success ? "Merge aborted." : result.stderr || "Failed to abort merge.",
+				conflictingFiles: await this.getConflictFiles(gitRoot),
+				targetWorktreePath: gitRoot,
+			}
+		}
+
+		if (action === "continue") {
+			const result = await this.runGit(["merge", "--continue"], gitRoot)
+			return {
+				success: result.success,
+				action,
+				message: result.success ? "Merge continued." : result.stderr || "Failed to continue merge.",
+				conflictingFiles: await this.getConflictFiles(gitRoot),
+				targetWorktreePath: gitRoot,
+			}
+		}
+
+		const status = await this.getWorktreeStatus(gitRoot)
+		return {
+			success: true,
+			action: "status",
+			message: status.statusSummary || "Merge status loaded.",
+			statusSummary: status.statusSummary,
+			statusEntries: status.statusEntries,
+			conflictingFiles: await this.getConflictFiles(gitRoot),
+			targetWorktreePath: gitRoot,
+		}
+	}
+
 	private requireClineSdk() {
 		if (!this.clineSdk) {
-			throw new Error("Cline SDK runtime is not attached.")
+			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 		return this.clineSdk
 	}
@@ -813,7 +2469,7 @@ export class VisualStudioWebviewRouter {
 
 	private async startNewTask(message: unknown, options: { broadcast?: boolean } = {}) {
 		if (!this.clineSdk) {
-			throw new Error("Cline SDK runtime is not attached.")
+			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
 		this.closingSessionIds.clear()
@@ -822,8 +2478,15 @@ export class VisualStudioWebviewRouter {
 		const images = getStringArray(message, "images")
 		const files = getStringArray(message, "files")
 		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({})
-		const cwd = workspaceRoots[0] || process.cwd()
+		const requestedWorkspacePath = getString(message, "workspacePath") || getString(message, "cwd") || getString(message, "worktreePath")
+		const cwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
+			? path.resolve(requestedWorkspacePath)
+			: workspaceRoots[0] || process.cwd()
 		const taskItem = createHistoryItem(createId(), text, cwd, this.getModelId())
+		if (requestedWorkspacePath) {
+			;(taskItem as Record<string, unknown>).workspacePath = cwd
+			;(taskItem as Record<string, unknown>).worktreePath = cwd
+		}
 
 		this.state.clineMessages = []
 		this.lastToolSummaries = []
@@ -839,9 +2502,12 @@ export class VisualStudioWebviewRouter {
 		this.addMessage({ type: "say", say: "task", text, images, files })
 		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
+		void this.runLifecycleHooks("TaskStart", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
+		void this.runLifecycleHooks("UserPromptSubmit", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
 		if (options.broadcast !== false) {
 			await this.broadcastState()
 		}
+		savePersistedState(this.state)
 
 		this.clineSdk.startSession({
 			prompt: text,
@@ -850,7 +2516,7 @@ export class VisualStudioWebviewRouter {
 			userFiles: files,
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, String(taskItem.id || "")),
-			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
+			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
 		}).then((result) => this.completeFromSdkResult(result, String(taskItem.id || ""), "startSession")).catch(async (error) => {
 			this.clearTaskIdleWatchdog()
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
@@ -861,7 +2527,7 @@ export class VisualStudioWebviewRouter {
 
 	private async sendAskResponse(message: unknown) {
 		if (!this.clineSdk) {
-			throw new Error("Cline SDK runtime is not attached.")
+			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
 		const responseType = getString(message, "responseType")
@@ -949,6 +2615,7 @@ export class VisualStudioWebviewRouter {
 
 		this.removeTerminalAskMessages()
 		this.addMessage({ type: "say", say: "user_feedback", text })
+		savePersistedState(this.state)
 		await this.broadcastState()
 
 		const sendParams = {
@@ -958,6 +2625,12 @@ export class VisualStudioWebviewRouter {
 			userFiles: getStringArray(message, "files"),
 			delivery: normalizePromptDelivery(getString(message, "delivery")),
 		}
+		void this.runLifecycleHooks("UserPromptSubmit", {
+			prompt: getString(message, "text"),
+			sessionId,
+			images: getStringArray(message, "images"),
+			files: getStringArray(message, "files"),
+		})
 
 		this.sendOrResumeSdkSession(sessionId, sendParams, text.length).then((result) =>
 			this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "send"),
@@ -973,7 +2646,7 @@ export class VisualStudioWebviewRouter {
 		textLength: number,
 	): Promise<unknown> {
 		if (!this.clineSdk) {
-			throw new Error("Cline SDK runtime is not attached.")
+			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
 		if (this.clineSdk.status.activeSessionId !== sessionId) {
@@ -1013,7 +2686,7 @@ export class VisualStudioWebviewRouter {
 		textLength: number,
 	): Promise<unknown> {
 		if (!this.clineSdk) {
-			throw new Error("Cline SDK runtime is not attached.")
+			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
 		const workspaceRoots = await VisualStudioHostProvider.create(this.connection).workspaceClient.getWorkspacePaths({})
@@ -1042,6 +2715,7 @@ export class VisualStudioWebviewRouter {
 			textLength,
 			cwd,
 		})
+		void this.runLifecycleHooks("TaskResume", { prompt, cwd, userImages, userFiles, sessionId })
 		return this.clineSdk.startSession({
 			prompt,
 			cwd,
@@ -1049,7 +2723,7 @@ export class VisualStudioWebviewRouter {
 			userFiles,
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, sessionId),
-			toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
+			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
 		})
 	}
 
@@ -1096,6 +2770,7 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async cancelTask() {
+		const sessionIdForHook = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
 		if (this.clineSdk) {
 			const sessionId = this.clineSdk.status.activeSessionId
 			if (sessionId) {
@@ -1117,6 +2792,7 @@ export class VisualStudioWebviewRouter {
 		this.removeTerminalAskMessages()
 		this.addMessage({ type: "say", say: "info", text: "현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다." })
 		this.updateCurrentTaskItem()
+		await this.runLifecycleHooks("TaskCancel", { sessionId: sessionIdForHook })
 		await this.broadcastState()
 	}
 
@@ -1144,23 +2820,40 @@ export class VisualStudioWebviewRouter {
 		if (this.clineSdk && taskId) {
 			this.clearLiveInteractionState("showTaskWithId")
 			this.closingSessionIds.delete(taskId)
-			const session = asRecord(await this.clineSdk.activateSession(taskId))
-			const messages = await this.clineSdk.readMessages({ sessionId: taskId })
-			const taskItem = sdkSessionToHistoryItem(session)
-			const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
-			logInteraction("sidecar", "sdkMessagesHydrated", {
-				source: "showTaskWithId",
-				sessionId: taskId,
-				sdkCount: Array.isArray(messages) ? messages.length : 0,
-				clineCount: clineMessages.length,
-				messages: clineMessages.map(summarizeClineMessageForLog),
-			})
-			this.state.currentTaskItem = taskItem
-			this.state.clineMessages = clineMessages
-			this.taskSnapshots.set(taskId, {
-				taskItem: { ...taskItem },
-				messages: this.state.clineMessages.map((message) => ({ ...message })),
-			})
+			try {
+				const session = asRecord(await this.clineSdk.activateSession(taskId))
+				const messages = await this.clineSdk.readMessages({ sessionId: taskId })
+				const taskItem = sdkSessionToHistoryItem(session)
+				const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+				logInteraction("sidecar", "sdkMessagesHydrated", {
+					source: "showTaskWithId",
+					sessionId: taskId,
+					sdkCount: Array.isArray(messages) ? messages.length : 0,
+					clineCount: clineMessages.length,
+					messages: clineMessages.map(summarizeClineMessageForLog),
+				})
+				this.state.currentTaskItem = taskItem
+				this.state.clineMessages = clineMessages
+				this.taskSnapshots.set(taskId, {
+					taskItem: { ...taskItem },
+					messages: this.state.clineMessages.map((message) => ({ ...message })),
+				})
+				savePersistedState(this.state)
+				await this.broadcastState()
+				return
+			} catch (error) {
+				if (!isSessionNotFoundError(error)) {
+					throw error
+				}
+				logInteraction("sidecar", "showTaskWithId.sdkMissingFallback", {
+					sessionId: taskId,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+		}
+
+		if (String(this.state.currentTaskItem?.id || "") === taskId && this.state.clineMessages.length > 0) {
+			logInteraction("sidecar", "showTaskWithId.currentStateFallback", { sessionId: taskId })
 			await this.broadcastState()
 			return
 		}
@@ -1173,6 +2866,7 @@ export class VisualStudioWebviewRouter {
 		this.clearLiveInteractionState("showTaskWithId:snapshot")
 		this.state.currentTaskItem = { ...snapshot.taskItem }
 		this.state.clineMessages = snapshot.messages.map((message) => ({ ...message }))
+		savePersistedState(this.state)
 		await this.broadcastState()
 	}
 
@@ -1200,6 +2894,7 @@ export class VisualStudioWebviewRouter {
 			this.state.currentTaskItem = null
 			this.state.clineMessages = []
 		}
+		savePersistedState(this.state)
 	}
 
 	private async deleteAllTasks() {
@@ -1241,6 +2936,7 @@ export class VisualStudioWebviewRouter {
 		if (!this.state.currentTaskItem) {
 			this.state.clineMessages = []
 		}
+		savePersistedState(this.state)
 	}
 
 	private toggleTaskFavorite(taskId: string, isFavorited: boolean) {
@@ -1353,7 +3049,7 @@ export class VisualStudioWebviewRouter {
 			start: {
 				config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
 				interactive: true,
-				toolPolicies: createToolPolicies(this.state.autoApprovalSettings),
+				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
 			},
 		})
 
@@ -1363,6 +3059,77 @@ export class VisualStudioWebviewRouter {
 		} else {
 			this.addMessage({ type: "say", say: "info", text: "Checkpoint workspace restore completed." })
 			await this.broadcastState()
+		}
+	}
+
+	private async describeCheckpointDiff(message: unknown) {
+		if (!this.state.currentTaskItem) {
+			return {
+				success: false,
+				supported: false,
+				message: "No SDK-backed task is selected for checkpoint compare.",
+			}
+		}
+
+		const messageTs = getNumber(message, "messageTs") || getNumber(message, "value") || getNumber(message, "number")
+		const checkpointRunCount =
+			getNumber(message, "checkpointRunCount") ||
+			getNumber(message, "runCount") ||
+			findCheckpointRunCount(this.state.clineMessages, messageTs)
+		if (checkpointRunCount === undefined) {
+			return {
+				success: false,
+				supported: false,
+				message: "No SDK checkpoint run count is available for this compare target.",
+			}
+		}
+
+		const checkpointMessage = findCheckpointMessage(this.state.clineMessages, checkpointRunCount, messageTs)
+		const sessionId = String(this.state.currentTaskItem.id || "")
+		const workspaceRoot =
+			getString(checkpointMessage, "checkpointWorkspaceRoot") ||
+			String(this.state.currentTaskItem.cwdOnTaskInitialization || "")
+		const createdAt = numberValue(checkpointMessage?.ts)
+		const createdAtText = createdAt ? new Date(createdAt).toLocaleString() : ""
+		const trackedChanges = Array.from(this.pendingChangeSummaries.values()).map((change) => ({
+			filePath: change.filePath,
+			action: change.action,
+			additions: change.additions,
+			deletions: change.deletions,
+			beforePath: change.beforePath,
+			afterPath: change.afterPath,
+		}))
+		const text = [
+			`Checkpoint compare requested for SDK checkpoint #${checkpointRunCount}.`,
+			sessionId ? `Session: ${sessionId}` : "",
+			workspaceRoot ? `Workspace: ${workspaceRoot}` : "",
+			createdAtText ? `Created: ${createdAtText}` : "",
+			trackedChanges.length > 0 ? `Tracked edit snapshots: ${trackedChanges.length}` : "",
+			"The current SDK runtime exposes checkpoint restore metadata, but not a first-class checkpoint diff stream. Use the transcript change cards or Review controls for file-level snapshots.",
+		].filter(Boolean).join("\n")
+
+		this.addMessage({
+			type: "say",
+			say: "info",
+			text,
+			checkpointRunCount,
+		})
+		this.updateCurrentTaskItem()
+		return {
+			success: true,
+			supported: true,
+			checkpointRunCount,
+			sessionId,
+			workspaceRoot,
+			comments: [
+				{
+					type: "sdk_checkpoint_limitation",
+					message: "Checkpoint diff stream is unavailable from the current SDK runtime; Visual Studio links the compare request to stored edit snapshots.",
+					trackedChanges,
+				},
+			],
+			trackedChanges,
+			text,
 		}
 	}
 
@@ -1389,6 +3156,204 @@ export class VisualStudioWebviewRouter {
 			globalWorkflowToggles: { toggles: globalWorkflowToggles },
 			localWorkflowToggles: { toggles: localWorkflowToggles },
 		}
+	}
+
+	private async refreshHookSettings() {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const scripts = this.getHookScripts(workspaceRoot)
+		const globalHooks = scripts
+			.filter((hook) => hook.source === "global")
+			.map((hook) => ({ name: hook.name, enabled: hook.enabled, absolutePath: hook.path }))
+		const localHooks = scripts
+			.filter((hook) => hook.source === "workspace")
+			.map((hook) => ({ name: hook.name, enabled: hook.enabled, absolutePath: hook.path }))
+
+		this.state.hooksEnabled = true
+		return {
+			globalHooks,
+			workspaceHooks: workspaceRoot
+				? [
+						{
+							workspaceName: path.basename(workspaceRoot),
+							hooks: localHooks,
+						},
+					]
+				: [],
+		}
+	}
+
+	private async createHook(message: unknown) {
+		const request = asRecord(message)
+		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
+		if (!hookName) {
+			throw new Error("A supported hook name is required.")
+		}
+
+		const isGlobal = request.isGlobal === true
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const directory = isGlobal ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
+		if (!directory) {
+			throw new Error("No workspace is open for workspace hooks.")
+		}
+
+		fs.mkdirSync(directory, { recursive: true })
+		const hookPath = findHookScript(directory, hookName)?.path || path.join(directory, `${hookName}.ps1`)
+		if (!fs.existsSync(hookPath)) {
+			fs.writeFileSync(hookPath, createHookScriptTemplate(hookName), "utf8")
+		}
+		setHookToggle(isGlobal ? "global" : "workspace", workspaceRoot, hookName, true)
+		return this.refreshHookSettings()
+	}
+
+	private async deleteHook(message: unknown) {
+		const request = asRecord(message)
+		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
+		if (!hookName) {
+			throw new Error("A supported hook name is required.")
+		}
+
+		const isGlobal = request.isGlobal === true
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const directory = isGlobal ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
+		const existing = directory ? findHookScript(directory, hookName) : null
+		if (existing) {
+			fs.rmSync(existing.path, { force: true })
+		}
+		removeHookToggle(isGlobal ? "global" : "workspace", workspaceRoot, hookName)
+		return this.refreshHookSettings()
+	}
+
+	private async toggleHook(message: unknown) {
+		const request = asRecord(message)
+		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
+		if (!hookName) {
+			throw new Error("A supported hook name is required.")
+		}
+
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const source = request.isGlobal === true ? "global" : "workspace"
+		setHookToggle(source, workspaceRoot, hookName, request.enabled !== false)
+		return this.refreshHookSettings()
+	}
+
+	private async listScheduledAgentSpecs() {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		const specs = readScheduledAgentSpecs(workspaceRoot)
+		return {
+			success: true,
+			supported: true,
+			workspaceRoot,
+			specs,
+			items: specs,
+			recentRuns: readScheduledAgentRuns(),
+			automationEnabled: this.isScheduledAgentsEnabled(),
+			source: workspaceRoot ? path.join(workspaceRoot, ".cline", "cron") : "",
+			message: this.isScheduledAgentsEnabled()
+				? ""
+				: "Scheduled agents are local-only and disabled until scheduled agents are enabled in Visual Studio settings.",
+		}
+	}
+
+	private async saveScheduledAgentSpec(message: unknown) {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		if (!workspaceRoot) {
+			throw new Error("No workspace is open for scheduled agent specs.")
+		}
+		const spec = writeScheduledAgentSpec(workspaceRoot, asRecord(message))
+		return {
+			...(await this.listScheduledAgentSpecs()),
+			success: true,
+			supported: true,
+			spec,
+		}
+	}
+
+	private async deleteScheduledAgentSpec(message: unknown) {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		if (!workspaceRoot) {
+			throw new Error("No workspace is open for scheduled agent specs.")
+		}
+		const specId = getScheduledSpecId(asRecord(message))
+		const deleted = deleteScheduledAgentSpecFile(workspaceRoot, specId)
+		return {
+			...(await this.listScheduledAgentSpecs()),
+			success: deleted,
+			supported: true,
+			deleted,
+			specId,
+		}
+	}
+
+	private async runScheduledAgentSpec(message: unknown) {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
+		if (!workspaceRoot) {
+			throw new Error("No workspace is open for scheduled agent specs.")
+		}
+		const request = asRecord(message)
+		const specId = getScheduledSpecId(request)
+		const spec =
+			readScheduledAgentSpecs(workspaceRoot).find((item) => getString(item, "id") === specId || getString(item, "name") === specId || getString(item, "fileName") === specId) ||
+			writeScheduledAgentSpec(workspaceRoot, request)
+		const prompt = getString(request, "prompt") || getString(spec, "prompt") || getString(spec, "task") || getString(spec, "text")
+		if (!prompt.trim()) {
+			throw new Error("Scheduled agent spec does not contain a prompt/task.")
+		}
+		const run = appendScheduledAgentRun({
+			specId: getString(spec, "id"),
+			name: getString(spec, "name"),
+			workspaceRoot,
+			status: "started",
+			startedAt: Date.now(),
+			manual: true,
+		})
+		await this.startNewTask({ text: prompt, workspacePath: workspaceRoot, taskSessionId: run.runId }, { broadcast: false })
+		return {
+			success: true,
+			supported: true,
+			run,
+			spec,
+			recentRuns: readScheduledAgentRuns(),
+		}
+	}
+
+	private async getLocalPluginConfigStatus() {
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
+		const plugins = discoverLocalPlugins(workspaceRoot)
+		return {
+			success: true,
+			supported: true,
+			plugins,
+			items: plugins,
+			count: plugins.length,
+			workspaceRoot,
+			marketplaceEnabled: false,
+			marketplaceInstallSupported: false,
+			marketplaceDisabledReason: "Air-gap Visual Studio mode only discovers local plugin configuration; online marketplace install is intentionally disabled.",
+		}
+	}
+
+	private getHookScripts(workspaceRoot: string): HookScript[] {
+		const scripts: HookScript[] = []
+		for (const source of ["global", "workspace"] as const) {
+			const directory = source === "global" ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
+			if (!directory || !fs.existsSync(directory)) {
+				continue
+			}
+
+			for (const filePath of safeReadDirFiles(directory)) {
+				const hookName = normalizeHookName(path.basename(filePath, path.extname(filePath)))
+				if (!hookName || !isExecutableHookFile(filePath)) {
+					continue
+				}
+				scripts.push({
+					name: hookName,
+					source,
+					path: filePath,
+					enabled: getHookToggle(source, workspaceRoot, hookName),
+				})
+			}
+		}
+		return scripts.sort((left, right) => `${left.source}:${left.name}`.localeCompare(`${right.source}:${right.name}`))
 	}
 
 	private async refreshSdkSkills() {
@@ -1467,12 +3432,13 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
 		if (stream === "agent") {
+			this.noteQuietTaskActivity("chunk:agent")
 			this.addAgentTranscriptChunk(payload.chunk)
 			return
 		}
 
+		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
 		const text = truncateText(chunk, readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
 		this.addMessage({
 			type: "say",
@@ -1501,7 +3467,7 @@ export class VisualStudioWebviewRouter {
 			if (reasoning.trim()) {
 				this.upsertFoldedReasoningText(reasoning)
 				this.updateCurrentTaskItem()
-				this.broadcastState().catch((error) => console.error(error))
+				this.schedulePartialStateBroadcast()
 				return
 			}
 			logInteraction("sidecar", "sdkAgentChunkSkippedForUi", summarizeAgentChunkForLog(chunk))
@@ -1569,6 +3535,8 @@ export class VisualStudioWebviewRouter {
 	private handleTeamProgress(payload: Record<string, unknown>) {
 		const summary = asRecord(payload.summary)
 		const lifecycle = asRecord(payload.lifecycle)
+		const agents = arrayOfRecords(payload.agents || payload.subagents || payload.members)
+		const results = arrayOfRecords(payload.results || payload.outputs)
 		const message =
 			getString(summary, "message") ||
 			getString(summary, "status") ||
@@ -1576,7 +3544,31 @@ export class VisualStudioWebviewRouter {
 			getString(payload, "teamName") ||
 			"Team progress updated."
 		this.noteTaskActivity("team_progress")
-		logInteraction("sidecar", "teamProgress", { message: truncateText(message, 500) })
+		this.addMessage({
+			type: "say",
+			say: "use_subagents",
+			text: JSON.stringify({
+				message,
+				teamId: getString(payload, "teamId") || getString(payload, "id") || undefined,
+				teamName: getString(payload, "teamName") || undefined,
+				phase: getString(lifecycle, "phase") || getString(payload, "phase") || undefined,
+				status: getString(summary, "status") || getString(payload, "status") || undefined,
+				agents: agents.map((agent) => ({
+					id: getString(agent, "id") || getString(agent, "agentId"),
+					name: getString(agent, "name") || getString(agent, "role"),
+					status: getString(agent, "status") || getString(agent, "phase"),
+					progress: getNumber(agent, "progress"),
+				})),
+				results: results.map((result) => ({
+					id: getString(result, "id") || getString(result, "agentId"),
+					status: getString(result, "status"),
+					summary: truncateText(getString(result, "summary") || getString(result, "text"), 500),
+				})),
+			}),
+			isCollapsed: true,
+			isExpanded: false,
+		})
+		logInteraction("sidecar", "teamProgress", { message: truncateText(message, 500), agents: agents.length, results: results.length })
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
 	}
@@ -1597,6 +3589,93 @@ export class VisualStudioWebviewRouter {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
+	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
+		if (this.state.hooksEnabled === false) {
+			return []
+		}
+
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
+		const scripts = this.getHookScripts(workspaceRoot).filter((hook) => hook.name === hookName && hook.enabled)
+		if (scripts.length === 0) {
+			return []
+		}
+
+		const results: HookExecutionResult[] = []
+		for (const hook of scripts) {
+			results.push(await this.runHookScript(hook, { ...context, hookName, workspaceRoot }))
+		}
+		return results
+	}
+
+	private async runPreToolUseHooks(context: Record<string, unknown>): Promise<PreToolUseDecision> {
+		const results = await this.runLifecycleHooks("PreToolUse", context)
+		let inputDecision: PreToolUseDecision = { blocked: false, reason: "" }
+		for (const result of results) {
+			const decision = hookDecisionFromResponse(result.jsonResponse)
+			if (decision.blocked) {
+				logInteraction("sidecar", "preToolUseBlocked", {
+					hookName: result.hook.name,
+					scriptPath: result.hook.path,
+					reason: decision.reason,
+				})
+				return decision
+			}
+			if (decision.inputPatch && Object.keys(decision.inputPatch).length > 0) {
+				inputDecision = {
+					blocked: false,
+					reason: decision.reason || inputDecision.reason,
+					inputPatch: {
+						...(inputDecision.replaceInput ? {} : inputDecision.inputPatch),
+						...decision.inputPatch,
+					},
+					replaceInput: decision.replaceInput === true || inputDecision.replaceInput === true,
+					validationMessage: decision.validationMessage || inputDecision.validationMessage,
+					contextPatch: mergeOptionalRecords(inputDecision.contextPatch, decision.contextPatch),
+					structuredDecision: mergeOptionalRecords(inputDecision.structuredDecision, decision.structuredDecision),
+				}
+			} else if (decision.validationMessage || decision.contextPatch || decision.structuredDecision) {
+				inputDecision = {
+					...inputDecision,
+					reason: decision.reason || inputDecision.reason,
+					validationMessage: decision.validationMessage || inputDecision.validationMessage,
+					contextPatch: mergeOptionalRecords(inputDecision.contextPatch, decision.contextPatch),
+					structuredDecision: mergeOptionalRecords(inputDecision.structuredDecision, decision.structuredDecision),
+				}
+			}
+		}
+		return inputDecision
+	}
+
+	private async runHookScript(hook: HookScript, context: Record<string, unknown>): Promise<HookExecutionResult> {
+		const ts = Date.now() + this.messageSequence++
+		const startedMetadata = createHookMetadata(hook, "running", context)
+		this.state.clineMessages.push({
+			ts,
+			type: "say",
+			say: "hook_status",
+			text: JSON.stringify(startedMetadata),
+		})
+		this.updateCurrentTaskItem()
+		await this.broadcastState().catch((error) => console.error(error))
+
+		const result = await executeHookScript(hook, context)
+		const jsonResponse = extractHookJsonResponse(result.stdout)
+		const completedMetadata = createHookMetadata(hook, result.exitCode === 0 ? "completed" : "failed", context, result, jsonResponse)
+		const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n")
+		this.upsertMessage(ts, {
+			type: "say",
+			say: "hook_status",
+			text: output ? `${JSON.stringify(completedMetadata)}\n__HOOK_OUTPUT__\n${output}` : JSON.stringify(completedMetadata),
+		})
+		this.updateCurrentTaskItem()
+		await this.broadcastState().catch((error) => console.error(error))
+		return {
+			hook,
+			...result,
+			jsonResponse,
+		}
+	}
+
 	private handlePendingPrompts(payload: Record<string, unknown>) {
 		const prompts = Array.isArray(payload.prompts) ? payload.prompts : []
 		this.noteTaskActivity("pending_prompts")
@@ -1615,6 +3694,224 @@ export class VisualStudioWebviewRouter {
 		}
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
+	}
+
+	private async getBrowserConnectionInfo() {
+		const browserSettings = asRecord(this.state.browserSettings)
+		const remoteBrowserEnabled = browserSettings.remoteBrowserEnabled === true
+		const host = getString(browserSettings, "remoteBrowserHost")
+		const webFetchEnabled = isWebFetchEnabled(browserSettings)
+		const debugInfo = remoteBrowserEnabled ? await fetchBrowserDebugInfo(host) : null
+		const executablePath = resolveBrowserExecutablePath(getString(browserSettings, "chromeExecutablePath"))
+		const isConnected = remoteBrowserEnabled ? Boolean(debugInfo?.success) : Boolean(executablePath)
+
+		return {
+			isConnected,
+			isRemote: remoteBrowserEnabled,
+			host: remoteBrowserEnabled ? normalizeBrowserDebugHost(host) : "",
+			path: remoteBrowserEnabled ? "" : executablePath,
+			browser: debugInfo?.browser || "",
+			protocolVersion: debugInfo?.protocolVersion || "",
+			tabCount: debugInfo?.tabCount ?? 0,
+			activeTabTitle: debugInfo?.activeTabTitle || "",
+			activeTabUrl: debugInfo?.activeTabUrl || "",
+			error: debugInfo?.error || "",
+			webFetchEnabled,
+			webFetchDisabledReason: webFetchDisabledReason(browserSettings),
+			browserToolUseDisabled: browserSettings.disableToolUse === true,
+		}
+	}
+
+	private async discoverBrowser() {
+		const browserSettings = asRecord(this.state.browserSettings)
+		const webFetchEnabled = isWebFetchEnabled(browserSettings)
+		if (browserSettings.remoteBrowserEnabled === true) {
+			const host = getString(browserSettings, "remoteBrowserHost")
+			const debugInfo = await fetchBrowserDebugInfo(host)
+			const success = Boolean(debugInfo.success)
+			return {
+				success,
+				message: success
+					? `Browser connection successful.${debugInfo.browser ? ` ${debugInfo.browser}` : ""}`
+					: debugInfo.error || "Unable to reach the configured browser host.",
+				host: normalizeBrowserDebugHost(host),
+				browser: debugInfo.browser || "",
+				protocolVersion: debugInfo.protocolVersion || "",
+				tabCount: debugInfo.tabCount ?? 0,
+				activeTabTitle: debugInfo.activeTabTitle || "",
+				activeTabUrl: debugInfo.activeTabUrl || "",
+				webFetchEnabled,
+				webFetchDisabledReason: webFetchDisabledReason(browserSettings),
+				browserToolUseDisabled: browserSettings.disableToolUse === true,
+			}
+		}
+
+		const detectedPath = resolveBrowserExecutablePath(getString(browserSettings, "chromeExecutablePath"))
+		return {
+			success: Boolean(detectedPath),
+			message: detectedPath ? `Detected browser at ${detectedPath}` : "No local Chrome or Edge executable could be found.",
+			path: detectedPath,
+			webFetchEnabled,
+			webFetchDisabledReason: webFetchDisabledReason(browserSettings),
+			browserToolUseDisabled: browserSettings.disableToolUse === true,
+		}
+	}
+
+	private getBrowserAdapterConfig() {
+		const browserSettings = asRecord(this.state.browserSettings)
+		return {
+			host: normalizeBrowserDebugHost(getString(browserSettings, "remoteBrowserHost") || "http://localhost:9222"),
+			viewport: normalizeBrowserViewport(browserSettings.viewport),
+			disabled: browserSettings.disableToolUse === true,
+		}
+	}
+
+	private async listBrowserTabs() {
+		const config = this.getBrowserAdapterConfig()
+		if (config.disabled) {
+			return { success: false, tabs: [], error: "Browser tool usage is disabled in Visual Studio settings." }
+		}
+		return listDevToolsTabs(config.host)
+	}
+
+	private async captureBrowserScreenshot(params: unknown) {
+		const config = this.getBrowserAdapterConfig()
+		if (config.disabled) {
+			return { success: false, error: "Browser tool usage is disabled in Visual Studio settings." }
+		}
+		const request = asRecord(params)
+		const tabId = getString(request, "tabId")
+		const result = await this.runBrowserActionWithSession(config.host, {
+			action: "screenshot",
+			tabId,
+			viewport: config.viewport,
+		})
+		return result
+	}
+
+	private async performBrowserAction(params: unknown) {
+		const config = this.getBrowserAdapterConfig()
+		const input = asRecord(params)
+		if (config.disabled) {
+			return { success: false, status: "error", error: "Browser tool usage is disabled in Visual Studio settings." }
+		}
+		return this.runBrowserActionWithSession(config.host, {
+			action: normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || "navigate"),
+			url: getString(input, "url") || getString(input, "value"),
+			tabId: getString(input, "tabId"),
+			coordinate: getString(input, "coordinate"),
+			text: getString(input, "text"),
+			viewport: config.viewport,
+		})
+	}
+
+	private async runBrowserActionWithSession(host: string, request: BrowserAdapterAction) {
+		this.pruneBrowserSessions()
+		const normalizedHost = normalizeBrowserDebugHost(host)
+		const requestedSessionId = getString(request as unknown as Record<string, unknown>, "browserSessionId")
+		const existingSession =
+			(requestedSessionId && this.browserSessions.get(requestedSessionId)) ||
+			Array.from(this.browserSessions.values()).find((session) => session.host === normalizedHost && (!request.tabId || session.tabId === request.tabId))
+		const sessionId = existingSession?.sessionId || `browser-${createId()}`
+		const actionId = `browser-action-${createId()}`
+		const session: BrowserSessionRecord = existingSession || {
+			sessionId,
+			host: normalizedHost,
+			createdAt: Date.now(),
+			lastActionAt: Date.now(),
+		}
+		session.lastActionId = actionId
+		session.lastActionAt = Date.now()
+		session.lastPhase = "starting"
+		this.browserSessions.set(sessionId, session)
+
+		const phases: Array<Record<string, unknown>> = []
+		const result = await runBrowserActionViaDevTools(normalizedHost, {
+			...request,
+			tabId: request.tabId || session.tabId,
+			browserSessionId: sessionId,
+			browserActionId: actionId,
+			onPhase: (phase) => {
+				session.lastPhase = getString(phase, "phase") || session.lastPhase
+				session.lastActionAt = Date.now()
+				phases.push({ ...phase, browserSessionId: sessionId, browserActionId: actionId })
+			},
+		})
+		const record = asRecord(result)
+		session.tabId = getString(record, "tabId") || session.tabId
+		session.url = getString(record, "currentUrl") || getString(record, "url") || session.url
+		session.title = getString(record, "title") || session.title
+		session.reconnectReason = getString(record, "reconnectReason") || session.reconnectReason
+		session.lastPhase = getString(record, "status") || session.lastPhase
+		session.lastActionAt = Date.now()
+		return {
+			...record,
+			browserSessionId: sessionId,
+			browserActionId: actionId,
+			phases,
+			tabId: session.tabId || getString(record, "tabId"),
+			currentUrl: session.url || getString(record, "currentUrl"),
+			title: session.title || getString(record, "title"),
+			screenshotBytes: screenshotByteLength(getString(record, "screenshot")),
+		}
+	}
+
+	private pruneBrowserSessions() {
+		const maxAgeMs = readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)
+		const now = Date.now()
+		for (const [sessionId, session] of this.browserSessions) {
+			if (now - session.lastActionAt > maxAgeMs) {
+				this.browserSessions.delete(sessionId)
+			}
+		}
+	}
+
+	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
+		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
+		const url = getString(input, "url") || getString(input, "value")
+		if (action === "launch" || action === "navigate") {
+			this.addMessage({ type: "say", say: "browser_action_launch", text: url || "" })
+		} else {
+			this.addMessage({
+				type: "say",
+				say: "browser_action",
+				text: JSON.stringify({
+					action,
+					coordinate: getString(input, "coordinate"),
+					text: getString(input, "text"),
+				}),
+			})
+		}
+
+		let result: Record<string, unknown>
+		if (error) {
+			result = { success: false, status: "error", error }
+		} else {
+			result = await this.performBrowserAction({ ...input, action })
+		}
+
+		for (const phase of arrayOfRecords(result.phases)) {
+			this.addMessage({
+				type: "say",
+				say: "browser_action",
+				text: JSON.stringify({
+					action,
+					phase: getString(phase, "phase"),
+					tabId: getString(phase, "tabId"),
+					browserSessionId: getString(phase, "browserSessionId"),
+					browserActionId: getString(phase, "browserActionId"),
+					reconnectReason: getString(phase, "reconnectReason"),
+				}),
+			})
+		}
+
+		this.addMessage({
+			type: "say",
+			say: "browser_action_result",
+			text: JSON.stringify(browserActionResultForTranscript(result)),
+		})
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
 	}
 
 	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
@@ -1724,15 +4021,27 @@ export class VisualStudioWebviewRouter {
 			this.clearReasoningStatus()
 			const toolName = getString(event, "toolName")
 			const error = getString(event, "error")
+			void this.runLifecycleHooks("PostToolUse", {
+				sessionId,
+				toolName,
+				input: event.input,
+				output: event.output,
+				error,
+				iteration: getNumber(event, "iteration"),
+			})
 			const isCommand = toolName === "bash" || toolName === "run_commands"
+			const input = asRecord(event.input)
 			if (isCommand) {
 				this.stopTerminalStatePolling()
 				this.pollTerminalState().catch((pollError) =>
 					logInteraction("sidecar", "terminalStateFinalPollFailed", { message: stringify(pollError) }),
 				)
 			}
+			if (isBrowserToolName(toolName)) {
+				void this.handleBrowserToolEvent(toolName, input, error)
+				return
+			}
 			const mappedToolName = mapToolName(toolName)
-			const input = asRecord(event.input)
 			const trackedPath =
 				mappedToolName === "editedExistingFile"
 					? getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output)
@@ -1758,14 +4067,7 @@ export class VisualStudioWebviewRouter {
 					})
 			this.rememberToolSummary(mappedToolName, text)
 			if (isCommand) {
-				this.addMessage({
-					type: "say",
-					say: "command_output",
-					text,
-					commandCompleted: true,
-					isCollapsed: true,
-					isExpanded: false,
-				})
+				this.appendTerminalActivityText(formatCompletedCommandActivity(text))
 				this.moveActiveReasoningToEnd()
 			} else {
 				this.recordToolActivity(mappedToolName, text)
@@ -2007,7 +4309,7 @@ export class VisualStudioWebviewRouter {
 		const text = JSON.stringify({
 			tool: "vsclineChangedFiles",
 			path: files[0]?.filePath || "",
-			content: `Cline ${actionParts.join(", ") || "changed"} file${files.length > 1 ? "s" : ""}.`,
+			content: `LIG VS ${actionParts.join(", ") || "changed"} file${files.length > 1 ? "s" : ""}.`,
 			files,
 			additions,
 			deletions,
@@ -2015,6 +4317,74 @@ export class VisualStudioWebviewRouter {
 		this.addMessage({ type: "say", say: "tool", text })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
+	}
+
+	private async revertVsClineChanges(message: unknown) {
+		const request = asRecord(message)
+		const files = (Array.isArray(request.files) ? request.files : [])
+			.map(asRecord)
+			.filter((file) => getString(file, "filePath"))
+		const workspaceClient = VisualStudioHostProvider.create(this.connection).workspaceClient
+		const reverted: string[] = []
+		const skipped: Array<{ filePath: string; reason: string }> = []
+
+		for (const file of files) {
+			const filePath = getString(file, "filePath")
+			const beforePath = getString(file, "beforePath")
+			const action = getString(file, "action") || "modified"
+			if (!filePath) {
+				continue
+			}
+
+			try {
+				if (action === "created") {
+					await workspaceClient.deleteFile({ path: filePath })
+					reverted.push(filePath)
+					continue
+				}
+
+				if (!beforePath) {
+					skipped.push({ filePath, reason: "missing before snapshot" })
+					continue
+				}
+
+				const before = await workspaceClient.readTextFile({ path: beforePath })
+				if (!before.exists) {
+					skipped.push({ filePath, reason: "before snapshot not found" })
+					continue
+				}
+
+				await workspaceClient.writeTextFile({ path: filePath, content: before.content })
+				reverted.push(filePath)
+			} catch (error) {
+				skipped.push({ filePath, reason: stringify(error) })
+			}
+		}
+
+		const content =
+			skipped.length > 0
+				? `Reverted ${reverted.length} file${reverted.length === 1 ? "" : "s"}; skipped ${skipped.length}.`
+				: `Reverted ${reverted.length} file${reverted.length === 1 ? "" : "s"}.`
+		this.addMessage({
+			type: "say",
+			say: "tool",
+			text: JSON.stringify({
+				tool: "vsclineRevertedFiles",
+				path: reverted[0] || skipped[0]?.filePath || "",
+				content,
+				files: reverted,
+				skipped,
+			}),
+		})
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
+
+		return {
+			success: skipped.length === 0,
+			reverted,
+			skipped,
+			message: content,
+		}
 	}
 
 	private wasRecentlyTracked(filePath: string) {
@@ -2045,7 +4415,9 @@ export class VisualStudioWebviewRouter {
 		const modelLookupBaseUrl = providerId === "ollama" ? normalizeOllamaRootBaseUrl(configuredBaseUrl) : configuredBaseUrl
 		const sdkBaseUrl = providerId === "ollama" ? normalizeOllamaOpenAiBaseUrl(configuredBaseUrl) : configuredBaseUrl
 		const modelId = await this.resolveEffectiveModelId(apiConfig, providerId, modePrefix, modelLookupBaseUrl)
-		const apiKey = resolveApiKey(apiConfig, providerId) || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
+		const oauthCredentials = resolveOAuthCredentials(apiConfig, providerId)
+		const oauthAccessToken = getString(oauthCredentials, "accessToken") || getString(oauthCredentials, "access_token")
+		const apiKey = resolveApiKey(apiConfig, providerId) || oauthAccessToken || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
 		const maxTokensPerTurn = readOptionalPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN")
 		const apiTimeoutMs = resolveRequestTimeoutMs(apiConfig)
 		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
@@ -2053,6 +4425,8 @@ export class VisualStudioWebviewRouter {
 		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
 		const maxParallelToolCalls = readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS")
 		const execution = buildOptionalExecutionConfig()
+		const subagentsEnabled = this.state.subagentsEnabled === true || process.env.VSCLINE_ENABLE_SUBAGENTS === "1"
+		const scheduledAgentsEnabled = this.isScheduledAgentsEnabled()
 
 		logInteraction("sidecar", "sdkConfig", {
 			providerId: sdkProviderId,
@@ -2066,6 +4440,9 @@ export class VisualStudioWebviewRouter {
 			sessionId: sessionId || undefined,
 			maxIterations,
 			maxParallelToolCalls,
+			subagentsEnabled,
+			scheduledAgentsEnabled,
+			oauthConfigured: Object.keys(oauthCredentials).length > 0,
 			execution,
 		})
 
@@ -2079,8 +4456,8 @@ export class VisualStudioWebviewRouter {
 			workspaceRoot: cwd,
 			mode: this.state.mode === "plan" ? "plan" : "act",
 			enableTools: true,
-			enableSpawnAgent: false,
-			enableAgentTeams: false,
+			enableSpawnAgent: subagentsEnabled,
+			enableAgentTeams: subagentsEnabled,
 			...(maxIterations ? { maxIterations } : {}),
 			...(maxParallelToolCalls ? { maxParallelToolCalls } : {}),
 			...(maxTokensPerTurn ? { maxTokensPerTurn } : {}),
@@ -2090,6 +4467,7 @@ export class VisualStudioWebviewRouter {
 			providerConfig: {
 				...(maxTokensPerTurn ? { maxTokens: maxTokensPerTurn } : {}),
 				...(apiTimeoutMs ? { timeout: apiTimeoutMs } : {}),
+				...(Object.keys(oauthCredentials).length > 0 ? { oauthCredentials } : {}),
 				reasoning: {
 					enabled: thinking,
 					effort: reasoningEffort,
@@ -2100,7 +4478,7 @@ export class VisualStudioWebviewRouter {
 			},
 			...(execution ? { execution } : {}),
 			systemPrompt:
-				"You are Cline running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.",
+				"You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.",
 		}
 	}
 
@@ -2161,6 +4539,8 @@ export class VisualStudioWebviewRouter {
 		}
 		this.finalizeOpenPartialMessages()
 		this.addCompletionResultMarker(status)
+		void this.runLifecycleHooks("TaskComplete", { sessionId, status, text: activeText })
+		savePersistedState(this.state)
 	}
 
 	private addCompletionResultMarker(status: string) {
@@ -2192,8 +4572,8 @@ export class VisualStudioWebviewRouter {
 		}
 		if (status === "stalled" || status === "idle-timeout") {
 			return toolSummary
-				? `Cline SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다.\n\n마지막으로 확인된 작업:\n${toolSummary}`
-				: "Cline SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다."
+				? `LIG VS SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다.\n\n마지막으로 확인된 작업:\n${toolSummary}`
+				: "LIG VS SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다."
 		}
 		if (status === "cancelled" || status === "stopped" || status === "aborted") {
 			return toolSummary ? `작업이 중단되었습니다.\n\n${toolSummary}` : "작업이 중단되었습니다."
@@ -2264,10 +4644,39 @@ export class VisualStudioWebviewRouter {
 				},
 			}
 		}
-		for (const key of ["apiConfiguration", "autoApprovalSettings", "mode", "planActSeparateModelsSetting"] as const) {
+		if ("browserSettings" in request) {
+			this.state.browserSettings = {
+				...asRecord(this.state.browserSettings),
+				...asRecord(request.browserSettings),
+			} as typeof this.state.browserSettings
+			this.refreshWebToolFeatureState()
+		}
+		for (const key of [
+			"apiConfiguration",
+			"autoApprovalSettings",
+			"mode",
+			"planActSeparateModelsSetting",
+			"subagentsEnabled",
+			"scheduledAgentsEnabled",
+			"hooksEnabled",
+			"enableParallelToolCalling",
+			"nativeToolCallEnabled",
+			"strictPlanModeEnabled",
+			"useAutoCondense",
+		] as const) {
 			if (key in request && key !== "apiConfiguration" && key !== "autoApprovalSettings") {
-				;(this.state as Record<string, unknown>)[key] = request[key]
+				const stateKey = key === "nativeToolCallEnabled" ? "nativeToolCallSetting" : key
+				;(this.state as Record<string, unknown>)[stateKey] = request[key]
 			}
+		}
+	}
+
+	private refreshWebToolFeatureState() {
+		const enabled = isWebFetchEnabled(this.state.browserSettings)
+		this.state.clineWebToolsEnabled = {
+			user: enabled,
+			featureFlag: enabled,
+			reason: webFetchDisabledReason(this.state.browserSettings) || undefined,
 		}
 	}
 
@@ -2547,6 +4956,26 @@ export class VisualStudioWebviewRouter {
 		this.upsertFoldedProgressMessage()
 	}
 
+	private appendTerminalActivityText(text: string) {
+		const normalized = normalizeProgressTranscriptText(text)
+		if (!normalized) {
+			return
+		}
+
+		const previous = this.activeTerminalActivityText
+		const previousNormalized = normalizeTranscriptText(previous)
+		const nextNormalized = normalizeTranscriptText(normalized)
+		if (previousNormalized.includes(nextNormalized)) {
+			return
+		}
+
+		this.activeTerminalActivityText = truncateText(
+			[nextNormalized.includes(previousNormalized) ? "" : previous, normalized].filter(Boolean).join("\n\n"),
+			readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
+		)
+		this.upsertFoldedProgressMessage()
+	}
+
 	private upsertFoldedProgressMessage() {
 		const foldedText = [
 			this.activeFoldedActivityText,
@@ -2745,6 +5174,14 @@ export class VisualStudioWebviewRouter {
 		this.scheduleTaskIdleWatchdog()
 	}
 
+	private noteQuietTaskActivity(reason: string) {
+		if (!this.state.currentTaskItem) {
+			return
+		}
+		this.lastTaskActivityAt = Date.now()
+		this.lastTaskActivityReason = reason
+	}
+
 	private scheduleTaskIdleWatchdog() {
 		this.clearTaskIdleWatchdog()
 		if (!this.state.currentTaskItem) {
@@ -2762,7 +5199,7 @@ export class VisualStudioWebviewRouter {
 					return
 				}
 
-				const text = `Cline SDK 응답을 기다리는 중입니다. 마지막 활동 후 ${Math.round(idleForMs / 1000)}초가 지났습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}`
+				const text = `LIG VS SDK 응답을 기다리는 중입니다. 마지막 활동 후 ${Math.round(idleForMs / 1000)}초가 지났습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}`
 				logInteraction("sidecar", "taskIdleNotice", { noticeMs, idleForMs, reason: this.lastTaskActivityReason })
 			}, noticeMs)
 		}
@@ -2904,21 +5341,116 @@ export class VisualStudioWebviewRouter {
 
 	private createCurrentModelCatalog() {
 		const id = this.getModelId()
-		const model = {
-			id,
-			name: id,
-			contextWindow: 128000,
-			maxTokens: 128000,
-			capabilities: ["tools", "reasoning"],
+		return createModelCatalog([id], {
+			providerId: normalizeProviderId(getString(asRecord(this.state.apiConfiguration), `${this.state.mode === "plan" ? "planMode" : "actMode"}ApiProvider`)),
+			selectedId: id,
+			reduced: true,
+			message: "Using the configured model because this provider catalog cannot be refreshed locally.",
+		})
+	}
+
+	private async createProviderModelCatalog(providerId: string, request: Record<string, unknown>) {
+		const normalizedProviderId = normalizeProviderId(providerId)
+		const requestConfig = extractApiConfigurationUpdate(request)
+		const apiConfig = {
+			...asRecord(this.state.apiConfiguration),
+			...compactApiConfiguration(requestConfig),
 		}
-		return {
-			models: { [id]: model },
-			values: [model],
+		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
+		const selectedId = resolveModelId(apiConfig, normalizedProviderId, modePrefix) || this.getModelId()
+		const oauthCredentials = resolveOAuthCredentials(apiConfig, normalizedProviderId)
+		const oauthState = describeOAuthCredentialState(oauthCredentials)
+		const apiKey = resolveApiKey(apiConfig, normalizedProviderId) || getString(oauthCredentials, "accessToken") || getString(oauthCredentials, "access_token")
+		const requestBaseUrl =
+			getString(request, "baseUrl") ||
+			getString(request, "baseURL") ||
+			getString(request, "url") ||
+			getString(request, "value")
+		const configuredBaseUrl = requestBaseUrl || resolveBaseUrl(apiConfig, normalizedProviderId)
+		const baseUrl =
+			normalizedProviderId === "lmstudio" && !configuredBaseUrl
+				? "http://localhost:1234/v1"
+				: configuredBaseUrl || defaultOpenAiCompatibleCatalogBaseUrl(normalizedProviderId, apiKey)
+
+		if (normalizedProviderId === "ollama") {
+			const ids = await getOllamaModels(baseUrl)
+			if (ids.length > 0) {
+				this.applyDefaultOllamaModel(ids[0])
+			}
+			return createModelCatalog(ids, {
+				providerId: normalizedProviderId,
+				selectedId: selectedId || ids[0],
+				source: "ollama:/api/tags",
+				supported: true,
+				reduced: ids.length === 0,
+				message: ids.length > 0 ? "" : "Ollama did not return any local models. Check that Ollama is running and has pulled models.",
+				diagnostics: createCatalogDiagnostics(normalizedProviderId, "ollama:/api/tags", {
+					baseUrl: normalizeOllamaRootBaseUrl(baseUrl),
+					authenticated: false,
+					modelCount: ids.length,
+				}),
+			})
 		}
+
+		if (isOpenAiCompatibleCatalogProvider(normalizedProviderId)) {
+			if (!baseUrl) {
+				return createModelCatalog(selectedId ? [selectedId] : [], {
+					providerId: normalizedProviderId,
+					selectedId,
+					supported: true,
+					reduced: true,
+					message: `${providerAuthLabel(normalizedProviderId)} does not expose a configured model catalog endpoint in this Visual Studio port, so the configured model is shown as a reduced catalog.`,
+					diagnostics: createCatalogDiagnostics(normalizedProviderId, "reduced", {
+						baseUrlConfigured: false,
+						authenticated: Boolean(apiKey),
+						oauthRefreshStatus: oauthState.refreshStatus,
+					}),
+				})
+			}
+
+			const result = await getOpenAiCompatibleModels(baseUrl, apiKey)
+			return createModelCatalog(result.ids, {
+				providerId: normalizedProviderId,
+				selectedId: selectedId || result.ids[0],
+				source: `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`,
+				supported: true,
+				reduced: result.ids.length === 0,
+				message: result.error || (result.ids.length > 0 ? "" : "The model endpoint returned no models."),
+				error: result.error,
+				modelInfoById: result.modelInfoById,
+				diagnostics: createCatalogDiagnostics(normalizedProviderId, "openai-compatible:/models", {
+					baseUrl: normalizeOpenAiCompatibleBaseUrl(baseUrl),
+					authenticated: Boolean(apiKey),
+					oauthRefreshStatus: oauthState.refreshStatus,
+					modelCount: result.ids.length,
+					error: result.error,
+				}),
+			})
+		}
+
+		return this.createUnsupportedModelCatalog(`ModelsService.refresh:${normalizedProviderId}`)
+	}
+
+	private createUnsupportedModelCatalog(key: string) {
+		const providerId = key.replace(/^ModelsService\./, "").replace(/Rpc$/, "")
+		return createModelCatalog([], {
+			providerId,
+			supported: false,
+			reduced: true,
+			message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`,
+			diagnostics: createCatalogDiagnostics(providerId, "unsupported", {
+				authenticated: false,
+				reason: "air_gap_provider_catalog_not_implemented",
+			}),
+		})
 	}
 
 	private async broadcastState() {
 		const messages = this.buildStateMessages()
+		if (messages.length === 0) {
+			return
+		}
+
 		logInteraction("sidecar->webview", "state.broadcast", { count: messages.length, messages: messages.map(summarizeGrpcMessageForLog) })
 		await Promise.all(
 			messages.map((message) =>
@@ -2932,9 +5464,18 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private buildStateMessages() {
-		return [...this.stateStreamRequestIds].map((requestId) =>
-			grpcResponse(requestId, { stateJson: JSON.stringify(this.state) }, true),
-		)
+		const stateJson = JSON.stringify(this.state)
+		const stateKey = String(stateJson.length) + ":" + fastStringHash(stateJson)
+		return [...this.stateStreamRequestIds]
+			.map((requestId) => {
+				const deliveryKey = `${requestId}:${stateKey}`
+				if (this.lastStateBroadcastKeys.get(requestId) === deliveryKey) {
+					return null
+				}
+				this.lastStateBroadcastKeys.set(requestId, deliveryKey)
+				return grpcResponse(requestId, { stateJson }, true)
+			})
+			.filter((message): message is ReturnType<typeof grpcResponse> => message !== null)
 	}
 
 	private sendPartialMessage(message: Record<string, unknown> | undefined) {
@@ -2957,6 +5498,34 @@ export class VisualStudioWebviewRouter {
 			).catch((error) => console.error(error))
 		}
 	}
+}
+
+function shouldLogSdkEventForInteraction(event: unknown) {
+	const record = asRecord(event)
+	const type = getString(record, "type")
+	if (type !== "chunk") {
+		return true
+	}
+
+	const payload = asRecord(record.payload)
+	if (getString(payload, "stream") !== "agent") {
+		return true
+	}
+
+	const chunkRecord = sdkChunkRecord(payload.chunk)
+	const chunkType = getString(chunkRecord, "type")
+	const contentType = getString(chunkRecord, "contentType")
+	return !(
+		(chunkType === "content_start" || chunkType === "content_update" || chunkType === "content_delta") &&
+		(contentType === "reasoning" || contentType === "text")
+	)
+}
+
+function sdkChunkRecord(chunk: unknown) {
+	if (typeof chunk === "string") {
+		return asRecord(tryParseJson(chunk) ?? {})
+	}
+	return asRecord(chunk)
 }
 
 function summarizeSdkEventForLog(event: unknown) {
@@ -3038,6 +5607,15 @@ function summarizeGrpcMessageForLog(message: unknown) {
 	}
 }
 
+function fastStringHash(value: string) {
+	let hash = 2166136261
+	for (let index = 0; index < value.length; index++) {
+		hash ^= value.charCodeAt(index)
+		hash = Math.imul(hash, 16777619)
+	}
+	return (hash >>> 0).toString(16)
+}
+
 function readRequestId(message: unknown) {
 	const record = asRecord(message)
 	return getString(record, "request_id") || getString(record, "requestId")
@@ -3070,6 +5648,767 @@ function getNumber(message: unknown, key: string): number | undefined {
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function parseGitWorktreePorcelain(output: string) {
+	const worktrees: Array<Record<string, unknown>> = []
+	let current: Record<string, unknown> | null = null
+
+	const pushCurrent = () => {
+		if (current && getString(current, "path")) {
+			worktrees.push(current)
+		}
+		current = null
+	}
+
+	for (const rawLine of output.split(/\r?\n/)) {
+		const line = rawLine.trim()
+		if (!line) {
+			pushCurrent()
+			continue
+		}
+
+		const [key, ...rest] = line.split(" ")
+		const value = rest.join(" ")
+		if (key === "worktree") {
+			pushCurrent()
+			current = {
+				path: value,
+				branch: "",
+				head: "",
+				isBare: false,
+				isDetached: false,
+				isLocked: false,
+				isPrunable: false,
+				isCurrent: false,
+			}
+			continue
+		}
+
+		if (!current) {
+			continue
+		}
+
+		switch (key) {
+			case "HEAD":
+				current.head = value
+				break
+			case "branch":
+				current.branch = value.replace(/^refs\/heads\//, "")
+				break
+			case "bare":
+				current.isBare = true
+				break
+			case "detached":
+				current.isDetached = true
+				break
+			case "locked":
+				current.isLocked = true
+				current.lockReason = value
+				break
+			case "prunable":
+				current.isPrunable = true
+				current.prunableReason = value
+				break
+		}
+	}
+	pushCurrent()
+	return worktrees
+}
+
+function uniqueSortedLines(output: string) {
+	return Array.from(
+		new Set(
+			output
+				.split(/\r?\n/)
+				.map((line) => line.trim())
+				.filter(Boolean),
+		),
+	).sort((left, right) => left.localeCompare(right))
+}
+
+function classifyWorktreeGitError(stderr: string, operation: "create" | "delete" | "merge") {
+	const text = (stderr || "").trim()
+	const lower = text.toLowerCase()
+	if (!text) {
+		return operation === "create"
+			? "Failed to create worktree."
+			: operation === "delete"
+				? "Failed to delete worktree."
+				: "Failed to merge worktree."
+	}
+	if (lower.includes("already exists")) {
+		return `Target path or branch already exists. ${text}`
+	}
+	if (lower.includes("invalid reference") || lower.includes("not a valid branch") || lower.includes("not a valid object name")) {
+		return `The selected branch or base branch is invalid. ${text}`
+	}
+	if (lower.includes("is already checked out")) {
+		return `The selected branch is already checked out in another worktree. ${text}`
+	}
+	if (lower.includes("not a git repository")) {
+		return `This folder is not a git repository. ${text}`
+	}
+	if (lower.includes("permission denied") || lower.includes("access is denied")) {
+		return `Git could not access the target path. ${text}`
+	}
+	if (lower.includes("uncommitted changes") || lower.includes("local changes")) {
+		return `Uncommitted changes are blocking this worktree operation. ${text}`
+	}
+	if (lower.includes("conflict") || lower.includes("automatic merge failed")) {
+		return `Merge conflict detected. ${text}`
+	}
+	return text
+}
+
+function normalizeMergeRecoveryAction(value: string) {
+	const normalized = value.trim().toLowerCase()
+	return normalized === "abort" || normalized === "continue" || normalized === "status" ? normalized : "status"
+}
+
+function samePath(left: string, right: string) {
+	if (!left || !right) {
+		return false
+	}
+	return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
+}
+
+function isPathInside(candidate: string, root: string) {
+	const relative = path.relative(path.resolve(root), path.resolve(candidate))
+	return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative)
+}
+
+function findSolutions(root: string) {
+	const solutions = new Set<string>()
+	const direct = safeReadDir(root)
+		.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sln"))
+		.map((entry) => path.join(root, entry.name))
+		.sort()
+	for (const solution of direct) {
+		solutions.add(solution)
+	}
+
+	const queue = safeReadDir(root)
+		.filter((entry) => entry.isDirectory() && ![".git", "bin", "obj", "node_modules"].includes(entry.name))
+		.map((entry) => path.join(root, entry.name))
+	while (queue.length > 0) {
+		const current = queue.shift()!
+		const entries = safeReadDir(current)
+		for (const solution of entries
+			.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sln"))
+			.map((entry) => path.join(current, entry.name))
+			.sort()) {
+			solutions.add(solution)
+		}
+		for (const entry of entries) {
+			if (entry.isDirectory() && ![".git", "bin", "obj", "node_modules"].includes(entry.name)) {
+				queue.push(path.join(current, entry.name))
+			}
+		}
+	}
+	return Array.from(solutions).sort()
+}
+
+function safeReadDir(root: string) {
+	try {
+		return fs.readdirSync(root, { withFileTypes: true })
+	} catch {
+		return []
+	}
+}
+
+function resolveBrowserExecutablePath(configuredPath = "") {
+	const candidates = [
+		configuredPath,
+		process.env.CHROME_PATH || "",
+		process.env.EDGE_PATH || "",
+		process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "Google", "Chrome", "Application", "chrome.exe") : "",
+		process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"] as string, "Google", "Chrome", "Application", "chrome.exe") : "",
+		process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe") : "",
+		process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "Microsoft", "Edge", "Application", "msedge.exe") : "",
+		process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"] as string, "Microsoft", "Edge", "Application", "msedge.exe") : "",
+		process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Microsoft", "Edge", "Application", "msedge.exe") : "",
+	]
+
+	return candidates.find((candidate) => candidate.trim() && fs.existsSync(candidate)) || ""
+}
+
+function normalizeBrowserDebugHost(host: string) {
+	const trimmed = host.trim()
+	if (!trimmed) {
+		return ""
+	}
+
+	const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+	return withProtocol.replace(/\/+$/, "")
+}
+
+async function canReachBrowserDebugHost(host: string) {
+	return (await fetchBrowserDebugInfo(host)).success === true
+}
+
+async function fetchBrowserDebugInfo(host: string) {
+	const normalized = normalizeBrowserDebugHost(host)
+	if (!normalized) {
+		return { success: false, error: "Browser debug host is not configured." }
+	}
+
+	const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000)
+	const controller = new AbortController()
+	const timer = setTimeout(() => controller.abort(), timeoutMs)
+	try {
+		const versionResponse = await fetch(`${normalized}/json/version`, { signal: controller.signal })
+		if (!versionResponse.ok) {
+			return { success: false, host: normalized, error: `Browser debug host returned HTTP ${versionResponse.status}.` }
+		}
+
+		const version = asRecord(await versionResponse.json().catch(() => ({})))
+		const tabsResponse = await fetch(`${normalized}/json/list`, { signal: controller.signal }).catch(() => null)
+		const tabs = tabsResponse?.ok ? await tabsResponse.json().catch(() => []) : []
+		const tabRecords = Array.isArray(tabs) ? tabs.map(asRecord) : []
+		const pageTabs = tabRecords.filter((tab) => getString(tab, "type") === "page")
+		const activeTab = pageTabs[0] || tabRecords[0] || {}
+		return {
+			success: true,
+			host: normalized,
+			browser: getString(version, "Browser"),
+			protocolVersion: getString(version, "Protocol-Version"),
+			tabCount: pageTabs.length || tabRecords.length,
+			activeTabTitle: getString(activeTab, "title"),
+			activeTabUrl: getString(activeTab, "url"),
+		}
+	} catch (error) {
+		const message = error instanceof Error && error.name === "AbortError"
+			? `Browser debug connection timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+			: stringify(error)
+		return { success: false, host: normalized, error: message }
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+type BrowserViewport = { width: number; height: number }
+type DevToolsTab = {
+	id: string
+	type: string
+	url: string
+	title: string
+	webSocketDebuggerUrl: string
+}
+type BrowserAdapterAction = {
+	action: string
+	url?: string
+	tabId?: string
+	browserSessionId?: string
+	browserActionId?: string
+	coordinate?: string
+	text?: string
+	viewport: BrowserViewport
+	onPhase?: (phase: Record<string, unknown>) => void
+}
+
+function normalizeBrowserViewport(value: unknown): BrowserViewport {
+	const record = asRecord(value)
+	return {
+		width: Math.max(320, Math.min(numberValue(record.width) || 900, 4096)),
+		height: Math.max(240, Math.min(numberValue(record.height) || 600, 4096)),
+	}
+}
+
+function normalizeBrowserActionName(value: string) {
+	const normalized = value.trim().toLowerCase().replace(/[-\s]/g, "_")
+	switch (normalized) {
+		case "browser_action_launch":
+		case "launch_browser":
+		case "launch":
+			return "launch"
+		case "open":
+		case "goto":
+		case "go_to":
+		case "navigate":
+			return "navigate"
+		case "screenshot":
+		case "capture_screenshot":
+			return "screenshot"
+		case "scroll_down":
+		case "scroll_up":
+		case "click":
+		case "type":
+		case "close":
+			return normalized
+		default:
+			return normalized || "navigate"
+	}
+}
+
+async function listDevToolsTabs(host: string) {
+	const normalized = normalizeBrowserDebugHost(host)
+	if (!normalized) {
+		return { success: false, tabs: [], error: "Browser debug host is not configured." }
+	}
+	const controller = new AbortController()
+	const timer = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000))
+	try {
+		const response = await fetch(`${normalized}/json/list`, { signal: controller.signal })
+		if (!response.ok) {
+			return { success: false, host: normalized, tabs: [], error: `Browser tab list returned HTTP ${response.status}.` }
+		}
+		const tabs = arrayOfRecords(await response.json().catch(() => []))
+			.filter((tab) => getString(tab, "type") === "page")
+			.map((tab) => ({
+				id: getString(tab, "id"),
+				type: getString(tab, "type"),
+				url: getString(tab, "url"),
+				title: getString(tab, "title"),
+				webSocketDebuggerUrl: getString(tab, "webSocketDebuggerUrl"),
+			}))
+			.filter((tab) => tab.id && tab.webSocketDebuggerUrl)
+		return { success: true, host: normalized, tabs }
+	} catch (error) {
+		const message = error instanceof Error && error.name === "AbortError"
+			? "Browser tab list timed out."
+			: stringify(error)
+		return { success: false, host: normalized, tabs: [], error: message }
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+async function runBrowserActionViaDevTools(host: string, request: BrowserAdapterAction) {
+	const normalized = normalizeBrowserDebugHost(host)
+	if (!normalized) {
+		return { success: false, status: "error", error: "Browser debug host is not configured." }
+	}
+	if (typeof (globalThis as Record<string, unknown>).WebSocket !== "function") {
+		return { success: false, status: "unsupported", error: "Node WebSocket runtime is unavailable; bundled Node 22+ is required." }
+	}
+
+	try {
+		request.onPhase?.({ phase: "resolving_tab", action: normalizeBrowserActionName(request.action), host: normalized })
+		let tab = await resolveDevToolsTab(normalized, request)
+		let lastError: unknown
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				request.onPhase?.({ phase: attempt > 0 ? "reconnected" : "connected", action: normalizeBrowserActionName(request.action), tabId: tab.id })
+				return await executeBrowserActionOnDevToolsTab(normalized, tab, request)
+			} catch (error) {
+				lastError = error
+				if (attempt > 0 || !isRetryableDevToolsError(error)) {
+					throw error
+				}
+				request.onPhase?.({
+					phase: "reconnecting",
+					action: normalizeBrowserActionName(request.action),
+					tabId: tab.id,
+					reconnectReason: stringify(error),
+				})
+				tab = await resolveDevToolsTab(normalized, { ...request, tabId: "" })
+			}
+		}
+		throw lastError
+	} catch (error) {
+		return {
+			success: false,
+			status: "error",
+			action: normalizeBrowserActionName(request.action),
+			browserSessionId: request.browserSessionId || normalized,
+			browserActionId: request.browserActionId,
+			error: stringify(error),
+		}
+	}
+}
+
+async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab, request: BrowserAdapterAction) {
+	const client = await connectDevTools(tab.webSocketDebuggerUrl)
+	try {
+		request.onPhase?.({ phase: "preparing", action: normalizeBrowserActionName(request.action), tabId: tab.id })
+		await client.send("Page.enable")
+		await client.send("Runtime.enable")
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			width: request.viewport.width,
+			height: request.viewport.height,
+			deviceScaleFactor: 1,
+			mobile: false,
+		})
+
+		const action = normalizeBrowserActionName(request.action)
+		if ((action === "launch" || action === "navigate") && request.url) {
+			request.onPhase?.({ phase: "navigating", action, tabId: tab.id, url: request.url })
+			const loaded = client.waitForEvent("Page.loadEventFired", readPositiveIntEnv("VSCLINE_BROWSER_NAVIGATION_TIMEOUT_MS", 10000))
+			await client.send("Page.navigate", { url: normalizeBrowserNavigationUrl(request.url) })
+			await loaded.catch(() => waitForDevToolsSettle())
+		} else if (action === "click") {
+			request.onPhase?.({ phase: "clicking", action, tabId: tab.id, coordinate: request.coordinate })
+			const coordinate = parseBrowserCoordinate(request.coordinate, request.viewport)
+			await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: coordinate.x, y: coordinate.y, button: "left", clickCount: 1 })
+			await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: coordinate.x, y: coordinate.y, button: "left", clickCount: 1 })
+			await waitForDevToolsSettle(250)
+		} else if (action === "type") {
+			request.onPhase?.({ phase: "typing", action, tabId: tab.id })
+			await client.send("Input.insertText", { text: request.text || "" })
+			await waitForDevToolsSettle(150)
+		} else if (action === "scroll_down" || action === "scroll_up") {
+			request.onPhase?.({ phase: "scrolling", action, tabId: tab.id })
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseWheel",
+				x: Math.round(request.viewport.width / 2),
+				y: Math.round(request.viewport.height / 2),
+				deltaY: action === "scroll_down" ? request.viewport.height * 0.75 : -request.viewport.height * 0.75,
+				deltaX: 0,
+			})
+			await waitForDevToolsSettle(250)
+		} else if (action === "close") {
+			request.onPhase?.({ phase: "closing", action, tabId: tab.id })
+			await closeDevToolsTab(host, tab.id)
+			return {
+				success: true,
+				status: "closed",
+				action,
+				browserSessionId: request.browserSessionId || host,
+				browserActionId: request.browserActionId,
+				tabId: tab.id,
+				url: tab.url,
+				title: tab.title,
+				currentUrl: tab.url,
+			}
+		}
+
+		request.onPhase?.({ phase: "capturing", action, tabId: tab.id })
+		const state = await readDevToolsPageState(client)
+		const screenshot = await captureDevToolsScreenshot(client)
+		return {
+			success: true,
+			status: "ok",
+			action,
+			browserSessionId: request.browserSessionId || host,
+			browserActionId: request.browserActionId,
+			tabId: tab.id,
+			url: state.url || tab.url,
+			title: state.title || tab.title,
+			currentUrl: state.url || tab.url,
+			screenshot,
+		}
+	} finally {
+		client.close()
+	}
+}
+
+async function resolveDevToolsTab(host: string, request: BrowserAdapterAction): Promise<DevToolsTab> {
+	const action = normalizeBrowserActionName(request.action)
+	if ((action === "launch" || action === "navigate") && request.url && !request.tabId) {
+		const created = await createDevToolsTab(host, request.url).catch(() => undefined)
+		if (created?.webSocketDebuggerUrl) {
+			return created
+		}
+	}
+
+	const list = await listDevToolsTabs(host)
+	const tabs = Array.isArray(list.tabs) ? list.tabs as DevToolsTab[] : []
+	const tab = tabs.find((candidate) => candidate.id === request.tabId) || tabs[0]
+	if (!tab) {
+		throw new Error("No Chrome DevTools page tab is available. Open Chrome or Edge with --remote-debugging-port=9222.")
+	}
+	return tab
+}
+
+async function createDevToolsTab(host: string, url: string): Promise<DevToolsTab | undefined> {
+	const target = `${host}/json/new?${encodeURIComponent(normalizeBrowserNavigationUrl(url))}`
+	const response = await fetch(target, { method: "PUT" }).catch(() => fetch(target))
+	if (!response.ok) {
+		return undefined
+	}
+	const tab = asRecord(await response.json().catch(() => ({})))
+	const webSocketDebuggerUrl = getString(tab, "webSocketDebuggerUrl")
+	if (!webSocketDebuggerUrl) {
+		return undefined
+	}
+	return {
+		id: getString(tab, "id"),
+		type: getString(tab, "type"),
+		url: getString(tab, "url"),
+		title: getString(tab, "title"),
+		webSocketDebuggerUrl,
+	}
+}
+
+async function closeDevToolsTab(host: string, tabId: string) {
+	if (!tabId) {
+		return
+	}
+	await fetch(`${host}/json/close/${encodeURIComponent(tabId)}`).catch(() => undefined)
+}
+
+function connectDevTools(webSocketDebuggerUrl: string) {
+	const WebSocketCtor = (globalThis as Record<string, any>).WebSocket
+	const socket = new WebSocketCtor(webSocketDebuggerUrl)
+	let nextId = 1
+	const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+	const eventWaiters = new Map<string, Array<{ resolve: (value: unknown) => void; timer: NodeJS.Timeout }>>()
+	const opened = new Promise<void>((resolve, reject) => {
+		const timeout = setTimeout(() => reject(new Error("Timed out opening Chrome DevTools WebSocket.")), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000))
+		socket.addEventListener("open", () => {
+			clearTimeout(timeout)
+			resolve()
+		})
+		socket.addEventListener("error", () => {
+			clearTimeout(timeout)
+			reject(new Error("Chrome DevTools WebSocket connection failed."))
+		})
+	})
+
+	socket.addEventListener("message", (event: { data: unknown }) => {
+		const data = typeof event.data === "string" ? event.data : Buffer.from(event.data as ArrayBuffer).toString("utf8")
+		const message = asRecord(tryParseJson(data) || {})
+		const id = numberValue(message.id)
+		const method = getString(message, "method")
+		if (method && eventWaiters.has(method)) {
+			const waiters = eventWaiters.get(method) || []
+			eventWaiters.delete(method)
+			for (const waiter of waiters) {
+				clearTimeout(waiter.timer)
+				waiter.resolve(message.params ?? message)
+			}
+		}
+		if (!id || !pending.has(id)) {
+			return
+		}
+		const waiter = pending.get(id)!
+		pending.delete(id)
+		const error = asRecord(message.error)
+		if (Object.keys(error).length > 0) {
+			waiter.reject(new Error(getString(error, "message") || JSON.stringify(error)))
+		} else {
+			waiter.resolve(message.result)
+		}
+	})
+
+	socket.addEventListener("close", () => {
+		for (const waiter of pending.values()) {
+			waiter.reject(new Error("Chrome DevTools WebSocket closed."))
+		}
+		pending.clear()
+		for (const waiters of eventWaiters.values()) {
+			for (const waiter of waiters) {
+				clearTimeout(waiter.timer)
+				waiter.resolve(undefined)
+			}
+		}
+		eventWaiters.clear()
+	})
+
+	return {
+		async send(method: string, params?: Record<string, unknown>) {
+			await opened
+			const id = nextId++
+			const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_ACTION_TIMEOUT_MS", 8000)
+			return new Promise<unknown>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					pending.delete(id)
+					reject(new Error(`Chrome DevTools command timed out: ${method}`))
+				}, timeoutMs)
+				pending.set(id, {
+					resolve: (value) => {
+						clearTimeout(timer)
+						resolve(value)
+					},
+					reject: (error) => {
+						clearTimeout(timer)
+						reject(error)
+					},
+				})
+				socket.send(JSON.stringify({ id, method, params: params || {} }))
+			})
+		},
+		async waitForEvent(method: string, timeoutMs: number) {
+			await opened
+			return new Promise<unknown>((resolve) => {
+				const timer = setTimeout(() => {
+					const waiters = eventWaiters.get(method) || []
+					eventWaiters.set(method, waiters.filter((waiter) => waiter.resolve !== resolve))
+					resolve(undefined)
+				}, Math.max(1, timeoutMs))
+				const waiters = eventWaiters.get(method) || []
+				waiters.push({ resolve, timer })
+				eventWaiters.set(method, waiters)
+			})
+		},
+		close() {
+			try {
+				socket.close()
+			} catch {
+				// ignore close errors
+			}
+		},
+	}
+}
+
+async function readDevToolsPageState(client: Awaited<ReturnType<typeof connectDevTools>>) {
+	const result = asRecord(await client.send("Runtime.evaluate", {
+		expression: "({ url: location.href, title: document.title })",
+		returnByValue: true,
+	}))
+	return asRecord(asRecord(asRecord(result.result).value))
+}
+
+async function captureDevToolsScreenshot(client: Awaited<ReturnType<typeof connectDevTools>>) {
+	const result = asRecord(await client.send("Page.captureScreenshot", { format: "png", fromSurface: true }))
+	const data = getString(result, "data")
+	return data ? `data:image/png;base64,${data}` : ""
+}
+
+function parseBrowserCoordinate(coordinate: string | undefined, viewport: BrowserViewport) {
+	const match = /^(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)$/.exec(coordinate || "")
+	return {
+		x: match ? Math.max(0, Math.min(Number(match[1]), viewport.width)) : Math.round(viewport.width / 2),
+		y: match ? Math.max(0, Math.min(Number(match[2]), viewport.height)) : Math.round(viewport.height / 2),
+	}
+}
+
+function normalizeBrowserNavigationUrl(value: string) {
+	const trimmed = value.trim()
+	if (!trimmed) {
+		return "about:blank"
+	}
+	if (/^(https?|file|about):/i.test(trimmed)) {
+		return trimmed
+	}
+	return `https://${trimmed}`
+}
+
+function browserActionResultForTranscript(result: Record<string, unknown>) {
+	return {
+		screenshot: getString(result, "screenshot"),
+		screenshotBytes: numberValue(result.screenshotBytes) || screenshotByteLength(getString(result, "screenshot")),
+		currentUrl: getString(result, "currentUrl") || getString(result, "url"),
+		logs: getString(result, "error") || (result.success === false ? "Browser action failed." : ""),
+		currentMousePosition: getString(result, "currentMousePosition"),
+		browserSessionId: getString(result, "browserSessionId"),
+		tabId: getString(result, "tabId"),
+		url: getString(result, "url"),
+		title: getString(result, "title"),
+		action: getString(result, "action"),
+		status: getString(result, "status"),
+		error: getString(result, "error"),
+	}
+}
+
+function screenshotByteLength(value: string) {
+	const marker = "base64,"
+	const index = value.indexOf(marker)
+	if (index < 0) {
+		return 0
+	}
+	const base64 = value.slice(index + marker.length)
+	return Math.floor((base64.length * 3) / 4)
+}
+
+function isBrowserToolName(toolName: string) {
+	const normalized = toolName.trim().toLowerCase()
+	return normalized === "browser" ||
+		normalized === "browser_action" ||
+		normalized === "browseraction" ||
+		normalized === "browser_action_launch" ||
+		normalized === "browser_action_result"
+}
+
+function isRetryableDevToolsError(error: unknown) {
+	const text = stringify(error).toLowerCase()
+	return text.includes("websocket closed") ||
+		text.includes("target closed") ||
+		text.includes("no chrome devtools page tab") ||
+		text.includes("cannot find context") ||
+		text.includes("inspected target")
+}
+
+function waitForDevToolsSettle(ms = 500) {
+	return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function checkIsImageUrl(url: string) {
+	const normalized = normalizeHttpUrl(url)
+	if (!normalized || process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
+		return { value: false, success: false, disabled: process.env.VSCLINE_ENABLE_WEB_FETCH !== "1" }
+	}
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 5000))
+	try {
+		const response = await fetch(normalized, { method: "HEAD", signal: controller.signal })
+		const contentType = response.headers.get("content-type") || ""
+		return { value: response.ok && contentType.toLowerCase().startsWith("image/"), contentType, success: response.ok }
+	} catch (error) {
+		return { value: false, success: false, error: stringify(error) }
+	} finally {
+		clearTimeout(timeout)
+	}
+}
+
+async function fetchOpenGraphData(url: string) {
+	const normalized = normalizeHttpUrl(url)
+	if (!normalized) {
+		return { success: false, error: "Invalid URL." }
+	}
+	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
+		return {
+			success: false,
+			disabled: true,
+			url: normalized,
+			message: "Web preview fetching is disabled for air-gap mode. Set VSCLINE_ENABLE_WEB_FETCH=1 to enable it.",
+		}
+	}
+
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 8000))
+	try {
+		const response = await fetch(normalized, {
+			signal: controller.signal,
+			headers: { Accept: "text/html,*/*;q=0.5", "User-Agent": "LIG-VS/1.0 VisualStudio2022" },
+		})
+		if (!response.ok) {
+			return { success: false, url: normalized, error: `HTTP ${response.status}` }
+		}
+		const html = await response.text()
+		const title = extractHtmlMeta(html, "og:title") || extractHtmlTitle(html)
+		const description = extractHtmlMeta(html, "og:description") || extractHtmlMeta(html, "description")
+		const image = extractHtmlMeta(html, "og:image")
+		return {
+			success: true,
+			url: normalized,
+			title,
+			description,
+			image,
+			siteName: extractHtmlMeta(html, "og:site_name"),
+		}
+	} catch (error) {
+		return { success: false, url: normalized, error: stringify(error) }
+	} finally {
+		clearTimeout(timeout)
+	}
+}
+
+function extractHtmlTitle(html: string) {
+	const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)
+	return match ? decodeBasicHtmlEntities(match[1].replace(/\s+/g, " ").trim()) : ""
+}
+
+function extractHtmlMeta(html: string, key: string) {
+	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+	const propertyPattern = new RegExp(`<meta\\b(?=[^>]*(?:property|name)=["']${escaped}["'])(?=[^>]*content=["']([^"']*)["'])[^>]*>`, "i")
+	const match = propertyPattern.exec(html)
+	return match ? decodeBasicHtmlEntities(match[1].trim()) : ""
+}
+
+function decodeBasicHtmlEntities(value: string) {
+	return value
+		.replace(/&nbsp;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&lt;/gi, "<")
+		.replace(/&gt;/gi, ">")
+		.replace(/&quot;/gi, '"')
+		.replace(/&#39;/gi, "'")
+}
+
+function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
+	return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : []
 }
 
 function numberValue(value: unknown) {
@@ -3422,19 +6761,27 @@ function summarizeCommandOutput(output: unknown) {
 			const exitCode = result.exitCode
 			const commandId = getString(result, "commandId")
 			const terminalId = getString(result, "terminalId")
+			const cwd = getString(result, "cwd")
+			const currentDirectory = getString(result, "currentDirectory")
 			const durationMs = numberValue(result.durationMs)
 			const status = getString(result, "status")
 			const background = result.background === true
 			const isHot = result.isHot === true
+			const attachable = result.attachable === true
+			const proceedWhileRunning = result.proceedWhileRunningAvailable === true
 			const parts = [
 				getString(record, "query"),
 				commandId ? `commandId=${commandId}` : "",
 				terminalId ? `terminal=${terminalId}` : "",
+				cwd ? `cwd=${cwd}` : "",
+				currentDirectory ? `currentDirectory=${currentDirectory}` : "",
 				status ? `status=${status}` : "",
 				typeof exitCode === "number" ? `exitCode=${exitCode}` : "",
 				durationMs !== undefined ? `durationMs=${durationMs}` : "",
 				background ? "background=true" : "",
 				isHot ? "hotProcess=true" : "",
+				attachable ? "attachable=true" : "",
+				proceedWhileRunning ? "proceedWhileRunning=true" : "",
 				result.stdoutTruncated === true ? "stdout truncated" : "",
 				result.stderrTruncated === true ? "stderr truncated" : "",
 				stdout ? `stdout:\n${truncateText(stdout, 1200)}` : "",
@@ -3477,7 +6824,7 @@ function sanitizeConsoleOutput(text: string) {
 function stripCommandSentinel(text: string) {
 	return text
 		.split(/\r?\n/)
-		.filter((line) => !/(?:^|>)__VSCLINE_COMMAND_DONE__cmd-\d{6}__-?\d+\s*$/.test(line.trim()))
+		.filter((line) => !/(?:^|>)__VSCLINE_COMMAND_(?:DONE__cmd-\d{6}__-?\d+|CWD__cmd-\d{6}__.*)\s*$/.test(line.trim()))
 		.join("\n")
 }
 
@@ -3749,7 +7096,7 @@ function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 	const checkpoint = asRecord(metadata.checkpoint)
 	const latestCheckpoint = asRecord(checkpoint.latest)
 	const id = getString(session, "sessionId") || getString(session, "id") || createId()
-	const task = getString(metadata, "title") || getString(session, "title") || getString(session, "prompt") || "Cline SDK task"
+	const task = getString(metadata, "title") || getString(session, "title") || getString(session, "prompt") || "LIG VS SDK task"
 	return {
 		id,
 		ts: getNumber(session, "updatedAt") || getNumber(session, "createdAt") || Date.now(),
@@ -4587,6 +7934,23 @@ function findCheckpointRunCount(messages: Array<Record<string, unknown>>, messag
 	return undefined
 }
 
+function findCheckpointMessage(messages: Array<Record<string, unknown>>, checkpointRunCount: number, messageTs?: number) {
+	if (messageTs !== undefined) {
+		const target = messages.find((message) => message.ts === messageTs)
+		if (getNumber(target, "checkpointRunCount") === checkpointRunCount) {
+			return target
+		}
+	}
+
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index]
+		if (getNumber(message, "checkpointRunCount") === checkpointRunCount) {
+			return message
+		}
+	}
+	return undefined
+}
+
 function buildSettingsToggleMap(items: Array<Record<string, unknown>>, scope: "global" | "local") {
 	return Object.fromEntries(
 		items
@@ -4734,7 +8098,7 @@ function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boo
 	const commands = uniqueStrings(entries.filter((entry) => entry.kind === "command").map((entry) => entry.label))
 	const others = uniqueStrings(entries.filter((entry) => entry.kind === "tool").map((entry) => entry.label))
 	const summaryParts = [
-		files.length ? `Cline read ${files.length} file${files.length > 1 ? "s" : ""}` : "",
+		files.length ? `LIG VS read ${files.length} file${files.length > 1 ? "s" : ""}` : "",
 		searches.length ? `performed ${searches.length} search${searches.length > 1 ? "es" : ""}` : "",
 		edits.length ? `prepared ${edits.length} edit${edits.length > 1 ? "s" : ""}` : "",
 		commands.length ? `ran ${commands.length} command${commands.length > 1 ? "s" : ""}` : "",
@@ -4749,7 +8113,7 @@ function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boo
 		formatToolActivitySection("Tools", others, 12),
 	].filter(Boolean)
 	const body = sections.length ? `\n${sections.join("\n")}` : ""
-	return `${summaryParts.join(", ") || "Cline used tools"}:\n${running ? "파일 읽기 진행 중" : "Done."}${body}`
+	return `${summaryParts.join(", ") || "LIG VS used tools"}:\n${running ? "파일 읽기 진행 중" : "Done."}${body}`
 }
 
 function formatToolActivitySection(title: string, values: string[], limit: number) {
@@ -4777,15 +8141,21 @@ function buildTerminalActivityText(
 			const status = getString(command, "status") || "running"
 			const commandText = getString(command, "command")
 			const processId = getNumber(command, "processId")
+			const cwd = getString(command, "currentDirectory") || getString(command, "cwd")
 			const isHot = command.isHot === true
 			const background = command.background === true
 			const reusable = command.isReusableShell === true
+			const attachable = command.attachable === true
+			const proceedWhileRunning = command.proceedWhileRunningAvailable === true
 			const where = [
 				terminalId ? `terminal ${terminalId}` : "",
+				cwd ? `cwd ${cwd}` : "",
 				processId ? `pid ${processId}` : "",
 				reusable ? "reused shell" : "",
 				isHot ? "hot process" : "",
 				background ? "background" : "",
+				attachable ? "attachable" : "",
+				proceedWhileRunning ? "proceed while running" : "",
 			].filter(Boolean).join(", ")
 			return `- ${[commandId || "command", status, where].filter(Boolean).join(" ")}${commandText ? `: ${commandText}` : ""}`
 		})
@@ -4798,12 +8168,14 @@ function buildTerminalActivityText(
 			const commandText = getString(command, "command")
 			const exitCode = getNumber(command, "exitCode")
 			const durationMs = getNumber(command, "durationMs")
+			const cwd = getString(command, "currentDirectory") || getString(command, "cwd")
 			const timedOut = command.timedOut === true
 			const cancelled = command.cancelled === true
 			const isHot = command.isHot === true
 			const flags = [
 				exitCode !== undefined ? `exit=${exitCode}` : "",
 				durationMs !== undefined ? `${durationMs}ms` : "",
+				cwd ? `cwd ${cwd}` : "",
 				timedOut ? "timed out" : "",
 				cancelled ? "cancelled" : "",
 				isHot ? "hot process" : "",
@@ -4830,7 +8202,19 @@ function buildTerminalActivityText(
 	const shell = getString(state, "shell")
 	const shellState = getString(state, "shellState")
 	const reuseMode = getString(state, "reuseMode")
-	const shellSummary = [shell, shellState, reuseMode].filter(Boolean).join(" / ")
+	const currentDirectory = getString(state, "currentDirectory")
+	const attachable = state.attachable === true
+	const proceedWhileRunning = state.proceedWhileRunningAvailable === true
+	const unretrievedOutputAvailable = state.unretrievedOutputAvailable === true
+	const shellSummary = [
+		shell,
+		shellState,
+		reuseMode,
+		currentDirectory ? `cwd ${currentDirectory}` : "",
+		attachable ? "attachable" : "",
+		proceedWhileRunning ? "proceed while running available" : "",
+		unretrievedOutputAvailable ? "new output available" : "",
+	].filter(Boolean).join(" / ")
 	const sections = [
 		shellSummary ? `Shell: ${shellSummary}` : "",
 		commands.length ? `Running commands:\n${commands.join("\n")}` : "",
@@ -4843,6 +8227,24 @@ function buildTerminalActivityText(
 
 	return truncateText(
 		`터미널 실행 진행 중:\n${sections.join("\n")}`,
+		readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
+	)
+}
+
+function formatCompletedCommandActivity(text: string) {
+	const normalized = normalizeProgressTranscriptText(text)
+	if (!normalized) {
+		return ""
+	}
+
+	const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+	const commandLine = lines.find((line) => looksLikeCommandText(line)) || lines[0] || "command"
+	const outputPreview = lines
+		.filter((line) => line !== commandLine && !line.startsWith("__VSCLINE_COMMAND_DONE__"))
+		.slice(0, 8)
+		.join("\n")
+	return truncateText(
+		`터미널 실행 완료:\n- ${commandLine}${outputPreview ? `\nRecent output:\n${outputPreview}` : ""}`,
 		readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
 	)
 }
@@ -5005,6 +8407,10 @@ function normalizeProviderId(providerId: string) {
 		HICAP: "hicap",
 		NOUSRESEARCH: "nousResearch",
 		OPENAI_CODEX: "openai-codex",
+		LIG: "account",
+		LIGVS: "account",
+		LIG_VS: "account",
+		ACCOUNT: "account",
 	}
 	if (providerMap[providerId]) {
 		return providerMap[providerId]
@@ -5081,11 +8487,30 @@ function resolveModelId(apiConfig: Record<string, unknown>, providerId: string, 
 }
 
 function resolveApiKey(apiConfig: Record<string, unknown>, providerId: string) {
+	for (const field of providerCredentialFields(providerId)) {
+		const value = getString(apiConfig, field)
+		if (value) {
+			return value
+		}
+	}
+
+	return (
+		resolveProviderEnvApiKey(providerId) ||
+		(["openai", "openai-compatible", "openai-native"].includes(providerId)
+			? getString(apiConfig, "actModeOpenAiApiKey") || getString(apiConfig, "planModeOpenAiApiKey")
+			: "")
+	)
+}
+
+function providerCredentialFields(providerId: string) {
 	const apiKeyFields: Record<string, string[]> = {
+		cline: ["clineApiKey", "clineAccountId"],
 		anthropic: ["apiKey"],
 		openrouter: ["openRouterApiKey"],
-		openai: ["openAiApiKey", "openAiNativeApiKey"],
+		bedrock: ["awsBedrockApiKey", "awsAccessKey"],
+		openai: ["openAiApiKey"],
 		"openai-compatible": ["openAiApiKey"],
+		"openai-native": ["openAiNativeApiKey"],
 		ollama: ["ollamaApiKey"],
 		gemini: ["geminiApiKey"],
 		requesty: ["requestyApiKey"],
@@ -5094,45 +8519,164 @@ function resolveApiKey(apiConfig: Record<string, unknown>, providerId: string) {
 		groq: ["groqApiKey"],
 		litellm: ["liteLlmApiKey"],
 		moonshot: ["moonshotApiKey"],
+		nebius: ["nebiusApiKey"],
 		deepseek: ["deepSeekApiKey"],
 		qwen: ["qwenApiKey"],
+		"qwen-code": ["qwenApiKey"],
+		doubao: ["doubaoApiKey"],
 		mistral: ["mistralApiKey"],
 		xai: ["xaiApiKey"],
+		zai: ["zaiApiKey"],
+		sambanova: ["sambanovaApiKey"],
+		cerebras: ["cerebrasApiKey"],
+		asksage: ["asksageApiKey"],
 		baseten: ["basetenApiKey"],
 		huggingface: ["huggingFaceApiKey"],
+		"huawei-cloud-maas": ["huaweiCloudMaasApiKey"],
+		dify: ["difyApiKey"],
 		"vercel-ai-gateway": ["vercelAiGatewayApiKey"],
+		minimax: ["minimaxApiKey"],
 		aihubmix: ["aihubmixApiKey"],
 		hicap: ["hicapApiKey"],
+		nousResearch: ["nousResearchApiKey"],
+		sapaicore: ["sapAiCoreClientId", "sapAiCoreClientSecret"],
 		oca: ["ocaApiKey"],
+		wandb: ["wandbApiKey"],
 	}
-
-	for (const field of apiKeyFields[providerId] || []) {
-		const value = getString(apiConfig, field)
-		if (value) {
-			return value
-		}
-	}
-
-	return getString(apiConfig, "actModeOpenAiApiKey") || getString(apiConfig, "planModeOpenAiApiKey")
+	return apiKeyFields[providerId] || []
 }
 
-function resolveBaseUrl(apiConfig: Record<string, unknown>, providerId: string) {
+function providerCredentialField(providerId: string) {
+	return providerCredentialFields(providerId)[0] || ""
+}
+
+function extractProviderCredentialValue(request: Record<string, unknown>) {
+	return (
+		getString(request, "apiKey") ||
+		getString(request, "token") ||
+		getString(request, "accessToken") ||
+		getString(request, "credential") ||
+		getString(request, "secret") ||
+		getString(request, "value")
+	)
+}
+
+function providerBaseUrlField(providerId: string) {
 	const baseUrlFields: Record<string, string> = {
 		anthropic: "anthropicBaseUrl",
+		bedrock: "awsBedrockEndpoint",
 		openai: "openAiBaseUrl",
 		"openai-compatible": "openAiBaseUrl",
+		"openai-native": "openAiBaseUrl",
+		openrouter: "openRouterBaseUrl",
+		groq: "groqBaseUrl",
 		gemini: "geminiBaseUrl",
 		ollama: "ollamaBaseUrl",
 		lmstudio: "lmStudioBaseUrl",
 		litellm: "liteLlmBaseUrl",
 		requesty: "requestyBaseUrl",
+		huggingface: "huggingFaceBaseUrl",
+		baseten: "basetenBaseUrl",
+		"vercel-ai-gateway": "vercelAiGatewayBaseUrl",
+		hicap: "hicapBaseUrl",
 		asksage: "asksageApiUrl",
+		sapaicore: "sapAiCoreBaseUrl",
 		dify: "difyBaseUrl",
 		oca: "ocaBaseUrl",
 		aihubmix: "aihubmixBaseUrl",
 	}
 
-	return getString(apiConfig, baseUrlFields[providerId]) || getString(apiConfig, "actModeOpenAiBaseUrl")
+	return baseUrlFields[providerId] || ""
+}
+
+function resolveBaseUrl(apiConfig: Record<string, unknown>, providerId: string) {
+	const field = providerBaseUrlField(providerId)
+	const providerSpecific = (field ? getString(apiConfig, field) : "") || resolveProviderEnvBaseUrl(providerId)
+	if (providerSpecific) {
+		return providerSpecific
+	}
+	return ["openai", "openai-compatible", "openai-native"].includes(providerId) ? getString(apiConfig, "actModeOpenAiBaseUrl") : ""
+}
+
+function resolveProviderEnvApiKey(providerId: string) {
+	const envFields: Record<string, string[]> = {
+		cline: ["CLINE_API_KEY"],
+		anthropic: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+		openrouter: ["OPENROUTER_API_KEY"],
+		openai: ["OPENAI_API_KEY"],
+		"openai-compatible": ["OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"],
+		"openai-native": ["OPENAI_API_KEY"],
+		ollama: ["OLLAMA_API_KEY"],
+		gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+		requesty: ["REQUESTY_API_KEY"],
+		together: ["TOGETHER_API_KEY"],
+		fireworks: ["FIREWORKS_API_KEY"],
+		groq: ["GROQ_API_KEY"],
+		litellm: ["LITELLM_API_KEY", "LITE_LLM_API_KEY"],
+		moonshot: ["MOONSHOT_API_KEY"],
+		nebius: ["NEBIUS_API_KEY"],
+		deepseek: ["DEEPSEEK_API_KEY", "DEEP_SEEK_API_KEY"],
+		qwen: ["QWEN_API_KEY"],
+		"qwen-code": ["QWEN_API_KEY"],
+		doubao: ["DOUBAO_API_KEY"],
+		mistral: ["MISTRAL_API_KEY"],
+		xai: ["XAI_API_KEY"],
+		zai: ["ZAI_API_KEY"],
+		sambanova: ["SAMBANOVA_API_KEY"],
+		cerebras: ["CEREBRAS_API_KEY"],
+		asksage: ["ASKSAGE_API_KEY"],
+		baseten: ["BASETEN_API_KEY"],
+		huggingface: ["HUGGINGFACE_API_KEY", "HUGGING_FACE_API_KEY"],
+		"huawei-cloud-maas": ["HUAWEI_CLOUD_MAAS_API_KEY"],
+		dify: ["DIFY_API_KEY"],
+		"vercel-ai-gateway": ["VERCEL_AI_GATEWAY_API_KEY"],
+		minimax: ["MINIMAX_API_KEY"],
+		aihubmix: ["AIHUBMIX_API_KEY"],
+		hicap: ["HICAP_API_KEY"],
+		nousResearch: ["NOUSRESEARCH_API_KEY", "NOUS_RESEARCH_API_KEY"],
+		oca: ["OCA_API_KEY"],
+		wandb: ["WANDB_API_KEY"],
+	}
+	for (const name of envFields[providerId] || []) {
+		const value = process.env[name]
+		if (value) {
+			return value
+		}
+	}
+	return ""
+}
+
+function resolveProviderEnvBaseUrl(providerId: string) {
+	const envFields: Record<string, string[]> = {
+		anthropic: ["ANTHROPIC_BASE_URL"],
+		bedrock: ["AWS_BEDROCK_ENDPOINT"],
+		openai: ["OPENAI_BASE_URL"],
+		"openai-compatible": ["OPENAI_COMPATIBLE_BASE_URL", "OPENAI_BASE_URL"],
+		"openai-native": ["OPENAI_BASE_URL"],
+		openrouter: ["OPENROUTER_BASE_URL"],
+		groq: ["GROQ_BASE_URL"],
+		gemini: ["GEMINI_BASE_URL"],
+		ollama: ["OLLAMA_BASE_URL"],
+		lmstudio: ["LMSTUDIO_BASE_URL", "LM_STUDIO_BASE_URL"],
+		litellm: ["LITELLM_BASE_URL", "LITE_LLM_BASE_URL"],
+		requesty: ["REQUESTY_BASE_URL"],
+		huggingface: ["HUGGINGFACE_BASE_URL", "HUGGING_FACE_BASE_URL"],
+		baseten: ["BASETEN_BASE_URL"],
+		"vercel-ai-gateway": ["VERCEL_AI_GATEWAY_BASE_URL"],
+		hicap: ["HICAP_BASE_URL"],
+		asksage: ["ASKSAGE_API_URL"],
+		sapaicore: ["SAP_AICORE_BASE_URL"],
+		dify: ["DIFY_BASE_URL"],
+		oca: ["OCA_BASE_URL"],
+		aihubmix: ["AIHUBMIX_BASE_URL"],
+	}
+	for (const name of envFields[providerId] || []) {
+		const value = process.env[name]
+		if (value) {
+			return value
+		}
+	}
+	return ""
 }
 
 function pickApiConfigurationFields(request: Record<string, unknown>) {
@@ -5144,6 +8688,7 @@ function pickApiConfigurationFields(request: Record<string, unknown>) {
 			key.endsWith("ModelId") ||
 			key.endsWith("ApiKey") ||
 			key.endsWith("BaseUrl") ||
+			key.endsWith("OAuthCredentials") ||
 			key.endsWith("ModelInfo") ||
 			key.endsWith("ReasoningEffort") ||
 			key.endsWith("ThinkingBudgetTokens") ||
@@ -5215,6 +8760,70 @@ function normalizeApiConfiguration(apiConfig: Record<string, unknown>) {
 	return normalized
 }
 
+function resolveOAuthCredentials(apiConfig: Record<string, unknown>, providerId: string) {
+	const field = oauthCredentialsField(providerId)
+	const raw = getString(apiConfig, field)
+	if (!raw) {
+		return {}
+	}
+
+	const parsed = asRecord(tryParseJson(raw) ?? {})
+	return Object.keys(parsed).length > 0 ? parsed : { accessToken: raw }
+}
+
+function describeOAuthCredentialState(credentials: Record<string, unknown>) {
+	const expiresAt = numberValue(credentials.expiresAt) || numberValue(credentials.expires_at)
+	const refreshToken = getString(credentials, "refreshToken") || getString(credentials, "refresh_token")
+	if (!Object.keys(credentials).length) {
+		return { refreshStatus: "none", refreshSupported: false, expiresAt: undefined as number | undefined }
+	}
+	if (!expiresAt) {
+		return { refreshStatus: refreshToken ? "refreshable" : "unknown", refreshSupported: Boolean(refreshToken), expiresAt: undefined as number | undefined }
+	}
+	const skewMs = readPositiveIntEnv("VSCLINE_OAUTH_EXPIRY_SKEW_MS", 60_000)
+	const refreshStatus = expiresAt <= Date.now() + skewMs ? "expired" : refreshToken ? "refreshable" : "valid"
+	return { refreshStatus, refreshSupported: Boolean(refreshToken), expiresAt }
+}
+
+async function refreshOAuthToken(provider: string, refreshToken: string, exchange: OAuthTokenExchangeConfig) {
+	const body = new URLSearchParams()
+	body.set("grant_type", "refresh_token")
+	body.set("refresh_token", refreshToken)
+	body.set("client_id", exchange.clientId)
+	if (exchange.clientSecret && exchange.authMethod !== "client_secret_basic") {
+		body.set("client_secret", exchange.clientSecret)
+	}
+	if (exchange.scope) {
+		body.set("scope", exchange.scope)
+	}
+	const headers: Record<string, string> = {
+		"content-type": "application/x-www-form-urlencoded",
+		accept: "application/json",
+	}
+	if (exchange.clientSecret && exchange.authMethod === "client_secret_basic") {
+		headers.authorization = `Basic ${Buffer.from(`${exchange.clientId}:${exchange.clientSecret}`).toString("base64")}`
+	}
+	const response = await fetch(exchange.tokenUrl, { method: "POST", headers, body })
+	const text = await response.text()
+	const parsed = asRecord(tryParseJson(text) ?? {})
+	if (!response.ok) {
+		const error = getString(parsed, "error_description") || getString(parsed, "error") || truncateText(text, 500)
+		throw new Error(`Token refresh for ${providerAuthLabel(provider)} returned HTTP ${response.status}: ${error || response.statusText}`)
+	}
+	const accessToken = getString(parsed, "access_token") || getString(parsed, "token")
+	if (!accessToken) {
+		throw new Error(`Token refresh for ${providerAuthLabel(provider)} did not include access_token.`)
+	}
+	const expiresIn = getNumber(parsed, "expires_in")
+	return {
+		accessToken,
+		refreshToken: getString(parsed, "refresh_token") || refreshToken,
+		tokenType: getString(parsed, "token_type") || undefined,
+		expiresAt: expiresIn ? Date.now() + expiresIn * 1000 : undefined,
+		tokenResponse: parsed,
+	}
+}
+
 function extractAutoApprovalSettingsUpdate(request: Record<string, unknown>) {
 	const candidates = [
 		request.autoApprovalSettings,
@@ -5259,11 +8868,11 @@ function isAutoApprovalSettingsLike(record: Record<string, unknown>) {
 	return "actions" in record || "enabled" in record || "maxRequests" in record || "favorites" in record
 }
 
-function createToolPolicies(autoApprovalSettings: unknown) {
+function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}) {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
 	const autoApproveAll = settings.enabled === true
-	const webFetchEnabled = process.env.VSCLINE_ENABLE_WEB_FETCH === "1"
+	const webFetchEnabled = isWebFetchEnabled(browserSettings)
 	const readAuto = autoApproveAll || actions.readFiles === true
 	const editAuto = autoApproveAll || actions.editFiles === true
 	const commandAuto = autoApproveAll || actions.executeAllCommands === true || actions.executeSafeCommands === true
@@ -5299,6 +8908,21 @@ function createToolPolicies(autoApprovalSettings: unknown) {
 	}
 }
 
+function isWebFetchEnabled(browserSettings: unknown) {
+	const settings = asRecord(browserSettings)
+	return process.env.VSCLINE_ENABLE_WEB_FETCH === "1" && settings.disableToolUse !== true
+}
+
+function webFetchDisabledReason(browserSettings: unknown) {
+	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
+		return "VSCLINE_ENABLE_WEB_FETCH is not set to 1."
+	}
+	if (asRecord(browserSettings).disableToolUse === true) {
+		return "Browser/web tool usage is disabled in settings."
+	}
+	return ""
+}
+
 function loadInitialState() {
 	const state = createInitialState()
 	const persisted = readPersistedState()
@@ -5312,6 +8936,9 @@ function loadInitialState() {
 			...state.apiConfiguration,
 			...apiConfiguration,
 		}) as typeof state.apiConfiguration
+		if (Object.keys(resolveOAuthCredentials(state.apiConfiguration, "openai-codex")).length > 0) {
+			state.openAiCodexIsAuthenticated = true
+		}
 	}
 
 	const autoApprovalSettings = asRecord(persisted.autoApprovalSettings)
@@ -5326,11 +8953,36 @@ function loadInitialState() {
 		}
 	}
 
+	const browserSettings = asRecord(persisted.browserSettings)
+	if (Object.keys(browserSettings).length > 0) {
+		state.browserSettings = {
+			...asRecord(state.browserSettings),
+			...browserSettings,
+		} as typeof state.browserSettings
+		const enabled = isWebFetchEnabled(state.browserSettings)
+		state.clineWebToolsEnabled = {
+			user: enabled,
+			featureFlag: enabled,
+			reason: webFetchDisabledReason(state.browserSettings) || undefined,
+		}
+	}
+
 	if (persisted.mode === "plan" || persisted.mode === "act") {
 		state.mode = persisted.mode
 	}
 	if (typeof persisted.planActSeparateModelsSetting === "boolean") {
 		state.planActSeparateModelsSetting = persisted.planActSeparateModelsSetting
+	}
+
+	const taskHistory = arrayOfRecords(persisted.taskHistory)
+	if (taskHistory.length > 0) {
+		state.taskHistory = taskHistory
+	}
+
+	const currentTaskItem = asRecord(persisted.currentTaskItem)
+	if (Object.keys(currentTaskItem).length > 0) {
+		state.currentTaskItem = currentTaskItem
+		state.clineMessages = arrayOfRecords(persisted.clineMessages).map(normalizeClineMessagePayload)
 	}
 
 	return state
@@ -5354,8 +9006,12 @@ function savePersistedState(state: ReturnType<typeof createInitialState>) {
 				{
 					apiConfiguration: state.apiConfiguration,
 					autoApprovalSettings: state.autoApprovalSettings,
+					browserSettings: state.browserSettings,
 					mode: state.mode,
 					planActSeparateModelsSetting: state.planActSeparateModelsSetting,
+					taskHistory: state.taskHistory,
+					currentTaskItem: state.currentTaskItem,
+					clineMessages: state.currentTaskItem ? state.clineMessages : [],
 				},
 				null,
 				2,
@@ -5363,7 +9019,7 @@ function savePersistedState(state: ReturnType<typeof createInitialState>) {
 			"utf8",
 		)
 	} catch (error) {
-		console.error("Failed to persist Visual Studio Cline settings:", error)
+		console.error("Failed to persist LIG VS settings:", error)
 	}
 }
 
@@ -5382,12 +9038,423 @@ function getSettingsPath() {
 	return path.join(root, "settings.json")
 }
 
+function getSidecarDataPath(fileName: string) {
+	return path.join(path.dirname(getSettingsPath()), fileName)
+}
+
+function getScheduledAgentsDirectory(workspaceRoot: string) {
+	return workspaceRoot ? path.join(workspaceRoot, ".cline", "cron") : ""
+}
+
+function readScheduledAgentSpecs(workspaceRoot: string) {
+	const directory = getScheduledAgentsDirectory(workspaceRoot)
+	return safeReadDirFiles(directory)
+		.filter((filePath) => [".json", ".md", ".yaml", ".yml"].includes(path.extname(filePath).toLowerCase()))
+		.map((filePath) => scheduledSpecFromFile(filePath, workspaceRoot))
+		.filter((spec) => Boolean(spec))
+		.map((spec) => asRecord(spec))
+}
+
+function scheduledSpecFromFile(filePath: string, workspaceRoot: string) {
+	try {
+		const raw = fs.readFileSync(filePath, "utf8")
+		const extension = path.extname(filePath).toLowerCase()
+		const parsed = extension === ".json" ? asRecord(tryParseJson(raw) ?? {}) : parseLooseKeyValueSpec(raw)
+		const id = getString(parsed, "id") || path.basename(filePath, extension)
+		const prompt = getString(parsed, "prompt") || getString(parsed, "task") || markdownBodyAfterFrontMatter(raw)
+		return {
+			id,
+			name: getString(parsed, "name") || id,
+			description: getString(parsed, "description"),
+			schedule: getString(parsed, "schedule") || getString(parsed, "cron"),
+			prompt,
+			enabled: parsed.enabled !== false,
+			source: "local",
+			workspaceRoot,
+			filePath,
+			fileName: path.basename(filePath),
+			updatedAt: fs.statSync(filePath).mtimeMs,
+		}
+	} catch {
+		return null
+	}
+}
+
+function writeScheduledAgentSpec(workspaceRoot: string, request: Record<string, unknown>) {
+	const directory = getScheduledAgentsDirectory(workspaceRoot)
+	fs.mkdirSync(directory, { recursive: true })
+	const specId = safeFileStem(getScheduledSpecId(request) || "scheduled-agent")
+	const filePath = path.join(directory, `${specId}.json`)
+	const existing = fs.existsSync(filePath) ? asRecord(tryParseJson(fs.readFileSync(filePath, "utf8")) ?? {}) : {}
+	const spec = {
+		...existing,
+		id: specId,
+		name: getString(request, "name") || getString(existing, "name") || specId,
+		description: getString(request, "description") || getString(existing, "description"),
+		schedule: getString(request, "schedule") || getString(request, "cron") || getString(existing, "schedule"),
+		prompt: getString(request, "prompt") || getString(request, "task") || getString(request, "text") || getString(existing, "prompt"),
+		enabled: request.enabled === undefined ? existing.enabled !== false : request.enabled !== false,
+		updatedAt: new Date().toISOString(),
+	}
+	fs.writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf8")
+	return scheduledSpecFromFile(filePath, workspaceRoot) || { ...spec, filePath }
+}
+
+function deleteScheduledAgentSpecFile(workspaceRoot: string, specId: string) {
+	const directory = getScheduledAgentsDirectory(workspaceRoot)
+	const filePath = path.resolve(directory, `${safeFileStem(specId)}.json`)
+	if (!filePath.toLowerCase().startsWith(path.resolve(directory).toLowerCase() + path.sep)) {
+		throw new Error("Scheduled agent spec path must stay inside .cline/cron.")
+	}
+	if (!fs.existsSync(filePath)) {
+		return false
+	}
+	fs.rmSync(filePath, { force: true })
+	return true
+}
+
+function getScheduledSpecId(request: Record<string, unknown>) {
+	return safeFileStem(getString(request, "id") || getString(request, "specId") || getString(request, "name") || getString(request, "fileName"))
+}
+
+function readScheduledAgentRuns() {
+	try {
+		const value = tryParseJson(fs.readFileSync(getSidecarDataPath("scheduled-runs.json"), "utf8"))
+		return Array.isArray(value) ? value.map(asRecord).slice(0, 25) : []
+	} catch {
+		return []
+	}
+}
+
+function appendScheduledAgentRun(run: Record<string, unknown>) {
+	const entry = { runId: `scheduled-${createId()}`, ...run }
+	const runs = [entry, ...readScheduledAgentRuns()].slice(0, 25)
+	fs.mkdirSync(path.dirname(getSidecarDataPath("scheduled-runs.json")), { recursive: true })
+	fs.writeFileSync(getSidecarDataPath("scheduled-runs.json"), JSON.stringify(runs, null, 2), "utf8")
+	return entry
+}
+
+function discoverLocalPlugins(workspaceRoot: string) {
+	const candidates = [
+		workspaceRoot ? path.join(workspaceRoot, ".cline", "plugins") : "",
+		workspaceRoot ? path.join(workspaceRoot, ".cline", "plugins.json") : "",
+		path.join(path.dirname(getSettingsPath()), "plugins"),
+		path.join(process.env.USERPROFILE || "", ".cline", "plugins"),
+	].filter(Boolean)
+	const plugins: Record<string, unknown>[] = []
+	for (const candidate of candidates) {
+		try {
+			if (!fs.existsSync(candidate)) {
+				continue
+			}
+			const stat = fs.statSync(candidate)
+			if (stat.isFile()) {
+				plugins.push(...pluginsFromConfigFile(candidate))
+			} else if (stat.isDirectory()) {
+				for (const entry of fs.readdirSync(candidate, { withFileTypes: true })) {
+					const pluginRoot = path.join(candidate, entry.name)
+					const manifest = entry.isDirectory() ? path.join(pluginRoot, ".codex-plugin", "plugin.json") : pluginRoot
+					if (entry.isDirectory() && fs.existsSync(manifest)) {
+						plugins.push(pluginFromManifest(manifest, pluginRoot))
+					}
+				}
+			}
+		} catch {
+			plugins.push({ path: candidate, status: "error", local: true })
+		}
+	}
+	return plugins
+}
+
+function pluginsFromConfigFile(filePath: string) {
+	const parsed = tryParseJson(fs.readFileSync(filePath, "utf8"))
+	const configured = asRecord(parsed).plugins
+	const list: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(configured) ? configured : []
+	return list.map((item) => {
+		const record = asRecord(item)
+		return {
+			id: getString(record, "id") || getString(record, "name") || getString(record, "path"),
+			name: getString(record, "name") || getString(record, "id"),
+			path: getString(record, "path"),
+			enabled: record.enabled !== false,
+			source: filePath,
+			local: true,
+			status: "configured",
+		}
+	})
+}
+
+function pluginFromManifest(manifestPath: string, pluginRoot: string) {
+	const manifest = asRecord(tryParseJson(fs.readFileSync(manifestPath, "utf8")) ?? {})
+	return {
+		id: getString(manifest, "id") || path.basename(pluginRoot),
+		name: getString(manifest, "name") || getString(manifest, "id") || path.basename(pluginRoot),
+		version: getString(manifest, "version"),
+		description: getString(manifest, "description"),
+		path: pluginRoot,
+		manifestPath,
+		enabled: manifest.enabled !== false,
+		local: true,
+		status: "discovered",
+	}
+}
+
+function parseLooseKeyValueSpec(text: string) {
+	const result: Record<string, unknown> = {}
+	const frontMatter = text.match(/^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/)
+	const source = frontMatter?.[1] || text
+	for (const line of source.split(/\r?\n/)) {
+		const match = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/)
+		if (match) {
+			result[match[1]] = match[2].replace(/^["']|["']$/g, "")
+		}
+	}
+	return result
+}
+
+function markdownBodyAfterFrontMatter(text: string) {
+	return text.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*/, "").trim()
+}
+
+function safeFileStem(value: string) {
+	return String(value || "")
+		.trim()
+		.replace(/\.[^.]+$/, "")
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 80)
+}
+
 function normalizeOllamaRootBaseUrl(baseUrl: string) {
 	return (baseUrl || "http://localhost:11434").replace(/\/+$/, "").replace(/\/v1$/i, "")
 }
 
 function normalizeOllamaOpenAiBaseUrl(baseUrl: string) {
 	return `${normalizeOllamaRootBaseUrl(baseUrl)}/v1`
+}
+
+function normalizeOpenAiCompatibleBaseUrl(baseUrl: string) {
+	const normalized = (baseUrl || "").replace(/\/+$/, "")
+	return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`
+}
+
+function isOpenAiCompatibleCatalogProvider(providerId: string) {
+	return [
+		"openai",
+		"openai-compatible",
+		"openai-native",
+		"lmstudio",
+		"litellm",
+		"openrouter",
+		"requesty",
+		"groq",
+		"vercel-ai-gateway",
+		"huggingface",
+		"baseten",
+		"aihubmix",
+		"hicap",
+		"oca",
+		"sapaicore",
+	].includes(providerId)
+}
+
+function defaultOpenAiCompatibleCatalogBaseUrl(providerId: string, apiKey: string) {
+	if (!apiKey) {
+		return ""
+	}
+
+	const defaults: Record<string, string> = {
+		openrouter: "https://openrouter.ai/api/v1",
+		requesty: "https://router.requesty.ai/v1",
+		groq: "https://api.groq.com/openai/v1",
+		"vercel-ai-gateway": "https://ai-gateway.vercel.sh/v1",
+	}
+	return defaults[providerId] || ""
+}
+
+function createModelCatalog(
+	ids: string[],
+	options: {
+		providerId?: string
+		selectedId?: string
+		source?: string
+		supported?: boolean
+		reduced?: boolean
+		message?: string
+		error?: string
+		modelInfoById?: Record<string, Record<string, unknown>>
+		diagnostics?: Record<string, unknown>
+	} = {},
+) {
+	const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)))
+	const values = uniqueIds.map((id) => {
+		const inferred = inferModelInfo(id, options.providerId || "")
+		const remote = options.modelInfoById?.[id] || {}
+		return {
+			id,
+			name: getString(remote, "name") || id,
+			...inferred,
+			...remote,
+			capabilities: modelCapabilities({ ...inferred, ...remote }),
+			providerId: options.providerId || undefined,
+		}
+	})
+	const models = values.reduce<Record<string, (typeof values)[number]>>((acc, model) => {
+		acc[model.id] = model
+		return acc
+	}, {})
+
+	return {
+		models,
+		values,
+		items: values,
+		modelIds: uniqueIds,
+		selectedId: options.selectedId || uniqueIds[0] || "",
+		providerId: options.providerId || "",
+		source: options.source || "",
+		supported: options.supported !== false,
+		reduced: options.reduced === true,
+		message: options.message || "",
+		error: options.error || "",
+		diagnostics: options.diagnostics || {},
+	}
+}
+
+function createCatalogDiagnostics(providerId: string, source: string, details: Record<string, unknown>) {
+	return {
+		providerId,
+		source,
+		capabilitySource: "sdk/provider metadata first, endpoint metadata second, conservative inference last",
+		airGap: true,
+		...details,
+		refreshedAt: Date.now(),
+	}
+}
+
+function inferModelInfo(id: string, providerId: string): Record<string, unknown> {
+	const normalizedId = id.toLowerCase()
+	const isClaude = normalizedId.includes("claude")
+	const isGemini = normalizedId.includes("gemini")
+	const isReasoning =
+		/(^|[-/:.])(o[134]|o4-mini|o3-mini|reasoning|r1|qwq|gpt-oss|deepseek-r1)([-/:.]|$)/.test(normalizedId) ||
+		normalizedId.includes("thinking")
+	const supportsImages =
+		isGemini ||
+		isClaude ||
+		normalizedId.includes("vision") ||
+		normalizedId.includes("vl") ||
+		normalizedId.includes("gpt-4o") ||
+		normalizedId.includes("gpt-4.1")
+	const contextWindow = inferContextWindow(normalizedId, providerId)
+	const supportsPromptCache = isClaude || isGemini || normalizedId.includes("cache")
+
+	return {
+		contextWindow,
+		maxTokens: inferMaxTokens(normalizedId, contextWindow),
+		supportsImages,
+		supportsPromptCache,
+		supportsReasoning: isReasoning,
+		supportsTools: true,
+		supportsStreaming: true,
+		description: `Model metadata inferred from provider catalog for ${id}.`,
+	}
+}
+
+function inferContextWindow(normalizedId: string, providerId: string) {
+	if (normalizedId.includes("1m") || normalizedId.includes("1-million")) {
+		return 1_000_000
+	}
+	if (normalizedId.includes("gemini-1.5-pro") || normalizedId.includes("gemini-2")) {
+		return 1_000_000
+	}
+	if (normalizedId.includes("claude")) {
+		return 200_000
+	}
+	if (normalizedId.includes("gpt-4.1") || normalizedId.includes("gpt-4o") || normalizedId.includes("o3") || normalizedId.includes("o4")) {
+		return 128_000
+	}
+	if (normalizedId.includes("llama-3.1") || normalizedId.includes("llama-3.3")) {
+		return 128_000
+	}
+	if (providerId === "groq") {
+		return 131_072
+	}
+	return 128_000
+}
+
+function inferMaxTokens(normalizedId: string, contextWindow: number) {
+	if (normalizedId.includes("claude")) {
+		return Math.min(contextWindow, 64_000)
+	}
+	if (normalizedId.includes("gemini")) {
+		return Math.min(contextWindow, 65_536)
+	}
+	if (normalizedId.includes("o3") || normalizedId.includes("o4") || normalizedId.includes("gpt-4.1")) {
+		return Math.min(contextWindow, 32_768)
+	}
+	return Math.min(contextWindow, 16_384)
+}
+
+function modelCapabilities(modelInfo: Record<string, unknown>) {
+	return [
+		booleanField(modelInfo, "supportsTools") !== false ? "tools" : "",
+		booleanField(modelInfo, "supportsReasoning") ? "reasoning" : "",
+		booleanField(modelInfo, "supportsImages") ? "images" : "",
+		booleanField(modelInfo, "supportsPromptCache") ? "prompt-cache" : "",
+	].filter(Boolean)
+}
+
+function booleanField(record: Record<string, unknown>, key: string) {
+	return booleanValue(record[key])
+}
+
+function modelInfoFromRemoteMetadata(id: string, metadata: Record<string, unknown>): Record<string, unknown> {
+	const pricing = asRecord(metadata.pricing)
+	const architecture = asRecord(metadata.architecture)
+	const contextWindow =
+		numberValue(metadata.context_length) ??
+		numberValue(metadata.contextWindow) ??
+		numberValue(metadata.max_context_length) ??
+		numberValue(metadata.maxContextLength)
+	const maxTokens =
+		numberValue(metadata.max_completion_tokens) ??
+		numberValue(metadata.maxTokens) ??
+		numberValue(metadata.max_output_tokens) ??
+		numberValue(metadata.maxOutputTokens)
+	const inputPrice = parseModelPrice(pricing.prompt ?? pricing.input)
+	const outputPrice = parseModelPrice(pricing.completion ?? pricing.output)
+	const modality = [
+		getString(metadata, "modality"),
+		getString(architecture, "modality"),
+		getString(architecture, "input_modalities"),
+		getString(architecture, "output_modalities"),
+	].join(" ").toLowerCase()
+	const inferred = inferModelInfo(id, getString(metadata, "provider") || "")
+
+	return {
+		...inferred,
+		name: getString(metadata, "name") || getString(metadata, "id") || id,
+		contextWindow: contextWindow || inferred.contextWindow,
+		maxTokens: maxTokens || inferred.maxTokens,
+		supportsImages: modality.includes("image") || booleanField(metadata, "supportsImages") || inferred.supportsImages,
+		supportsPromptCache: booleanField(metadata, "supportsPromptCache") || inferred.supportsPromptCache,
+		supportsReasoning: booleanField(metadata, "supportsReasoning") || inferred.supportsReasoning,
+		inputPrice,
+		outputPrice,
+		description: getString(metadata, "description") || inferred.description,
+	}
+}
+
+function parseModelPrice(value: unknown) {
+	if (value === undefined || value === null || value === "") {
+		return undefined
+	}
+	const numeric = Number(value)
+	if (!Number.isFinite(numeric)) {
+		return undefined
+	}
+	// OpenRouter-compatible catalogs often report per-token prices. The WebView expects per-million.
+	return numeric > 0 && numeric < 0.001 ? numeric * 1_000_000 : numeric
 }
 
 async function getOllamaModels(baseUrl: string) {
@@ -5412,9 +9479,58 @@ async function getOllamaModels(baseUrl: string) {
 	}
 }
 
+async function getOpenAiCompatibleModels(
+	baseUrl: string,
+	apiKey: string,
+): Promise<{ ids: string[]; modelInfoById: Record<string, Record<string, unknown>>; error: string }> {
+	const endpoint = `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), 3000)
+	try {
+		const headers: Record<string, string> = {}
+		if (apiKey) {
+			headers.Authorization = `Bearer ${apiKey}`
+		}
+		const response = await fetch(endpoint, { headers, signal: controller.signal })
+		if (!response.ok) {
+			return { ids: [], modelInfoById: {}, error: `Model endpoint returned HTTP ${response.status}.` }
+		}
+
+		const body = asRecord(await response.json())
+		const candidates = Array.isArray(body.data)
+			? body.data
+			: Array.isArray(body.models)
+				? body.models
+				: Array.isArray(body.values)
+					? body.values
+					: []
+		const modelInfoById: Record<string, Record<string, unknown>> = {}
+		const ids = candidates
+			.map((model) => {
+				const record = asRecord(model)
+				const id = typeof model === "string" ? model : getString(record, "id") || getString(record, "name")
+				if (id && Object.keys(record).length > 0) {
+					modelInfoById[id] = modelInfoFromRemoteMetadata(id, record)
+				}
+				return id
+			})
+			.filter((id): id is string => id.length > 0)
+		return { ids, modelInfoById, error: "" }
+	} catch (error) {
+		const message = error instanceof Error && error.name === "AbortError"
+			? "Model endpoint timed out."
+			: `Model endpoint could not be reached: ${stringify(error)}`
+		return { ids: [], modelInfoById: {}, error: message }
+	} finally {
+		clearTimeout(timeout)
+	}
+}
+
 function createInitialState() {
 	const defaultProvider = process.env.CLINE_PROVIDER_ID || "ollama"
 	const defaultModelId = process.env.CLINE_MODEL_ID || ""
+	const browserSettings = { viewport: { width: 900, height: 600 }, remoteBrowserEnabled: false, disableToolUse: process.env.VSCLINE_ENABLE_WEB_FETCH !== "1" }
+	const webFetchEnabled = isWebFetchEnabled(browserSettings)
 
 	return {
 		version: "vs2022-17.12-sdk-port",
@@ -5446,7 +9562,7 @@ function createInitialState() {
 		taskHistory: [] as Array<Record<string, unknown>>,
 		shouldShowAnnouncement: false,
 		autoApprovalSettings: { version: 1, enabled: false, favorites: [], maxRequests: 20, actions: {} },
-		browserSettings: { viewport: { width: 900, height: 600 }, remoteBrowserEnabled: false, disableToolUse: true },
+		browserSettings,
 		focusChainSettings: { enabled: false, remindClineInterval: 6 },
 		preferredLanguage: "English",
 		mode: "act",
@@ -5480,8 +9596,9 @@ function createInitialState() {
 		customPrompt: null,
 		useAutoCondense: false,
 		subagentsEnabled: false,
-		clineWebToolsEnabled: { user: false, featureFlag: false },
-		worktreesEnabled: { user: false, featureFlag: false },
+		scheduledAgentsEnabled: false,
+		clineWebToolsEnabled: { user: webFetchEnabled, featureFlag: webFetchEnabled, reason: webFetchDisabledReason(browserSettings) || undefined },
+		worktreesEnabled: { user: true, featureFlag: false },
 		favoritedModelIds: [] as string[],
 		lastDismissedInfoBannerVersion: 0,
 		lastDismissedModelBannerVersion: 0,
@@ -5500,7 +9617,7 @@ function createInitialState() {
 		primaryRootIndex: 0,
 		isMultiRootWorkspace: false,
 		multiRootSetting: { user: false, featureFlag: false },
-		hooksEnabled: false,
+		hooksEnabled: true,
 		nativeToolCallSetting: false,
 		enableParallelToolCalling: false,
 		currentTaskItem: null as Record<string, unknown> | null,
@@ -5528,9 +9645,11 @@ function createSdkCoverageState(lastError: string | null) {
 		partial: [
 			{ id: "mcp-marketplace", label: "MCP marketplace install and OAuth", owner: "cline-sdk" },
 			{ id: "browser", label: "Browser/Web tools", owner: "cline-sdk" },
-			{ id: "auth", label: "Cline account and OAuth providers", owner: "cline-sdk" },
+			{ id: "auth", label: "LIG VS account and OAuth providers", owner: "cline-sdk" },
 			{ id: "models", label: "Provider catalog refresh", owner: "cline-sdk" },
+			{ id: "hooks", label: "Local lifecycle hooks", owner: "cline-sdk" },
 			{ id: "subagents", label: "Subagents and teams", owner: "cline-sdk" },
+			{ id: "scheduled-agents", label: "Workspace scheduled agents", owner: "cline-sdk" },
 		],
 		visualStudioUnsupported: [
 			{
@@ -5559,6 +9678,703 @@ function createSdkCoverageState(lastError: string | null) {
 				reason: "WebView2 assets and local resource loading are hosted through the VSIX package.",
 			},
 		],
+	}
+}
+
+const SUPPORTED_HOOK_NAMES: HookLifecycleName[] = [
+	"TaskStart",
+	"TaskResume",
+	"TaskCancel",
+	"TaskComplete",
+	"PreToolUse",
+	"PostToolUse",
+	"UserPromptSubmit",
+]
+
+function normalizeHookName(value: string): HookLifecycleName | "" {
+	const normalized = String(value || "").trim()
+	return SUPPORTED_HOOK_NAMES.find((name) => name.toLowerCase() === normalized.toLowerCase()) || ""
+}
+
+function getGlobalHooksDirectory() {
+	const userProfile = process.env.USERPROFILE || process.env.HOME || process.cwd()
+	return path.join(userProfile, ".cline", "hooks")
+}
+
+function getWorkspaceHooksDirectory(workspaceRoot: string) {
+	return workspaceRoot ? path.join(workspaceRoot, ".clinerules", "hooks") : ""
+}
+
+function safeReadDirFiles(directory: string) {
+	try {
+		return fs
+			.readdirSync(directory, { withFileTypes: true })
+			.filter((entry) => entry.isFile())
+			.map((entry) => path.join(directory, entry.name))
+	} catch {
+		return []
+	}
+}
+
+function isExecutableHookFile(filePath: string) {
+	return [".ps1", ".cmd", ".bat", ".js"].includes(path.extname(filePath).toLowerCase())
+}
+
+function findHookScript(directory: string, hookName: HookLifecycleName) {
+	return safeReadDirFiles(directory)
+		.map((filePath) => ({ name: normalizeHookName(path.basename(filePath, path.extname(filePath))), path: filePath }))
+		.find((item) => item.name === hookName && isExecutableHookFile(item.path))
+}
+
+function createHookScriptTemplate(hookName: string) {
+	return [
+		'$ErrorActionPreference = "Stop"',
+		`# ${hookName} hook`,
+		"# Hook context is available as JSON in $env:VSCLINE_HOOK_CONTEXT and stdin.",
+		"$contextJson = $env:VSCLINE_HOOK_CONTEXT",
+		'Write-Output "Hook executed: ' + hookName + '"',
+		"",
+	].join("\r\n")
+}
+
+function getHookToggleStorePath() {
+	return path.join(path.dirname(getSettingsPath()), "hook-toggles.json")
+}
+
+function readHookToggleStore() {
+	try {
+		return JSON.parse(fs.readFileSync(getHookToggleStorePath(), "utf8")) as Record<string, unknown>
+	} catch {
+		return {}
+	}
+}
+
+function writeHookToggleStore(store: Record<string, unknown>) {
+	fs.mkdirSync(path.dirname(getHookToggleStorePath()), { recursive: true })
+	fs.writeFileSync(getHookToggleStorePath(), JSON.stringify(store, null, 2), "utf8")
+}
+
+function normalizeHookWorkspaceKey(workspaceRoot: string) {
+	try {
+		return path.resolve(workspaceRoot || "").toLowerCase()
+	} catch {
+		return String(workspaceRoot || "").toLowerCase()
+	}
+}
+
+function hookToggleKey(source: "global" | "workspace", workspaceRoot: string, hookName: string) {
+	return source === "global" ? `global:${hookName}` : `workspace:${normalizeHookWorkspaceKey(workspaceRoot)}:${hookName}`
+}
+
+function getHookToggle(source: "global" | "workspace", workspaceRoot: string, hookName: string) {
+	const store = readHookToggleStore()
+	const value = store[hookToggleKey(source, workspaceRoot, hookName)]
+	return typeof value === "boolean" ? value : true
+}
+
+function setHookToggle(source: "global" | "workspace", workspaceRoot: string, hookName: string, enabled: boolean) {
+	const store = readHookToggleStore()
+	store[hookToggleKey(source, workspaceRoot, hookName)] = enabled
+	writeHookToggleStore(store)
+}
+
+function removeHookToggle(source: "global" | "workspace", workspaceRoot: string, hookName: string) {
+	const store = readHookToggleStore()
+	delete store[hookToggleKey(source, workspaceRoot, hookName)]
+	writeHookToggleStore(store)
+}
+
+function createHookMetadata(
+	hook: HookScript,
+	status: "running" | "completed" | "failed" | "cancelled",
+	context: Record<string, unknown>,
+	result?: { exitCode: number; stderr: string; error?: string },
+	jsonResponse?: Record<string, unknown>,
+) {
+	const toolName = getString(context, "toolName")
+	const hasJsonResponse = Boolean(jsonResponse && Object.keys(jsonResponse).length > 0)
+	const decision = hookDecisionFromResponse(jsonResponse)
+	return {
+		hookName: hook.name,
+		toolName: toolName || undefined,
+		status,
+		exitCode: result?.exitCode,
+		hasJsonResponse,
+		jsonResponse: hasJsonResponse ? jsonResponse : undefined,
+		blocked: decision.blocked || undefined,
+		modifiedInput: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? true : undefined,
+		replaceInput: decision.replaceInput || undefined,
+		modifiedInputKeys: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? Object.keys(decision.inputPatch) : undefined,
+		validationMessage: decision.validationMessage || undefined,
+		contextInjectionKeys: decision.contextPatch && Object.keys(decision.contextPatch).length > 0 ? Object.keys(decision.contextPatch) : undefined,
+		structuredDecision: decision.structuredDecision && Object.keys(decision.structuredDecision).length > 0 ? decision.structuredDecision : undefined,
+		reason: decision.reason || undefined,
+		error:
+			status === "failed"
+				? {
+						type: "execution",
+						message: result?.error || result?.stderr || "Hook failed.",
+						scriptPath: hook.path,
+					}
+				: undefined,
+	}
+}
+
+function extractHookJsonResponse(stdout: string): Record<string, unknown> | undefined {
+	const text = String(stdout || "").trim()
+	if (!text) {
+		return undefined
+	}
+
+	const parsedWhole = tryParseJson(text)
+	const wholeRecord = nonEmptyRecord(parsedWhole)
+	if (wholeRecord) {
+		return wholeRecord
+	}
+	if (Array.isArray(parsedWhole)) {
+		for (let index = parsedWhole.length - 1; index >= 0; index--) {
+			const record = nonEmptyRecord(parsedWhole[index])
+			if (record) {
+				return record
+			}
+		}
+	}
+
+	const lines = text
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean)
+	for (let index = lines.length - 1; index >= 0; index--) {
+		const record = nonEmptyRecord(tryParseJson(lines[index]))
+		if (record) {
+			return record
+		}
+	}
+
+	return undefined
+}
+
+function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
+	const record = asRecord(value)
+	return Object.keys(record).length > 0 ? record : undefined
+}
+
+function hookDecisionFromResponse(response?: Record<string, unknown>): PreToolUseDecision {
+	if (!response || Object.keys(response).length === 0) {
+		return { blocked: false, reason: "" }
+	}
+
+	const action = (
+		getString(response, "decision") ||
+		getString(response, "action") ||
+		getString(response, "permission") ||
+		getString(response, "result") ||
+		""
+	).toLowerCase()
+	const approved = response.approved
+	const blocked =
+		response.block === true ||
+		response.blocked === true ||
+		response.deny === true ||
+		response.denied === true ||
+		response.cancel === true ||
+		response.cancelled === true ||
+		approved === false ||
+		["block", "blocked", "deny", "denied", "reject", "rejected", "cancel", "cancelled", "abort", "aborted", "disallow", "disallowed"].includes(
+			action,
+		)
+	const reason =
+		getString(response, "reason") ||
+		getString(response, "message") ||
+		getString(response, "error") ||
+		(blocked ? "Blocked by PreToolUse hook." : "")
+	const inputPatch = blocked ? undefined : getPreToolUseInputPatch(response)
+	const replaceInput = inputPatch
+		? response.replaceInput === true || response.replace_input === true || getString(response, "mode").toLowerCase() === "replace"
+		: false
+	const validationMessage =
+		getString(response, "validationMessage") ||
+		getString(response, "validation_message") ||
+		getString(asRecord(response.validation), "message") ||
+		""
+	const contextPatch = blocked ? undefined : getPreToolUseContextPatch(response)
+	const structuredDecision = getPreToolUseStructuredDecision(response, action)
+	return { blocked, reason, inputPatch, replaceInput, validationMessage, contextPatch, structuredDecision }
+}
+
+function getPreToolUseInputPatch(response: Record<string, unknown>) {
+	for (const key of ["inputPatch", "toolInputPatch", "argumentsPatch", "paramsPatch", "input", "toolInput", "arguments", "params"]) {
+		const patch = asRecord(response[key])
+		if (Object.keys(patch).length > 0) {
+			return patch
+		}
+	}
+	return undefined
+}
+
+function getPreToolUseContextPatch(response: Record<string, unknown>) {
+	for (const key of ["contextPatch", "context", "contextInjection", "injectContext"]) {
+		const patch = asRecord(response[key])
+		if (Object.keys(patch).length > 0) {
+			return patch
+		}
+	}
+	return undefined
+}
+
+function getPreToolUseStructuredDecision(response: Record<string, unknown>, action: string) {
+	const structured = asRecord(response.structuredDecision || response.toolDecision || response.metadata)
+	const result = {
+		...structured,
+		action: action || undefined,
+		severity: getString(response, "severity") || getString(structured, "severity") || undefined,
+		category: getString(response, "category") || getString(structured, "category") || undefined,
+	}
+	return Object.keys(result).some((key) => result[key as keyof typeof result] !== undefined && result[key as keyof typeof result] !== "")
+		? result
+		: undefined
+}
+
+function mergeOptionalRecords(left?: Record<string, unknown>, right?: Record<string, unknown>) {
+	if (!left || Object.keys(left).length === 0) {
+		return right
+	}
+	if (!right || Object.keys(right).length === 0) {
+		return left
+	}
+	return { ...left, ...right }
+}
+
+function applyPreToolUseInputPatch(input: Record<string, unknown>, approvalRequest: Record<string, unknown>, decision: PreToolUseDecision) {
+	const patch = decision.inputPatch
+	if (!patch || Object.keys(patch).length === 0) {
+		return
+	}
+
+	if (decision.replaceInput === true) {
+		for (const key of Object.keys(input)) {
+			delete input[key]
+		}
+	}
+	Object.assign(input, patch)
+
+	let patchedExistingRequestInput = false
+	for (const key of ["input", "params", "arguments"]) {
+		if (approvalRequest[key] && typeof approvalRequest[key] === "object" && !Array.isArray(approvalRequest[key])) {
+			if (decision.replaceInput === true) {
+				const target = approvalRequest[key] as Record<string, unknown>
+				for (const existingKey of Object.keys(target)) {
+					delete target[existingKey]
+				}
+			}
+			Object.assign(approvalRequest[key] as Record<string, unknown>, input)
+			patchedExistingRequestInput = true
+		}
+	}
+	if (!patchedExistingRequestInput) {
+		approvalRequest.input = input
+	}
+}
+
+async function executeHookScript(hook: HookScript, context: Record<string, unknown>) {
+	const extension = path.extname(hook.path).toLowerCase()
+	const contextJson = JSON.stringify(context)
+	const cwd = getString(context, "workspaceRoot") || process.cwd()
+	const timeoutMs = readPositiveIntEnv("VSCLINE_HOOK_TIMEOUT_MS", 30000)
+	const outputLimit = readPositiveIntEnv("VSCLINE_HOOK_OUTPUT_CHARS", 12000)
+	const command =
+		extension === ".ps1"
+			? "powershell.exe"
+			: extension === ".js"
+				? "node.exe"
+				: "cmd.exe"
+	const args =
+		extension === ".ps1"
+			? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", hook.path]
+			: extension === ".js"
+				? [hook.path]
+				: ["/c", hook.path]
+
+	return new Promise<{ exitCode: number; stdout: string; stderr: string; error?: string }>((resolve) => {
+		let stdout = ""
+		let stderr = ""
+		let settled = false
+		const child = childProcess.spawn(command, args, {
+			cwd,
+			env: {
+				...process.env,
+				VSCLINE_HOOK_CONTEXT: contextJson,
+				VSCLINE_HOOK_NAME: hook.name,
+				VSCLINE_HOOK_SOURCE: hook.source,
+				VSCLINE_HOOK_SCRIPT: hook.path,
+			},
+			windowsHide: true,
+		})
+
+		const timer = setTimeout(() => {
+			if (settled) {
+				return
+			}
+			settled = true
+			child.kill()
+			resolve({
+				exitCode: -1,
+				stdout: truncateText(stdout, outputLimit),
+				stderr: truncateText(stderr, outputLimit),
+				error: `Hook timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
+			})
+		}, timeoutMs)
+
+		child.stdout?.on("data", (chunk) => {
+			stdout = truncateText(stdout + chunk.toString(), outputLimit)
+		})
+		child.stderr?.on("data", (chunk) => {
+			stderr = truncateText(stderr + chunk.toString(), outputLimit)
+		})
+		child.on("error", (error) => {
+			if (settled) {
+				return
+			}
+			settled = true
+			clearTimeout(timer)
+			resolve({ exitCode: -1, stdout, stderr, error: error.message })
+		})
+		child.on("close", (code) => {
+			if (settled) {
+				return
+			}
+			settled = true
+			clearTimeout(timer)
+			resolve({ exitCode: code ?? 0, stdout: truncateText(stdout, outputLimit), stderr: truncateText(stderr, outputLimit) })
+		})
+		child.stdin?.end(contextJson)
+	})
+}
+
+function createUnauthenticatedAccountState() {
+	return {
+		loggedIn: false,
+		user: null,
+		organizations: [],
+		activeOrganization: null,
+		isAuthenticated: false,
+		openAiCodexIsAuthenticated: false,
+		authStatus: "unauthenticated",
+	}
+}
+
+function createVisualStudioAuthUnsupportedResponse(provider: string, url = "") {
+	const label = providerAuthLabel(provider)
+	const message =
+		`${label} OAuth is not implemented in the Visual Studio 2022 host yet. ` +
+		"Use a local API key or a provider-specific credential file where available."
+	return {
+		success: false,
+		supported: false,
+		provider,
+		url,
+		value: url,
+		message,
+		reason: "visual_studio_oauth_callback_not_implemented",
+		...createUnauthenticatedAccountState(),
+	}
+}
+
+function createFallbackProviderConfigFields(provider: string) {
+	const providerId = normalizeSdkProviderId(provider)
+	if (provider === "oca" || provider === "openAiCodex" || provider === "openai-codex" || provider === "account") {
+		return {
+			providerId,
+			authMethod: "oauth",
+			fields: {},
+			description: `${providerAuthLabel(provider)} requires a Visual Studio-compatible OAuth callback/token exchange bridge.`,
+		}
+	}
+
+	const fields: Record<string, Record<string, unknown>> = providerCredentialField(provider)
+		? {
+				apiKey: {
+					label: `${providerAuthLabel(provider)} API Key`,
+					placeholder: "Enter API Key...",
+				},
+			}
+		: {}
+	const baseUrlField = providerBaseUrlField(provider)
+	if (baseUrlField) {
+		fields.baseUrl = {
+			label: "Base URL",
+			placeholder: "https://...",
+			optional: true,
+		}
+	}
+
+	return {
+		providerId,
+		authMethod: Object.keys(fields).length > 0 ? "api-key" : "local",
+		fields,
+		description: `${providerAuthLabel(provider)} provider metadata is using the LIG VS fallback map.`,
+	}
+}
+
+function createProviderAuthInfo(provider: string, message: unknown, bridge: OAuthCallbackSession | null = null) {
+	const request = asRecord(message)
+	if (provider === "openrouter") {
+		const url = "https://openrouter.ai/settings/keys"
+		return {
+			success: true,
+			supported: true,
+			provider,
+			url,
+			value: url,
+			message: "OpenRouter API key page opened. Paste the generated key into LIG VS settings.",
+			authMode: "api_key",
+		}
+	}
+
+	if (provider === "requesty") {
+		const configuredBaseUrl = getString(request, "value") || getString(request, "baseUrl")
+		const root = normalizeHttpUrl(configuredBaseUrl) || "https://app.requesty.ai"
+		const url = new URL("api-keys", root.endsWith("/") ? root : `${root}/`).toString()
+		return {
+			success: true,
+			supported: true,
+			provider,
+			url,
+			value: url,
+			message: "Requesty API key page opened. Paste the generated key into LIG VS settings.",
+			authMode: "api_key",
+		}
+	}
+
+	if (provider === "hicap") {
+		const url = "https://hicap.ai"
+		return {
+			success: true,
+			supported: true,
+			provider,
+			url,
+			value: url,
+			message: "Hicap provider page opened. Use a local API key in LIG VS settings.",
+			authMode: "api_key",
+		}
+	}
+
+	if (bridge || isOAuthBridgeProvider(provider)) {
+		const callbackUrl = bridge?.callbackUrl || ""
+		const authorizationUrl = bridge?.authorizationUrl || ""
+		return {
+			...createUnauthenticatedAccountState(),
+			success: true,
+			supported: true,
+			provider,
+			value: authorizationUrl || callbackUrl,
+			url: authorizationUrl || undefined,
+			authorizationUrl: authorizationUrl || undefined,
+			callbackUrl,
+			redirectUrl: callbackUrl,
+			state: bridge?.state || "",
+			authMode: "oauth_callback",
+			authStatus: "pending",
+			authorizationUrlSupported: Boolean(authorizationUrl),
+			tokenExchangeSupported: bridge?.tokenExchangeSupported === true,
+			message:
+				authorizationUrl
+					? `${providerAuthLabel(provider)} OAuth authorization URL opened. Complete sign-in in the browser and return to LIG VS through the localhost callback.`
+					: `${providerAuthLabel(provider)} OAuth callback bridge is ready. Configure a provider authorization URL to open sign-in automatically.`,
+		}
+	}
+
+	return createVisualStudioAuthUnsupportedResponse(provider)
+}
+
+function isOAuthBridgeProvider(provider: string) {
+	const normalized = normalizeProviderValue(provider)
+	const compact = String(provider || "").replace(/[_\s-]/g, "").toLowerCase()
+	return normalized === "oca" || normalized === "openai-codex" || normalized === "account" || compact === "openaicodex"
+}
+
+function createOAuthAuthorizationRequest(provider: string, callbackUrl: string, state: string, request: Record<string, unknown>) {
+	const authorizationBaseUrl = getString(request, "authorizationUrl") || getString(request, "authUrl") || oauthProviderEnv(provider, "AUTHORIZE_URL")
+	const clientId = getString(request, "clientId") || oauthProviderEnv(provider, "CLIENT_ID")
+	const scope = getString(request, "scope") || oauthProviderEnv(provider, "SCOPE")
+	const audience = getString(request, "audience") || oauthProviderEnv(provider, "AUDIENCE")
+	const tokenExchange = createOAuthTokenExchangeConfig(provider, request)
+	const tokenExchangeSupported = Boolean(tokenExchange)
+	if (!authorizationBaseUrl) {
+		return { url: "", tokenExchangeSupported, tokenExchange }
+	}
+
+	try {
+		const url = new URL(authorizationBaseUrl)
+		if (!url.searchParams.has("response_type")) {
+			url.searchParams.set("response_type", "code")
+		}
+		if (clientId && !url.searchParams.has("client_id")) {
+			url.searchParams.set("client_id", clientId)
+		}
+		if (!url.searchParams.has("redirect_uri")) {
+			url.searchParams.set("redirect_uri", callbackUrl)
+		}
+		if (!url.searchParams.has("state")) {
+			url.searchParams.set("state", state)
+		}
+		if (scope && !url.searchParams.has("scope")) {
+			url.searchParams.set("scope", scope)
+		}
+		if (audience && !url.searchParams.has("audience")) {
+			url.searchParams.set("audience", audience)
+		}
+		return { url: url.toString(), tokenExchangeSupported, tokenExchange }
+	} catch {
+		return { url: "", tokenExchangeSupported, tokenExchange }
+	}
+}
+
+function createOAuthTokenExchangeConfig(provider: string, request: Record<string, unknown>): OAuthTokenExchangeConfig | null {
+	const tokenUrl = getString(request, "tokenUrl") || getString(request, "tokenEndpoint") || oauthProviderEnv(provider, "TOKEN_URL")
+	const clientId = getString(request, "clientId") || oauthProviderEnv(provider, "CLIENT_ID")
+	if (!tokenUrl || !clientId) {
+		return null
+	}
+
+	return {
+		tokenUrl,
+		clientId,
+		clientSecret: getString(request, "clientSecret") || oauthProviderEnv(provider, "CLIENT_SECRET") || undefined,
+		scope: getString(request, "scope") || oauthProviderEnv(provider, "SCOPE") || undefined,
+		codeVerifier: getString(request, "codeVerifier") || getString(request, "code_verifier") || oauthProviderEnv(provider, "CODE_VERIFIER") || undefined,
+		authMethod: getString(request, "authMethod") || oauthProviderEnv(provider, "AUTH_METHOD") || undefined,
+	}
+}
+
+function parseUrlFragmentParams(url: URL) {
+	const fragment = url.hash.replace(/^#/, "")
+	return new URLSearchParams(fragment)
+}
+
+function hasConfiguredOAuthAuthorizationUrl(provider: string, request: Record<string, unknown> = {}) {
+	return Boolean(getString(request, "authorizationUrl") || getString(request, "authUrl") || oauthProviderEnv(provider, "AUTHORIZE_URL"))
+}
+
+function hasConfiguredOAuthTokenExchange(provider: string, request: Record<string, unknown> = {}) {
+	return Boolean(createOAuthTokenExchangeConfig(provider, request))
+}
+
+function oauthProviderEnv(provider: string, suffix: string) {
+	const normalized = normalizeProviderValue(provider) || String(provider || "account")
+	const envKey = normalized.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+	return process.env[`VSCLINE_${envKey}_OAUTH_${suffix}`] || process.env[`LIGVS_${envKey}_OAUTH_${suffix}`] || process.env[`VSCLINE_OAUTH_${suffix}`] || ""
+}
+
+function oauthCredentialsField(provider: string) {
+	const normalized = normalizeProviderValue(provider)
+	switch (normalized) {
+		case "openai-codex":
+			return "openAiCodexOAuthCredentials"
+		case "oca":
+			return "ocaOAuthCredentials"
+		case "account":
+			return "ligVsOAuthCredentials"
+		default:
+			return `${normalized || "provider"}OAuthCredentials`
+	}
+}
+
+function isOAuthTokenBlobProvider(provider: string) {
+	const normalized = normalizeProviderValue(provider)
+	return normalized === "openai-codex" || normalized === "oca" || normalized === "account"
+}
+
+function redactUrl(value: string) {
+	try {
+		const url = new URL(value)
+		url.search = ""
+		url.hash = ""
+		return url.toString()
+	} catch {
+		return value ? "[configured]" : ""
+	}
+}
+
+function escapeHtml(value: string) {
+	return value.replace(/[&<>"']/g, (char) => {
+		switch (char) {
+			case "&":
+				return "&amp;"
+			case "<":
+				return "&lt;"
+			case ">":
+				return "&gt;"
+			case '"':
+				return "&quot;"
+			case "'":
+				return "&#39;"
+			default:
+				return char
+		}
+	})
+}
+
+function providerAuthLabel(provider: string) {
+	switch (provider) {
+		case "anthropic":
+			return "Anthropic"
+		case "openrouter":
+			return "OpenRouter"
+		case "openai":
+		case "openai-compatible":
+			return "OpenAI Compatible"
+		case "openai-native":
+			return "OpenAI"
+		case "ollama":
+			return "Ollama"
+		case "lmstudio":
+			return "LM Studio"
+		case "litellm":
+			return "LiteLLM"
+		case "requesty":
+			return "Requesty"
+		case "vercel-ai-gateway":
+			return "Vercel AI Gateway"
+		case "groq":
+			return "Groq"
+		case "huggingface":
+			return "Hugging Face"
+		case "baseten":
+			return "Baseten"
+		case "hicap":
+			return "Hicap"
+		case "sapaicore":
+			return "SAP AI Core"
+		case "aihubmix":
+			return "AIHubMix"
+		case "nousResearch":
+			return "Nous Research"
+		case "openAiCodex":
+		case "openai-codex":
+			return "OpenAI Codex"
+		case "oca":
+			return "OCA"
+		case "account":
+			return "LIG VS account"
+		default:
+			return provider || "Provider"
+	}
+}
+
+function normalizeHttpUrl(value: string) {
+	const raw = String(value || "").trim()
+	if (!raw) {
+		return ""
+	}
+	try {
+		return new URL(raw).toString()
+	} catch {
+		try {
+			return new URL(`https://${raw}`).toString()
+		} catch {
+			return ""
+		}
 	}
 }
 

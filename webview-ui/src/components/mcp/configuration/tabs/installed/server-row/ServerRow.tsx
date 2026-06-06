@@ -226,6 +226,15 @@ const ServerRow = ({
 		const remoteServer = remoteMCPServers.find((remote) => remote.url === serverUrl)
 		return remoteServer?.alwaysEnabled === true
 	})()
+	const lifecycleText = isDeleting
+		? "Deleting server..."
+		: isAuthenticating || server.oauthAuthStatus === "pending"
+			? "Authenticating server..."
+			: isRestarting
+				? "Restarting server..."
+				: server.status === "connecting"
+					? "Connecting server..."
+					: ""
 
 	return (
 		<div className="mb-2.5">
@@ -300,6 +309,9 @@ const ServerRow = ({
 					})}
 				/>
 			</div>
+			{lifecycleText && (
+				<div className="text-xs text-description bg-text-block-background px-2.5 py-1">{lifecycleText}</div>
+			)}
 
 			{server.error ? (
 				<div className="text-sm bg-text-block-background rounded-b-sm">

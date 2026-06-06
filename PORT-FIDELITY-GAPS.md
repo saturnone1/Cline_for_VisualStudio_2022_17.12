@@ -1,21 +1,71 @@
 # Port Fidelity Gaps
 
-This file used to track an older C# bridge/runtime audit. That content is no longer the active source of truth because the project now routes runtime behavior through the Cline SDK sidecar.
+This file is the concise gap index for the Visual Studio 2022 Cline port. The
+coverage percentages and implementation evidence live in
+`VS2022-SDK-COVERAGE.md`.
 
-Use [VS2022-SDK-COVERAGE.md](VS2022-SDK-COVERAGE.md) for the current feature matrix, Visual Studio parity gaps, and implementation order.
+## Current Rule
 
-## Current Canonical Backlog
+Do not mark a feature as complete only because `@cline/sdk` exposes it. Visual
+Studio parity requires:
 
-The remaining parity work is tracked in the "Visual Studio Parity Backlog" and "Remaining Work" sections of `VS2022-SDK-COVERAGE.md`.
+- SDK runtime support.
+- Visual Studio host adapter support.
+- WebView controls and transcript state.
+- Persisted settings/session behavior.
+- Honest diagnostics for reduced, air-gap disabled, or unsupported paths.
 
-High-level order and current progress:
+## Done
 
-1. Terminal/command execution Cline parity: 75%.
-2. MCP server connection lifecycle: 70%. Online marketplace work is deferred
-   for air-gapped deployments.
-3. Browser tools and web fetch session support: 35%.
-4. OAuth, account, and provider auth: 20%.
-5. Checkpoint, diff, review, undo/revert completion: 65%.
-6. Worktree create/switch/merge/delete: 20%.
-7. Hooks, scheduled agents, plugins, and subagents: 15%.
-8. Provider/model catalog parity: 35%.
+- SDK baseline moved to `@cline/sdk` 0.0.43.
+- Terminal command cards expose command ids, cwd/output state, Attach, Continue,
+  and Open Output.
+- MCP settings-file lifecycle routes through SDK helpers where available.
+- Browser/Web fetch paths are gated, diagnostic, and transcript-visible.
+- OpenAI Codex/OCA/LIG provider auth state tracks token expiry and refresh.
+- Checkpoint compare/restore is visible in the transcript, with SDK diff-stream
+  limitations called out.
+- Worktree create/switch/merge/delete and per-worktree task routing are wired.
+- Hooks, `.cline/cron`, local plugin status, and SDK team progress have usable
+  Visual Studio WebView surfaces.
+- Provider catalogs prefer SDK/provider metadata, then endpoint metadata, then
+  conservative reduced fallback.
+- LIG branding uses selected optimized assets from `Signature_PNG` without
+  replacing Cline's task-first UX.
+
+## Not Done
+
+- Native VS terminal shell integration is not equivalent to VS Code shell
+  integration.
+- Remote MCP OAuth and marketplace install are not full upstream parity.
+- Browser launch/reconnect automation still needs real Chrome/Edge smoke
+  coverage.
+- Global Cline account organization, credit, and spend-limit flows remain
+  deployment-specific.
+- True SDK checkpoint diff streams are blocked until the SDK exposes them.
+- Unusual worktree folder-only and merge-conflict states need more host tests.
+- Additional hook lifecycle names and scheduler queue controls are not yet
+  required by deployment.
+- Non-OpenAI provider-specific catalog APIs are only reduced unless selected for
+  deployment.
+
+## UI/UX Differences To Keep Visible
+
+- VS Code-only extension commands map to Visual Studio commands or reduced
+  messages.
+- VS Code authentication providers map to sidecar/host OAuth callback bridges
+  only for required providers.
+- VS Code webview URI helpers map to packaged WebView2 assets.
+- VS Code terminal, diff, comments, storage, and secrets APIs map to
+  Visual Studio-specific adapters.
+- Air-gap policy disables online marketplace install and web fetch by default.
+
+## Next Implementation Order
+
+1. Fix stale C# fallback handlers that still report unsupported for sidecar-owned
+   SDK features.
+2. Add focused host/manual tests for terminal attach/continue, worktree folder
+   fallback, and merge recovery.
+3. Add real-browser smoke tests behind an environment flag.
+4. Add deployment-selected provider/account APIs only when required.
+5. Re-audit upstream Cline UI after each SDK or upstream baseline update.

@@ -36,12 +36,15 @@ export type RunningCommand = {
 	processId: number
 	command: string
 	cwd: string
+	currentDirectory?: string
 	startedAt: string
 	lastOutputAt?: string
 	status: string
 	isReusableShell?: boolean
 	isHot?: boolean
 	background?: boolean
+	attachable?: boolean
+	proceedWhileRunningAvailable?: boolean
 	shell?: string
 }
 
@@ -57,12 +60,25 @@ export type CompletedCommand = RunningCommand & {
 
 export type TerminalState = {
 	activeCommands: RunningCommand[]
+	backgroundCommands?: RunningCommand[]
 	recentCommands: CompletedCommand[]
 	recentOutput: TerminalOutputLine[]
 	outputSequence: number
 	shell?: string
 	shellState?: string
 	reuseMode?: string
+	currentDirectory?: string
+	unretrievedOutputAvailable?: boolean
+	attachable?: boolean
+	proceedWhileRunningAvailable?: boolean
+}
+
+export type TerminalCommandActionResult = {
+	success: boolean
+	message?: string
+	command?: RunningCommand | CompletedCommand
+	state?: TerminalState
+	lines?: TerminalOutputLine[]
 }
 
 export class VisualStudioHostBridgeClient {
@@ -111,6 +127,10 @@ export class VisualStudioHostBridgeClient {
 
 	async writeTextFile(path: string, content: string) {
 		return sendHostRequest(this.connection, "workspace.writeTextFile", { path, content })
+	}
+
+	async deleteFile(path: string) {
+		return sendHostRequest(this.connection, "workspace.deleteFile", { path })
 	}
 
 	async createDirectory(path: string) {
@@ -178,6 +198,8 @@ export class VisualStudioHostBridgeClient {
 		cancelled?: boolean
 		background?: boolean
 		isHot?: boolean
+		attachable?: boolean
+		proceedWhileRunningAvailable?: boolean
 		durationMs: number
 		stdout?: string
 		stderr?: string
@@ -198,6 +220,8 @@ export class VisualStudioHostBridgeClient {
 			cancelled?: boolean
 			background?: boolean
 			isHot?: boolean
+			attachable?: boolean
+			proceedWhileRunningAvailable?: boolean
 			durationMs: number
 			stdout?: string
 			stderr?: string
@@ -228,8 +252,24 @@ export class VisualStudioHostBridgeClient {
 		return sendHostRequest(this.connection, "workspace.openProblemsPanel", null)
 	}
 
-	async openTerminalPanel() {
-		return sendHostRequest(this.connection, "workspace.openTerminalPanel", null)
+	async openTerminalPanel(request?: { terminalId?: string; commandId?: string }) {
+		return sendHostRequest(this.connection, "workspace.openTerminalPanel", request || null)
+	}
+
+	async attachTerminalCommand(commandId: string, terminalId?: string): Promise<TerminalCommandActionResult> {
+		return (await sendHostRequest(this.connection, "workspace.attachTerminalCommand", { commandId, terminalId })) as TerminalCommandActionResult
+	}
+
+	async continueTerminalCommand(commandId: string, terminalId?: string): Promise<TerminalCommandActionResult> {
+		return (await sendHostRequest(this.connection, "workspace.continueTerminalCommand", { commandId, terminalId })) as TerminalCommandActionResult
+	}
+
+	async openSolution(solutionPath: string, newWindow = false) {
+		return sendHostRequest(this.connection, "workspace.openSolution", { solutionPath, newWindow })
+	}
+
+	async openFolder(folderPath: string, newWindow = false) {
+		return sendHostRequest(this.connection, "workspace.openFolder", { folderPath, newWindow })
 	}
 
 	async openDiff(leftPath: string, rightPath: string, title?: string) {

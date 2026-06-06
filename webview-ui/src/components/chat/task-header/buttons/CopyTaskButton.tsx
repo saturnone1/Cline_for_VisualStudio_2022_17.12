@@ -1,8 +1,10 @@
 import { CheckIcon, CopyIcon } from "lucide-react"
 import { useCallback, useState } from "react"
+import { StringRequest } from "@shared/proto/cline/common"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { FileServiceClient } from "@/services/grpc-client"
 
 const CopyTaskButton: React.FC<{
 	taskText?: string
@@ -15,7 +17,11 @@ const CopyTaskButton: React.FC<{
 			return
 		}
 
-		navigator.clipboard.writeText(taskText).then(() => {
+		const copyPromise = navigator.clipboard?.writeText
+			? navigator.clipboard.writeText(taskText).catch(() => FileServiceClient.copyToClipboard(StringRequest.create({ value: taskText })))
+			: FileServiceClient.copyToClipboard(StringRequest.create({ value: taskText }))
+
+		copyPromise.then(() => {
 			setCopied(true)
 			setTimeout(() => setCopied(false), 1500)
 		})

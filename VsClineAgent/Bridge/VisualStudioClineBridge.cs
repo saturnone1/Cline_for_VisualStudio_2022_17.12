@@ -201,13 +201,13 @@ namespace VsClineAgent.Bridge
                 case "WorktreeService.createWorktreeInclude":
                     return CreateWorktreeInclude(message);
                 case "WorktreeService.createWorktree":
-                    return CreateUnsupportedWorktreeResponse("Creating new worktrees is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedWorktreeResponse("Worktree creation is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "WorktreeService.switchWorktree":
-                    return CreateUnsupportedWorktreeResponse("Switching worktrees is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedWorktreeResponse("Worktree switching is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "WorktreeService.mergeWorktree":
-                    return CreateUnsupportedMergeWorktreeResponse("Merging worktrees is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMergeWorktreeResponse("Worktree merging is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "WorktreeService.deleteWorktree":
-                    return CreateUnsupportedWorktreeResponse("Deleting worktrees is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedWorktreeResponse("Worktree deletion is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "WorktreeService.trackWorktreeViewOpened":
                     return new JObject();
                 case "WebService.checkIsImageUrl":
@@ -308,21 +308,21 @@ namespace VsClineAgent.Bridge
                 case "McpService.refreshMcpMarketplace":
                     return CreateEmptyMcpMarketplaceCatalog();
                 case "McpService.addRemoteMcpServer":
-                    return CreateUnsupportedMcpServersResponse("Adding remote MCP servers is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP server registration is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.openMcpSettings":
-                    return CreateUnsupportedMcpOperationResponse("Opening MCP settings is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpOperationResponse("MCP settings are owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.updateMcpTimeout":
-                    return CreateUnsupportedMcpServersResponse("Updating MCP server timeouts is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP server timeout updates are owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.restartMcpServer":
-                    return CreateUnsupportedMcpServersResponse("Restarting MCP servers is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP restart is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.deleteMcpServer":
-                    return CreateUnsupportedMcpServersResponse("Deleting MCP servers is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP deletion is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.toggleToolAutoApprove":
-                    return CreateUnsupportedMcpServersResponse("Toggling MCP tool auto-approval is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP tool auto-approval is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.toggleMcpServer":
-                    return CreateUnsupportedMcpServersResponse("Toggling MCP servers is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP toggling is owned by the SDK sidecar. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.authenticateMcpServer":
-                    return CreateUnsupportedMcpServersResponse("Authenticating MCP servers is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedMcpServersResponse("MCP authentication is owned by the SDK sidecar for supported providers. If this fallback appears, the sidecar handler did not answer.");
                 case "McpService.downloadMcp":
                     return CreateUnsupportedMcpDownloadResponse("Downloading MCP marketplace entries is not implemented in the Visual Studio port.");
                 case "TaskService.newTask":
@@ -479,13 +479,13 @@ namespace VsClineAgent.Bridge
                 case "AccountService.hicapAuthClicked":
                     return CreateUnsupportedAccountOperationResponse("Hicap OAuth is not implemented in the Visual Studio port.");
                 case "AccountService.openAiCodexSignIn":
-                    return CreateUnsupportedAccountOperationResponse("OpenAI Codex OAuth is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedAccountOperationResponse("OpenAI Codex OAuth is owned by the SDK sidecar for supported deployments. If this fallback appears, the sidecar handler did not answer.");
                 case "AccountService.openAiCodexSignOut":
-                    return CreateUnsupportedAccountOperationResponse("OpenAI Codex sign-out is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedAccountOperationResponse("OpenAI Codex sign-out is owned by the SDK sidecar for supported deployments. If this fallback appears, the sidecar handler did not answer.");
                 case "OcaAccountService.ocaAccountLoginClicked":
-                    return CreateUnsupportedAccountOperationResponse("OCA account sign-in is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedAccountOperationResponse("OCA account sign-in is owned by the SDK sidecar for supported deployments. If this fallback appears, the sidecar handler did not answer.");
                 case "OcaAccountService.ocaAccountLogoutClicked":
-                    return CreateUnsupportedAccountOperationResponse("OCA account sign-out is not implemented in the Visual Studio port.");
+                    return CreateUnsupportedAccountOperationResponse("OCA account sign-out is owned by the SDK sidecar for supported deployments. If this fallback appears, the sidecar handler did not answer.");
                 case "SlashService.condense":
                     return await HandleSlashUtilityActionAsync();
                 case "SlashService.reportBug":
@@ -4310,7 +4310,7 @@ namespace VsClineAgent.Bridge
                 ["useAutoCondense"] = false,
                 ["subagentsEnabled"] = false,
                 ["clineWebToolsEnabled"] = new JObject { ["user"] = false, ["featureFlag"] = false },
-                ["worktreesEnabled"] = new JObject { ["user"] = false, ["featureFlag"] = false },
+                ["worktreesEnabled"] = new JObject { ["user"] = true, ["featureFlag"] = false },
                 ["favoritedModelIds"] = new JArray(),
                 ["lastDismissedInfoBannerVersion"] = 0,
                 ["lastDismissedModelBannerVersion"] = 0,

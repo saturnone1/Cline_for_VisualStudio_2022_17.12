@@ -123,7 +123,7 @@ Model: qwen3-coder:latest
 - reusable `cmd.exe` command session, command id, terminal id, UTF-8 codepage 설정
 - 명령 취소, 장기 실행 명령 감지, 최근/미수거 출력 조회
 - SDK settings 기반 rules, workflows, skills 목록/토글 일부
-- SDK checkpoint restore 일부
+- SDK checkpoint restore와 transcript-visible checkpoint compare metadata
 - MCP settings-file 기반 서버 등록, 목록, 연결, tool discovery, toggle, timeout, restart, delete 일부
 - WebView 초기 렌더를 위한 안전한 C# 초기 상태 제공
 - `%LOCALAPPDATA%\VsClineAgent\logs` 아래 상호작용 진단 로그 기록
@@ -135,30 +135,30 @@ Model: qwen3-coder:latest
 - 명령 실행: 실제 명령 실행과 출력 카드는 동작하지만 Visual Studio 터미널 pane과 완전 통합되지는 않았습니다.
 - 체크포인트: SDK restore 경로는 있으나 diff/review/undo parity는 제한적입니다.
 - MCP: settings-file 서버와 SDK tool 연결은 일부 지원하지만 marketplace 설치, OAuth callback, resource/prompt listing은 완전하지 않습니다.
-- Browser/web fetch: 폐쇄망을 고려해 `fetch_web_content`는 기본 비활성화이며, `VSCLINE_ENABLE_WEB_FETCH=1`일 때만 제한적으로 사용합니다. Chrome debugging 기반 browser action adapter는 아직 필요합니다.
-- Provider/model catalog: 로컬 API 설정은 가능하지만 원격 catalog refresh와 OAuth 기반 provider 설정은 축소되어 있습니다.
-- Account/auth: 인증되지 않은 상태 snapshot은 가능하지만 VS Code authentication provider와 같은 흐름은 Visual Studio에서 별도 구현이 필요합니다.
+- Browser/web fetch: 폐쇄망을 고려해 `fetch_web_content`는 기본 비활성화이며, `VSCLINE_ENABLE_WEB_FETCH=1`이고 브라우저 도구 사용이 설정에서 비활성화되어 있지 않을 때만 SDK tool policy로 노출됩니다. 설정 화면은 현재 web fetch 사용 가능 여부, 비활성화 사유, Chrome DevTools 연결의 버전/탭 진단을 표시합니다. SDK 0.0.42 기본 도구에는 `webFetch`만 있으므로 Chrome debugging 기반 browser action adapter는 아직 별도 구현이 필요합니다.
+- Provider/model catalog: Ollama, LM Studio, LiteLLM, OpenAI-compatible, OpenRouter, Requesty, Groq, Vercel AI Gateway 및 내부 OpenAI-compatible 엔드포인트는 모델 목록을 조회하고 기본 capability/pricing metadata를 표시할 수 있지만, provider 고유 catalog API와 OAuth 기반 provider 설정은 축소되어 있습니다.
+- Account/auth: 인증되지 않은 상태 snapshot, provider auth 버튼의 안전한 응답, SDK provider auth requirements metadata, 로컬/환경변수 provider credential 저장/상태/삭제 RPC, 설정 기반 provider authorization URL 실행, localhost OAuth callback 수신 bridge, 설정 기반 authorization-code token exchange와 SDK session credential 전달은 가능하지만, provider별 refresh/account signed-in propagation은 Visual Studio에서 별도 구현이 필요합니다.
 - Rules/workflows/skills: 설정 조회/토글은 일부 가능하지만 `skills` 실행 도구는 승인/실행 UX가 완성될 때까지 비활성화 상태입니다.
-- Worktree 서비스: WebView RPC stub/reduced response 중심입니다.
+- Worktree 서비스: sidecar git adapter가 list/create/switch/merge/delete를 처리하고, dirty/locked/prunable 상태와 변경 파일 요약, local branch checkout, local/remote base branch 선택, 다중 solution 선택, 현재/새 Visual Studio 창 전환을 지원합니다. 작업 중에는 Worktrees view 폴링을 멈춰 선택/상태 메시지가 덮이지 않게 했고, Per-worktree task routing과 깊은 conflict recovery는 아직 남아 있습니다.
+- Hooks/subagents/scheduled agents: `.clinerules/hooks` 및 `~/.cline/hooks`의 로컬 hook 파일은 WebView에서 생성/토글/삭제되고 task/resume/tool lifecycle에서 실행됩니다. `PreToolUse` hook JSON 응답으로 도구 실행 차단과 도구 입력 patch가 가능하고, Subagents 토글은 SDK spawn/team agent 설정으로 전달됩니다. Scheduled Agents 토글은 로컬 `.cline/cron` spec 기반 SDK workspace automation을 켭니다. 더 풍부한 upstream hook 응답 의미, scheduled-agent 관리 UX, subagent 실행 UX는 아직 남아 있습니다.
 
 ### 미구현 또는 주요 남은 작업
 
 - Visual Studio 터미널 pane과의 first-class 통합
-- 장기 실행 명령에 대한 proceed while running, attach, continue UX
+- 장기 실행 명령에 대한 명시적 continue/attach action과 Visual Studio terminal pane 통합
 - 파일 변경 Review, Undo, Revert, multi-file review의 upstream 수준 parity
-- checkpoint diff/review metadata와 transcript UX
-- Chrome debugging adapter 기반 browser action
-- Web fetch/browser lifecycle 상태 표시
+- true checkpoint diff streams와 richer checkpoint review metadata
+- Chrome debugging adapter 기반 browser action, screenshots, tab lifecycle streaming
 - MCP marketplace catalog/install
 - MCP OAuth authenticate callback
 - MCP resource, resource-template, prompt listing
-- Visual Studio 호환 OAuth/account login/logout flow
-- OpenRouter, Requesty, Hicap, OpenAI Codex 등 provider auth flow parity
-- provider/model catalog stream과 capability metadata refresh
-- worktree create, switch, merge, delete, conflict 처리
-- Visual Studio solution reload와 worktree 전환 연동
-- hooks lifecycle 실행
-- scheduled agents/cron automation
+- Visual Studio 호환 OAuth refresh 및 account login/logout flow
+- OpenAI Codex 등 OAuth-backed provider auth flow parity
+- provider/model catalog stream과 provider별 정밀 capability metadata
+- worktree merge conflict abort/continue/recovery UX
+- solution이 없는 folder-only worktree 전환 처리와 worktree별 task/session routing
+- hooks JSON response 기반 고급 hook semantics와 validation 메시지
+- scheduled-agent spec/run management UX
 - plugin install/configuration surface
 - subagent/team 실행 상태와 승인 UX
 

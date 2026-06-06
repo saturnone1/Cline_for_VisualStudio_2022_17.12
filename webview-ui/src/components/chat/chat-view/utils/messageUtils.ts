@@ -49,6 +49,33 @@ function isMeaninglessTextMessage(message: ClineMessage): boolean {
 	return message.type === "say" && message.say === "text" && (message.text || "").trim() === "{}"
 }
 
+function getApiRequestSummaryText(message: ClineMessage): string {
+	try {
+		return String(JSON.parse(message.text || "{}").request || "").trim()
+	} catch {
+		return ""
+	}
+}
+
+function isVisibleProgressRequest(message: ClineMessage): boolean {
+	const request = getApiRequestSummaryText(message)
+	if (!request) {
+		return false
+	}
+
+	const normalized = request.replace(/\s+/g, " ").trim()
+	if (
+		normalized === "모델 진행 중" ||
+		normalized === "모델 진행 기록" ||
+		normalized === "Cline SDK is thinking..." ||
+		/^Cline SDK iteration \d+ (started|finished)\./i.test(normalized)
+	) {
+		return false
+	}
+
+	return /\b(Files|Searches|Edits|Commands|Tools):/i.test(request) || /^LIG VS (read|performed|prepared|ran|used)\b/i.test(normalized)
+}
+
 /**
  * Check if a message group is a tool group (array with _isToolGroup marker)
  */
@@ -100,9 +127,14 @@ export function filterVisibleMessages(messages: ClineMessage[]): ClineMessage[] 
 				return false
 			// NOTE: reasoning passes through to be included in tool groups
 			case "api_req_started": {
-				// api_req_started rows only render visible content for errors/cancels.
-				// Reasoning has its own standalone ChatRows. Everything else renders
-				// as invisible padding. Filter out unless there's an error.
+				// SDK progress summaries are normalized into api_req_started so the
+				// live and restored transcripts use the same folded progress row.
+				if (isVisibleProgressRequest(message)) {
+					break
+				}
+				// Other api_req_started rows only render visible content for errors/cancels.
+				// Reasoning has its own standalone ChatRows. Everything else is internal
+				// bookkeeping and should stay hidden.
 				try {
 					const info = JSON.parse(message.text || "{}")
 					if (info.cancelReason || info.streamingFailedMessage) {

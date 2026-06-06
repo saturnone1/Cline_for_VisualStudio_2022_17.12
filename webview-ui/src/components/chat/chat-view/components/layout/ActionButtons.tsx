@@ -114,7 +114,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 		}
 
 		return (
-			<div className="flex justify-end px-3.5">
+			<div className="lig-action-buttons flex justify-end">
 				<VSCodeButton
 					appearance="icon"
 					aria-label="Scroll to bottom"
@@ -139,7 +139,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	const opacity = canInteract || isStreaming ? 1 : 0.5
 
 	return (
-		<div className="flex px-3.5" style={{ opacity }}>
+		<div className="lig-action-buttons flex" style={{ opacity }}>
 			{primaryText && primaryAction && (
 				<VSCodeButton
 					appearance="primary"

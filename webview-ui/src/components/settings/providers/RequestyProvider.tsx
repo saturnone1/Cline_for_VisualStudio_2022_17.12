@@ -27,6 +27,7 @@ export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: Req
 	const { handleFieldChange } = useApiConfigurationHandlers()
 
 	const [requestyEndpointSelected, setRequestyEndpointSelected] = useState(!!apiConfiguration?.requestyBaseUrl)
+	const [authMessage, setAuthMessage] = useState("")
 
 	const resolvedUrl = toRequestyServiceUrl(apiConfiguration?.requestyBaseUrl, "app")
 	const apiKeyUrl = resolvedUrl != null ? new URL("api-keys", resolvedUrl).toString() : undefined
@@ -44,19 +45,22 @@ export const RequestyProvider = ({ showModelOptions, isPopup, currentMode }: Req
 					appearance="secondary"
 					onClick={async () => {
 						try {
-							await AccountServiceClient.requestyAuthClicked(
+							const response = await AccountServiceClient.requestyAuthClicked(
 								StringRequest.create({
 									value: apiConfiguration?.requestyBaseUrl || "",
 								}),
 							)
+							setAuthMessage(response?.message || "Requesty API key page opened.")
 						} catch (error) {
 							console.error("Failed to open Requesty auth:", error)
+							setAuthMessage(error instanceof Error ? error.message : String(error))
 						}
 					}}
 					style={{ margin: "5px 0 0 0" }}>
 					Get Requesty API Key
 				</VSCodeButton>
 			)}
+			{authMessage && <p style={{ color: "var(--vscode-descriptionForeground)", fontSize: 12, marginTop: 8 }}>{authMessage}</p>}
 			<VSCodeCheckbox
 				checked={requestyEndpointSelected}
 				onChange={(e: any) => {

@@ -54,7 +54,7 @@ export const ThinkingRow = memo(
 		}
 
 		return (
-			<div className="ml-1 pl-0 mb-0 -mt-[2px]">
+			<div className="lig-thinking-row ml-0 pl-0 mb-0">
 				{showTitle ? (
 					<Button
 						className={cn(

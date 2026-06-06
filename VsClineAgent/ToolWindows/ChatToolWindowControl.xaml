@@ -13,7 +13,7 @@
         <StackPanel x:Name="loadingPanel"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center">
-            <TextBlock Text="AI Agent"
+            <TextBlock Text="LIG VS"
                        Foreground="#569CD6"
                        FontSize="16"
                        FontWeight="Bold"

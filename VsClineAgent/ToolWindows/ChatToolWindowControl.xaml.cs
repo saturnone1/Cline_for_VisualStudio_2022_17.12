@@ -103,7 +103,7 @@ namespace VsClineAgent.ToolWindows
                     throw new InvalidOperationException(
                         "No WebView2 runtime could initialize.\n" + string.Join("\n", initializationFailures));
 
-                SetStatus("Starting Cline sidecar...");
+                SetStatus("Starting LIG VS sidecar...");
                 await TryEnsureSidecarRunningAsync();
 
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
@@ -719,7 +719,7 @@ html, body, #root {
                       CancellationToken.None);
 
                  if (!handledBySidecar)
-                     await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the Cline SDK sidecar.");
+                     await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar.");
              }
              catch (Exception ex)
              {
@@ -745,7 +745,7 @@ html, body, #root {
 
                 _sidecarProcess?.Dispose();
                 _sidecarProcess = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                SetStatus("Preparing Cline sidecar runtime...");
+                SetStatus("Preparing LIG VS sidecar runtime...");
                 await System.Windows.Threading.Dispatcher.Yield();
 
                 var sidecarProcess = _sidecarProcess
@@ -753,12 +753,12 @@ html, body, #root {
                 var status = await Task.Run(() =>
                     sidecarProcess.EnsureStartedAsync(CancellationToken.None));
                 _lastSidecarError = null;
-                SetStatus($"Cline sidecar: {status}");
+                SetStatus($"LIG VS sidecar: {status}");
                 return _sidecarProcess != null && _sidecarProcess.IsRunning;
             }
             catch (Exception ex)
             {
-                _lastSidecarError = "Cline sidecar failed to start: " + ex.Message;
+                _lastSidecarError = "LIG VS sidecar failed to start: " + ex.Message;
                 SetStatus(_lastSidecarError);
                 return false;
             }
@@ -771,7 +771,7 @@ html, body, #root {
         private string GetSidecarNotRunningMessage()
         {
             return string.IsNullOrWhiteSpace(_lastSidecarError)
-                ? "Cline SDK sidecar is not running."
+                ? "LIG VS SDK sidecar is not running."
                 : _lastSidecarError!;
         }
 
@@ -949,7 +949,7 @@ html, body, #root {
                 ["useAutoCondense"] = false,
                 ["subagentsEnabled"] = false,
                 ["clineWebToolsEnabled"] = new JObject { ["user"] = false, ["featureFlag"] = false },
-                ["worktreesEnabled"] = new JObject { ["user"] = false, ["featureFlag"] = false },
+                ["worktreesEnabled"] = new JObject { ["user"] = true, ["featureFlag"] = false },
                 ["favoritedModelIds"] = new JArray(),
                 ["lastDismissedInfoBannerVersion"] = 0,
                 ["lastDismissedModelBannerVersion"] = 0,
@@ -1094,7 +1094,7 @@ html, body, #root {
                 {
                     ShowError(BuildDetailedDiagnostic(
                         "WebApp loaded but rendered no UI.",
-                        "This usually means the Cline WebApp did not receive its initial StateService hydration response.",
+                        "This usually means the LIG VS WebApp did not receive its initial StateService hydration response.",
                         state));
                 }
             }

@@ -43,7 +43,7 @@ mermaid.initialize({
 	themeVariables: {
 		...MERMAID_THEME,
 		fontSize: "16px",
-		fontFamily: "var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif)",
+		fontFamily: "Noto Sans KR, sans-serif",
 
 		// Additional styling
 		noteTextColor: "#ffffff",
@@ -146,7 +146,11 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
 
 	const handleCopyCode = async () => {
 		try {
-			await navigator.clipboard.writeText(code)
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(code).catch(() => FileServiceClient.copyToClipboard(StringRequest.create({ value: code })))
+			} else {
+				await FileServiceClient.copyToClipboard(StringRequest.create({ value: code }))
+			}
 		} catch (err) {
 			console.error("Copy failed", err)
 		}

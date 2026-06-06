@@ -44,6 +44,7 @@ const server = net.createServer((socket) => {
 		(event) => webviewRouter.handleSdkEvent(event),
 		(request) => webviewRouter.requestToolApproval(request),
 		(question, options) => webviewRouter.requestQuestion(question, options),
+		() => webviewRouter.isScheduledAgentsEnabled(),
 	)
 	webviewRouter.setClineSdk(clineSdk)
 
@@ -93,6 +94,24 @@ server.listen(pipeName, () => {
 
 process.on("SIGTERM", () => process.exit(0))
 process.on("SIGINT", () => process.exit(0))
+process.on("unhandledRejection", (reason) => {
+	if (isSessionStopError(reason)) {
+		logInteraction("sidecar", "sessionStopUnhandledRejection", { message: errorMessage(reason) })
+		return
+	}
+
+	console.error(reason instanceof Error && reason.stack ? reason.stack : String(reason))
+	process.exit(1)
+})
+process.on("uncaughtException", (error) => {
+	if (isSessionStopError(error)) {
+		logInteraction("sidecar", "sessionStopUncaughtException", { message: errorMessage(error) })
+		return
+	}
+
+	console.error(error instanceof Error && error.stack ? error.stack : String(error))
+	process.exit(1)
+})
 
 function handleMessage(
 	connection: JsonRpcConnection,
@@ -244,4 +263,12 @@ async function dispatch(
 
 function write(socket: net.Socket, message: unknown) {
 	socket.write(`${JSON.stringify(message)}\n`)
+}
+
+function isSessionStopError(error: unknown) {
+	return errorMessage(error) === "session_stop"
+}
+
+function errorMessage(error: unknown) {
+	return error instanceof Error ? error.message : String(error)
 }

@@ -281,7 +281,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 									</TooltipTrigger>
 									<TooltipContent side="top">
 										Create a new git worktree and open it in a separate window. Great for running parallel
-										Cline tasks.
+										LIG VS tasks.
 									</TooltipContent>
 								</Tooltip>
 								*/}
@@ -305,7 +305,7 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 											</button>
 										</TooltipTrigger>
 										<TooltipContent side="bottom">
-											View and manage git worktrees. Great for running parallel Cline tasks.
+											View and manage git worktrees. Great for running parallel LIG VS tasks.
 										</TooltipContent>
 									</Tooltip>
 								)}

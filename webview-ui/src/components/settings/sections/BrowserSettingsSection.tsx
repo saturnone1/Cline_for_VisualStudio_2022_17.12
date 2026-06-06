@@ -47,13 +47,21 @@ const ConnectionStatusIndicator = ({
 }
 
 export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ renderSectionHeader }) => {
-	const { browserSettings } = useExtensionState()
+	const { browserSettings, clineWebToolsEnabled } = useExtensionState()
 	const [isCheckingConnection, setIsCheckingConnection] = useState(false)
 	const [connectionStatus, setConnectionStatus] = useState<boolean | null>(null)
 	const [relaunchResult, setRelaunchResult] = useState<{ success: boolean; message: string } | null>(null)
 	const [debugMode, setDebugMode] = useState(false)
 	const [isBundled, setIsBundled] = useState(false)
 	const [detectedChromePath, setDetectedChromePath] = useState<string | null>(null)
+	const [browserDiagnostics, setBrowserDiagnostics] = useState<{
+		message?: string
+		browser?: string
+		host?: string
+		tabCount?: number
+		activeTabTitle?: string
+		error?: string
+	} | null>(null)
 
 	// Auto-clear relaunch result message after 15 seconds
 	useEffect(() => {
@@ -79,24 +87,45 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 
 	// Function to check connection once without changing UI state immediately
 	const checkConnectionOnce = useCallback(() => {
+		setIsCheckingConnection(true)
 		if (browserSettings.remoteBrowserHost) {
 			BrowserServiceClient.testBrowserConnection(StringRequest.create({ value: browserSettings.remoteBrowserHost }))
 				.then((result) => {
 					setConnectionStatus(result.success)
+					setBrowserDiagnostics({
+						message: result.message,
+						host: result.host,
+						browser: result.browser,
+						tabCount: result.tabCount,
+						activeTabTitle: result.activeTabTitle,
+						error: result.success ? undefined : result.message,
+					})
 				})
 				.catch((error) => {
 					console.error("Error testing browser connection:", error)
 					setConnectionStatus(false)
+					setBrowserDiagnostics({ error: error.message })
 				})
+				.finally(() => setIsCheckingConnection(false))
 		} else {
 			BrowserServiceClient.discoverBrowser(EmptyRequest.create({}))
 				.then((result) => {
 					setConnectionStatus(result.success)
+					setBrowserDiagnostics({
+						message: result.message,
+						host: result.host,
+						browser: result.browser,
+						tabCount: result.tabCount,
+						activeTabTitle: result.activeTabTitle,
+						error: result.success ? undefined : result.message,
+					})
 				})
 				.catch((error) => {
 					console.error("Error discovering browser:", error)
 					setConnectionStatus(false)
+					setBrowserDiagnostics({ error: error.message })
 				})
+				.finally(() => setIsCheckingConnection(false))
 		}
 	}, [browserSettings.remoteBrowserHost])
 
@@ -110,7 +139,7 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 		checkConnectionOnce()
 		const pollInterval = setInterval(() => {
 			checkConnectionOnce()
-		}, 1000)
+		}, 5000)
 
 		return () => clearInterval(pollInterval)
 	}, [browserSettings.remoteBrowserEnabled, checkConnectionOnce])
@@ -154,6 +183,10 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 	const isRemoteEnabled = Boolean(browserSettings.remoteBrowserEnabled)
 	const shouldShowRelaunchButton = isRemoteEnabled && connectionStatus === false
 	const isSubSettingsOpen = !(browserSettings.disableToolUse || false)
+	const isWebFetchEnabled = Boolean(clineWebToolsEnabled?.user && clineWebToolsEnabled?.featureFlag)
+	const webFetchDisabledReason =
+		clineWebToolsEnabled?.reason ||
+		(isWebFetchEnabled ? "" : "Web fetch is disabled for the current Visual Studio air-gap policy.")
 
 	return (
 		<div>
@@ -175,8 +208,35 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 								color: "var(--vscode-descriptionForeground)",
 								margin: "4px 0 0 0px",
 							}}>
-							Prevent Cline from using browser actions (e.g. launch, click, type).
+							Prevent LIG VS from using browser actions (e.g. launch, click, type).
 						</p>
+						<div
+							style={{
+								marginTop: 8,
+								padding: "8px 10px",
+								border: "1px solid var(--vscode-widget-border)",
+								borderRadius: 4,
+								background: "var(--vscode-editor-inactiveSelectionBackground)",
+								fontSize: 12,
+								lineHeight: 1.45,
+							}}>
+							<div style={{ fontWeight: 600 }}>
+								Web fetch:{" "}
+								<span
+									style={{
+										color: isWebFetchEnabled
+											? "var(--vscode-terminal-ansiGreen)"
+											: "var(--vscode-descriptionForeground)",
+									}}>
+									{isWebFetchEnabled ? "Enabled" : "Disabled"}
+								</span>
+							</div>
+							{!isWebFetchEnabled && (
+								<div style={{ color: "var(--vscode-descriptionForeground)", marginTop: 2 }}>
+									{webFetchDisabledReason}
+								</div>
+							)}
+						</div>
 					</div>
 
 					<CollapsibleContent isOpen={isSubSettingsOpen}>
@@ -246,7 +306,7 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 									color: "var(--vscode-descriptionForeground)",
 									margin: "0 0 6px 0px",
 								}}>
-								Enable Cline to use your Chrome
+								Enable LIG VS to use your Chrome
 								{isBundled
 									? "(not detected on your machine)"
 									: detectedChromePath
@@ -307,12 +367,35 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 										</div>
 									)}
 
-									<p
-										style={{
-											fontSize: "12px",
-											color: "var(--vscode-descriptionForeground)",
-											margin: 0,
-										}}></p>
+									{browserDiagnostics && (
+										<div
+											style={{
+												padding: "8px",
+												marginBottom: "8px",
+												backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)",
+												border: "1px solid var(--vscode-widget-border)",
+												borderRadius: "3px",
+												fontSize: "11px",
+												lineHeight: 1.45,
+												whiteSpace: "pre-wrap",
+												wordBreak: "break-word",
+											}}>
+											{browserDiagnostics.message && <div>{browserDiagnostics.message}</div>}
+											{browserDiagnostics.browser && <div>Browser: {browserDiagnostics.browser}</div>}
+											{browserDiagnostics.host && <div>Host: {browserDiagnostics.host}</div>}
+											{typeof browserDiagnostics.tabCount === "number" && (
+												<div>Open tabs: {browserDiagnostics.tabCount}</div>
+											)}
+											{browserDiagnostics.activeTabTitle && (
+												<div>Active tab: {browserDiagnostics.activeTabTitle}</div>
+											)}
+											{browserDiagnostics.error && (
+												<div style={{ color: "var(--vscode-errorForeground)" }}>
+													{browserDiagnostics.error}
+												</div>
+											)}
+										</div>
+									)}
 								</div>
 							)}
 							{/* Chrome Executable Path section now follows remote-specific settings */}

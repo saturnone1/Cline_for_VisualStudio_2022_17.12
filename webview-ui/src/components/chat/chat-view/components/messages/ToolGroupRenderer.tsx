@@ -48,9 +48,9 @@ export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => 
 	}
 
 	return (
-		<div className={cn("px-4 py-2 ml-1 text-description")}>
+		<div className={cn("lig-tool-group text-description")}>
 			{/* Header */}
-			<div className="text-[13px] text-description font-semibold mb-1">{summary}:</div>
+			<div className="text-[13px] text-description font-semibold mb-1.5">{summary}</div>
 
 			{/* Content - unified list of completed + active tools */}
 			<div className="min-w-0">
@@ -67,7 +67,7 @@ export const ToolGroupRenderer = memo(({ messages }: ToolGroupRendererProps) => 
 					return (
 						<div className="min-w-0" key={tool.ts}>
 							<Button
-								className="flex items-center gap-[3px] cursor-pointer text-[13px] text-description py-[1px] hover:text-link min-w-0 max-w-full px-0 leading-tight -my-0.5"
+								className="flex items-center gap-1.5 cursor-pointer text-[13px] text-description py-0.5 hover:text-link min-w-0 max-w-full px-0 leading-tight"
 								onClick={() => (isExpandable ? handleItemToggle(tool.ts) : handleOpenFile(info.path))}
 								size="icon"
 								variant="text">
@@ -247,5 +247,5 @@ export function getToolGroupSummaryFromParsedTools(tools: ClineSayTool[]): strin
 		parts.push(`performed ${counts.search} search${counts.search > 1 ? "es" : ""}`)
 	}
 
-	return parts.length === 0 ? "Context" : "Cline" + action + parts.join(", ")
+	return parts.length === 0 ? "Context" : "LIG VS" + action + parts.join(", ")
 }

@@ -51,10 +51,33 @@ export class VisualStudioHostProvider {
 }
 
 class VisualStudioWorkspaceClient {
+	private static cachedWorkspacePaths: { value: string[]; expiresAt: number } | null = null
+	private static workspacePathsRequest: Promise<string[]> | null = null
+
 	constructor(private readonly bridge: VisualStudioHostBridgeClient) {}
 
 	getWorkspacePaths(_request: unknown) {
-		return this.bridge.getWorkspacePaths()
+		const now = Date.now()
+		if (VisualStudioWorkspaceClient.cachedWorkspacePaths && VisualStudioWorkspaceClient.cachedWorkspacePaths.expiresAt > now) {
+			return Promise.resolve(VisualStudioWorkspaceClient.cachedWorkspacePaths.value)
+		}
+		if (VisualStudioWorkspaceClient.workspacePathsRequest) {
+			return VisualStudioWorkspaceClient.workspacePathsRequest
+		}
+
+		VisualStudioWorkspaceClient.workspacePathsRequest = this.bridge
+			.getWorkspacePaths()
+			.then((paths) => {
+				VisualStudioWorkspaceClient.cachedWorkspacePaths = {
+					value: paths,
+					expiresAt: Date.now() + readPositiveIntEnv("VSCLINE_WORKSPACE_PATHS_CACHE_MS", 5000),
+				}
+				return paths
+			})
+			.finally(() => {
+				VisualStudioWorkspaceClient.workspacePathsRequest = null
+			})
+		return VisualStudioWorkspaceClient.workspacePathsRequest
 	}
 
 	getDiagnostics(_request: unknown) {
@@ -67,6 +90,10 @@ class VisualStudioWorkspaceClient {
 
 	writeTextFile(request: { path?: string; content?: string }) {
 		return this.bridge.writeTextFile(request.path || "", request.content || "")
+	}
+
+	deleteFile(request: { path?: string }) {
+		return this.bridge.deleteFile(request.path || "")
 	}
 
 	createDirectory(request: { path?: string }) {
@@ -105,9 +132,35 @@ class VisualStudioWorkspaceClient {
 		return this.bridge.openProblemsPanel()
 	}
 
-	openTerminalPanel(_request: unknown) {
-		return this.bridge.openTerminalPanel()
+	openTerminalPanel(request: { terminalId?: string; commandId?: string } = {}) {
+		return this.bridge.openTerminalPanel(request)
 	}
+
+	attachTerminalCommand(request: { terminalId?: string; commandId?: string }) {
+		return this.bridge.attachTerminalCommand(request.commandId || "", request.terminalId)
+	}
+
+	continueTerminalCommand(request: { terminalId?: string; commandId?: string }) {
+		return this.bridge.continueTerminalCommand(request.commandId || "", request.terminalId)
+	}
+
+	openSolution(request: { solutionPath?: string; newWindow?: boolean }) {
+		return this.bridge.openSolution(request.solutionPath || "", request.newWindow === true)
+	}
+
+	openFolder(request: { folderPath?: string; path?: string; newWindow?: boolean }) {
+		return this.bridge.openFolder(request.folderPath || request.path || "", request.newWindow === true)
+	}
+}
+
+function readPositiveIntEnv(name: string, fallback: number) {
+	const raw = process.env[name]
+	if (!raw) {
+		return fallback
+	}
+
+	const value = Number.parseInt(raw, 10)
+	return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 class VisualStudioWindowClient {

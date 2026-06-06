@@ -23,13 +23,18 @@ namespace VsClineAgent.Services
         private static readonly Regex CompletionMarkerRegex = new Regex(
             @"(?:^|>)__VSCLINE_COMMAND_DONE__(?<id>cmd-\d{6})__(?<exit>-?\d+)$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly Regex CurrentDirectoryMarkerRegex = new Regex(
+            @"(?:^|>)__VSCLINE_COMMAND_CWD__(?<id>cmd-\d{6})__(?<cwd>.*)$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Guid OutputPaneGuid = new Guid("A95D2F78-1D66-4E7D-B3B0-7E7193E129F1");
         private readonly ConcurrentDictionary<string, RunningCommandInfo> _activeCommands = new ConcurrentDictionary<string, RunningCommandInfo>();
         private readonly ConcurrentQueue<CommandOutputLine> _outputHistory = new ConcurrentQueue<CommandOutputLine>();
         private readonly ConcurrentQueue<CompletedCommandInfo> _commandHistory = new ConcurrentQueue<CompletedCommandInfo>();
         private readonly ConcurrentDictionary<string, List<TerminalShellSession>> _sessionsByCwd = new ConcurrentDictionary<string, List<TerminalShellSession>>(StringComparer.OrdinalIgnoreCase);
+        private readonly object _outputPaneLock = new object();
         private long _commandSequence;
         private long _outputSequence;
+        private IVsOutputWindowPane? _outputPane;
 
         public async Task<CommandExecutionResult> ExecuteCommandAsync(
             string command,
@@ -50,6 +55,7 @@ namespace VsClineAgent.Services
                 Process = session.Process,
                 Command = command,
                 WorkingDirectory = cwd,
+                CurrentDirectory = session.CurrentDirectory,
                 StartedAt = startedAt,
                 Status = "running",
                 IsReusableShell = true,
@@ -113,6 +119,7 @@ namespace VsClineAgent.Services
                         Background = runningInfo.Background,
                         IsHot = runningInfo.IsHot,
                         DurationMs = stopwatch.ElapsedMilliseconds,
+                        CurrentDirectory = runningInfo.CurrentDirectory,
                         StdOut = stdOut.ToString(),
                         StdErr = stdErr.ToString(),
                         StdOutTruncated = runningInfo.StdOutTruncated,
@@ -141,6 +148,7 @@ namespace VsClineAgent.Services
                     Background = runningInfo.Background,
                     IsHot = runningInfo.IsHot,
                     DurationMs = stopwatch.ElapsedMilliseconds,
+                    CurrentDirectory = runningInfo.CurrentDirectory,
                     StdOut = stdOut.ToString(),
                     StdErr = stdErr.ToString(),
                     StdOutTruncated = runningInfo.StdOutTruncated,
@@ -183,21 +191,38 @@ namespace VsClineAgent.Services
 
         public Task<TerminalStateInfo> GetTerminalStateAsync()
         {
+            var activeCommands = _activeCommands.Values
+                .OrderBy(command => command.StartedAt)
+                .ToList();
+            var recentOutput = _outputHistory
+                .OrderBy(line => line.Sequence)
+                .ToList();
+            var sessions = GetLiveSessions();
+            var currentDirectory = activeCommands
+                .Select(command => command.CurrentDirectory)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+                ?? sessions
+                    .Select(session => session.CurrentDirectory)
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+                ?? string.Empty;
             var state = new TerminalStateInfo
             {
-                ActiveCommands = _activeCommands.Values
-                    .OrderBy(command => command.StartedAt)
+                ActiveCommands = activeCommands,
+                BackgroundCommands = activeCommands
+                    .Where(command => command.Background)
                     .ToList(),
                 RecentCommands = _commandHistory
                     .OrderBy(command => command.StartedAt)
                     .ToList(),
-                RecentOutput = _outputHistory
-                    .OrderBy(line => line.Sequence)
-                    .ToList(),
+                RecentOutput = recentOutput,
                 OutputSequence = Interlocked.Read(ref _outputSequence),
                 Shell = "cmd.exe",
-                ShellState = BuildShellState(),
+                ShellState = BuildShellState(sessions),
                 ReuseMode = "reusable-cmd-session",
+                CurrentDirectory = currentDirectory,
+                UnretrievedOutputAvailable = recentOutput.Count > 0,
+                Attachable = activeCommands.Count > 0,
+                ProceedWhileRunningAvailable = activeCommands.Any(command => command.Background || command.IsHot),
             };
             return Task.FromResult(state);
         }
@@ -290,6 +315,7 @@ namespace VsClineAgent.Services
             {
                 TerminalId = terminalId,
                 WorkingDirectory = cwd,
+                CurrentDirectory = cwd,
                 Process = process,
             };
 
@@ -309,7 +335,9 @@ namespace VsClineAgent.Services
             try
             {
                 await session.Process.StandardInput.WriteLineAsync(command).ConfigureAwait(false);
-                await session.Process.StandardInput.WriteLineAsync($"echo __VSCLINE_COMMAND_DONE__{commandId}__%ERRORLEVEL%").ConfigureAwait(false);
+                await session.Process.StandardInput.WriteLineAsync("set \"__VSCLINE_EXIT=%ERRORLEVEL%\"").ConfigureAwait(false);
+                await session.Process.StandardInput.WriteLineAsync($"echo __VSCLINE_COMMAND_CWD__{commandId}__%CD%").ConfigureAwait(false);
+                await session.Process.StandardInput.WriteLineAsync($"echo __VSCLINE_COMMAND_DONE__{commandId}__%__VSCLINE_EXIT%").ConfigureAwait(false);
                 await session.Process.StandardInput.FlushAsync().ConfigureAwait(false);
             }
             finally
@@ -332,6 +360,22 @@ namespace VsClineAgent.Services
                     if (int.TryParse(marker.Groups["exit"].Value, out var exitCode))
                     {
                         CompleteBackgroundCommand(session, exitCode, exitCode == 0 ? "completed" : "failed");
+                    }
+                }
+                return;
+            }
+
+            var cwdMarker = CurrentDirectoryMarkerRegex.Match(text.Trim());
+            if (stream == "stdout" && cwdMarker.Success)
+            {
+                var command = session.ActiveCommand;
+                if (command != null && string.Equals(command.CommandId, cwdMarker.Groups["id"].Value, StringComparison.Ordinal))
+                {
+                    var currentDirectory = cwdMarker.Groups["cwd"].Value.Trim();
+                    if (!string.IsNullOrWhiteSpace(currentDirectory))
+                    {
+                        session.CurrentDirectory = currentDirectory;
+                        command.CurrentDirectory = currentDirectory;
                     }
                 }
                 return;
@@ -384,6 +428,7 @@ namespace VsClineAgent.Services
                 Background = false,
                 IsHot = command.IsHot,
                 DurationMs = duration,
+                CurrentDirectory = command.CurrentDirectory,
                 StdOut = command.StdOutBuffer?.ToString() ?? string.Empty,
                 StdErr = command.StdErrBuffer?.ToString() ?? string.Empty,
                 StdOutTruncated = command.StdOutTruncated,
@@ -465,6 +510,7 @@ namespace VsClineAgent.Services
                 ProcessId = command.ProcessId,
                 Command = command.Command,
                 WorkingDirectory = command.WorkingDirectory,
+                CurrentDirectory = command.CurrentDirectory,
                 StartedAt = command.StartedAt,
                 CompletedAt = DateTimeOffset.UtcNow,
                 LastOutputAt = command.LastOutputAt,
@@ -484,15 +530,19 @@ namespace VsClineAgent.Services
             }
         }
 
-        private string BuildShellState()
+        private List<TerminalShellSession> GetLiveSessions()
         {
-            var sessions = _sessionsByCwd.Values.SelectMany(items =>
+            return _sessionsByCwd.Values.SelectMany(items =>
             {
                 lock (items)
                 {
                     return items.ToList();
                 }
             }).Where(session => !session.IsDisposed && !session.Process.HasExited).ToList();
+        }
+
+        private static string BuildShellState(IReadOnlyCollection<TerminalShellSession> sessions)
+        {
             if (sessions.Count == 0)
                 return "idle";
 
@@ -535,18 +585,30 @@ namespace VsClineAgent.Services
             }
         }
 
-        private static async Task<IVsOutputWindowPane?> GetOrCreatePaneAsync()
+        private async Task<IVsOutputWindowPane?> GetOrCreatePaneAsync()
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+            lock (_outputPaneLock)
+            {
+                if (_outputPane != null)
+                    return _outputPane;
+            }
+
+            var outputPaneGuid = OutputPaneGuid;
             var outputWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
             if (outputWindow == null)
                 return null;
 
-            var outputPaneGuid = OutputPaneGuid;
             outputWindow.CreatePane(ref outputPaneGuid, "VsCline Agent", 1, 1);
             outputWindow.GetPane(ref outputPaneGuid, out var pane);
             pane?.Activate();
+
+            lock (_outputPaneLock)
+            {
+                _outputPane = pane;
+            }
+
             return pane;
         }
     }
@@ -565,6 +627,7 @@ namespace VsClineAgent.Services
         public Process? Process { get; set; }
         public string Command { get; set; } = string.Empty;
         public string WorkingDirectory { get; set; } = string.Empty;
+        public string CurrentDirectory { get; set; } = string.Empty;
         public DateTimeOffset StartedAt { get; set; }
         public DateTimeOffset? LastOutputAt { get; set; }
         public string Status { get; set; } = string.Empty;
@@ -573,6 +636,8 @@ namespace VsClineAgent.Services
         public bool IsReusableShell { get; set; }
         public bool IsHot { get; set; }
         public bool Background { get; set; }
+        public bool Attachable => Background || string.Equals(Status, "running", StringComparison.OrdinalIgnoreCase);
+        public bool ProceedWhileRunningAvailable => Background || IsHot;
         public string Shell { get; set; } = string.Empty;
         internal StringBuilder? StdOutBuffer { get; set; }
         internal StringBuilder? StdErrBuffer { get; set; }
@@ -590,6 +655,7 @@ namespace VsClineAgent.Services
         public bool Background { get; set; }
         public bool IsHot { get; set; }
         public long DurationMs { get; set; }
+        public string CurrentDirectory { get; set; } = string.Empty;
         public string StdOut { get; set; } = string.Empty;
         public string StdErr { get; set; } = string.Empty;
         public bool StdOutTruncated { get; set; }
@@ -599,12 +665,17 @@ namespace VsClineAgent.Services
     internal sealed class TerminalStateInfo
     {
         public IReadOnlyList<RunningCommandInfo> ActiveCommands { get; set; } = Array.Empty<RunningCommandInfo>();
+        public IReadOnlyList<RunningCommandInfo> BackgroundCommands { get; set; } = Array.Empty<RunningCommandInfo>();
         public IReadOnlyList<CompletedCommandInfo> RecentCommands { get; set; } = Array.Empty<CompletedCommandInfo>();
         public IReadOnlyList<CommandOutputLine> RecentOutput { get; set; } = Array.Empty<CommandOutputLine>();
         public long OutputSequence { get; set; }
         public string Shell { get; set; } = string.Empty;
         public string ShellState { get; set; } = string.Empty;
         public string ReuseMode { get; set; } = string.Empty;
+        public string CurrentDirectory { get; set; } = string.Empty;
+        public bool UnretrievedOutputAvailable { get; set; }
+        public bool Attachable { get; set; }
+        public bool ProceedWhileRunningAvailable { get; set; }
     }
 
     internal sealed class CompletedCommandInfo
@@ -614,6 +685,7 @@ namespace VsClineAgent.Services
         public int ProcessId { get; set; }
         public string Command { get; set; } = string.Empty;
         public string WorkingDirectory { get; set; } = string.Empty;
+        public string CurrentDirectory { get; set; } = string.Empty;
         public DateTimeOffset StartedAt { get; set; }
         public DateTimeOffset CompletedAt { get; set; }
         public DateTimeOffset? LastOutputAt { get; set; }
@@ -642,6 +714,7 @@ namespace VsClineAgent.Services
     {
         public string TerminalId { get; set; } = string.Empty;
         public string WorkingDirectory { get; set; } = string.Empty;
+        public string CurrentDirectory { get; set; } = string.Empty;
         public Process Process { get; set; } = null!;
         public bool Busy { get; set; }
         public bool IsDisposed { get; set; }

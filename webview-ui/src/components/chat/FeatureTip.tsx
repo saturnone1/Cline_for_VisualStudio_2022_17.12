@@ -8,22 +8,22 @@ interface FeatureTipItem {
 
 const FEATURE_TIPS: FeatureTipItem[] = [
 	{
-		text: 'Enable "Double-Check Completion" in settings to have Cline verify its work before finishing a task.',
+		text: 'Enable "Double-Check Completion" in settings to have LIG VS verify its work before finishing a task.',
 	},
 	{
-		text: "Add a .clinerules file to your project root to give Cline project-specific instructions.",
+		text: "Add a .clinerules file to your project root to give LIG VS project-specific instructions.",
 	},
 	{
-		text: "Switch to Plan Mode to discuss and plan an approach before Cline takes action.",
+		text: "Switch to Plan Mode to discuss and plan an approach before LIG VS takes action.",
 	},
 	{
 		text: "Use @ in the chat input to add files, folders, or URLs as context for your task.",
 	},
 	{
-		text: "Set up MCP Servers to give Cline access to external tools and APIs.",
+		text: "Set up MCP Servers to give LIG VS access to external tools and APIs.",
 	},
 	{
-		text: "Cline creates checkpoints after changes — you can always restore to a previous state.",
+		text: "LIG VS creates checkpoints after changes — you can always restore to a previous state.",
 	},
 	{
 		text: "Use /compact to condense long conversations and free up context window space.",
@@ -32,13 +32,13 @@ const FEATURE_TIPS: FeatureTipItem[] = [
 		text: "Enable auto-approve for read-only tools like file reads to speed up exploration.",
 	},
 	{
-		text: "Use the quote button to select text from Cline's response and reference it in your reply.",
+		text: "Use the quote button to select text from LIG VS's response and reference it in your reply.",
 	},
 	{
-		text: "You can drag and drop images into the chat to share screenshots with Cline.",
+		text: "You can drag and drop images into the chat to share screenshots with LIG VS.",
 	},
 	{
-		text: "Cline can browse websites — ask it to test your local dev server in the browser.",
+		text: "LIG VS can browse websites — ask it to test your local dev server in the browser.",
 	},
 	{
 		text: "Use /reportbug to quickly file a GitHub issue with diagnostic context included.",
@@ -54,7 +54,7 @@ const FADE_DURATION_MS = 300
 
 /**
  * Shows rotating feature tips below the "Thinking..." indicator.
- * Appears after a brief delay and cycles through tips while Cline is thinking.
+ * Appears after a brief delay and cycles through tips while LIG VS is thinking.
  */
 export const FeatureTip = memo(() => {
 	const [isVisible, setIsVisible] = useState(false)

@@ -33,6 +33,19 @@ namespace VsClineAgent.Services
             catch { return null; }
         }
 
+        public async Task OpenSolutionAsync(string solutionPath)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            if (string.IsNullOrWhiteSpace(solutionPath))
+                throw new ArgumentException("Solution path is required.", nameof(solutionPath));
+
+            var dte = GetDte();
+            if (dte == null)
+                throw new InvalidOperationException("Visual Studio automation object is unavailable.");
+
+            dte.Solution.Open(solutionPath);
+        }
+
         public async Task<List<string>> GetOpenDocumentsAsync()
         {
             var result = new List<string>();

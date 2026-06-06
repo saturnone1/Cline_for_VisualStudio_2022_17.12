@@ -28,6 +28,8 @@ export class ClineSdkRuntime {
 	private mcpManager: McpManagerInstance | null = null
 	private mcpStarting: Promise<McpManagerInstance> | null = null
 	private mcpSettingsPath: string | null = null
+	private readonly mcpOperationStates = new Map<string, "connecting" | "restarting" | "deleting" | "authenticating" | "toggling">()
+	private readonly mcpOperationErrors = new Map<string, string>()
 	private activeSessionId: string | null = null
 	private lastError: string | undefined
 
@@ -37,6 +39,7 @@ export class ClineSdkRuntime {
 		private readonly onCoreEvent?: (event: CoreSessionEvent) => void,
 		private readonly onToolApproval?: (request: unknown) => Promise<ToolApprovalResult>,
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
+		private readonly isAutomationEnabled?: () => boolean,
 	) {
 		this.host = VisualStudioHostProvider.create(connection)
 	}
@@ -308,10 +311,19 @@ export class ClineSdkRuntime {
 			const timeout = numberValue(config.timeout) || numberValue(asRecord(registration.metadata).timeout)
 			const disabled = registration.disabled === true || config.disabled === true
 			let tools: Array<Record<string, unknown>> = []
-			let error = snapshot?.lastError || ""
+			const lifecycleState = this.mcpOperationStates.get(registration.name)
+			const lifecycleError = this.mcpOperationErrors.get(registration.name)
+			let error = lifecycleError || snapshot?.lastError || ""
 			let status = disabled ? "disconnected" : snapshot?.status || "disconnected"
+			let resources: Array<Record<string, unknown>> = []
+			let resourceTemplates: Array<Record<string, unknown>> = []
+			let prompts: Array<Record<string, unknown>> = []
 
-			if (!disabled) {
+			if (lifecycleState && lifecycleState !== "deleting") {
+				status = "connecting"
+			}
+
+			if (!disabled && !lifecycleState) {
 				try {
 					const listedTools = await manager.listTools(registration.name)
 					tools = listedTools.map((tool) => ({
@@ -326,6 +338,12 @@ export class ClineSdkRuntime {
 					status = "disconnected"
 				}
 			}
+			if (!disabled && status === "connected") {
+				const serverMetadata = asRecord(snapshot?.metadata)
+				resources = await this.listMcpResourcesBestEffort(manager, registration.name, snapshot, serverMetadata)
+				resourceTemplates = await this.listMcpResourceTemplatesBestEffort(manager, registration.name, snapshot, serverMetadata)
+				prompts = await this.listMcpPromptsBestEffort(manager, registration.name, snapshot, serverMetadata)
+			}
 
 			const oauth = oauthStatuses.get(registration.name)
 			servers.push({
@@ -334,13 +352,20 @@ export class ClineSdkRuntime {
 				status: toProtoMcpStatus(status),
 				error,
 				tools,
-				resources: [],
-				resourceTemplates: [],
-				prompts: [],
+				resources,
+				resourceTemplates,
+				prompts,
 				disabled,
 				timeout,
 				oauthRequired: oauth?.oauthSupported === true && oauth.oauthConfigured !== true,
-				oauthAuthStatus: oauth?.oauthConfigured ? "authenticated" : oauth?.oauthSupported ? "unauthenticated" : undefined,
+				oauthAuthStatus:
+					lifecycleState === "authenticating"
+						? "pending"
+						: oauth?.oauthConfigured
+							? "authenticated"
+							: oauth?.oauthSupported
+								? "unauthenticated"
+								: undefined,
 			})
 		}
 
@@ -363,27 +388,32 @@ export class ClineSdkRuntime {
 		const filePath = this.resolveMcpSettingsPath(sdk)
 		this.ensureMcpSettingsFile(filePath)
 
-		await sdk.authorizeMcpServerOAuth({
-			serverName: name,
-			filePath,
-			clientName: "VsClineAgent",
-			clientVersion: this.readSdkVersion() || "0.0.0",
-			callbackHost: "127.0.0.1",
-			timeoutMs: readPositiveIntEnv("VSCLINE_MCP_OAUTH_TIMEOUT_MS", 300000),
-			openUrl: async (url: string) => {
-				this.logSdkMessage("info", "Opening MCP OAuth URL", { serverName: name })
-				await this.host.envClient.openExternal({ value: url })
-			},
-			onServerListening: (info: unknown) => {
-				this.logSdkMessage("info", "MCP OAuth callback server listening", info)
-			},
-			onServerClose: (info: unknown) => {
-				this.logSdkMessage("info", "MCP OAuth callback server closed", info)
-			},
-		})
+		return this.withMcpOperation(name, "authenticating", async () => {
+			if (typeof sdk.authorizeMcpServerOAuth !== "function") {
+				throw new Error("MCP OAuth is unsupported by the bundled Cline SDK.")
+			}
+			await sdk.authorizeMcpServerOAuth({
+				serverName: name,
+				filePath,
+				clientName: "VsClineAgent",
+				clientVersion: this.readSdkVersion() || "0.0.0",
+				callbackHost: "127.0.0.1",
+				timeoutMs: readPositiveIntEnv("VSCLINE_MCP_OAUTH_TIMEOUT_MS", 300000),
+				openUrl: async (url: string) => {
+					this.logSdkMessage("info", "Opening MCP OAuth URL", { serverName: name })
+					await this.host.envClient.openExternal({ value: url })
+				},
+				onServerListening: (info: unknown) => {
+					this.logSdkMessage("info", "MCP OAuth callback server listening", info)
+				},
+				onServerClose: (info: unknown) => {
+					this.logSdkMessage("info", "MCP OAuth callback server closed", info)
+				},
+			})
 
-		await this.reloadMcpServers()
-		return this.getMcpServersResponse()
+			await this.reloadMcpServers()
+			return this.getMcpServersResponse()
+		})
 	}
 
 	async addRemoteMcpServer(params: unknown) {
@@ -410,8 +440,10 @@ export class ClineSdkRuntime {
 			timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
 		} as any
 		await this.saveMcpSettings(sdk, settings)
-		await this.reloadMcpServers()
-		return this.getMcpServersResponse()
+		return this.withMcpOperation(serverName, "connecting", async () => {
+			await this.reloadMcpServers()
+			return this.getMcpServersResponse()
+		})
 	}
 
 	async setMcpServerDisabled(params: unknown) {
@@ -422,11 +454,13 @@ export class ClineSdkRuntime {
 		}
 		const disabled = request.disabled === true
 		const sdk = await importClineSdk()
-		sdk.setMcpServerDisabled({ filePath: this.resolveMcpSettingsPath(sdk), name, disabled })
-		const manager = await this.ensureMcpManager()
-		await manager.setServerDisabled(name, disabled).catch(() => undefined)
-		await this.reloadMcpServers()
-		return this.getMcpServersResponse()
+		return this.withMcpOperation(name, "toggling", async () => {
+			sdk.setMcpServerDisabled({ filePath: this.resolveMcpSettingsPath(sdk), name, disabled })
+			const manager = await this.ensureMcpManager()
+			await manager.setServerDisabled(name, disabled).catch(() => undefined)
+			await this.reloadMcpServers()
+			return this.getMcpServersResponse()
+		})
 	}
 
 	async updateMcpTimeout(params: unknown) {
@@ -458,14 +492,16 @@ export class ClineSdkRuntime {
 		if (!name) {
 			throw new Error("MCP server name is required.")
 		}
-		const sdk = await importClineSdk()
-		const settings = this.loadMcpSettings(sdk)
-		delete settings.mcpServers[name]
-		await this.saveMcpSettings(sdk, settings)
-		const manager = await this.ensureMcpManager()
-		await manager.unregisterServer(name).catch(() => undefined)
-		await this.reloadMcpServers()
-		return this.getMcpServersResponse()
+		return this.withMcpOperation(name, "deleting", async () => {
+			const sdk = await importClineSdk()
+			const settings = this.loadMcpSettings(sdk)
+			delete settings.mcpServers[name]
+			await this.saveMcpSettings(sdk, settings)
+			const manager = await this.ensureMcpManager()
+			await manager.unregisterServer(name).catch(() => undefined)
+			await this.reloadMcpServers()
+			return this.getMcpServersResponse()
+		})
 	}
 
 	async restartMcpServer(params: unknown) {
@@ -474,12 +510,14 @@ export class ClineSdkRuntime {
 		if (!name) {
 			throw new Error("MCP server name is required.")
 		}
-		const manager = await this.ensureMcpManager()
-		await this.reloadMcpServers()
-		await manager.disconnectServer(name).catch(() => undefined)
-		await manager.connectServer(name).catch(() => undefined)
-		await manager.refreshTools(name).catch(() => undefined)
-		return this.getMcpServersResponse()
+		return this.withMcpOperation(name, "restarting", async () => {
+			const manager = await this.ensureMcpManager()
+			await this.reloadMcpServers()
+			await manager.disconnectServer(name).catch(() => undefined)
+			await manager.connectServer(name).catch(() => undefined)
+			await manager.refreshTools(name).catch(() => undefined)
+			return this.getMcpServersResponse()
+		})
 	}
 
 	async toggleMcpToolAutoApprove(params: unknown) {
@@ -515,6 +553,64 @@ export class ClineSdkRuntime {
 		} as any
 		await this.saveMcpSettings(sdk, settings)
 		return this.getMcpServersResponse()
+	}
+
+	private async withMcpOperation<T>(
+		serverName: string,
+		operation: "connecting" | "restarting" | "deleting" | "authenticating" | "toggling",
+		action: () => Promise<T>,
+	) {
+		this.mcpOperationStates.set(serverName, operation)
+		this.mcpOperationErrors.delete(serverName)
+		try {
+			const result = await action()
+			this.mcpOperationErrors.delete(serverName)
+			return result
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			this.mcpOperationErrors.set(serverName, message)
+			this.logSdkMessage("warn", `MCP ${operation} failed for ${serverName}`, { error: message })
+			throw error
+		} finally {
+			this.mcpOperationStates.delete(serverName)
+		}
+	}
+
+	private async listMcpResourcesBestEffort(
+		manager: McpManagerInstance,
+		serverName: string,
+		snapshot: unknown,
+		metadata: Record<string, unknown>,
+	) {
+		const listed = await callMcpListMethod(manager, serverName, ["listResources", "getResources", "refreshResources", "listServerResources"])
+		return normalizeMcpResources(listed || getArrayProperty(snapshot, "resources") || getArrayProperty(metadata, "resources"))
+	}
+
+	private async listMcpResourceTemplatesBestEffort(
+		manager: McpManagerInstance,
+		serverName: string,
+		snapshot: unknown,
+		metadata: Record<string, unknown>,
+	) {
+		const listed = await callMcpListMethod(manager, serverName, [
+			"listResourceTemplates",
+			"getResourceTemplates",
+			"refreshResourceTemplates",
+			"listServerResourceTemplates",
+		])
+		return normalizeMcpResourceTemplates(
+			listed || getArrayProperty(snapshot, "resourceTemplates") || getArrayProperty(metadata, "resourceTemplates"),
+		)
+	}
+
+	private async listMcpPromptsBestEffort(
+		manager: McpManagerInstance,
+		serverName: string,
+		snapshot: unknown,
+		metadata: Record<string, unknown>,
+	) {
+		const listed = await callMcpListMethod(manager, serverName, ["listPrompts", "getPrompts", "refreshPrompts", "listServerPrompts"])
+		return normalizeMcpPrompts(listed || getArrayProperty(snapshot, "prompts") || getArrayProperty(metadata, "prompts"))
 	}
 
 	async dispose() {
@@ -558,12 +654,24 @@ export class ClineSdkRuntime {
 	private async createCore() {
 		const sdk = await importClineSdk()
 		await this.ensureMcpManager()
+		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({}).catch(() => [] as string[])
+		const workspaceRoot = workspaceRoots[0] || process.cwd()
+		const automationEnabled = this.isAutomationEnabled?.() === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"
+		const automation = automationEnabled
+			? {
+					cronScope: "workspace" as const,
+					workspaceRoot,
+					cronSpecsDir: path.join(workspaceRoot, ".cline", "cron"),
+					autoStart: true,
+				}
+			: undefined
 		const defaultExecutors = sdk.createDefaultExecutors({
 			applyPatch: { restrictToCwd: true },
 		})
 		const core = await sdk.ClineCore.create({
 			clientName: "VsClineAgent",
 			backendMode: "local",
+			...(automation ? { automation } : {}),
 			capabilities: {
 				requestToolApproval: async (request: unknown) => {
 					if (this.onToolApproval) {
@@ -626,6 +734,14 @@ export class ClineSdkRuntime {
 						} finally {
 							abortSignal?.removeEventListener("abort", abortHandler)
 						}
+					},
+					webFetch: async (urlOrRequest: string | { url?: string; prompt?: string }, promptOrContext?: string | AgentToolContext, context?: AgentToolContext) => {
+						const url = typeof urlOrRequest === "string" ? urlOrRequest : stringValue(urlOrRequest.url) || ""
+						const prompt = typeof urlOrRequest === "string"
+							? typeof promptOrContext === "string" ? promptOrContext : ""
+							: stringValue(urlOrRequest.prompt) || ""
+						const toolContext = (typeof promptOrContext === "object" ? promptOrContext : context) as AgentToolContext | undefined
+						return fetchWebContentForSdk(url, prompt, toolContext)
 					},
 					editor: async (
 						input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null },
@@ -939,6 +1055,85 @@ function truncateText(value: string, maxChars: number) {
 	return `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`
 }
 
+async function fetchWebContentForSdk(url: string, prompt: string, context?: AgentToolContext) {
+	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
+		throw new Error("fetch_web_content is disabled for air-gap mode. Set VSCLINE_ENABLE_WEB_FETCH=1 to enable explicit web fetching.")
+	}
+	const normalizedUrl = normalizeHttpUrl(url)
+	if (!normalizedUrl) {
+		throw new Error(`Invalid URL for fetch_web_content: ${url}`)
+	}
+
+	const timeoutMs = readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 15000)
+	const maxChars = readPositiveIntEnv("VSCLINE_WEB_FETCH_RESULT_CHARS", 20000)
+	const controller = new AbortController()
+	const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal } | undefined)?.abortSignal
+	const abortHandler = () => controller.abort()
+	abortSignal?.addEventListener("abort", abortHandler, { once: true })
+	const timer = setTimeout(() => controller.abort(), timeoutMs)
+	try {
+		const response = await fetch(normalizedUrl, {
+			signal: controller.signal,
+			headers: {
+				Accept: "text/html,text/plain,application/json,application/xml;q=0.8,*/*;q=0.4",
+				"User-Agent": "LIG-VS/1.0 VisualStudio2022",
+			},
+		})
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status} ${response.statusText}`)
+		}
+
+		const contentType = response.headers.get("content-type") || ""
+		const raw = await response.text()
+		const text = contentType.includes("html") ? htmlToReadableText(raw) : raw
+		const header = [
+			`URL: ${normalizedUrl}`,
+			contentType ? `Content-Type: ${contentType}` : "",
+			prompt ? `Prompt: ${prompt}` : "",
+		].filter(Boolean).join("\n")
+		return truncateText(`${header}\n\n${text.trim()}`, maxChars)
+	} catch (error) {
+		if (error instanceof Error && error.name === "AbortError") {
+			throw new Error(`Web fetch timed out after ${Math.round(timeoutMs / 1000)} seconds.`)
+		}
+		throw error
+	} finally {
+		clearTimeout(timer)
+		abortSignal?.removeEventListener("abort", abortHandler)
+	}
+}
+
+function normalizeHttpUrl(value: string) {
+	const raw = String(value || "").trim()
+	if (!raw) {
+		return ""
+	}
+	try {
+		const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+		return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : ""
+	} catch {
+		return ""
+	}
+}
+
+function htmlToReadableText(html: string) {
+	return html
+		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+		.replace(/<\/(p|div|section|article|header|footer|li|tr|h[1-6])>/gi, "\n")
+		.replace(/<br\s*\/?>/gi, "\n")
+		.replace(/<[^>]+>/g, " ")
+		.replace(/&nbsp;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&lt;/gi, "<")
+		.replace(/&gt;/gi, ">")
+		.replace(/&quot;/gi, '"')
+		.replace(/&#39;/gi, "'")
+		.replace(/[ \t]+/g, " ")
+		.replace(/\n\s+/g, "\n")
+		.replace(/\n{3,}/g, "\n\n")
+}
+
 function readPositiveIntEnv(name: string, fallback: number) {
 	const value = Number.parseInt(process.env[name] || "", 10)
 	return Number.isFinite(value) && value > 0 ? value : fallback
@@ -951,6 +1146,91 @@ function stringArrayValue(value: unknown) {
 function isToolAutoApproved(serverConfig: Record<string, unknown>, toolName: string) {
 	const metadata = asRecord(serverConfig.metadata)
 	return stringArrayValue(metadata.autoApproveTools).includes(toolName)
+}
+
+async function callMcpListMethod(manager: McpManagerInstance, serverName: string, methodNames: string[]) {
+	const source = manager as unknown as Record<string, unknown>
+	for (const methodName of methodNames) {
+		const method = source[methodName]
+		if (typeof method !== "function") {
+			continue
+		}
+		try {
+			const result = await method.call(manager, serverName)
+			return Array.isArray(result) ? result : undefined
+		} catch {
+			return undefined
+		}
+	}
+	return undefined
+}
+
+function getArrayProperty(source: unknown, propertyName: string) {
+	const value = asRecord(source)[propertyName]
+	return Array.isArray(value) ? value : undefined
+}
+
+function normalizeMcpResources(values: unknown[] | undefined): Array<Record<string, unknown>> {
+	return (values || []).flatMap((value) => {
+		const record = asRecord(value)
+		const uri = stringValue(record.uri)
+		if (!uri) {
+			return []
+		}
+		return [{
+			uri,
+			name: stringValue(record.name) || uri,
+			mimeType: stringValue(record.mimeType),
+			description: stringValue(record.description),
+		}]
+	})
+}
+
+function normalizeMcpResourceTemplates(values: unknown[] | undefined): Array<Record<string, unknown>> {
+	return (values || []).flatMap((value) => {
+		const record = asRecord(value)
+		const uriTemplate = stringValue(record.uriTemplate)
+		if (!uriTemplate) {
+			return []
+		}
+		return [{
+			uriTemplate,
+			name: stringValue(record.name) || uriTemplate,
+			description: stringValue(record.description),
+			mimeType: stringValue(record.mimeType),
+		}]
+	})
+}
+
+function normalizeMcpPrompts(values: unknown[] | undefined): Array<Record<string, unknown>> {
+	return (values || []).flatMap((value) => {
+		const record = asRecord(value)
+		const name = stringValue(record.name)
+		if (!name) {
+			return []
+		}
+		return [{
+			name,
+			title: stringValue(record.title),
+			description: stringValue(record.description),
+			arguments: normalizeMcpPromptArguments(getArrayProperty(record, "arguments")),
+		}]
+	})
+}
+
+function normalizeMcpPromptArguments(values: unknown[] | undefined): Array<Record<string, unknown>> {
+	return (values || []).flatMap((value) => {
+		const record = asRecord(value)
+		const name = stringValue(record.name)
+		if (!name) {
+			return []
+		}
+		return [{
+			name,
+			description: stringValue(record.description),
+			required: record.required === true,
+		}]
+	})
 }
 
 function toDisplayMcpConfig(registration: Record<string, unknown>, serverConfig: Record<string, unknown>) {

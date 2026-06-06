@@ -596,7 +596,7 @@ const ClineModelPicker: React.FC<ClineModelPickerProps> = ({ isPopup, currentMod
 						marginTop: 0,
 						color: "var(--vscode-descriptionForeground)",
 					}}>
-					The extension automatically fetches the latest Cline model list. If you're unsure which model to choose, Cline
+					The extension automatically fetches the latest LIG VS model list. If you're unsure which model to choose, LIG VS
 					works best with <strong>anthropic/claude-sonnet-4.5</strong>.
 				</p>
 			)}

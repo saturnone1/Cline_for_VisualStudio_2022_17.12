@@ -1,4 +1,6 @@
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import ligCiColor01 from "@/assets/lig-ci-color01.jpg"
+import ClineLogoVariable from "@/assets/ClineLogoVariable"
 import Section from "../Section"
 
 interface AboutSectionProps {
@@ -11,9 +13,13 @@ const AboutSection = ({ version, renderSectionHeader }: AboutSectionProps) => {
 			{renderSectionHeader("about")}
 			<Section>
 				<div className="flex px-4 flex-col gap-2">
-					<h2 className="text-lg font-semibold">Cline v{version}</h2>
+					<div className="flex flex-col items-start gap-2">
+						<img alt="" className="h-12 w-full max-w-[220px] object-contain" src={ligCiColor01} />
+						<ClineLogoVariable className="h-10 w-48 object-contain" />
+					</div>
+					<h2 className="text-lg font-semibold">LIG VS v{version}</h2>
 					<p>
-						An AI assistant that can use your CLI and Editor. Cline can handle complex software development tasks
+						An AI assistant that can use your CLI and Editor. LIG VS can handle complex software development tasks
 						step-by-step with tools that let him create & edit files, explore large projects, use the browser, and
 						execute terminal commands (after you grant permission).
 					</p>

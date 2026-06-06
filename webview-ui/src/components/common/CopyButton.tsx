@@ -1,7 +1,9 @@
 import { CheckCheckIcon, CopyIcon } from "lucide-react"
 import { forwardRef, useCallback, useState } from "react"
+import { StringRequest } from "@shared/proto/cline/common"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { FileServiceClient } from "@/services/grpc-client"
 
 interface CopyButtonProps {
 	textToCopy?: string
@@ -41,8 +43,11 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ textToCopy, onCopy, clas
 			return
 		}
 
-		navigator.clipboard
-			.writeText(text)
+		const copyPromise = navigator.clipboard?.writeText
+			? navigator.clipboard.writeText(text).catch(() => FileServiceClient.copyToClipboard(StringRequest.create({ value: text })))
+			: FileServiceClient.copyToClipboard(StringRequest.create({ value: text }))
+
+		copyPromise
 			.then(() => {
 				setCopied(true)
 				setTimeout(() => setCopied(false), COPIED_TIMEOUT)

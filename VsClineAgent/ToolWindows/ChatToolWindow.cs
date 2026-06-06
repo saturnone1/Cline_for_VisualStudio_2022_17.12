@@ -9,7 +9,7 @@ namespace VsClineAgent.ToolWindows
     {
         public ChatToolWindow() : base(null)
         {
-            Caption = "AI Agent";
+            Caption = "LIG VS";
             Content = new ChatToolWindowControl();
         }
 

@@ -30,6 +30,7 @@ const ChatLayoutContainer = styled.div.withConfig({
 	height: 100%;
 	min-height: 100vh;
 	position: relative;
+	background: var(--lig-bg);
 `
 
 const MainContent = styled.div`
@@ -37,4 +38,5 @@ const MainContent = styled.div`
 	flex-direction: column;
 	overflow: hidden;
 	grid-row: 1;
+	background: var(--lig-bg);
 `

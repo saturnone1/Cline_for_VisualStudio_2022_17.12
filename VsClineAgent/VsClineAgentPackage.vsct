@@ -16,9 +16,9 @@
       <Button guid="guidVsClineAgentCmdSet" id="cmdOpenChatWindow" priority="0x0100" type="Button">
         <Parent guid="guidVsClineAgentCmdSet" id="grpAIAgentMenu" />
         <Strings>
-          <ButtonText>AI Agent</ButtonText>
-          <CommandName>View.AIAgent</CommandName>
-          <ToolTipText>Open AI Agent chat window</ToolTipText>
+          <ButtonText>LIG VS</ButtonText>
+          <CommandName>View.LIGVS</CommandName>
+          <ToolTipText>Open LIG VS chat window</ToolTipText>
         </Strings>
       </Button>
     </Buttons>

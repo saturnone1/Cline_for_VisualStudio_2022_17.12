@@ -45,7 +45,7 @@ export const RequestStartRow: React.FC<RequestStartRowProps> = ({
 	const apiRequestSummary = useMemo(() => getApiRequestSummary(message.text), [message.text])
 
 	return (
-		<div>
+		<div className={apiRequestSummary && !hasError ? "lig-progress-row" : undefined}>
 			{apiRequestSummary && !hasError && (
 				<ThinkingRow
 					isExpanded={isExpanded}

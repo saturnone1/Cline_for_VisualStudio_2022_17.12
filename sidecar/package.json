@@ -12,6 +12,6 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "@cline/sdk": "^0.0.42"
+    "@cline/sdk": "^0.0.43"
   }
 }

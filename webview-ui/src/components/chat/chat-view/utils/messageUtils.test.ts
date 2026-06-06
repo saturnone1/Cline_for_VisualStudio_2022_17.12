@@ -1,6 +1,6 @@
 import type { ClineMessage } from "@shared/ExtensionMessage"
 import { describe, expect, it } from "vitest"
-import { groupLowStakesTools, isToolGroup } from "./messageUtils"
+import { filterVisibleMessages, groupLowStakesTools, isToolGroup } from "./messageUtils"
 
 const createTextMessage = (ts: number, text: string): ClineMessage => ({
 	type: "say",
@@ -21,6 +21,33 @@ const createReasoningMessage = (ts: number, text: string): ClineMessage => ({
 	say: "reasoning",
 	text,
 	ts,
+})
+
+const createApiRequestMessage = (ts: number, request: string): ClineMessage => ({
+	type: "say",
+	say: "api_req_started",
+	text: JSON.stringify({ request, tokensIn: 0, tokensOut: 0, cost: 0 }),
+	ts,
+})
+
+describe("filterVisibleMessages", () => {
+	it("keeps folded SDK progress summaries that contain user-visible tool activity", () => {
+		const visible = filterVisibleMessages([
+			createApiRequestMessage(1, "LIG VS read 2 files, ran 1 command:\nFiles:\n- Program.cs\nCommands:\n- dotnet build"),
+		])
+
+		expect(visible).toHaveLength(1)
+		expect(visible[0]).toMatchObject({ type: "say", say: "api_req_started" })
+	})
+
+	it("hides internal SDK iteration and empty model-progress placeholders", () => {
+		const visible = filterVisibleMessages([
+			createApiRequestMessage(1, "Cline SDK iteration 4 started."),
+			createApiRequestMessage(2, "모델 진행 기록"),
+		])
+
+		expect(visible).toHaveLength(0)
+	})
 })
 
 describe("groupLowStakesTools", () => {
@@ -72,11 +99,11 @@ describe("groupLowStakesTools", () => {
 		expect(grouped[1]).toMatchObject({ type: "say", say: "tool" })
 	})
 
-	it("keeps reasoning visible when low-stakes tool group starts immediately after", () => {
+	it("groups reasoning with a low-stakes tool group that starts immediately after", () => {
 		const grouped = groupLowStakesTools([createReasoningMessage(1, "Planning next read"), createToolMessage(2, "readFile")])
 
-		expect(grouped).toHaveLength(2)
-		expect(grouped[0]).toMatchObject({ type: "say", say: "reasoning", text: "Planning next read" })
-		expect(isToolGroup(grouped[1])).toBe(true)
+		expect(grouped).toHaveLength(1)
+		expect(isToolGroup(grouped[0])).toBe(true)
+		expect(grouped[0]).toHaveLength(2)
 	})
 })

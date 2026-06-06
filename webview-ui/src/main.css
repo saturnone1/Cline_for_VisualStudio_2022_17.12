@@ -1,3 +1,35 @@
+@font-face {
+	font-family: "Noto Sans KR";
+	font-style: normal;
+	font-weight: 300;
+	font-display: swap;
+	src: url("../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-300-normal.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "Noto Sans KR";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "Noto Sans KR";
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url("../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "Noto Sans KR";
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url("../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-700-normal.woff2") format("woff2");
+}
+
 textarea:focus {
 	outline: 1.5px solid var(--vscode-focusBorder, #007fd4);
 }
@@ -21,18 +53,233 @@ html {
 	width: 100%;
 }
 
+:root {
+	--lig-font-family:
+		"Noto Sans KR", var(--vscode-font-family), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, sans-serif;
+}
+
 body {
 	margin: 0;
 	padding: 0;
 	line-height: 1.25;
 	height: 100%;
 	width: 100%;
-	background-color: var(--vscode-sideBar-background);
+	background: var(--lig-bg);
+	color: var(--vscode-foreground);
+	font-family: var(--lig-font-family);
 }
 
 #root {
 	height: 100%;
 	width: 100%;
+}
+
+:root {
+	--lig-bg: color-mix(in srgb, var(--vscode-editor-background, #1f1f1f) 88%, #07120f);
+	--lig-panel: color-mix(in srgb, var(--vscode-sideBar-background, #252526) 82%, #0d1714);
+	--lig-panel-raised: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 76%, #101b17);
+	--lig-panel-soft: color-mix(in srgb, var(--vscode-toolbar-hoverBackground, #2d2d2d) 58%, transparent);
+	--lig-border: color-mix(in srgb, var(--vscode-panel-border, #3f3f46) 62%, transparent);
+	--lig-border-strong: color-mix(in srgb, var(--vscode-focusBorder, #2f81f7) 55%, var(--lig-border));
+	--lig-accent: #54d78b;
+	--lig-accent-2: #67b7ff;
+	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 16%, transparent);
+	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, transparent);
+	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
+	--lig-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+}
+
+button,
+input,
+textarea,
+select,
+vscode-button,
+vscode-dropdown,
+vscode-text-field,
+vscode-text-area,
+vscode-checkbox,
+vscode-radio,
+vscode-tag {
+	font-family: var(--lig-font-family);
+}
+
+.lig-app-shell {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--lig-panel) 45%, transparent) 0%, transparent 180px),
+		var(--lig-bg);
+	color: var(--vscode-foreground);
+}
+
+.lig-messages-area {
+	background: var(--lig-bg);
+}
+
+.lig-transcript {
+	padding: 0 14px 10px 14px;
+	scrollbar-color: color-mix(in srgb, var(--vscode-scrollbarSlider-background, #797979) 70%, transparent) transparent;
+	user-select: text;
+}
+
+.lig-message-frame {
+	margin: 7px 0;
+	user-select: text;
+}
+
+.lig-assistant-message {
+	max-width: 980px;
+	padding: 2px 4px;
+	color: color-mix(in srgb, var(--vscode-foreground) 96%, white);
+	user-select: text;
+}
+
+.lig-message-frame pre,
+.lig-message-frame code,
+.lig-message-frame p,
+.lig-message-frame li,
+.lig-message-frame table {
+	user-select: text;
+}
+
+.lig-assistant-message .inline-markdown-block {
+	line-height: 1.48;
+}
+
+.lig-assistant-message .inline-markdown-block p {
+	margin-block-start: 0.55em;
+	margin-block-end: 0.55em;
+}
+
+.lig-assistant-message .inline-markdown-block table {
+	border-radius: 5px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--lig-panel) 76%, transparent);
+}
+
+.lig-assistant-message .inline-markdown-block th {
+	background: color-mix(in srgb, var(--lig-accent-muted) 70%, var(--lig-panel));
+	color: color-mix(in srgb, var(--vscode-foreground) 96%, white);
+}
+
+.lig-assistant-message .inline-markdown-block tr:nth-child(even) {
+	background: color-mix(in srgb, var(--lig-panel-raised) 52%, transparent);
+}
+
+.lig-assistant-message .inline-markdown-block code:not(pre > code) {
+	border-color: color-mix(in srgb, var(--lig-accent) 24%, var(--lig-border));
+	background: color-mix(in srgb, var(--lig-panel-raised) 78%, transparent);
+	color: color-mix(in srgb, var(--vscode-editor-foreground, #d4d4d4) 92%, #ffd479);
+}
+
+.lig-tool-group,
+.lig-progress-row,
+.lig-reasoning-row {
+	max-width: 980px;
+	border: 1px solid var(--lig-border);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--lig-panel) 82%, transparent);
+	box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.lig-tool-group {
+	padding: 8px 10px;
+	margin: 8px 0;
+	color: var(--lig-text-muted);
+}
+
+.lig-progress-row,
+.lig-reasoning-row {
+	padding: 7px 10px;
+	margin: 8px 0;
+}
+
+.lig-thinking-row button {
+	border-radius: 4px;
+}
+
+.lig-thinking-row button:hover {
+	background: color-mix(in srgb, var(--lig-panel-soft) 70%, transparent);
+}
+
+.lig-thinking-row [class*="text-description"] {
+	color: var(--lig-text-muted);
+}
+
+.lig-task-header {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--lig-panel-raised) 95%, transparent), var(--lig-panel));
+	border: 1px solid var(--lig-border) !important;
+	border-radius: 6px !important;
+	box-shadow: var(--lig-shadow);
+}
+
+.lig-task-header:hover {
+	border-color: var(--lig-border-strong) !important;
+}
+
+.lig-auto-approve {
+	border: 1px solid var(--lig-border);
+	border-bottom: 0;
+	border-radius: 6px 6px 0 0;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--lig-panel-raised) 92%, transparent), var(--lig-panel));
+	box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.lig-action-buttons {
+	padding: 0 14px 8px 14px;
+}
+
+.lig-action-buttons vscode-button::part(control) {
+	border-radius: 4px;
+}
+
+.lig-input-section {
+	padding: 8px 14px 10px;
+	background: var(--lig-panel);
+	border-top: 1px solid var(--lig-border);
+}
+
+.lig-input-shell {
+	border: 1px solid var(--lig-border);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--vscode-input-background, #1e1e1e) 84%, #0f1815);
+	transition:
+		border-color 120ms ease,
+		background 120ms ease;
+}
+
+.lig-input-shell:focus-within {
+	border-color: var(--lig-border-strong);
+	background: color-mix(in srgb, var(--vscode-input-background, #1e1e1e) 90%, #0f1815);
+}
+
+.lig-input-toolbar {
+	padding: 0 2px;
+}
+
+.lig-input-send {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 4px;
+	color: var(--lig-accent-2);
+	background: color-mix(in srgb, var(--lig-accent-2) 9%, transparent);
+	transition:
+		color 120ms ease,
+		background 120ms ease,
+		transform 120ms ease;
+}
+
+.lig-input-send:not(.disabled):hover {
+	color: white;
+	background: color-mix(in srgb, var(--lig-accent-2) 24%, transparent);
+	transform: translateY(-1px);
+}
+
+.lig-input-send.disabled {
+	color: var(--vscode-disabledForeground, #777);
+	background: transparent;
 }
 
 body.scrollable,
@@ -164,7 +411,7 @@ vscode-dropdown::part(listbox) {
 .mention-context-highlight,
 .mention-context-highlight-with-shadow,
 .slash-command-match-textarea-highlight {
-	font-family: var(--vscode-font-family);
+	font-family: var(--lig-font-family);
 	font-size: var(--vscode-editor-font-size);
 	line-height: var(--vscode-editor-line-height);
 }

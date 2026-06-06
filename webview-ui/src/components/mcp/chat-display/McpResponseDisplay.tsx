@@ -27,7 +27,7 @@ const ResponseHeader = styled.div`
 	user-select: none;
 	border-bottom: 1px dashed var(--vscode-editorGroup-border);
 	margin-bottom: 8px;
-	font-family: var(--vscode-font-family);
+	font-family: var(--lig-font-family);
 	font-size: var(--vscode-font-size);
 
 	.header-title {

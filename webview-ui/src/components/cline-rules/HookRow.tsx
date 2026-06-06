@@ -10,7 +10,6 @@ interface HookRowProps {
 	enabled: boolean
 	absolutePath: string
 	isGlobal: boolean
-	isWindows: boolean
 	hooksRuntimeUnsupported?: boolean
 	workspaceName?: string
 	onToggle: (hookName: string, newEnabled: boolean) => void
@@ -22,15 +21,13 @@ const HookRow: React.FC<HookRowProps> = ({
 	enabled,
 	absolutePath,
 	isGlobal,
-	isWindows,
 	hooksRuntimeUnsupported = false,
 	workspaceName,
 	onToggle,
 	onDelete,
 }) => {
-	const disableHookMutations = isWindows || hooksRuntimeUnsupported
-	const disabledReason =
-		"Hooks are not executed in the Visual Studio port yet, so create, toggle, and delete actions are disabled."
+	const disableHookMutations = hooksRuntimeUnsupported
+	const disabledReason = "Hook file mutations are disabled for this Visual Studio session."
 
 	const handleEditClick = () => {
 		FileServiceClient.openFile(StringRequest.create({ value: absolutePath })).catch((err) =>

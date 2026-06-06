@@ -154,14 +154,18 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					}
 
 					if (textToCopy !== null) {
-						try {
-							FileServiceClient.copyToClipboard(StringRequest.create({ value: textToCopy })).catch((err) => {
-								console.error("Error copying to clipboard:", err)
-							})
+						let handledByClipboardData = false
+						if (e.clipboardData) {
+							e.clipboardData.setData("text/plain", textToCopy)
+							handledByClipboardData = true
 							e.preventDefault()
-						} catch (error) {
-							console.error("Error copying to clipboard:", error)
 						}
+						FileServiceClient.copyToClipboard(StringRequest.create({ value: textToCopy })).catch((err) => {
+							console.error("Error copying to clipboard:", err)
+							if (!handledByClipboardData) {
+								console.warn("Copy fallback failed and default copy was preserved.")
+							}
+						})
 					}
 				}
 			}

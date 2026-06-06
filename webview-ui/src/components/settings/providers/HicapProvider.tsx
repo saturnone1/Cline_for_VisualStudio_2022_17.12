@@ -1,7 +1,7 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { AccountServiceClient } from "@/services/grpc-client"
 import { DebouncedTextField } from "../common/DebouncedTextField"
@@ -23,6 +23,7 @@ interface HicapProviderProps {
 export const HicapProvider = ({ showModelOptions, isPopup, currentMode }: HicapProviderProps) => {
 	const { apiConfiguration, refreshHicapModels } = useExtensionState()
 	const { handleFieldChange } = useApiConfigurationHandlers()
+	const [authMessage, setAuthMessage] = useState("")
 
 	useEffect(() => {
 		if (apiConfiguration?.hicapApiKey && apiConfiguration?.hicapApiKey.length === 32) {
@@ -61,14 +62,19 @@ export const HicapProvider = ({ showModelOptions, isPopup, currentMode }: HicapP
 						appearance="secondary"
 						onClick={async () => {
 							try {
-								await AccountServiceClient.hicapAuthClicked(EmptyRequest.create())
+								const response = await AccountServiceClient.hicapAuthClicked(EmptyRequest.create())
+								setAuthMessage(response?.message || "Hicap provider page opened.")
 							} catch (error) {
 								console.error("Failed to open Hicap auth:", error)
+								setAuthMessage(error instanceof Error ? error.message : String(error))
 							}
 						}}
 						style={{ margin: "5px 0 0 0" }}>
 						Generate API Key
 					</VSCodeButton>
+				)}
+				{authMessage && (
+					<p style={{ color: "var(--vscode-descriptionForeground)", fontSize: 12, marginTop: 8 }}>{authMessage}</p>
 				)}
 			</div>
 

@@ -1,6 +1,7 @@
 import { openAiCodexModels } from "@shared/api"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
+import { useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { AccountServiceClient } from "@/services/grpc-client"
 import { ModelInfoView } from "../common/ModelInfoView"
@@ -22,23 +23,28 @@ interface OpenAiCodexProviderProps {
 export const OpenAiCodexProvider = ({ showModelOptions, isPopup, currentMode }: OpenAiCodexProviderProps) => {
 	const { apiConfiguration, openAiCodexIsAuthenticated } = useExtensionState()
 	const { handleModeFieldChange } = useApiConfigurationHandlers()
+	const [authMessage, setAuthMessage] = useState("")
 
 	const { selectedModelId, selectedModelInfo } = normalizeApiConfiguration(apiConfiguration, currentMode)
 	const showReasoningEffort = supportsReasoningEffortForModelId(selectedModelId, true)
 
 	const handleSignIn = async () => {
 		try {
-			await AccountServiceClient.openAiCodexSignIn({})
+			const response = await AccountServiceClient.openAiCodexSignIn({})
+			setAuthMessage(response?.message || "OpenAI Codex OAuth is not available in this Visual Studio host.")
 		} catch (error) {
 			console.error("Failed to sign in to OpenAI Codex:", error)
+			setAuthMessage(error instanceof Error ? error.message : String(error))
 		}
 	}
 
 	const handleSignOut = async () => {
 		try {
-			await AccountServiceClient.openAiCodexSignOut({})
+			const response = await AccountServiceClient.openAiCodexSignOut({})
+			setAuthMessage(response?.message || "Signed out of OpenAI Codex.")
 		} catch (error) {
 			console.error("Failed to sign out of OpenAI Codex:", error)
+			setAuthMessage(error instanceof Error ? error.message : String(error))
 		}
 	}
 
@@ -64,6 +70,9 @@ export const OpenAiCodexProvider = ({ showModelOptions, isPopup, currentMode }: 
 						</p>
 						<VSCodeButton onClick={handleSignIn}>Sign in to OpenAI Codex</VSCodeButton>
 					</div>
+				)}
+				{authMessage && (
+					<p style={{ color: "var(--vscode-descriptionForeground)", fontSize: 12, marginTop: 8 }}>{authMessage}</p>
 				)}
 			</div>
 

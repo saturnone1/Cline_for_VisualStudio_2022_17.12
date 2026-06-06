@@ -437,11 +437,11 @@ const ClineRulesToggleModal: React.FC = () => {
 		<div className="inline-flex min-w-0 max-w-full items-center" ref={modalRef}>
 			<div className="inline-flex w-full items-center" ref={buttonRef}>
 				<Tooltip>
-					{!isVisible && <TooltipContent>Manage Cline Rules & Workflows</TooltipContent>}
+					{!isVisible && <TooltipContent>Manage LIG VS Rules & Workflows</TooltipContent>}
 					<TooltipTrigger>
 						<VSCodeButton
 							appearance="icon"
-							aria-label={isVisible ? "Hide Cline Rules & Workflows" : "Show Cline Rules & Workflows"}
+							aria-label={isVisible ? "Hide LIG VS Rules & Workflows" : "Show LIG VS Rules & Workflows"}
 							className="p-0 m-0 flex items-center"
 							onClick={() => setIsVisible(!isVisible)}>
 							<i className="codicon codicon-law" style={{ fontSize: "12.5px" }} />
@@ -530,7 +530,7 @@ const ClineRulesToggleModal: React.FC = () => {
 								</p>
 							) : (
 								<p>
-									Hooks allow you to execute custom scripts at specific points in Cline's execution lifecycle,
+									Hooks allow you to execute custom scripts at specific points in LIG VS's execution lifecycle,
 									enabling automation and integration with external tools.
 								</p>
 							)}
@@ -696,17 +696,14 @@ const ClineRulesToggleModal: React.FC = () => {
 									</p>
 								</div>
 								{/* Hooks Tab */}
-								{/* Windows warning banner */}
-								{isWindows && (
-									<div className="flex items-center gap-2 px-3 py-3 mb-4 bg-vscode-inputValidation-warningBackground border-l-[3px] border-vscode-inputValidation-warningBorder">
-										<i className="codicon codicon-warning text-sm" />
-										<span className="text-base">
-											Hooks are not executed in the Visual Studio port yet. Existing hook files can be
-											opened for inspection, but create, toggle, and delete actions are disabled until
-											hook runtime support exists.
-										</span>
-									</div>
-								)}
+								<div className="flex items-center gap-2 px-3 py-3 mb-4 bg-vscode-textBlockQuote-background border-l-[3px] border-vscode-textBlockQuote-border">
+									<i className="codicon codicon-symbol-event text-sm" />
+									<span className="text-base">
+										LIG VS runs PowerShell, command, batch, and Node hook files through the sidecar.{" "}
+										PreToolUse hooks can block tool execution by returning JSON such as{" "}
+										<code>{'{"decision":"block","reason":"..." }'}</code>.
+									</span>
+								</div>
 
 								{/* Global Hooks */}
 								<div className="mb-3">
@@ -720,8 +717,6 @@ const ClineRulesToggleModal: React.FC = () => {
 													enabled={hook.enabled}
 													hookName={hook.name}
 													isGlobal={true}
-													isWindows={isWindows}
-													hooksRuntimeUnsupported={isWindows}
 													key={hook.name}
 													onDelete={(hooksToggles) => {
 														// Use response data directly, no need to refresh
@@ -734,8 +729,6 @@ const ClineRulesToggleModal: React.FC = () => {
 												/>
 											))}
 										<NewRuleRow
-											disabled={isWindows}
-											disabledReason="Hooks are not executed in the Visual Studio port yet."
 											existingHooks={globalHooks.map((h) => h.name)}
 											isGlobal={true}
 											ruleType="hook"
@@ -760,8 +753,6 @@ const ClineRulesToggleModal: React.FC = () => {
 														enabled={hook.enabled}
 														hookName={hook.name}
 														isGlobal={false}
-														isWindows={isWindows}
-														hooksRuntimeUnsupported={isWindows}
 														key={hook.absolutePath}
 														onDelete={(hooksToggles) => {
 															// Use response data directly, no need to refresh
@@ -775,8 +766,6 @@ const ClineRulesToggleModal: React.FC = () => {
 													/>
 												))}
 											<NewRuleRow
-												disabled={isWindows}
-												disabledReason="Hooks are not executed in the Visual Studio port yet."
 												existingHooks={workspace.hooks.map((h) => h.name)}
 												isGlobal={false}
 												ruleType="hook"

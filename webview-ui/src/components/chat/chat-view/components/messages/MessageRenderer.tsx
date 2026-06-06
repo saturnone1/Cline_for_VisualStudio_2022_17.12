@@ -80,11 +80,13 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
 	}
 
 	// Regular message
+	const messageKind = messageOrGroup.type === "ask" ? messageOrGroup.ask : messageOrGroup.say
 	return (
 		<div
 			className={cn({
 				"pb-2.5": isLastMessage && !footerActive,
-			})}
+			}, "lig-message-frame")}
+			data-message-kind={messageKind}
 			data-message-ts={messageOrGroup.ts}>
 			<ChatRow
 				inputValue={inputValue}

@@ -1,4 +1,5 @@
 import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import ligMarkBlue from "@/assets/lig-mark-blue.png"
 import { useClineSignIn } from "@/context/ClineAuthContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import ClineLogoVariable from "../../assets/ClineLogoVariable"
@@ -12,7 +13,8 @@ export const AccountWelcomeView = () => {
 
 	return (
 		<div className="flex flex-col items-center gap-2.5">
-			<ClineLogoVariable className="size-16 mb-4" environment={environment} />
+			<img alt="" className="h-10 w-auto object-contain" src={ligMarkBlue} />
+			<ClineLogoVariable className="h-12 w-48 object-contain mb-4" environment={environment} />
 
 			<p>
 				Sign up for an account to get access to the latest models, billing dashboard to view usage and credits, and more
