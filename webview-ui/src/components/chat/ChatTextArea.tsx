@@ -79,7 +79,9 @@ interface ChatTextAreaProps {
 	setSelectedImages: React.Dispatch<React.SetStateAction<string[]>>
 	setSelectedFiles: React.Dispatch<React.SetStateAction<string[]>>
 	onSend: () => void
+	onCancelRequest?: () => void
 	onSelectFilesAndImages: () => void
+	requestPending?: boolean
 	shouldDisableFilesAndImages: boolean
 	onHeightChange?: (height: number) => void
 	onFocusChange?: (isFocused: boolean) => void
@@ -208,7 +210,9 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setSelectedImages,
 			setSelectedFiles,
 			onSend,
+			onCancelRequest,
 			onSelectFilesAndImages,
+			requestPending = false,
 			shouldDisableFilesAndImages,
 			onHeightChange,
 			onFocusChange,
@@ -1546,14 +1550,26 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						style={{ height: textAreaBaseHeight }}>
 						<div className="flex flex-row items-center">
 							<div
-								className={cn("lig-input-send input-icon-button", { disabled: sendingDisabled }, "codicon codicon-send text-sm")}
-								data-testid="send-button"
+								aria-label={requestPending ? t("common.cancel") : t("chat.send")}
+								className={cn(
+									"lig-input-send input-icon-button",
+									{ disabled: sendingDisabled && !requestPending },
+									"codicon text-sm",
+									requestPending ? "codicon-debug-stop" : "codicon-send",
+								)}
+								data-testid={requestPending ? "cancel-send-button" : "send-button"}
 								onClick={() => {
+									if (requestPending) {
+										onCancelRequest?.()
+										return
+									}
 									if (!sendingDisabled) {
 										setIsTextAreaFocused(false)
 										onSend()
 									}
 								}}
+								role="button"
+								title={requestPending ? t("common.cancel") : t("chat.send")}
 							/>
 						</div>
 					</div>

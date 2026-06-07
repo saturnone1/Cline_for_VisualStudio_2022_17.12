@@ -55,6 +55,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 			<ChatTextArea
 				activeQuote={activeQuote}
 				inputValue={inputValue}
+				onCancelRequest={() => messageHandlers.executeButtonAction("cancel")}
 				onFocusChange={handleFocusChange}
 				onHeightChange={() => {
 					if (isAtBottom) {
@@ -65,6 +66,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 				onSend={() => messageHandlers.handleSendMessage(inputValue, selectedImages, selectedFiles)}
 				placeholderText={placeholderText}
 				ref={textAreaRef}
+				requestPending={sendingDisabled}
 				selectedFiles={selectedFiles}
 				selectedImages={selectedImages}
 				sendingDisabled={sendingDisabled}

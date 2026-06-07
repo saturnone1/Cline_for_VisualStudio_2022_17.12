@@ -53,6 +53,18 @@ type NormalizedUsage = {
 	reliable: boolean
 }
 
+type SendLatencyTrace = {
+	requestId: string
+	kind: "newTask" | "askResponse"
+	sessionId: string
+	startedAt: number
+	sdkSendAt?: number
+	firstSdkEventAt?: number
+	firstAssistantAt?: number
+	errorAt?: number
+	textLength: number
+}
+
 type HookLifecycleName = "TaskStart" | "TaskResume" | "TaskCancel" | "TaskComplete" | "PreToolUse" | "PostToolUse" | "UserPromptSubmit"
 
 type HookScript = {
@@ -155,6 +167,7 @@ export class VisualStudioWebviewRouter {
 	private lastTerminalOutputSequence = 0
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
+	private persistedStateSaveTimer: NodeJS.Timeout | null = null
 	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private lastPartialStateBroadcastAt = 0
 	private stateHydrationRefreshInFlight = false
@@ -171,6 +184,7 @@ export class VisualStudioWebviewRouter {
 	private changeSummaryTimer: NodeJS.Timeout | null = null
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
+	private readonly sendLatencyTraces = new Map<string, SendLatencyTrace>()
 	private oauthCallbackServer: http.Server | null = null
 	private oauthCallbackPort = 0
 	private readonly oauthCallbackSessions = new Map<string, OAuthCallbackSession>()
@@ -204,12 +218,34 @@ export class VisualStudioWebviewRouter {
 		return this.state.scheduledAgentsEnabled === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"
 	}
 
+	private isPlanModeToolBlocked(mappedToolName: string) {
+		if (this.state.mode !== "plan") {
+			return false
+		}
+		return isPlanModeBlockedTool(mappedToolName)
+	}
+
 	async requestToolApproval(request: unknown): Promise<ToolApprovalResult> {
 		logInteraction("sdk->sidecar", "toolApproval.request", request)
 		const approvalRequest = asRecord(request)
 		const toolName = getString(approvalRequest, "toolName") || getString(approvalRequest, "name") || getString(approvalRequest, "tool")
 		const input = asRecord(approvalRequest.input || approvalRequest.params || approvalRequest.arguments)
 		const mappedToolName = mapToolName(toolName)
+		if (this.isPlanModeToolBlocked(mappedToolName)) {
+			const language = this.getUiLanguage()
+			const reason =
+				language === "ko"
+					? "Plan 모드에서는 실행/수정/브라우저/MCP 도구를 실행하지 않습니다. Act 모드로 전환한 뒤 다시 시도해 주세요."
+					: "Plan mode does not run execution, edit, browser, or MCP tools. Switch to Act mode and try again."
+			this.addMessage({
+				type: "say",
+				say: "info",
+				text: reason,
+			})
+			this.updateCurrentTaskItem()
+			await this.broadcastState()
+			return { approved: false, reason }
+		}
 		const hookDecision = await this.runPreToolUseHooks({
 			sessionId: this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""),
 			toolName,
@@ -330,6 +366,7 @@ export class VisualStudioWebviewRouter {
 				})
 				return
 			}
+			this.markSendLatencyFirstSdkEvent(sessionId, getString(asRecord(payload.event), "type") || type)
 			this.handleAgentEvent(asRecord(payload.event), sessionId)
 			return
 		}
@@ -344,6 +381,7 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			this.markSendLatencyFirstSdkEvent(sessionId, type)
 			this.handleSessionChunk(payload)
 			return
 		}
@@ -353,6 +391,7 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			this.markSendLatencyFirstSdkEvent(sessionId, type)
 			this.handleSessionSnapshot(payload)
 			return
 		}
@@ -399,6 +438,7 @@ export class VisualStudioWebviewRouter {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
+			this.markSendLatencyFirstSdkEvent(sessionId, `status:${status}`)
 			if (status === "idle") {
 				logInteraction("sidecar", "sdkStatusIdle", { sessionId })
 				this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
@@ -514,7 +554,7 @@ export class VisualStudioWebviewRouter {
 	private async handleStreamingRequest(key: string, requestId: string) {
 		if (key === "StateService.subscribeToState") {
 			this.stateStreamRequestIds.add(requestId)
-			this.refreshStateStreamsInBackground()
+			this.scheduleStateStreamsRefresh()
 			return grpcHandled(grpcResponse(requestId, { stateJson: JSON.stringify(this.state) }, true))
 		}
 
@@ -528,7 +568,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (key === "McpService.subscribeToMcpServers") {
-			return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), true))
+			return grpcHandled(grpcResponse(requestId, createMcpServersLazyResponse(), true))
 		}
 
 		if (key === "McpService.subscribeToMcpMarketplaceCatalog") {
@@ -774,7 +814,7 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 
 			case "StateService.togglePlanActModeProto":
-				this.state.mode = this.state.mode === "plan" ? "act" : "plan"
+				this.state.mode = resolveRequestedPlanActMode(message, this.state.mode)
 				savePersistedState(this.state)
 				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, { value: true, mode: this.state.mode }, false))
@@ -839,18 +879,18 @@ export class VisualStudioWebviewRouter {
 
 			case "TaskService.newTask":
 				if (this.pendingQuestion) {
-					await this.sendAskResponse(message)
+					await this.sendAskResponse(message, requestId)
 					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 				}
 				if (this.state.currentTaskItem && getString(message, "text").trim()) {
-					await this.sendAskResponse(message)
+					await this.sendAskResponse(message, requestId)
 					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 				}
-				await this.startNewTask(message, { broadcast: false })
+				await this.startNewTask(message, { broadcast: false, requestId })
 				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 
 			case "TaskService.askResponse":
-				await this.sendAskResponse(message)
+				await this.sendAskResponse(message, requestId)
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.cancelTask":
@@ -858,11 +898,11 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.getTaskHistory":
-				await this.refreshTaskHistoryFromSdk()
+				this.refreshTaskHistoryFromSdkInBackground("getTaskHistory")
 				return grpcHandled(grpcResponse(requestId, { tasks: this.state.taskHistory }, false))
 
 			case "TaskService.getTotalTasksSize":
-				await this.refreshTaskHistoryFromSdk()
+				this.refreshTaskHistoryFromSdkInBackground("getTotalTasksSize")
 				return grpcHandled(grpcResponse(requestId, { value: this.state.taskHistory.length }, false))
 
 			case "TaskService.showTaskWithId":
@@ -2537,7 +2577,7 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private async startNewTask(message: unknown, options: { broadcast?: boolean } = {}) {
+	private async startNewTask(message: unknown, options: { broadcast?: boolean; requestId?: string } = {}) {
 		if (!this.clineSdk) {
 			throw new Error("LIG VS SDK runtime is not attached.")
 		}
@@ -2551,6 +2591,7 @@ export class VisualStudioWebviewRouter {
 			? path.resolve(requestedWorkspacePath)
 			: process.cwd()
 		const taskItem = createHistoryItem(createId(), text, initialCwd, this.getModelId())
+		this.startSendLatencyTrace(options.requestId || createId(), "newTask", String(taskItem.id || ""), text.length)
 		if (requestedWorkspacePath) {
 			;(taskItem as Record<string, unknown>).workspacePath = initialCwd
 			;(taskItem as Record<string, unknown>).worktreePath = initialCwd
@@ -2569,13 +2610,13 @@ export class VisualStudioWebviewRouter {
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
 		this.addMessage({ type: "say", say: "task", text, images, files })
-		this.upsertFoldedActivityText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
+		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
 		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
 		if (options.broadcast !== false) {
-			await this.broadcastState()
+			this.broadcastState().catch((error) => console.error(error))
 		}
-		savePersistedState(this.state)
+		this.schedulePersistedStateSave()
 
 		void this.prepareAndLaunchNewTask({
 			text,
@@ -2619,7 +2660,16 @@ export class VisualStudioWebviewRouter {
 			}
 			this.updateCurrentTaskItem()
 			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
-			await this.clineSdk.stop({})
+			const previousActiveSessionId = this.clineSdk.status.activeSessionId
+			if (previousActiveSessionId) {
+				this.closingSessionIds.add(previousActiveSessionId)
+				await this.clineSdk.stop({ sessionId: previousActiveSessionId }).catch((error) => {
+					logInteraction("sidecar", "startNewTask.stopPreviousFailed", {
+						sessionId: previousActiveSessionId,
+						error: error instanceof Error ? error.message : String(error),
+					})
+				})
+			}
 			void this.runLifecycleHooks("TaskStart", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
 			void this.runLifecycleHooks("UserPromptSubmit", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
 			await this.launchSdkStartSession({
@@ -2649,10 +2699,11 @@ export class VisualStudioWebviewRouter {
 
 		try {
 			const config = await this.buildSdkConfig(cwd, sessionId)
+			this.markSendLatencySdkSend(sessionId)
 			const result = await this.clineSdk.startSession({
 				...params,
 				config,
-				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
+				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
 			})
 			await this.completeFromSdkResult(result, sessionId, source)
 		} catch (error) {
@@ -2663,7 +2714,7 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
-	private async sendAskResponse(message: unknown) {
+	private async sendAskResponse(message: unknown, requestId = createId()) {
 		if (!this.clineSdk) {
 			throw new Error("LIG VS SDK runtime is not attached.")
 		}
@@ -2737,7 +2788,7 @@ export class VisualStudioWebviewRouter {
 			this.pendingQuestion = null
 		}
 
-		const sessionId = selectedSessionId || activeSessionId
+		const sessionId = activeSessionId || selectedSessionId
 		if (!sessionId) {
 			logInteraction("sidecar", "sendAskResponse.startNewTask", { textLength: text.length })
 			await this.startNewTask(
@@ -2746,19 +2797,24 @@ export class VisualStudioWebviewRouter {
 					images: getStringArray(message, "images"),
 					files: getStringArray(message, "files"),
 				},
-				{ broadcast: true },
+				{ broadcast: true, requestId },
 			)
 			return
 		}
+		this.startSendLatencyTrace(requestId, "askResponse", sessionId, text.length)
 
 		this.removeTerminalAskMessages()
-		this.addMessage({ type: "say", say: "user_feedback", text })
-		savePersistedState(this.state)
-		await this.broadcastState()
+		const userMessage = this.addMessage({ type: "say", say: "user_feedback", text })
+		this.beginProgressPhase("reasoning")
+		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
+		this.schedulePersistedStateSave()
+		this.sendPartialMessage(userMessage)
+		this.broadcastState().catch((error) => console.error(error))
 
 		const sendParams = {
 			sessionId,
 			prompt: getString(message, "text"),
+			mode: this.state.mode === "plan" ? "plan" : "act",
 			userImages: getStringArray(message, "images"),
 			userFiles: getStringArray(message, "files"),
 			delivery: normalizePromptDelivery(getString(message, "delivery")),
@@ -2804,9 +2860,11 @@ export class VisualStudioWebviewRouter {
 		}
 
 		try {
+			this.markSendLatencySdkSend(sessionId)
 			logInteraction("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength })
 			return await this.clineSdk.send(sendParams)
 		} catch (error) {
+			this.markSendLatencyError(sessionId, error)
 			if (!isSessionNotFoundError(error)) {
 				throw error
 			}
@@ -2814,7 +2872,11 @@ export class VisualStudioWebviewRouter {
 				sessionId,
 				error: error instanceof Error ? error.message : String(error),
 			})
-			return this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
+			throw new Error(
+				this.getUiLanguage() === "ko"
+					? "이전 SDK 세션을 찾을 수 없어 메시지를 보내지 않았습니다. 현재 대화는 유지됩니다. 새 작업으로 시작하거나 잠시 후 다시 시도해 주세요."
+					: "The previous SDK session could not be found, so the message was not sent. The conversation was kept intact. Start a new task or try again shortly.",
+			)
 		}
 	}
 
@@ -2861,7 +2923,7 @@ export class VisualStudioWebviewRouter {
 			userFiles,
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, sessionId),
-			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
+			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
 		})
 	}
 
@@ -3118,6 +3180,29 @@ export class VisualStudioWebviewRouter {
 		}
 	}
 
+	private refreshTaskHistoryFromSdkInBackground(source: string) {
+		if (!this.clineSdk || this.stateHydrationRefreshInFlight) {
+			return
+		}
+		this.stateHydrationRefreshInFlight = true
+		void (async () => {
+			const startedAt = Date.now()
+			try {
+				await this.refreshTaskHistoryFromSdk()
+				logInteraction("sidecar", "stateHydration.historyRefreshed", {
+					source,
+					durationMs: Date.now() - startedAt,
+					count: this.state.taskHistory.length,
+				})
+				await this.broadcastState()
+			} catch (error) {
+				logInteraction("sidecar", "stateHydration.historyRefreshFailed", { source, error: stringify(error) })
+			} finally {
+				this.stateHydrationRefreshInFlight = false
+			}
+		})()
+	}
+
 	private async refreshSelectedTaskFromSdk() {
 		if (!this.clineSdk || !this.state.currentTaskItem) {
 			return
@@ -3130,6 +3215,22 @@ export class VisualStudioWebviewRouter {
 
 		const activeSessionId = this.clineSdk.status.activeSessionId
 		if (activeSessionId && activeSessionId !== taskId) {
+			return
+		}
+		if (this.activePartialTextTs || this.activeReasoningTextTs || this.activeToolActivityTs) {
+			logInteraction("sidecar", "stateHydration.selectedTaskSkipped", {
+				reason: "live_interaction",
+				taskId,
+				activeSessionId,
+			})
+			return
+		}
+		if (this.state.clineMessages.some((message) => message.partial === true)) {
+			logInteraction("sidecar", "stateHydration.selectedTaskSkipped", {
+				reason: "partial_messages",
+				taskId,
+				activeSessionId,
+			})
 			return
 		}
 		if (activeSessionId === taskId && this.state.clineMessages.length > 0) {
@@ -3196,7 +3297,7 @@ export class VisualStudioWebviewRouter {
 			start: {
 				config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
 				interactive: true,
-				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings),
+				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
 			},
 		})
 
@@ -4371,7 +4472,9 @@ export class VisualStudioWebviewRouter {
 			this.noteTaskActivity("error")
 			this.finishFoldedReasoningText()
 			this.clearReasoningStatus()
-			this.addMessage({ type: "say", say: "error", text: stringify(event.error) })
+			const text = formatProviderErrorForTranscript(event.error, this.getUiLanguage())
+			this.markSendLatencyError(sessionId, text)
+			this.addMessage({ type: "say", say: "error", text })
 		}
 
 		this.updateCurrentTaskItem()
@@ -4670,6 +4773,7 @@ export class VisualStudioWebviewRouter {
 		if (!normalizedText) {
 			return
 		}
+		this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), normalizedText.length)
 
 		const lastText = [...this.state.clineMessages]
 			.reverse()
@@ -4708,10 +4812,17 @@ export class VisualStudioWebviewRouter {
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
 
+		const hasAssistantText = this.hasAssistantTextAfterLastUserMessage()
 		if (activeText) {
 			this.addAssistantTextResult(activeText)
-		} else if (!this.hasAssistantTextAfterLastUserMessage()) {
+		} else if (!hasAssistantText) {
 			logInteraction("sidecar", "emptyDoneNoAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+			const normalizedStatus = String(status || "").toLowerCase()
+			if (normalizedStatus === "completed" || normalizedStatus === "idle" || normalizedStatus === "ended") {
+				this.finalizeOpenPartialMessages()
+				savePersistedState(this.state)
+				return
+			}
 		} else {
 			logInteraction("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		}
@@ -4895,16 +5006,18 @@ export class VisualStudioWebviewRouter {
 	private addMessage(message: Record<string, unknown>) {
 		if (isMeaninglessTextMessage(message)) {
 			logInteraction("sidecar", "skipMeaninglessTextMessage", message)
-			return
+			return undefined
 		}
 		if (isMeaninglessToolMessage(message)) {
 			logInteraction("sidecar", "skipMeaninglessToolMessage", message)
-			return
+			return undefined
 		}
-		this.state.clineMessages.push({
+		const normalizedMessage = {
 			ts: Date.now() + this.messageSequence++,
 			...normalizeClineMessagePayload(message),
-		})
+		}
+		this.state.clineMessages.push(normalizedMessage)
+		return normalizedMessage
 	}
 
 	private removeTerminalAskMessages() {
@@ -5078,6 +5191,7 @@ export class VisualStudioWebviewRouter {
 		if (!normalized) {
 			return
 		}
+		this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), normalized.length)
 
 		this.activeAssistantTextBuffer = normalized
 		if (shouldFoldTextContentAsReasoning(normalized)) {
@@ -5287,6 +5401,96 @@ export class VisualStudioWebviewRouter {
 			case "reasoning":
 			default:
 				return language === "ko" ? `응답 준비${suffix}` : `Preparing response${suffix}`
+		}
+	}
+
+	private startSendLatencyTrace(requestId: string, kind: "newTask" | "askResponse", sessionId: string, textLength: number) {
+		if (!sessionId) {
+			return
+		}
+		const trace: SendLatencyTrace = {
+			requestId,
+			kind,
+			sessionId,
+			startedAt: Date.now(),
+			textLength,
+		}
+		this.sendLatencyTraces.set(sessionId, trace)
+		logInteraction("sidecar", "sendLatency.received", {
+			requestId,
+			kind,
+			sessionId,
+			textLength,
+		})
+	}
+
+	private markSendLatencySdkSend(sessionId: string) {
+		const trace = this.sendLatencyTraces.get(sessionId)
+		if (!trace || trace.sdkSendAt) {
+			return
+		}
+		trace.sdkSendAt = Date.now()
+		logInteraction("sidecar", "sendLatency.sdkSend", this.createSendLatencyPayload(trace))
+	}
+
+	private markSendLatencyFirstSdkEvent(sessionId: string, eventType: string) {
+		const trace = this.sendLatencyTraces.get(sessionId)
+		if (!trace || trace.firstSdkEventAt) {
+			return
+		}
+		trace.firstSdkEventAt = Date.now()
+		logInteraction("sidecar", "sendLatency.firstSdkEvent", {
+			...this.createSendLatencyPayload(trace),
+			eventType,
+		})
+	}
+
+	private markSendLatencyFirstAssistant(sessionId: string, textLength: number) {
+		const trace = this.sendLatencyTraces.get(sessionId)
+		if (!trace || trace.firstAssistantAt) {
+			return
+		}
+		trace.firstAssistantAt = Date.now()
+		logInteraction("sidecar", "sendLatency.firstAssistant", {
+			...this.createSendLatencyPayload(trace),
+			assistantTextLength: textLength,
+		})
+	}
+
+	private markSendLatencyError(sessionId: string, error: unknown) {
+		const trace = this.sendLatencyTraces.get(sessionId)
+		if (!trace || trace.errorAt) {
+			return
+		}
+		trace.errorAt = Date.now()
+		logInteraction("sidecar", "sendLatency.error", {
+			...this.createSendLatencyPayload(trace),
+			error: stringify(error),
+		})
+	}
+
+	private rebindSendLatencyTrace(previousSessionId: string, nextSessionId: string) {
+		const trace = this.sendLatencyTraces.get(previousSessionId)
+		if (!trace || !nextSessionId || previousSessionId === nextSessionId) {
+			return
+		}
+		this.sendLatencyTraces.delete(previousSessionId)
+		trace.sessionId = nextSessionId
+		this.sendLatencyTraces.set(nextSessionId, trace)
+	}
+
+	private createSendLatencyPayload(trace: SendLatencyTrace) {
+		const now = Date.now()
+		return {
+			requestId: trace.requestId,
+			kind: trace.kind,
+			sessionId: trace.sessionId,
+			textLength: trace.textLength,
+			toSdkSendMs: trace.sdkSendAt ? trace.sdkSendAt - trace.startedAt : undefined,
+			toFirstSdkEventMs: trace.firstSdkEventAt ? trace.firstSdkEventAt - trace.startedAt : undefined,
+			toFirstAssistantMs: trace.firstAssistantAt ? trace.firstAssistantAt - trace.startedAt : undefined,
+			toErrorMs: trace.errorAt ? trace.errorAt - trace.startedAt : undefined,
+			elapsedMs: now - trace.startedAt,
 		}
 	}
 
@@ -5529,6 +5733,7 @@ export class VisualStudioWebviewRouter {
 		this.state.taskHistory = this.state.taskHistory.map((item) =>
 			String(item.id || "") === currentTaskId ? { ...item, id: sessionId } : item,
 		)
+		this.rebindSendLatencyTrace(currentTaskId, sessionId)
 		logInteraction("sidecar", "taskSessionIdRebound", { previousTaskId: currentTaskId, sessionId })
 	}
 
@@ -5579,6 +5784,18 @@ export class VisualStudioWebviewRouter {
 			reduced: true,
 			message: "Using the configured model because this provider catalog cannot be refreshed locally.",
 		})
+	}
+
+	private schedulePersistedStateSave() {
+		if (this.persistedStateSaveTimer) {
+			return
+		}
+
+		this.persistedStateSaveTimer = setTimeout(() => {
+			this.persistedStateSaveTimer = null
+			savePersistedState(this.state)
+		}, readPositiveIntEnv("VSCLINE_STATE_SAVE_DEBOUNCE_MS", 250))
+		this.persistedStateSaveTimer.unref?.()
 	}
 
 	private async createProviderModelCatalog(providerId: string, request: Record<string, unknown>) {
@@ -5747,6 +5964,16 @@ export class VisualStudioWebviewRouter {
 				this.stateHydrationRefreshInFlight = false
 			}
 		})()
+	}
+
+	private scheduleStateStreamsRefresh() {
+		const delayMs = readPositiveIntEnv("VSCLINE_STATE_REFRESH_DELAY_MS", 2500)
+		setTimeout(() => {
+			if (this.state.currentTaskItem && this.clineSdk?.status.activeSessionId) {
+				return
+			}
+			this.refreshStateStreamsInBackground()
+		}, delayMs).unref?.()
 	}
 }
 
@@ -6845,6 +7072,19 @@ function stringify(value: unknown) {
 	} catch {
 		return String(value)
 	}
+}
+
+function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko") {
+	const text = stringify(value).trim()
+	if (!text) {
+		return language === "ko" ? "모델 제공자가 빈 오류를 반환했습니다." : "The model provider returned an empty error."
+	}
+	if (/too many requests|rate limit|429/i.test(text)) {
+		return language === "ko"
+			? `모델 제공자 응답: 요청 한도를 초과했습니다.\n\n${text}`
+			: `Model provider response: rate limit exceeded.\n\n${text}`
+	}
+	return text
 }
 
 function isPlaceholderApiRequest(text: string) {
@@ -9193,7 +9433,7 @@ function isAutoApprovalSettingsLike(record: Record<string, unknown>) {
 	return "actions" in record || "enabled" in record || "maxRequests" in record || "favorites" in record
 }
 
-function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}) {
+function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}, mode: unknown = "act") {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
 	const autoApproveAll = settings.enabled === true
@@ -9203,7 +9443,7 @@ function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unkn
 	const commandAuto = autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
 	const mcpAuto = autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
 
-	return {
+	const policy = {
 		readFile: { enabled: true, autoApprove: readAuto },
 		read_file: { enabled: true, autoApprove: readAuto },
 		read: { enabled: true, autoApprove: readAuto },
@@ -9231,6 +9471,40 @@ function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unkn
 		ask_question: { enabled: true, autoApprove: true },
 		submit_and_exit: { enabled: true, autoApprove: true },
 	}
+	if (mode === "plan") {
+		const blockedTools: string[] = []
+		for (const key of Object.keys(policy) as Array<keyof typeof policy>) {
+			if (isPlanModeBlockedTool(key)) {
+				policy[key] = { enabled: false, autoApprove: false }
+				blockedTools.push(String(key))
+			}
+		}
+		logInteraction("sidecar", "sdkModePolicy.plan", { blockedTools })
+	}
+	return policy
+}
+
+function isPlanModeBlockedTool(toolName: string) {
+	const mapped = mapToolName(toolName)
+	return mapped === "executeCommand" ||
+		mapped === "editedExistingFile" ||
+		mapped === "useMcpServer" ||
+		mapped === "fetch_web_content" ||
+		mapped === "browser_action_launch" ||
+		mapped === "browser" ||
+		mapped === "skills"
+}
+
+function resolveRequestedPlanActMode(message: unknown, currentMode: string) {
+	const record = asRecord(message)
+	const raw = String(record.mode ?? record.value ?? "").toLowerCase()
+	if (raw === "plan" || raw === "planactmode.plan" || raw === "0") {
+		return "plan"
+	}
+	if (raw === "act" || raw === "planactmode.act" || raw === "1") {
+		return "act"
+	}
+	return currentMode === "plan" ? "act" : "plan"
 }
 
 function isWebFetchEnabled(browserSettings: unknown) {
@@ -9363,6 +9637,15 @@ function clearPersistedState() {
 		fs.rmSync(getSettingsPath(), { force: true })
 	} catch {
 		// Ignore cleanup failures; reset still applies to the in-memory state.
+	}
+}
+
+function createMcpServersLazyResponse() {
+	return {
+		mcpServers: [],
+		reduced: true,
+		reason: "mcp_servers_lazy_loaded",
+		message: "MCP servers are loaded when the MCP view is opened.",
 	}
 }
 

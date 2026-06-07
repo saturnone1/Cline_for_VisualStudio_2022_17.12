@@ -9,7 +9,6 @@ import { EmptyRequest } from "@shared/proto/cline/common"
 import type { OpenRouterCompatibleModelInfo } from "@shared/proto/cline/models"
 import { OnboardingModelGroup, type TerminalProfile } from "@shared/proto/cline/state"
 import { convertProtoToClineMessage } from "@shared/proto-conversions/cline-message"
-import { convertProtoMcpServersToMcpServers } from "@shared/proto-conversions/mcp/mcp-server-conversion"
 import { fromProtobufModels } from "@shared/proto-conversions/models/typeConversion"
 import type React from "react"
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
@@ -26,7 +25,7 @@ import {
 } from "../../../src/shared/api"
 import { Environment } from "../../../src/shared/config-types"
 import type { McpMarketplaceCatalog, McpServer, McpViewTab } from "../../../src/shared/mcp"
-import { McpServiceClient, ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpc-client"
+import { ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpc-client"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	didHydrateState: boolean
@@ -347,8 +346,6 @@ export const ExtensionStateContextProvider: React.FC<{
 			relinquishControlCallbacks.current.delete(callback)
 		}
 	}, [])
-	const mcpServersSubscriptionRef = useRef<(() => void) | null>(null)
-
 	// Subscribe to state updates and UI events using the gRPC streaming API
 	useEffect(() => {
 		// Set up state subscription
@@ -454,22 +451,6 @@ export const ExtensionStateContextProvider: React.FC<{
 				onComplete: () => {},
 			},
 		)
-
-		// Subscribe to MCP servers updates
-		mcpServersSubscriptionRef.current = McpServiceClient.subscribeToMcpServers(EmptyRequest.create(), {
-			onResponse: (response) => {
-				console.log("[DEBUG] Received MCP servers update from gRPC stream")
-				if (response.mcpServers) {
-					setMcpServers(convertProtoMcpServersToMcpServers(response.mcpServers))
-				}
-			},
-			onError: (error) => {
-				console.error("Error in MCP servers subscription:", error)
-			},
-			onComplete: () => {
-				console.log("MCP servers subscription completed")
-			},
-		})
 
 		// Set up settings button clicked subscription
 		settingsButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToSettingsButtonClicked(EmptyRequest.create({}), {
@@ -626,10 +607,6 @@ export const ExtensionStateContextProvider: React.FC<{
 			if (relinquishControlUnsubscribeRef.current) {
 				relinquishControlUnsubscribeRef.current()
 				relinquishControlUnsubscribeRef.current = null
-			}
-			if (mcpServersSubscriptionRef.current) {
-				mcpServersSubscriptionRef.current()
-				mcpServersSubscriptionRef.current = null
 			}
 		}
 	}, [])

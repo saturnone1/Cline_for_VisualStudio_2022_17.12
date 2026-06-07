@@ -33,7 +33,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	messageHandlers,
 	scrollBehavior,
 }) => {
-	const { inputValue, selectedImages, selectedFiles, setSendingDisabled } = chatState
+	const { inputValue, selectedImages, selectedFiles, sendingDisabled, enableButtons: chatEnableButtons, setSendingDisabled } = chatState
 	const { language } = useI18n()
 	const [isProcessing, setIsProcessing] = useState(false)
 
@@ -102,14 +102,23 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 
 	const { showScrollToBottom, scrollToBottomSmooth, disableAutoScrollRef } = scrollBehavior
 
-	const { primaryText, secondaryText, primaryAction, secondaryAction, enableButtons } = buttonConfig
+	const pendingCancelConfig = sendingDisabled && !chatEnableButtons
+	const effectiveButtonConfig = pendingCancelConfig && !buttonConfig.primaryText && !buttonConfig.secondaryText
+		? {
+			...buttonConfig,
+			enableButtons: true,
+			secondaryText: language === "ko" ? "취소" : "Cancel",
+			secondaryAction: "cancel" as ButtonActionType,
+		}
+		: buttonConfig
+	const { primaryText, secondaryText, primaryAction, secondaryAction, enableButtons } = effectiveButtonConfig
 	const hasButtons = primaryText || secondaryText
 	const isStreaming = task.partial === true
 	const canInteract = enableButtons && !isProcessing
 
 	// Keep scroll affordance visually separate from task actions. When there are no
 	// task actions, do not render a full-width button that looks like approval UI.
-	if (showScrollToBottom) {
+	if (!hasButtons && showScrollToBottom) {
 		const handleScrollToBottom = () => {
 			scrollToBottomSmooth()
 			disableAutoScrollRef.current = false

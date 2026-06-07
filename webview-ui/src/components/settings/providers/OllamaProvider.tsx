@@ -2,7 +2,6 @@ import { StringRequest } from "@shared/proto/cline/common"
 import { Mode } from "@shared/storage/types"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { useCallback, useEffect, useState } from "react"
-import { useInterval } from "react-use"
 import UseCustomPromptCheckbox from "@/components/settings/UseCustomPromptCheckbox"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
@@ -35,7 +34,6 @@ export const OllamaProvider = ({ showModelOptions, isPopup, currentMode }: Ollam
 
 	const [ollamaModels, setOllamaModels] = useState<string[]>([])
 
-	// Poll ollama models
 	const requestOllamaModels = useCallback(async () => {
 		try {
 			const response = await ModelsServiceClient.getOllamaModels(
@@ -55,8 +53,6 @@ export const OllamaProvider = ({ showModelOptions, isPopup, currentMode }: Ollam
 	useEffect(() => {
 		requestOllamaModels()
 	}, [requestOllamaModels])
-
-	useInterval(requestOllamaModels, 2000)
 
 	return (
 		<div className="flex flex-col gap-2">

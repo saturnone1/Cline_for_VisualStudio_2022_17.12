@@ -22,6 +22,15 @@ const requiredMarkers = [
 	["provider catalog diagnostics", "createCatalogDiagnostics"],
 	["90 percent supported diagnostics", "Provider catalog refresh diagnostics"],
 	["checkpoint reduced SDK limitation", "SDK checkpoint diff streams"],
+	["send latency diagnostics", "sendLatency.firstSdkEvent"],
+	["debounced persisted state save", "schedulePersistedStateSave"],
+	["provider rate-limit transcript label", "Model provider response: rate limit exceeded."],
+	["targeted plan act toggle", "resolveRequestedPlanActMode"],
+	["plan mode tool policy block", "isPlanModeBlockedTool"],
+	["follow-up pending progress row", "Preparing response."],
+	["SDK send mode propagation", "mode: this.state.mode === \"plan\" ? \"plan\" : \"act\""],
+	["cached history immediate response", "refreshTaskHistoryFromSdkInBackground"],
+	["live transcript hydrate protection", "stateHydration.selectedTaskSkipped"],
 ]
 
 const missing = requiredMarkers.filter(([, marker]) => !router.includes(marker))

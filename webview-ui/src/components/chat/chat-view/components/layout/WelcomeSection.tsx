@@ -45,20 +45,6 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 	const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
 	const [currentWorktree, setCurrentWorktree] = useState<Worktree | null>(null)
 
-	// Check if we're in a git repo and get current worktree info on mount
-	useEffect(() => {
-		WorktreeServiceClient.listWorktrees(EmptyRequest.create({}))
-			.then((result) => {
-				const canUseWorktrees = result.isGitRepo && !result.isMultiRoot && !result.isSubfolder
-				setIsGitRepo(canUseWorktrees)
-				if (canUseWorktrees) {
-					const current = result.worktrees.find((w) => w.isCurrent)
-					setCurrentWorktree(current || null)
-				}
-			})
-			.catch(() => setIsGitRepo(false))
-	}, [])
-
 	const { clineUser } = useClineAuth()
 	const {
 		openRouterModels,
@@ -70,6 +56,41 @@ export const WelcomeSection: React.FC<WelcomeSectionProps> = ({
 		welcomeBanners,
 	} = useExtensionState()
 	const { handleFieldsChange } = useApiConfigurationHandlers()
+
+	// Check worktree status lazily so the welcome screen does not compete with first chat startup.
+	useEffect(() => {
+		if (!worktreesEnabled?.featureFlag || !worktreesEnabled?.user) {
+			setIsGitRepo(false)
+			setCurrentWorktree(null)
+			return
+		}
+
+		let cancelled = false
+		const timer = window.setTimeout(() => {
+			WorktreeServiceClient.listWorktrees(EmptyRequest.create({}))
+				.then((result) => {
+					if (cancelled) {
+						return
+					}
+					const canUseWorktrees = result.isGitRepo && !result.isMultiRoot && !result.isSubfolder
+					setIsGitRepo(canUseWorktrees)
+					if (canUseWorktrees) {
+						const current = result.worktrees.find((w) => w.isCurrent)
+						setCurrentWorktree(current || null)
+					}
+				})
+				.catch(() => {
+					if (!cancelled) {
+						setIsGitRepo(false)
+					}
+				})
+		}, 2000)
+
+		return () => {
+			cancelled = true
+			window.clearTimeout(timer)
+		}
+	}, [worktreesEnabled?.featureFlag, worktreesEnabled?.user])
 
 	// Open modal once we have welcome banners
 	useEffect(() => {

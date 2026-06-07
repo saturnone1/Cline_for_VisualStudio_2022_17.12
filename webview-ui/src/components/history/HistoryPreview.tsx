@@ -1,6 +1,5 @@
 import { StringRequest } from "@shared/proto/cline/common"
-import { GetTaskHistoryRequest } from "@shared/proto/cline/task"
-import { memo, useEffect, useMemo, useState } from "react"
+import { memo, useMemo } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { TaskServiceClient } from "@/services/grpc-client"
@@ -12,32 +11,9 @@ type HistoryPreviewProps = {
 const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 	const { didHydrateState, taskHistory } = useExtensionState()
 	const { language, t } = useI18n()
-	const [loadedHistory, setLoadedHistory] = useState<typeof taskHistory>([])
-	const [hasLoadedHistory, setHasLoadedHistory] = useState(false)
-
-	useEffect(() => {
-		let cancelled = false
-		TaskServiceClient.getTaskHistory(GetTaskHistoryRequest.create({ sortBy: "newest" }))
-			.then((response) => {
-				if (!cancelled) {
-					setLoadedHistory(response.tasks ?? [])
-					setHasLoadedHistory(true)
-				}
-			})
-			.catch((error) => {
-				console.error("Error loading recent tasks:", error)
-				if (!cancelled) {
-					setHasLoadedHistory(true)
-				}
-			})
-
-		return () => {
-			cancelled = true
-		}
-	}, [])
 
 	const visibleTasks = useMemo(() => {
-		const source = didHydrateState ? taskHistory : loadedHistory.length > 0 ? loadedHistory : taskHistory
+		const source = taskHistory
 		const map = new Map<string, (typeof taskHistory)[number]>()
 		for (const item of source) {
 			if (item.id && item.ts && item.task && !map.has(item.id)) {
@@ -47,7 +23,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 		return Array.from(map.values())
 			.sort((a, b) => (b.ts || 0) - (a.ts || 0))
 			.slice(0, 3)
-	}, [didHydrateState, loadedHistory, taskHistory])
+	}, [taskHistory])
 
 	const handleHistorySelect = (id: string) => {
 		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>
@@ -206,7 +182,7 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								</div>
 							</div>
 						))
-					) : hasLoadedHistory ? (
+					) : didHydrateState ? (
 						<div
 							style={{
 								textAlign: "center",

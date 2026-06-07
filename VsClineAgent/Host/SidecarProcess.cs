@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -87,7 +88,8 @@ namespace VsClineAgent.Host
             var stopwatch = Stopwatch.StartNew();
             var pipeName = @"\\.\pipe\VsClineAgent-" + Guid.NewGuid().ToString("N");
             var sidecarDirectory = Path.Combine(_assemblyDirectory, "Sidecar");
-            var runtimeDirectory = PrepareSidecarRuntime(sidecarDirectory);
+            var runtimePreparation = PrepareSidecarRuntime(sidecarDirectory);
+            var runtimeDirectory = runtimePreparation.RuntimeDirectory;
             var scriptPath = Path.Combine(runtimeDirectory, "cline-sidecar.js");
             var nodePath = ResolveBundledNodePath(sidecarDirectory);
             _logFilePath = GetSidecarLogPath();
@@ -132,14 +134,22 @@ namespace VsClineAgent.Host
             _client = new NamedPipeJsonRpcClient(pipeName);
             _client.RequestReceived += HandleSidecarRequestAsync;
             JToken? result;
+            long pipeConnectMs = 0;
+            long healthPingMs = 0;
             try
             {
+                var pipeStopwatch = Stopwatch.StartNew();
                 await ConnectWithRetryAsync(_client, _process, cancellationToken).ConfigureAwait(false);
+                pipeStopwatch.Stop();
+                pipeConnectMs = pipeStopwatch.ElapsedMilliseconds;
 
+                var healthStopwatch = Stopwatch.StartNew();
                 result = await _client.SendRequestAsync(
                     "health.ping",
                     new { client = "VsClineAgent", protocol = 1 },
                     cancellationToken).ConfigureAwait(false);
+                healthStopwatch.Stop();
+                healthPingMs = healthStopwatch.ElapsedMilliseconds;
             }
             catch (Exception ex)
             {
@@ -151,7 +161,17 @@ namespace VsClineAgent.Host
             WriteSlowTrace("sidecar.start.slow", stopwatch.ElapsedMilliseconds, new JObject
             {
                 ["status"] = ((JObject?)result)?["status"]?.ToString() ?? "unknown",
-                ["runtime"] = runtimeDirectory
+                ["runtime"] = runtimeDirectory,
+                ["prepareRuntimeMs"] = runtimePreparation.TotalMs,
+                ["runtimeStampMs"] = runtimePreparation.RuntimeStampMs,
+                ["runtimeCopied"] = runtimePreparation.RuntimeCopied,
+                ["runtimeCopyMs"] = runtimePreparation.RuntimeCopyMs,
+                ["runtimeCopyReason"] = runtimePreparation.RuntimeCopyReason,
+                ["nodeModulesExtracted"] = runtimePreparation.NodeModulesExtracted,
+                ["nodeModulesExtractMs"] = runtimePreparation.NodeModulesExtractMs,
+                ["nodeModulesExtractReason"] = runtimePreparation.NodeModulesExtractReason,
+                ["pipeConnectMs"] = pipeConnectMs,
+                ["healthPingMs"] = healthPingMs
             }, 1500);
             return ((JObject?)result)?["status"]?.ToString() ?? "unknown";
         }
@@ -1202,8 +1222,22 @@ namespace VsClineAgent.Host
             throw new TimeoutException("Timed out while connecting to the Cline sidecar pipe.", lastError);
         }
 
-        private static string PrepareSidecarRuntime(string packagedSidecarDirectory)
+        private sealed class SidecarRuntimePreparation
         {
+            public string RuntimeDirectory { get; set; } = "";
+            public long TotalMs { get; set; }
+            public long RuntimeStampMs { get; set; }
+            public bool RuntimeCopied { get; set; }
+            public long RuntimeCopyMs { get; set; }
+            public string RuntimeCopyReason { get; set; } = "";
+            public bool NodeModulesExtracted { get; set; }
+            public long NodeModulesExtractMs { get; set; }
+            public string NodeModulesExtractReason { get; set; } = "";
+        }
+
+        private static SidecarRuntimePreparation PrepareSidecarRuntime(string packagedSidecarDirectory)
+        {
+            var totalStopwatch = Stopwatch.StartNew();
             var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
             var runtimeSourceDirectory = ResolvePackagedRuntimeDirectory(packagedSidecarDirectory);
             var runtimeVersion = GetRuntimeCacheVersion();
@@ -1216,18 +1250,40 @@ namespace VsClineAgent.Host
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
             var expectedStamp = GetArchiveStamp(nodeModulesZip);
+            var runtimeStampStopwatch = Stopwatch.StartNew();
             var expectedRuntimeStamp = GetRuntimeStamp(runtimeSourceDirectory);
+            runtimeStampStopwatch.Stop();
 
-            if (!File.Exists(runtimeStampPath) ||
-                !string.Equals(File.ReadAllText(runtimeStampPath), expectedRuntimeStamp, StringComparison.Ordinal))
+            var preparation = new SidecarRuntimePreparation
             {
+                RuntimeDirectory = cacheRoot,
+                RuntimeStampMs = runtimeStampStopwatch.ElapsedMilliseconds
+            };
+
+            var runtimeCopyReason = !File.Exists(runtimeStampPath)
+                ? "missing_runtime_stamp"
+                : !string.Equals(File.ReadAllText(runtimeStampPath), expectedRuntimeStamp, StringComparison.Ordinal)
+                    ? "runtime_stamp_mismatch"
+                    : "";
+            if (!string.IsNullOrEmpty(runtimeCopyReason))
+            {
+                var runtimeCopyStopwatch = Stopwatch.StartNew();
                 CopyRuntimeFiles(runtimeSourceDirectory, cacheRoot);
+                runtimeCopyStopwatch.Stop();
+                preparation.RuntimeCopied = true;
+                preparation.RuntimeCopyMs = runtimeCopyStopwatch.ElapsedMilliseconds;
+                preparation.RuntimeCopyReason = runtimeCopyReason;
                 File.WriteAllText(runtimeStampPath, expectedRuntimeStamp);
             }
 
-            if (!Directory.Exists(nodeModulesDirectory) ||
-                !File.Exists(stampPath) ||
-                !string.Equals(File.ReadAllText(stampPath), expectedStamp, StringComparison.Ordinal))
+            var nodeModulesExtractReason = !Directory.Exists(nodeModulesDirectory)
+                ? "missing_node_modules_directory"
+                : !File.Exists(stampPath)
+                    ? "missing_node_modules_stamp"
+                    : !string.Equals(File.ReadAllText(stampPath), expectedStamp, StringComparison.Ordinal)
+                        ? "node_modules_stamp_mismatch"
+                        : "";
+            if (!string.IsNullOrEmpty(nodeModulesExtractReason))
             {
                 if (!File.Exists(nodeModulesZip))
                     throw new FileNotFoundException("Cline SDK dependency archive was not found.", nodeModulesZip);
@@ -1236,11 +1292,29 @@ namespace VsClineAgent.Host
                 if (Directory.Exists(nodeModulesDirectory))
                     Directory.Delete(nodeModulesDirectory, true);
 
+                var extractStopwatch = Stopwatch.StartNew();
                 ZipFile.ExtractToDirectory(nodeModulesZip, nodeModulesDirectory);
+                extractStopwatch.Stop();
+                preparation.NodeModulesExtracted = true;
+                preparation.NodeModulesExtractMs = extractStopwatch.ElapsedMilliseconds;
+                preparation.NodeModulesExtractReason = nodeModulesExtractReason;
                 File.WriteAllText(stampPath, expectedStamp);
             }
 
-            return cacheRoot;
+            totalStopwatch.Stop();
+            preparation.TotalMs = totalStopwatch.ElapsedMilliseconds;
+            WriteSlowTrace("sidecar.runtime.prepare.slow", preparation.TotalMs, new JObject
+            {
+                ["runtime"] = preparation.RuntimeDirectory,
+                ["runtimeStampMs"] = preparation.RuntimeStampMs,
+                ["runtimeCopied"] = preparation.RuntimeCopied,
+                ["runtimeCopyMs"] = preparation.RuntimeCopyMs,
+                ["runtimeCopyReason"] = preparation.RuntimeCopyReason,
+                ["nodeModulesExtracted"] = preparation.NodeModulesExtracted,
+                ["nodeModulesExtractMs"] = preparation.NodeModulesExtractMs,
+                ["nodeModulesExtractReason"] = preparation.NodeModulesExtractReason
+            });
+            return preparation;
         }
 
         private static string ResolvePackagedRuntimeDirectory(string packagedSidecarDirectory)
@@ -1279,8 +1353,8 @@ namespace VsClineAgent.Host
 
         private static string GetRuntimeCacheVersion()
         {
-            var version = typeof(SidecarProcess).Assembly.GetName().Version?.ToString();
-            string cacheVersion = string.IsNullOrWhiteSpace(version) ? "unknown" : version!;
+            var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_CACHE_KEY");
+            string cacheVersion = string.IsNullOrWhiteSpace(configured) ? "current" : configured!;
 
             foreach (var invalidChar in Path.GetInvalidFileNameChars())
                 cacheVersion = cacheVersion.Replace(invalidChar, '_');
@@ -1350,7 +1424,12 @@ namespace VsClineAgent.Host
                 return "missing";
 
             var info = new FileInfo(archivePath);
-            return info.Length + ":" + info.LastWriteTimeUtc.Ticks;
+            using (var stream = File.OpenRead(archivePath))
+            using (var sha256 = SHA256.Create())
+            {
+                var hash = sha256.ComputeHash(stream);
+                return info.Length + ":sha256:" + BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
         }
 
         private static string Quote(string value)
