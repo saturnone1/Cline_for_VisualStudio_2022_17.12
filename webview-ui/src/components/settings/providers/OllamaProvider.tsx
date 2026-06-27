@@ -2,7 +2,6 @@ import { StringRequest } from "@shared/proto/cline/common"
 import { Mode } from "@shared/storage/types"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { useCallback, useEffect, useState } from "react"
-import UseCustomPromptCheckbox from "@/components/settings/UseCustomPromptCheckbox"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { ModelsServiceClient } from "@/services/grpc-client"
@@ -119,8 +118,6 @@ export const OllamaProvider = ({ showModelOptions, isPopup, currentMode }: Ollam
 					<p className="text-xs mt-0 text-description">{t("settings.api.requestTimeoutHelp")}</p>
 				</>
 			)}
-
-			<UseCustomPromptCheckbox providerId="ollama" />
 
 			<p
 				style={{

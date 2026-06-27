@@ -139,6 +139,7 @@ export class VisualStudioWebviewRouter {
 	private clineSdk: ClineSdkRuntime | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
+	private readonly mcpServerStreamRequestIds = new Set<string>()
 	private readonly taskSnapshots = new Map<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>()
 	private readonly lastStateBroadcastKeys = new Map<string, string>()
 	private readonly state: ReturnType<typeof createInitialState>
@@ -201,17 +202,26 @@ export class VisualStudioWebviewRouter {
 		"UiService.subscribeToShowWebview",
 		"UiService.subscribeToAddToInput",
 		"McpService.subscribeToMcpMarketplaceCatalog",
-		"McpService.subscribeToMcpServers",
 		"ModelsService.subscribeToOpenRouterModels",
 		"ModelsService.subscribeToLiteLlmModels",
 	])
 
 	constructor(private readonly connection: JsonRpcConnection) {
 		this.state = loadInitialState()
+		for (const [taskId, snapshot] of Object.entries(this.state.taskSnapshots)) {
+			const normalized = cloneTaskSnapshot(snapshot)
+			if (normalized) {
+				this.taskSnapshots.set(taskId, normalized)
+			}
+		}
 	}
 
 	setClineSdk(clineSdk: ClineSdkRuntime) {
 		this.clineSdk = clineSdk
+	}
+
+	dispose() {
+		this.flushPersistedStateSave()
 	}
 
 	isScheduledAgentsEnabled() {
@@ -500,6 +510,14 @@ export class VisualStudioWebviewRouter {
 					webviewMessages: [],
 				}
 			}
+			if (this.mcpServerStreamRequestIds.delete(requestId)) {
+				logInteraction("webview->sidecar", "grpc_request_cancel.mcpStreamDisposed", { requestId })
+				return {
+					handled: true,
+					owner: "sidecar",
+					webviewMessages: [],
+				}
+			}
 			// The Cline webview may cancel long-lived subscription request IDs while
 			// cancelling a task. Keep those host-owned streams alive so the user can
 			// continue the same conversation after Cancel.
@@ -568,7 +586,8 @@ export class VisualStudioWebviewRouter {
 		}
 
 		if (key === "McpService.subscribeToMcpServers") {
-			return grpcHandled(grpcResponse(requestId, createMcpServersLazyResponse(), true))
+			this.mcpServerStreamRequestIds.add(requestId)
+			return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), true))
 		}
 
 		if (key === "McpService.subscribeToMcpMarketplaceCatalog") {
@@ -1165,29 +1184,29 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, this.getMcpMarketplaceResponse(), false))
 
 			case "McpService.addRemoteMcpServer":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().addRemoteMcpServer(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().addRemoteMcpServer(message))
 
 			case "McpService.openMcpSettings":
 				await this.openMcpSettingsFile()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "McpService.updateMcpTimeout":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().updateMcpTimeout(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().updateMcpTimeout(message))
 
 			case "McpService.restartMcpServer":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().restartMcpServer(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().restartMcpServer(message))
 
 			case "McpService.deleteMcpServer":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().deleteMcpServer(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().deleteMcpServer(message))
 
 			case "McpService.toggleToolAutoApprove":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().toggleMcpToolAutoApprove(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().toggleMcpToolAutoApprove(message))
 
 			case "McpService.toggleMcpServer":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().setMcpServerDisabled(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().setMcpServerDisabled(message))
 
 			case "McpService.authenticateMcpServer":
-				return grpcHandled(grpcResponse(requestId, await this.requireClineSdk().authenticateMcpServer(message), false))
+				return this.grpcMcpServersMutation(requestId, await this.requireClineSdk().authenticateMcpServer(message))
 
 			case "McpService.downloadMcp":
 				return grpcHandled(
@@ -1518,6 +1537,7 @@ export class VisualStudioWebviewRouter {
 			if (normalizeProviderValue(session.provider) === "openai-codex") {
 				this.state.openAiCodexIsAuthenticated = true
 			}
+			this.syncActiveApiConfigurationProfile()
 			savePersistedState(this.state)
 			await this.broadcastState()
 			session.status = "configured"
@@ -1553,6 +1573,7 @@ export class VisualStudioWebviewRouter {
 		const next = { ...this.state.apiConfiguration } as Record<string, unknown>
 		delete next[field]
 		this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
+		this.syncActiveApiConfigurationProfile()
 	}
 
 	private getOAuthCallbackStatus(message: unknown) {
@@ -1670,6 +1691,7 @@ export class VisualStudioWebviewRouter {
 			...this.state.apiConfiguration,
 			...update,
 		}) as typeof this.state.apiConfiguration
+		this.syncActiveApiConfigurationProfile()
 		savePersistedState(this.state)
 		await this.broadcastState()
 
@@ -1775,6 +1797,7 @@ export class VisualStudioWebviewRouter {
 		if (provider === "openai-codex") {
 			this.state.openAiCodexIsAuthenticated = true
 		}
+		this.syncActiveApiConfigurationProfile()
 		savePersistedState(this.state)
 		await this.broadcastState()
 		logInteraction("sidecar", "oauthTokenRefreshed", {
@@ -1869,6 +1892,7 @@ export class VisualStudioWebviewRouter {
 			}
 		}
 		this.state.apiConfiguration = normalizeApiConfiguration(nextConfig) as typeof this.state.apiConfiguration
+		this.syncActiveApiConfigurationProfile()
 		savePersistedState(this.state)
 		await this.broadcastState()
 
@@ -2530,6 +2554,19 @@ export class VisualStudioWebviewRouter {
 		return this.requireClineSdk().getMcpServersResponse()
 	}
 
+	private grpcMcpServersMutation(requestId: string, response: unknown) {
+		return grpcHandled(
+			grpcResponse(requestId, response, false),
+			...this.buildMcpServerStreamMessages(response),
+		)
+	}
+
+	private buildMcpServerStreamMessages(response: unknown) {
+		return [...this.mcpServerStreamRequestIds]
+			.filter((streamRequestId) => streamRequestId)
+			.map((streamRequestId) => grpcResponse(streamRequestId, response, true))
+	}
+
 	private getMcpMarketplaceResponse() {
 		const catalog = { items: [] }
 		return { catalog, items: catalog.items }
@@ -2843,6 +2880,7 @@ export class VisualStudioWebviewRouter {
 			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
+		let activateMissing = false
 		if (this.clineSdk.status.activeSessionId !== sessionId) {
 			logInteraction("sidecar", "sendAskResponse.activateSession", {
 				from: this.clineSdk.status.activeSessionId,
@@ -2852,6 +2890,7 @@ export class VisualStudioWebviewRouter {
 				if (!isSessionNotFoundError(error)) {
 					throw error
 				}
+				activateMissing = true
 				logInteraction("sidecar", "sendAskResponse.activateSessionMissing", {
 					sessionId,
 					error: error instanceof Error ? error.message : String(error),
@@ -2860,6 +2899,9 @@ export class VisualStudioWebviewRouter {
 		}
 
 		try {
+			if (activateMissing) {
+				return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
+			}
 			this.markSendLatencySdkSend(sessionId)
 			logInteraction("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength })
 			return await this.clineSdk.send(sendParams)
@@ -2872,11 +2914,7 @@ export class VisualStudioWebviewRouter {
 				sessionId,
 				error: error instanceof Error ? error.message : String(error),
 			})
-			throw new Error(
-				this.getUiLanguage() === "ko"
-					? "이전 SDK 세션을 찾을 수 없어 메시지를 보내지 않았습니다. 현재 대화는 유지됩니다. 새 작업으로 시작하거나 잠시 후 다시 시도해 주세요."
-					: "The previous SDK session could not be found, so the message was not sent. The conversation was kept intact. Start a new task or try again shortly.",
-			)
+			return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
 		}
 	}
 
@@ -2917,7 +2955,7 @@ export class VisualStudioWebviewRouter {
 		})
 		void this.runLifecycleHooks("TaskResume", { prompt, cwd, userImages, userFiles, sessionId })
 		return this.clineSdk.startSession({
-			prompt,
+			prompt: buildResumedConversationPrompt(this.state.clineMessages, prompt, this.getUiLanguage()),
 			cwd,
 			userImages,
 			userFiles,
@@ -2948,7 +2986,7 @@ export class VisualStudioWebviewRouter {
 		}
 
 		const sessionId = getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || "")
-		const resultText = getString(agentResult, "text") || getString(agentResult, "outputText")
+		const resultText = extractCompletionTextFromResult(agentResult, resultRecord)
 		const finishReason = getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed"
 		if (resultText) {
 			this.finishSdkTask(sessionId, finishReason, resultText)
@@ -3002,10 +3040,7 @@ export class VisualStudioWebviewRouter {
 		if (this.state.currentTaskItem && this.state.clineMessages.length > 0) {
 			const taskId = String(this.state.currentTaskItem.id || sessionId)
 			if (taskId) {
-				this.taskSnapshots.set(taskId, {
-					taskItem: { ...this.state.currentTaskItem },
-					messages: this.state.clineMessages.map((message) => ({ ...message })),
-				})
+				this.rememberTaskSnapshot(taskId, this.state.currentTaskItem, this.state.clineMessages)
 			}
 		}
 
@@ -3021,6 +3056,7 @@ export class VisualStudioWebviewRouter {
 		this.pendingQuestion = null
 		this.state.currentTaskItem = null
 		this.state.clineMessages = []
+		savePersistedState(this.state)
 		await this.broadcastState()
 
 		this.clineSdk?.markSessionInactive(sessionId)
@@ -3033,7 +3069,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		const snapshot = this.taskSnapshots.get(taskId)
+		const snapshot = this.getTaskSnapshot(taskId)
 		if (snapshot) {
 			this.clearLiveInteractionState("showTaskWithId:snapshot")
 			this.state.currentTaskItem = { ...snapshot.taskItem }
@@ -3060,10 +3096,7 @@ export class VisualStudioWebviewRouter {
 				})
 				this.state.currentTaskItem = taskItem
 				this.state.clineMessages = clineMessages
-				this.taskSnapshots.set(taskId, {
-					taskItem: { ...taskItem },
-					messages: this.state.clineMessages.map((message) => ({ ...message })),
-				})
+				this.rememberTaskSnapshot(taskId, taskItem, this.state.clineMessages)
 				savePersistedState(this.state)
 				await this.broadcastState()
 				return
@@ -3095,7 +3128,7 @@ export class VisualStudioWebviewRouter {
 				return false
 			})
 			logInteraction("sidecar", "deleteSessionRequested", { sessionId: id, deleted })
-			this.taskSnapshots.delete(id)
+			this.forgetTaskSnapshot(id)
 		}
 		this.state.taskHistory = removeDeletedHistoryItems(this.state.taskHistory, this.deletedTaskIds)
 		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
@@ -3136,7 +3169,7 @@ export class VisualStudioWebviewRouter {
 			})
 		}
 
-		this.taskSnapshots.clear()
+		this.clearTaskSnapshots()
 		this.state.taskHistory = []
 		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
 			this.clearLiveInteractionState("deleteAllTasks")
@@ -3156,13 +3189,15 @@ export class VisualStudioWebviewRouter {
 		this.state.taskHistory = this.state.taskHistory.map((item) =>
 			item.id === taskId ? { ...item, isFavorited } : item,
 		)
-		const snapshot = this.taskSnapshots.get(taskId)
+		const snapshot = this.getTaskSnapshot(taskId)
 		if (snapshot) {
 			snapshot.taskItem = { ...snapshot.taskItem, isFavorited }
+			this.rememberTaskSnapshot(taskId, snapshot.taskItem, snapshot.messages)
 		}
 		if (this.state.currentTaskItem?.id === taskId) {
 			this.state.currentTaskItem = { ...this.state.currentTaskItem, isFavorited }
 		}
+		savePersistedState(this.state)
 		this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }).catch(() => undefined)
 	}
 
@@ -3264,10 +3299,8 @@ export class VisualStudioWebviewRouter {
 		})
 		this.state.currentTaskItem = taskItem
 		this.state.clineMessages = clineMessages
-		this.taskSnapshots.set(taskId, {
-			taskItem: { ...taskItem },
-			messages: this.state.clineMessages.map((message) => ({ ...message })),
-		})
+		this.rememberTaskSnapshot(taskId, taskItem, this.state.clineMessages)
+		this.schedulePersistedStateSave()
 	}
 
 	private async restoreCheckpoint(message: unknown) {
@@ -4426,7 +4459,7 @@ export class VisualStudioWebviewRouter {
 					totalCost: usage.totalCost,
 				})
 			}
-			const text = getString(result, "outputText")
+			const text = extractCompletionTextFromResult(result, event)
 			this.finishSdkTask(sessionId, getString(result, "status") || "completed", text)
 		}
 
@@ -4464,7 +4497,7 @@ export class VisualStudioWebviewRouter {
 			this.noteTaskActivity("done")
 			this.finishFoldedReasoningText()
 			this.clearReasoningStatus()
-			const text = getString(event, "text")
+			const text = extractCompletionTextFromResult(asRecord(event.result), event)
 			this.finishSdkTask(sessionId, "completed", text)
 		}
 
@@ -4706,6 +4739,13 @@ export class VisualStudioWebviewRouter {
 			this.state.mode === "plan"
 				? "You are in PLAN mode. Do not modify files, run terminal commands, launch browsers, or perform destructive/external actions. Use read-only inspection only when necessary, ask clarifying questions when the requested change is ambiguous, and return a concrete plan for the user to approve before implementation."
 				: "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
+		const customPrompt = getString(this.state, "customPrompt").trim()
+		const systemPrompt = [
+			`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`,
+			customPrompt ? `Additional user-defined instructions:\n${customPrompt}` : "",
+		]
+			.filter(Boolean)
+			.join("\n\n")
 
 		logInteraction("sidecar", "sdkConfig", {
 			providerId: sdkProviderId,
@@ -4758,8 +4798,7 @@ export class VisualStudioWebviewRouter {
 			},
 			...(execution ? { execution } : {}),
 			preferredLanguage,
-			systemPrompt:
-				`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`,
+			systemPrompt,
 		}
 	}
 
@@ -4803,6 +4842,34 @@ export class VisualStudioWebviewRouter {
 			.some((message) => getString(message, "say") === "completion_result" || getString(message, "ask") === "completion_result")
 	}
 
+	private getLastUserOrProgressMessageIndex() {
+		return findLastIndex(this.state.clineMessages, (message) => {
+			const say = getString(message, "say")
+			const ask = getString(message, "ask")
+			if (say === "user_feedback" || say === "task") {
+				return true
+			}
+			if (ask === "command" || ask === "tool") {
+				return true
+			}
+			if (say === "tool" || say === "command_output" || say === "browser_action") {
+				return true
+			}
+			if (say === "reasoning") {
+				const text = getString(message, "text")
+				return text.includes("기록") || text.includes("history") || text.includes("진행") || text.includes("Running")
+			}
+			return false
+		})
+	}
+
+	private hasAssistantTextAfterLastUserOrProgressMessage() {
+		const lastBoundaryIndex = this.getLastUserOrProgressMessageIndex()
+		return this.state.clineMessages
+			.slice(lastBoundaryIndex + 1)
+			.some((message) => getString(message, "say") === "text" && getString(message, "text").trim().length > 0 && message.partial !== true)
+	}
+
 	private finishSdkTask(sessionId: string, status: string, text = "") {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
@@ -4812,17 +4879,20 @@ export class VisualStudioWebviewRouter {
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
 
-		const hasAssistantText = this.hasAssistantTextAfterLastUserMessage()
+		const hasAssistantTextSinceUser = this.hasAssistantTextAfterLastUserMessage()
+		const hasFinalAssistantText = this.hasAssistantTextAfterLastUserOrProgressMessage()
 		if (activeText) {
 			this.addAssistantTextResult(activeText)
-		} else if (!hasAssistantText) {
-			logInteraction("sidecar", "emptyDoneNoAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+		} else if (!hasAssistantTextSinceUser) {
+			logInteraction("sidecar", "emptyDoneNoFinalAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 			const normalizedStatus = String(status || "").toLowerCase()
 			if (normalizedStatus === "completed" || normalizedStatus === "idle" || normalizedStatus === "ended") {
 				this.finalizeOpenPartialMessages()
 				savePersistedState(this.state)
 				return
 			}
+		} else if (!hasFinalAssistantText) {
+			logInteraction("sidecar", "doneWithPreviousAssistantTextNoFinalText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		} else {
 			logInteraction("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
 		}
@@ -4926,6 +4996,7 @@ export class VisualStudioWebviewRouter {
 				...this.state.apiConfiguration,
 				...compactApiConfiguration(apiConfigurationUpdate),
 			}) as typeof this.state.apiConfiguration
+			this.syncActiveApiConfigurationProfile()
 		}
 		const autoApprovalUpdate = extractAutoApprovalSettingsUpdate(request)
 		if (Object.keys(autoApprovalUpdate).length > 0) {
@@ -4961,12 +5032,73 @@ export class VisualStudioWebviewRouter {
 			"nativeToolCallEnabled",
 			"strictPlanModeEnabled",
 			"useAutoCondense",
+			"customPrompt",
 		] as const) {
 			if (key in request && key !== "apiConfiguration" && key !== "autoApprovalSettings") {
 				const stateKey = key === "nativeToolCallEnabled" ? "nativeToolCallSetting" : key
 				;(this.state as Record<string, unknown>)[stateKey] = request[key]
 			}
 		}
+		if ("apiConfigurationProfiles" in request) {
+			this.state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(request.apiConfigurationProfiles, this.state.apiConfiguration, this.state.planActSeparateModelsSetting)
+		}
+		if ("activeApiConfigurationProfileId" in request) {
+			this.activateApiConfigurationProfile(getString(request, "activeApiConfigurationProfileId"))
+		} else if ("apiConfigurationProfiles" in request) {
+			this.ensureApiConfigurationProfileState()
+		}
+		if ("planActSeparateModelsSetting" in request && !("activeApiConfigurationProfileId" in request)) {
+			this.syncActiveApiConfigurationProfile()
+		}
+	}
+
+	private ensureApiConfigurationProfileState() {
+		const profiles = normalizeApiConfigurationProfiles(
+			this.state.apiConfigurationProfiles,
+			this.state.apiConfiguration,
+			this.state.planActSeparateModelsSetting,
+		)
+		this.state.apiConfigurationProfiles = profiles
+		const activeId = getString(this.state, "activeApiConfigurationProfileId")
+		if (!profiles.some((profile) => getString(profile, "id") === activeId)) {
+			this.state.activeApiConfigurationProfileId = getString(profiles[0], "id")
+		}
+	}
+
+	private activateApiConfigurationProfile(profileId: string) {
+		this.ensureApiConfigurationProfileState()
+		const profiles = arrayOfRecords(this.state.apiConfigurationProfiles)
+		const profile = profiles.find((candidate) => getString(candidate, "id") === profileId) || profiles[0]
+		if (!profile) {
+			return
+		}
+		this.state.activeApiConfigurationProfileId = getString(profile, "id")
+		this.applyApiConfigurationProfileSnapshot(profile)
+	}
+
+	private applyApiConfigurationProfileSnapshot(profile: Record<string, unknown>) {
+		const profileApiConfiguration = asRecord(profile.apiConfiguration)
+		this.state.apiConfiguration = normalizeApiConfiguration(profileApiConfiguration) as typeof this.state.apiConfiguration
+		this.state.planActSeparateModelsSetting =
+			typeof profile.planActSeparateModelsSetting === "boolean"
+				? profile.planActSeparateModelsSetting
+				: this.state.planActSeparateModelsSetting
+	}
+
+	private syncActiveApiConfigurationProfile() {
+		this.ensureApiConfigurationProfileState()
+		const activeId = getString(this.state, "activeApiConfigurationProfileId")
+		const now = new Date().toISOString()
+		this.state.apiConfigurationProfiles = arrayOfRecords(this.state.apiConfigurationProfiles).map((profile) =>
+			getString(profile, "id") === activeId
+				? {
+					...profile,
+					apiConfiguration: normalizeApiConfiguration(asRecord(this.state.apiConfiguration)),
+					planActSeparateModelsSetting: this.state.planActSeparateModelsSetting,
+					updatedAt: now,
+				}
+				: profile,
+		) as typeof this.state.apiConfigurationProfiles
 	}
 
 	private refreshWebToolFeatureState() {
@@ -5017,6 +5149,7 @@ export class VisualStudioWebviewRouter {
 			...normalizeClineMessagePayload(message),
 		}
 		this.state.clineMessages.push(normalizedMessage)
+		this.schedulePersistedStateSave()
 		return normalizedMessage
 	}
 
@@ -5025,10 +5158,12 @@ export class VisualStudioWebviewRouter {
 			const ask = getString(message, "ask")
 			return ask !== "completion_result" && ask !== "resume_task" && ask !== "resume_completed_task"
 		})
+		this.schedulePersistedStateSave()
 	}
 
 	private removeAskMessages(askKind: string) {
 		this.state.clineMessages = this.state.clineMessages.filter((message) => getString(message, "ask") !== askKind)
+		this.schedulePersistedStateSave()
 	}
 
 	private addToolActivityMessage(tool: string, input: Record<string, unknown>, fallback: unknown) {
@@ -5624,7 +5759,7 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 		const noticeMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000)
-		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 180000)
+		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)
 		if (noticeMs > 0 && noticeMs < timeoutMs) {
 			this.taskIdleNoticeTimer = setTimeout(() => {
 				if (!this.state.currentTaskItem || this.activePartialTextTs) {
@@ -5724,10 +5859,10 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
-		const snapshot = this.taskSnapshots.get(currentTaskId)
+		const snapshot = this.getTaskSnapshot(currentTaskId)
 		if (snapshot) {
-			this.taskSnapshots.delete(currentTaskId)
-			this.taskSnapshots.set(sessionId, snapshot)
+			this.forgetTaskSnapshot(currentTaskId)
+			this.rememberTaskSnapshot(sessionId, snapshot.taskItem, snapshot.messages)
 		}
 		this.state.currentTaskItem = { ...this.state.currentTaskItem, id: sessionId }
 		this.state.taskHistory = this.state.taskHistory.map((item) =>
@@ -5741,6 +5876,7 @@ export class VisualStudioWebviewRouter {
 		const index = this.state.clineMessages.findIndex((message) => message.ts === ts)
 		if (index >= 0) {
 			this.state.clineMessages[index] = normalizeClineMessagePayload({ ...this.state.clineMessages[index], ...updates, ts })
+			this.schedulePersistedStateSave()
 		}
 	}
 
@@ -5759,10 +5895,43 @@ export class VisualStudioWebviewRouter {
 			this.state.currentTaskItem,
 			...this.state.taskHistory.filter((item) => item.id !== this.state.currentTaskItem?.id),
 		]
-		this.taskSnapshots.set(String(this.state.currentTaskItem.id || ""), {
-			taskItem: { ...this.state.currentTaskItem },
-			messages: this.state.clineMessages.map((message) => ({ ...message })),
-		})
+		this.rememberTaskSnapshot(String(this.state.currentTaskItem.id || ""), this.state.currentTaskItem, this.state.clineMessages)
+		this.schedulePersistedStateSave()
+	}
+
+	private getTaskSnapshot(taskId: string) {
+		const snapshot = this.taskSnapshots.get(taskId) || cloneTaskSnapshot(asRecord(this.state.taskSnapshots)[taskId])
+		if (snapshot) {
+			this.taskSnapshots.set(taskId, snapshot)
+		}
+		return snapshot
+	}
+
+	private rememberTaskSnapshot(taskId: string, taskItem: Record<string, unknown>, messages: Array<Record<string, unknown>>) {
+		if (!taskId) {
+			return
+		}
+		const snapshot = {
+			taskItem: { ...taskItem },
+			messages: messages.map((message) => ({ ...message })),
+		}
+		this.taskSnapshots.set(taskId, snapshot)
+		this.state.taskSnapshots = {
+			...this.state.taskSnapshots,
+			[taskId]: snapshot,
+		}
+	}
+
+	private forgetTaskSnapshot(taskId: string) {
+		this.taskSnapshots.delete(taskId)
+		const next = { ...this.state.taskSnapshots }
+		delete next[taskId]
+		this.state.taskSnapshots = next
+	}
+
+	private clearTaskSnapshots() {
+		this.taskSnapshots.clear()
+		this.state.taskSnapshots = {}
 	}
 
 	private getModelId() {
@@ -5796,6 +5965,14 @@ export class VisualStudioWebviewRouter {
 			savePersistedState(this.state)
 		}, readPositiveIntEnv("VSCLINE_STATE_SAVE_DEBOUNCE_MS", 250))
 		this.persistedStateSaveTimer.unref?.()
+	}
+
+	private flushPersistedStateSave() {
+		if (this.persistedStateSaveTimer) {
+			clearTimeout(this.persistedStateSaveTimer)
+			this.persistedStateSaveTimer = null
+		}
+		savePersistedState(this.state)
 	}
 
 	private async createProviderModelCatalog(providerId: string, request: Record<string, unknown>) {
@@ -6967,7 +7144,7 @@ function resolveRequestTimeoutMs(apiConfig: Record<string, unknown>) {
 		numberValue(apiConfig.apiTimeoutMs) ||
 		numberValue(apiConfig.openAiRequestTimeoutMs) ||
 		numberValue(apiConfig.openAiCompatibleRequestTimeoutMs)
-	return configured && configured > 0 ? configured : readOptionalPositiveIntEnv("VSCLINE_API_TIMEOUT_MS")
+	return configured && configured > 0 ? configured : readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 600_000)
 }
 
 function resolveReasoningEffort(apiConfig: Record<string, unknown>, modePrefix: string) {
@@ -7927,6 +8104,82 @@ function contentToText(content: unknown): string {
 	}).filter(Boolean).join("\n\n")
 }
 
+function extractCompletionTextFromResult(result: Record<string, unknown>, event: unknown): string {
+	const eventRecord = asRecord(event)
+	const candidates: unknown[] = [
+		result.outputText,
+		result.finalText,
+		result.finalResponse,
+		result.response,
+		result.answer,
+		result.text,
+		eventRecord.outputText,
+		eventRecord.finalText,
+		eventRecord.finalResponse,
+		eventRecord.response,
+		eventRecord.answer,
+		eventRecord.text,
+		result.message,
+		result.content,
+		result.output,
+		result.result,
+		eventRecord.message,
+		eventRecord.content,
+		eventRecord.output,
+	]
+
+	for (const candidate of candidates) {
+		const text = completionCandidateToText(candidate)
+		if (text) {
+			return text
+		}
+	}
+
+	return ""
+}
+
+function completionCandidateToText(value: unknown): string {
+	if (value === undefined || value === null) {
+		return ""
+	}
+	if (typeof value === "string") {
+		return normalizeAssistantTranscriptText(value)
+	}
+	if (Array.isArray(value)) {
+		return normalizeAssistantTranscriptText(completionContentBlocksToText(value))
+	}
+	const record = asRecord(value)
+	if (Object.keys(record).length === 0) {
+		return ""
+	}
+
+	for (const key of ["outputText", "finalText", "finalResponse", "response", "answer", "text", "message", "content", "output"]) {
+		const text = completionCandidateToText(record[key])
+		if (text) {
+			return text
+		}
+	}
+
+	return ""
+}
+
+function completionContentBlocksToText(content: unknown[]): string {
+	return content.map((block) => {
+		if (typeof block === "string") {
+			return block
+		}
+		const record = asRecord(block)
+		const type = getString(record, "type")
+		if (type === "text") {
+			return getString(record, "text")
+		}
+		if (!type) {
+			return completionCandidateToText(record)
+		}
+		return ""
+	}).filter(Boolean).join("\n\n")
+}
+
 function agentChunkToTranscriptText(chunk: unknown): string {
 	if (typeof chunk === "string") {
 		return agentChunkStringToTranscriptText(chunk)
@@ -8371,6 +8624,108 @@ function normalizeAssistantTranscriptText(text: string) {
 	}
 
 	return trimmed.replace(/\n{3,}/g, "\n\n")
+}
+
+const RESUMED_CONVERSATION_MAX_MESSAGES = 40
+const RESUMED_CONVERSATION_MAX_CHARS = 20_000
+const RESUMED_CONVERSATION_MAX_ENTRY_CHARS = 2_500
+
+function buildResumedConversationPrompt(messages: Array<Record<string, unknown>>, prompt: string, uiLanguage: string) {
+	const currentPrompt = prompt.trim()
+	const entries = messages
+		.filter((message) => message.partial !== true)
+		.map(clineMessageToResumedTranscriptEntry)
+		.filter((entry): entry is { role: string; text: string } => Boolean(entry?.text))
+
+	while (entries.length > 0 && normalizeTranscriptText(entries[entries.length - 1].text) === normalizeTranscriptText(currentPrompt)) {
+		entries.pop()
+	}
+
+	if (entries.length === 0 || !currentPrompt) {
+		return prompt
+	}
+
+	const selected: string[] = []
+	let totalChars = currentPrompt.length
+	for (let index = entries.length - 1; index >= 0 && selected.length < RESUMED_CONVERSATION_MAX_MESSAGES; index--) {
+		const entry = entries[index]
+		const line = `${entry.role}:\n${truncateText(entry.text, RESUMED_CONVERSATION_MAX_ENTRY_CHARS)}`
+		if (totalChars + line.length > RESUMED_CONVERSATION_MAX_CHARS) {
+			if (selected.length > 0) {
+				break
+			}
+			selected.unshift(truncateText(line, Math.max(1_000, RESUMED_CONVERSATION_MAX_CHARS - totalChars)))
+			break
+		}
+		selected.unshift(line)
+		totalChars += line.length
+	}
+
+	if (selected.length === 0) {
+		return prompt
+	}
+
+	const korean = uiLanguage === "ko"
+	const header = korean
+		? "아래는 Visual Studio 재시작 후 복원된 이전 대화 기록입니다. 이 기록을 현재 대화 문맥으로 사용해 이어서 답하세요."
+		: "The following is the previous conversation restored after Visual Studio restarted. Use it as context and continue the conversation."
+	const currentLabel = korean ? "현재 사용자 메시지" : "Current user message"
+	return `${header}\n\n${selected.join("\n\n")}\n\n${currentLabel}:\n${currentPrompt}`
+}
+
+function clineMessageToResumedTranscriptEntry(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	const ask = getString(message, "ask")
+	const text = resumedTranscriptTextForMessage(message)
+	if (!text) {
+		return null
+	}
+
+	if (say === "task" || say === "user_feedback") {
+		return { role: "User", text }
+	}
+	if (say === "text") {
+		return { role: "Assistant", text }
+	}
+	if (say === "tool" || say === "command_output" || say === "browser_action" || ask === "tool" || ask === "command") {
+		return { role: "Tool", text }
+	}
+	if (ask === "followup" || ask === "plan_mode_respond" || ask === "act_mode_respond") {
+		return { role: "Assistant", text }
+	}
+	if (say === "error" || ask === "api_req_failed") {
+		return { role: "System", text }
+	}
+	return null
+}
+
+function resumedTranscriptTextForMessage(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	const ask = getString(message, "ask")
+	const text = getString(message, "text")
+	if (!text || say === "completion_result" || ask === "completion_result" || say === "api_req_started" || say === "reasoning") {
+		return ""
+	}
+
+	const parsed = asRecord(tryParseJson(text) ?? {})
+	if (Object.keys(parsed).length === 0) {
+		return normalizeAssistantTranscriptText(text)
+	}
+
+	if (ask === "command") {
+		return getString(parsed, "command") || normalizeAssistantTranscriptText(text)
+	}
+	if (ask === "followup") {
+		const question = getString(parsed, "question")
+		const options = getStringArray(parsed, "options")
+		return [question, options.length ? `Options: ${options.join(", ")}` : ""].filter(Boolean).join("\n")
+	}
+	if (say === "tool" || ask === "tool") {
+		const label = getString(parsed, "tool") || getString(parsed, "path") || getString(parsed, "command") || "tool"
+		const content = getString(parsed, "content") || getString(parsed, "error") || stringify(parsed)
+		return `${label}\n${content}`
+	}
+	return normalizeAssistantTranscriptText(text)
 }
 
 function mergeTextDelta(current: string, delta: string) {
@@ -9318,6 +9673,45 @@ function normalizeApiConfiguration(apiConfig: Record<string, unknown>) {
 	return normalized
 }
 
+function normalizeApiConfigurationProfiles(
+	value: unknown,
+	fallbackApiConfiguration: unknown,
+	fallbackPlanActSeparateModelsSetting: boolean,
+) {
+	const now = new Date().toISOString()
+	const fallbackProfile = {
+		id: "default",
+		name: "Default",
+		apiConfiguration: normalizeApiConfiguration(asRecord(fallbackApiConfiguration)),
+		planActSeparateModelsSetting: fallbackPlanActSeparateModelsSetting,
+		createdAt: now,
+		updatedAt: now,
+	}
+
+	const profiles = arrayOfRecords(value)
+		.map((profile, index) => {
+			const apiConfiguration = normalizeApiConfiguration(asRecord(profile.apiConfiguration))
+			if (Object.keys(apiConfiguration).length === 0) {
+				return null
+			}
+			const id = getString(profile, "id") || `profile-${index + 1}`
+			return {
+				id,
+				name: getString(profile, "name") || (index === 0 ? "Default" : `Profile ${index + 1}`),
+				apiConfiguration,
+				planActSeparateModelsSetting:
+					typeof profile.planActSeparateModelsSetting === "boolean"
+						? profile.planActSeparateModelsSetting
+						: fallbackPlanActSeparateModelsSetting,
+				createdAt: getString(profile, "createdAt") || now,
+				updatedAt: getString(profile, "updatedAt") || now,
+			}
+		})
+		.filter((profile): profile is typeof fallbackProfile => Boolean(profile))
+
+	return profiles.length > 0 ? profiles : [fallbackProfile]
+}
+
 function normalizePreferredLanguage(value: string) {
 	const normalized = value.trim().toLowerCase()
 	return normalized === "korean" || normalized === "korean - 한국어" || normalized === "한국어"
@@ -9522,6 +9916,18 @@ function webFetchDisabledReason(browserSettings: unknown) {
 	return ""
 }
 
+function cloneTaskSnapshot(snapshot: unknown): { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> } | null {
+	const record = asRecord(snapshot)
+	const taskItem = asRecord(record.taskItem)
+	if (Object.keys(taskItem).length === 0) {
+		return null
+	}
+	return {
+		taskItem: { ...taskItem },
+		messages: arrayOfRecords(record.messages).map(normalizeClineMessagePayload),
+	}
+}
+
 function loadInitialState() {
 	const state = createInitialState()
 	const persisted = readPersistedState()
@@ -9537,6 +9943,24 @@ function loadInitialState() {
 		}) as typeof state.apiConfiguration
 		if (Object.keys(resolveOAuthCredentials(state.apiConfiguration, "openai-codex")).length > 0) {
 			state.openAiCodexIsAuthenticated = true
+		}
+	}
+
+	state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(
+		persisted.apiConfigurationProfiles,
+		state.apiConfiguration,
+		state.planActSeparateModelsSetting,
+	) as typeof state.apiConfigurationProfiles
+	state.activeApiConfigurationProfileId =
+		getString(persisted, "activeApiConfigurationProfileId") ||
+		getString(state.apiConfigurationProfiles[0], "id")
+	const activeProfile = arrayOfRecords(state.apiConfigurationProfiles).find(
+		(profile) => getString(profile, "id") === state.activeApiConfigurationProfileId,
+	)
+	if (activeProfile) {
+		state.apiConfiguration = normalizeApiConfiguration(asRecord(activeProfile.apiConfiguration)) as typeof state.apiConfiguration
+		if (typeof activeProfile.planActSeparateModelsSetting === "boolean") {
+			state.planActSeparateModelsSetting = activeProfile.planActSeparateModelsSetting
 		}
 	}
 
@@ -9580,10 +10004,35 @@ function loadInitialState() {
 	if (typeof persisted.preferredLanguage === "string") {
 		state.preferredLanguage = normalizePreferredLanguage(persisted.preferredLanguage)
 	}
+	const customPrompt = getString(persisted, "customPrompt")
+	state.customPrompt = customPrompt === "compact" ? "" : customPrompt
+	if (arrayOfRecords(persisted.apiConfigurationProfiles).length === 0) {
+		state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(
+			[],
+			state.apiConfiguration,
+			state.planActSeparateModelsSetting,
+		) as typeof state.apiConfigurationProfiles
+		state.activeApiConfigurationProfileId = getString(state.apiConfigurationProfiles[0], "id")
+	} else {
+		const profileAfterSettings = arrayOfRecords(state.apiConfigurationProfiles).find(
+			(profile) => getString(profile, "id") === state.activeApiConfigurationProfileId,
+		)
+		if (profileAfterSettings && typeof profileAfterSettings.planActSeparateModelsSetting === "boolean") {
+			state.planActSeparateModelsSetting = profileAfterSettings.planActSeparateModelsSetting
+		}
+	}
 
 	const taskHistory = arrayOfRecords(persisted.taskHistory)
 	if (taskHistory.length > 0) {
 		state.taskHistory = taskHistory
+	}
+
+	const taskSnapshots = asRecord(persisted.taskSnapshots)
+	for (const [taskId, snapshot] of Object.entries(taskSnapshots)) {
+		const normalized = cloneTaskSnapshot(snapshot)
+		if (taskId && normalized) {
+			state.taskSnapshots[taskId] = normalized
+		}
 	}
 
 	const currentTaskItem = asRecord(persisted.currentTaskItem)
@@ -9612,13 +10061,17 @@ function savePersistedState(state: ReturnType<typeof createInitialState>) {
 			JSON.stringify(
 				{
 					apiConfiguration: state.apiConfiguration,
+					apiConfigurationProfiles: state.apiConfigurationProfiles,
+					activeApiConfigurationProfileId: state.activeApiConfigurationProfileId,
 					autoApprovalSettings: state.autoApprovalSettings,
 					browserSettings: state.browserSettings,
 					uiLanguage: state.uiLanguage,
 					preferredLanguage: state.preferredLanguage,
+					customPrompt: state.customPrompt,
 					mode: state.mode,
 					planActSeparateModelsSetting: state.planActSeparateModelsSetting,
 					taskHistory: state.taskHistory,
+					taskSnapshots: state.taskSnapshots,
 					currentTaskItem: state.currentTaskItem,
 					clineMessages: state.currentTaskItem ? state.clineMessages : [],
 				},
@@ -10176,8 +10629,11 @@ function createInitialState() {
 			actModeOllamaModelId: defaultModelId,
 			planModeOllamaModelId: defaultModelId,
 		},
+		apiConfigurationProfiles: [] as Array<Record<string, unknown>>,
+		activeApiConfigurationProfileId: "",
 		clineMessages: [] as Array<Record<string, unknown>>,
 		taskHistory: [] as Array<Record<string, unknown>>,
+		taskSnapshots: {} as Record<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>,
 		shouldShowAnnouncement: false,
 		autoApprovalSettings: { version: 1, enabled: false, favorites: [], maxRequests: 20, actions: {} },
 		browserSettings,
@@ -10212,7 +10668,7 @@ function createInitialState() {
 		mcpResponsesCollapsed: false,
 		strictPlanModeEnabled: false,
 		yoloModeToggled: false,
-		customPrompt: null,
+		customPrompt: "",
 		useAutoCondense: false,
 		subagentsEnabled: false,
 		scheduledAgentsEnabled: false,

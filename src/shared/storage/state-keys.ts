@@ -272,7 +272,7 @@ const USER_SETTINGS_FIELDS = {
 	preferredLanguage: { default: "English" as string },
 	mode: { default: "act" as Mode },
 	focusChainSettings: { default: DEFAULT_FOCUS_CHAIN_SETTINGS as FocusChainSettings },
-	customPrompt: { default: undefined as "compact" | undefined },
+	customPrompt: { default: "" as string },
 	backgroundEditEnabled: { default: false as boolean },
 	optOutOfRemoteConfig: { default: false as boolean },
 	doubleCheckCompletionEnabled: { default: false as boolean },

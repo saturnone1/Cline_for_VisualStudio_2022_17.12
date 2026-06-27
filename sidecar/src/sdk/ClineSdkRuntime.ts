@@ -388,7 +388,7 @@ export class ClineSdkRuntime {
 		const filePath = this.resolveMcpSettingsPath(sdk)
 		this.ensureMcpSettingsFile(filePath)
 
-		return this.withMcpOperation(name, "authenticating", async () => {
+		await this.withMcpOperation(name, "authenticating", async () => {
 			if (typeof sdk.authorizeMcpServerOAuth !== "function") {
 				throw new Error("MCP OAuth is unsupported by the bundled Cline SDK.")
 			}
@@ -412,8 +412,8 @@ export class ClineSdkRuntime {
 			})
 
 			await this.reloadMcpServers()
-			return this.getMcpServersResponse()
 		})
+		return this.getMcpServersResponse()
 	}
 
 	async addRemoteMcpServer(params: unknown) {
@@ -440,10 +440,10 @@ export class ClineSdkRuntime {
 			timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
 		} as any
 		await this.saveMcpSettings(sdk, settings)
-		return this.withMcpOperation(serverName, "connecting", async () => {
+		await this.withMcpOperation(serverName, "connecting", async () => {
 			await this.reloadMcpServers()
-			return this.getMcpServersResponse()
 		})
+		return this.getMcpServersResponse()
 	}
 
 	async setMcpServerDisabled(params: unknown) {
@@ -454,13 +454,13 @@ export class ClineSdkRuntime {
 		}
 		const disabled = request.disabled === true
 		const sdk = await importClineSdk()
-		return this.withMcpOperation(name, "toggling", async () => {
+		await this.withMcpOperation(name, "toggling", async () => {
 			sdk.setMcpServerDisabled({ filePath: this.resolveMcpSettingsPath(sdk), name, disabled })
 			const manager = await this.ensureMcpManager()
 			await manager.setServerDisabled(name, disabled).catch(() => undefined)
 			await this.reloadMcpServers()
-			return this.getMcpServersResponse()
 		})
+		return this.getMcpServersResponse()
 	}
 
 	async updateMcpTimeout(params: unknown) {
@@ -492,7 +492,7 @@ export class ClineSdkRuntime {
 		if (!name) {
 			throw new Error("MCP server name is required.")
 		}
-		return this.withMcpOperation(name, "deleting", async () => {
+		await this.withMcpOperation(name, "deleting", async () => {
 			const sdk = await importClineSdk()
 			const settings = this.loadMcpSettings(sdk)
 			delete settings.mcpServers[name]
@@ -500,8 +500,8 @@ export class ClineSdkRuntime {
 			const manager = await this.ensureMcpManager()
 			await manager.unregisterServer(name).catch(() => undefined)
 			await this.reloadMcpServers()
-			return this.getMcpServersResponse()
 		})
+		return this.getMcpServersResponse()
 	}
 
 	async restartMcpServer(params: unknown) {
@@ -510,14 +510,14 @@ export class ClineSdkRuntime {
 		if (!name) {
 			throw new Error("MCP server name is required.")
 		}
-		return this.withMcpOperation(name, "restarting", async () => {
+		await this.withMcpOperation(name, "restarting", async () => {
 			const manager = await this.ensureMcpManager()
 			await this.reloadMcpServers()
 			await manager.disconnectServer(name).catch(() => undefined)
 			await manager.connectServer(name).catch(() => undefined)
 			await manager.refreshTools(name).catch(() => undefined)
-			return this.getMcpServersResponse()
 		})
+		return this.getMcpServersResponse()
 	}
 
 	async toggleMcpToolAutoApprove(params: unknown) {

@@ -241,6 +241,8 @@ export const ExtensionStateContextProvider: React.FC<{
 		telemetrySetting: "unset",
 		distinctId: "",
 		planActSeparateModelsSetting: true,
+		apiConfigurationProfiles: [],
+		activeApiConfigurationProfileId: undefined,
 		enableCheckpointsSetting: true,
 		mcpDisplayMode: DEFAULT_MCP_DISPLAY_MODE,
 		globalClineRulesToggles: {},
@@ -262,7 +264,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		mcpResponsesCollapsed: false, // Default value (expanded), will be overwritten by extension state
 		strictPlanModeEnabled: false,
 		yoloModeToggled: false,
-		customPrompt: undefined,
+		customPrompt: "",
 		useAutoCondense: false,
 		subagentsEnabled: false,
 		scheduledAgentsEnabled: false,

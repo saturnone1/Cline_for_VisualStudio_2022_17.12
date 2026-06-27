@@ -29,6 +29,10 @@ if (!pipeName) {
 	process.exit(2)
 }
 
+const activeRouters = new Set<VisualStudioWebviewRouter>()
+const activeRuntimes = new Set<ClineSdkRuntime>()
+let exiting = false
+
 const server = net.createServer((socket) => {
 	socket.setEncoding("utf8")
 
@@ -47,6 +51,8 @@ const server = net.createServer((socket) => {
 		() => webviewRouter.isScheduledAgentsEnabled(),
 	)
 	webviewRouter.setClineSdk(clineSdk)
+	activeRouters.add(webviewRouter)
+	activeRuntimes.add(clineSdk)
 
 	let buffer = ""
 	socket.on("data", (chunk) => {
@@ -73,13 +79,7 @@ const server = net.createServer((socket) => {
 			pending.reject(new Error("Host pipe closed."))
 		}
 		connection.pending.clear()
-		clineSdk
-			.dispose()
-			.catch((error) => console.error(error))
-			.finally(() => {
-				server.close(() => process.exit(0))
-				setTimeout(() => process.exit(0), 500).unref()
-			})
+		void flushAndExit(0)
 	})
 })
 
@@ -92,8 +92,8 @@ server.listen(pipeName, () => {
 	console.log(`VsCline sidecar listening on ${pipeName}`)
 })
 
-process.on("SIGTERM", () => process.exit(0))
-process.on("SIGINT", () => process.exit(0))
+process.on("SIGTERM", () => void flushAndExit(0))
+process.on("SIGINT", () => void flushAndExit(0))
 process.on("unhandledRejection", (reason) => {
 	if (isSessionStopError(reason)) {
 		logInteraction("sidecar", "sessionStopUnhandledRejection", { message: errorMessage(reason) })
@@ -101,7 +101,7 @@ process.on("unhandledRejection", (reason) => {
 	}
 
 	console.error(reason instanceof Error && reason.stack ? reason.stack : String(reason))
-	process.exit(1)
+	void flushAndExit(1)
 })
 process.on("uncaughtException", (error) => {
 	if (isSessionStopError(error)) {
@@ -110,8 +110,32 @@ process.on("uncaughtException", (error) => {
 	}
 
 	console.error(error instanceof Error && error.stack ? error.stack : String(error))
-	process.exit(1)
+	void flushAndExit(1)
 })
+
+async function flushAndExit(code: number) {
+	if (exiting) {
+		return
+	}
+	exiting = true
+	for (const router of activeRouters) {
+		try {
+			router.dispose()
+		} catch (error) {
+			console.error(error)
+		}
+	}
+
+	await Promise.all(
+		[...activeRuntimes].map((runtime) =>
+			runtime.dispose().catch((error) => console.error(error)),
+		),
+	)
+	activeRouters.clear()
+	activeRuntimes.clear()
+	server.close(() => process.exit(code))
+	setTimeout(() => process.exit(code), 500).unref()
+}
 
 function handleMessage(
 	connection: JsonRpcConnection,

@@ -4,9 +4,11 @@ import { combineErrorRetryMessages } from "@shared/combineErrorRetryMessages"
 import { combineHookSequences } from "@shared/combineHookSequences"
 import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
+import { Settings } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useMount } from "react-use"
 import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useShowNavbar } from "@/context/PlatformContext"
 import { FileServiceClient, UiServiceClient } from "@/services/grpc-client"
@@ -54,6 +56,8 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		currentFocusChainChecklist,
 		focusChainSettings,
 		hooksEnabled,
+		navigateToSettings,
+		uiLanguage,
 	} = useExtensionState()
 	const isProdHostedApp = userInfo?.apiBaseUrl === "https://app.cline.bot"
 	const shouldShowQuickWins = isProdHostedApp && (!taskHistory || taskHistory.length < QUICK_WINS_HISTORY_THRESHOLD)
@@ -384,6 +388,20 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			</div>
 			<footer className="bg-(--vscode-sidebar-background)" style={{ gridRow: "2" }}>
 				<AutoApproveBar />
+				<div className="flex justify-end px-3.5 pt-1">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								aria-label="Open settings"
+								className="size-[26px] flex items-center justify-center rounded-[3px] border-0 bg-transparent text-(--vscode-icon-foreground) hover:bg-(--vscode-toolbar-hoverBackground) cursor-pointer"
+								onClick={() => navigateToSettings()}
+								type="button">
+								<Settings className="size-4" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>{uiLanguage === "ko" ? "설정" : "Settings"}</TooltipContent>
+					</Tooltip>
+				</div>
 				<ActionButtons
 					chatState={chatState}
 					messageHandlers={messageHandlers}

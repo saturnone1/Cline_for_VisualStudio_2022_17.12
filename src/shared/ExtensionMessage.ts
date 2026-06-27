@@ -41,6 +41,8 @@ export interface ExtensionState {
 	welcomeViewCompleted: boolean
 	onboardingModels: OnboardingModelGroup | undefined
 	apiConfiguration?: ApiConfiguration
+	apiConfigurationProfiles?: ApiConfigurationProfile[]
+	activeApiConfigurationProfileId?: string
 	autoApprovalSettings: AutoApprovalSettings
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string
@@ -116,6 +118,15 @@ export interface ExtensionState {
 	welcomeBanners?: BannerCardData[]
 	openAiCodexIsAuthenticated?: boolean
 	vsClineSdkCoverage?: VsClineSdkCoverage
+}
+
+export interface ApiConfigurationProfile {
+	id: string
+	name: string
+	apiConfiguration: ApiConfiguration
+	planActSeparateModelsSetting: boolean
+	createdAt: string
+	updatedAt: string
 }
 
 export interface VsClineSdkCoverage {
