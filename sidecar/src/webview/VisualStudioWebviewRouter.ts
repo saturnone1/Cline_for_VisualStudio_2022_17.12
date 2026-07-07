@@ -2712,7 +2712,7 @@ export class VisualStudioWebviewRouter {
 			await this.launchSdkStartSession({
 				prompt: text,
 				cwd,
-				userImages: images,
+				userImages: normalizeSdkImageInputs(images),
 				userFiles: files,
 				interactive: true,
 			}, cwd, String(taskItem.id || ""), "startSession")
@@ -2852,7 +2852,7 @@ export class VisualStudioWebviewRouter {
 			sessionId,
 			prompt: getString(message, "text"),
 			mode: this.state.mode === "plan" ? "plan" : "act",
-			userImages: getStringArray(message, "images"),
+			userImages: normalizeSdkImageInputs(getStringArray(message, "images")),
 			userFiles: getStringArray(message, "files"),
 			delivery: normalizePromptDelivery(getString(message, "delivery")),
 		}
@@ -2957,7 +2957,7 @@ export class VisualStudioWebviewRouter {
 		return this.clineSdk.startSession({
 			prompt: buildResumedConversationPrompt(this.state.clineMessages, prompt, this.getUiLanguage()),
 			cwd,
-			userImages,
+			userImages: normalizeSdkImageInputs(userImages),
 			userFiles,
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, sessionId),
@@ -7785,10 +7785,83 @@ function toProtoSay(say: string) {
 
 function buildTaskInputWithAttachments(text: string, images: string[], files: string[]) {
 	const attachments = [
-		...images.map((image) => `Image: ${image}`),
+		...images.map((image) => `Image: ${formatAttachmentSummaryValue(image)}`),
 		...files.map((file) => `File: ${file}`),
 	]
 	return attachments.length > 0 ? `${text}\n\nAttachments:\n${attachments.join("\n")}` : text
+}
+
+function normalizeSdkImageInputs(images: string[]) {
+	return images.map((image) => normalizeSdkImageInput(image)).filter(Boolean)
+}
+
+function normalizeSdkImageInput(image: string) {
+	const trimmed = image.trim()
+	if (!trimmed) {
+		return ""
+	}
+
+	if (/^(https?:|data:image\/)/i.test(trimmed)) {
+		return trimmed
+	}
+
+	const localPath = trimmed.startsWith("file://") ? fileUrlToPath(trimmed) : trimmed
+	const dataUri = tryCreateImageDataUri(localPath)
+	return dataUri
+}
+
+function fileUrlToPath(value: string) {
+	try {
+		return decodeURIComponent(value.replace(/^file:\/\/\/?/i, "")).replace(/\//g, path.sep)
+	} catch {
+		return value
+	}
+}
+
+function tryCreateImageDataUri(filePath: string) {
+	try {
+		if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+			return ""
+		}
+
+		const mimeType = getImageMimeType(filePath)
+		if (!mimeType) {
+			return ""
+		}
+
+		return `data:${mimeType};base64,${fs.readFileSync(filePath).toString("base64")}`
+	} catch {
+		return ""
+	}
+}
+
+function getImageMimeType(filePath: string) {
+	const extension = path.extname(filePath).toLowerCase()
+	switch (extension) {
+		case ".png":
+			return "image/png"
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg"
+		case ".gif":
+			return "image/gif"
+		case ".webp":
+			return "image/webp"
+		case ".bmp":
+			return "image/bmp"
+		default:
+			return ""
+	}
+}
+
+function formatAttachmentSummaryValue(value: string) {
+	if (value.toLowerCase().startsWith("data:image/")) {
+		const separatorIndex = value.toLowerCase().indexOf(";base64,")
+		const mimeType = separatorIndex > "data:".length ? value.slice("data:".length, separatorIndex) : "image"
+		return `[attached ${mimeType}]`
+	}
+
+	return value
 }
 
 function createId() {

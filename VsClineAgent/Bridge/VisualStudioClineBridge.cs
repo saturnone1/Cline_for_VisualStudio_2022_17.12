@@ -599,7 +599,7 @@ namespace VsClineAgent.Bridge
             var imagePaths = (images ?? new JArray())
                 .Values<string>()
                 .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(NormalizeResumeContextText)
+                .Select(FormatAttachmentSummaryText)
                 .ToList();
             var filePaths = (files ?? new JArray())
                 .Values<string>()
@@ -914,7 +914,7 @@ namespace VsClineAgent.Bridge
                 {
                     if (allowImages && IsImagePath(fileName))
                     {
-                        imagePaths.Add(fileName);
+                        imagePaths.Add(TryCreateImageDataUri(fileName) ?? fileName);
                     }
                     else
                     {
@@ -4218,6 +4218,73 @@ namespace VsClineAgent.Bridge
                 || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
                 || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
                 || extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FormatAttachmentSummaryText(string? value)
+        {
+            var normalized = NormalizeResumeContextText(value);
+            if (normalized.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+            {
+                var separatorIndex = normalized.IndexOf(";base64,", StringComparison.OrdinalIgnoreCase);
+                var mimeType = separatorIndex > "data:".Length
+                    ? normalized.Substring("data:".Length, separatorIndex - "data:".Length)
+                    : "image";
+                return "[attached " + mimeType + "]";
+            }
+
+            return normalized;
+        }
+
+        private static string? TryCreateImageDataUri(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    return null;
+                }
+
+                var mimeType = GetImageMimeType(path);
+                if (string.IsNullOrWhiteSpace(mimeType))
+                {
+                    return null;
+                }
+
+                var bytes = File.ReadAllBytes(path);
+                return "data:" + mimeType + ";base64," + Convert.ToBase64String(bytes);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? GetImageMimeType(string path)
+        {
+            var extension = Path.GetExtension(path) ?? "";
+            if (extension.Equals(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image/png";
+            }
+            if (extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image/jpeg";
+            }
+            if (extension.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image/gif";
+            }
+            if (extension.Equals(".webp", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image/webp";
+            }
+            if (extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image/bmp";
+            }
+
+            return null;
         }
 
         private static JObject CreateHistoryItem(string id, string task)

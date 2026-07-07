@@ -52,7 +52,8 @@ namespace VsClineAgent.Host
             CancellationToken cancellationToken)
         {
             var id = Interlocked.Increment(ref _nextId).ToString();
-            var completion = new TaskCompletionSource<JToken?>();
+            var completion = new TaskCompletionSource<JToken?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
             var request = new JObject
             {
                 ["id"] = id,

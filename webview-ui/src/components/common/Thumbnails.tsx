@@ -69,18 +69,42 @@ const Thumbnails = ({ images, files, style, setImages, setFiles, onHeightChange,
 					onMouseEnter={() => setHoveredIndex(`image-${index}`)}
 					onMouseLeave={() => setHoveredIndex(null)}
 					style={{ position: "relative" }}>
-					<img
-						alt={`Thumbnail image-${index + 1}`}
-						onClick={() => handleImageClick(image)}
-						src={image}
-						style={{
-							width: 34,
-							height: 34,
-							objectFit: "cover",
-							borderRadius: 4,
-							cursor: "pointer",
-						}}
-					/>
+					{canRenderImageSrc(image) ? (
+						<img
+							alt={`Thumbnail image-${index + 1}`}
+							onClick={() => handleImageClick(image)}
+							src={image}
+							style={{
+								width: 34,
+								height: 34,
+								objectFit: "cover",
+								borderRadius: 4,
+								cursor: "pointer",
+							}}
+						/>
+					) : (
+						<div
+							onClick={() => handleImageClick(image)}
+							title={getDisplayNameFromPath(image)}
+							style={{
+								width: 34,
+								height: 34,
+								borderRadius: 4,
+								cursor: "pointer",
+								backgroundColor: "var(--vscode-editor-background)",
+								border: "1px solid var(--vscode-input-border)",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+							}}>
+							<span
+								className="codicon codicon-file-media"
+								style={{
+									fontSize: 16,
+									color: "var(--vscode-foreground)",
+								}}></span>
+						</div>
+					)}
 					{isDeletableImages && hoveredIndex === `image-${index}` && (
 						<div
 							onClick={() => handleDeleteImages(index)}
@@ -182,6 +206,20 @@ const Thumbnails = ({ images, files, style, setImages, setFiles, onHeightChange,
 			})}
 		</div>
 	)
+}
+
+function canRenderImageSrc(value: string) {
+	const normalized = value.trim().toLowerCase()
+	return (
+		normalized.startsWith("data:image/") ||
+		normalized.startsWith("blob:") ||
+		normalized.startsWith("https://") ||
+		normalized.startsWith("http://")
+	)
+}
+
+function getDisplayNameFromPath(value: string) {
+	return value.split(/[\\/]/).pop() || value
 }
 
 export default memo(Thumbnails)

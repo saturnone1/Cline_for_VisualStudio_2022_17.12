@@ -27,6 +27,7 @@ type HistoryViewItemProps = {
 	handleDeleteHistoryItem: (id: string) => void
 	toggleFavorite: (id: string, isCurrentlyFavorited: boolean) => void
 	handleHistorySelect: (itemId: string, checked: boolean) => void
+	handleTaskOpened: () => void
 }
 
 const HistoryViewItem = ({
@@ -35,9 +36,12 @@ const HistoryViewItem = ({
 	handleDeleteHistoryItem,
 	toggleFavorite,
 	handleHistorySelect,
+	handleTaskOpened,
 	selectedItems,
 }: HistoryViewItemProps) => {
 	const [expanded, setExpanded] = useState(false)
+	const [isOpening, setIsOpening] = useState(false)
+	const [openError, setOpenError] = useState<string | null>(null)
 	const { language, t } = useI18n()
 
 	const isFavoritedItem = useMemo(
@@ -45,11 +49,23 @@ const HistoryViewItem = ({
 		[item.id, item.isFavorited, pendingFavoriteToggles],
 	)
 
-	const handleShowTaskWithId = useCallback((id: string) => {
-		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>
-			console.error("Error showing task:", error),
-		)
-	}, [])
+	const handleShowTaskWithId = useCallback(
+		(id: string) => {
+			if (isOpening) {
+				return
+			}
+			setIsOpening(true)
+			setOpenError(null)
+			TaskServiceClient.showTaskWithId(StringRequest.create({ value: id }))
+				.then(handleTaskOpened)
+				.catch((error) => {
+					console.error("Error showing task:", error)
+					setOpenError(t("history.openFailed"))
+				})
+				.finally(() => setIsOpening(false))
+		},
+		[handleTaskOpened, isOpening, t],
+	)
 
 	const formatDate = useCallback((timestamp: number) => {
 		const date = new Date(timestamp)
@@ -91,7 +107,9 @@ const HistoryViewItem = ({
 			/>
 
 			<div
-				className="flex flex-col gap-2 py-2 pl-2 pr-3 relative flex-grow min-w-0"
+				className={cn("flex flex-col gap-2 py-2 pl-2 pr-3 relative flex-grow min-w-0", {
+					"opacity-80": isOpening,
+				})}
 				onClick={(e) => {
 					e.stopPropagation()
 					handleShowTaskWithId(item.id)
@@ -101,6 +119,18 @@ const HistoryViewItem = ({
 						<span className="ph-no-capture">{item.task}</span>
 					</div>
 					<div className="flex gap-2 flex-shrink-0">
+						<Button
+							aria-label={t("history.continue")}
+							className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+							disabled={isOpening}
+							onClick={(e) => {
+								e.stopPropagation()
+								handleShowTaskWithId(item.id)
+							}}
+							variant="secondary">
+							<span className={cn("codicon scale-90", isOpening ? "codicon-loading animate-spin" : "codicon-debug-continue")} />
+							{isOpening ? t("history.opening") : t("history.continue")}
+						</Button>
 						<Button
 							aria-label={t("history.delete")}
 							className="p-0 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -131,6 +161,7 @@ const HistoryViewItem = ({
 						</Button>
 					</div>
 				</div>
+				{openError && <div className="text-xs text-error">{openError}</div>}
 
 				<Button
 					className="p-0"

@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -1354,12 +1355,22 @@ namespace VsClineAgent.Host
         private static string GetRuntimeCacheVersion()
         {
             var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_CACHE_KEY");
-            string cacheVersion = string.IsNullOrWhiteSpace(configured) ? "current" : configured!;
+            string cacheVersion = string.IsNullOrWhiteSpace(configured)
+                ? GetDefaultRuntimeCacheVersion()
+                : configured!;
 
             foreach (var invalidChar in Path.GetInvalidFileNameChars())
                 cacheVersion = cacheVersion.Replace(invalidChar, '_');
 
             return cacheVersion.Replace(' ', '_');
+        }
+
+        private static string GetDefaultRuntimeCacheVersion()
+        {
+            var assemblyName = Assembly.GetExecutingAssembly().GetName();
+            var name = string.IsNullOrWhiteSpace(assemblyName.Name) ? "VsClineAgent" : assemblyName.Name!;
+            var version = assemblyName.Version?.ToString() ?? "unknown";
+            return name + "-" + version;
         }
 
         private static string GetRuntimeStamp(string sourceDirectory)

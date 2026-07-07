@@ -12,9 +12,10 @@
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>VsClineAgent</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
-    <Version>1.2</Version>
+    <AssemblyVersion>1.3.6.0</AssemblyVersion>
+    <FileVersion>1.3.6.0</FileVersion>
+    <Version>1.3.6</Version>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <!-- VSIX 생성 설정 -->
@@ -167,8 +168,12 @@
   <PropertyGroup>
     <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0</VSToolsPath>
     <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0</VSToolsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(NuGetPackageRoot)microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets')">$(NuGetPackageRoot)microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets')">$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
   </PropertyGroup>
   <!-- VSSDK 빌드 타겟: VS 설치 경로 또는 NuGet 패키지에서 임포트 -->
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
           Condition="'$(VSToolsPath)' != '' And Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+  <Import Project="$(VsSdkBuildToolsTargetsPath)"
+          Condition="!Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets') And '$(VsSdkBuildToolsTargetsPath)' != '' And Exists('$(VsSdkBuildToolsTargetsPath)')" />
 </Project>

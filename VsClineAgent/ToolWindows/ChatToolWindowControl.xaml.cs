@@ -37,7 +37,12 @@ namespace VsClineAgent.ToolWindows
             Loaded += OnLoaded;
         }
 
-        private async void OnLoaded(object sender, RoutedEventArgs e)
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            _ = OnLoadedAsync();
+        }
+
+        private async Task OnLoadedAsync()
         {
             if (_loaded)
                 return;
@@ -665,69 +670,87 @@ html, body, #root {
             public string? BrowserExecutableFolder { get; }
         }
 
-        private async void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        private void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
-            if (!e.IsSuccess)
+            _ = OnNavigationCompletedAsync(e);
+        }
+
+        private async Task OnNavigationCompletedAsync(CoreWebView2NavigationCompletedEventArgs e)
+        {
+            try
             {
-                ShowError($"Page load failed: {e.WebErrorStatus}");
-                return;
+                if (!e.IsSuccess)
+                {
+                    ShowError($"Page load failed: {e.WebErrorStatus}");
+                    return;
+                }
+
+                _webViewReady = true;
+                Dispatcher.Invoke(() =>
+                {
+                    loadingPanel.Visibility = Visibility.Collapsed;
+                    webView.Visibility = Visibility.Visible;
+                });
+
+                await ReportBlankWebviewIfNeededAsync();
             }
-
-             _webViewReady = true;
-             Dispatcher.Invoke(() =>
-             {
-                 loadingPanel.Visibility = Visibility.Collapsed;
-                 webView.Visibility = Visibility.Visible;
-             });
-
-             await ReportBlankWebviewIfNeededAsync();
-         }
-
-         private async void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
-         {
-             try
-             {
-                 _lastWebMessageJson = e.WebMessageAsJson;
-                 InteractionLog.Write("webview->host", "webview.message", e.WebMessageAsJson);
-                 if (TryHandleHostDiagnostic(e.WebMessageAsJson))
-                     return;
-
-                 if ((_sidecarProcess == null || !_sidecarProcess.IsRunning) &&
-                     TryHandlePassiveStreamingSubscription(e.WebMessageAsJson))
-                     return;
-
-                  if (_sidecarProcess == null || !_sidecarProcess.IsRunning)
-                  {
-                      var restarted = await TryEnsureSidecarRunningAsync();
-                      if (!restarted)
-                      {
-                          await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, GetSidecarNotRunningMessage());
-                          return;
-                      }
-                  }
-
-                  var sidecarProcess = _sidecarProcess;
-                  if (sidecarProcess == null || !sidecarProcess.IsRunning)
-                  {
-                      await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, GetSidecarNotRunningMessage());
-                      return;
-                  }
-
-                  var handledBySidecar = await sidecarProcess.TryHandleWebviewMessageAsync(
-                      e.WebMessageAsJson,
-                      SendToWebViewAsync,
-                      CancellationToken.None);
-
-                 if (!handledBySidecar)
-                     await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar.");
-             }
-             catch (Exception ex)
-             {
+            catch (Exception ex)
+            {
                 _lastSidecarError = ex.ToString();
-                if (TryHandlePassiveStreamingSubscription(e.WebMessageAsJson))
+                ShowError("WebView navigation handling failed:\n" + ex.Message);
+            }
+        }
+
+        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            _ = OnWebMessageReceivedAsync(e.WebMessageAsJson);
+        }
+
+        private async Task OnWebMessageReceivedAsync(string webMessageAsJson)
+        {
+            try
+            {
+                _lastWebMessageJson = webMessageAsJson;
+                InteractionLog.Write("webview->host", "webview.message", webMessageAsJson);
+                if (TryHandleHostDiagnostic(webMessageAsJson))
                     return;
 
-                await SendGrpcErrorIfPossibleAsync(e.WebMessageAsJson, ex.Message);
+                if ((_sidecarProcess == null || !_sidecarProcess.IsRunning) &&
+                    TryHandlePassiveStreamingSubscription(webMessageAsJson))
+                    return;
+
+                if (_sidecarProcess == null || !_sidecarProcess.IsRunning)
+                {
+                    var restarted = await TryEnsureSidecarRunningAsync();
+                    if (!restarted)
+                    {
+                        await SendGrpcErrorIfPossibleAsync(webMessageAsJson, GetSidecarNotRunningMessage());
+                        return;
+                    }
+                }
+
+                var sidecarProcess = _sidecarProcess;
+                if (sidecarProcess == null || !sidecarProcess.IsRunning)
+                {
+                    await SendGrpcErrorIfPossibleAsync(webMessageAsJson, GetSidecarNotRunningMessage());
+                    return;
+                }
+
+                var handledBySidecar = await sidecarProcess.TryHandleWebviewMessageAsync(
+                    webMessageAsJson,
+                    SendToWebViewAsync,
+                    CancellationToken.None);
+
+                if (!handledBySidecar)
+                    await SendGrpcErrorIfPossibleAsync(webMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar.");
+            }
+            catch (Exception ex)
+            {
+                _lastSidecarError = ex.ToString();
+                if (TryHandlePassiveStreamingSubscription(webMessageAsJson))
+                    return;
+
+                await SendGrpcErrorIfPossibleAsync(webMessageAsJson, ex.Message);
             }
         }
 
@@ -1110,7 +1133,7 @@ html, body, #root {
             {
                 var json = JsonConvert.SerializeObject(payload);
                 InteractionLog.Write("host->webview", "webview.postMessage", json);
-                await Dispatcher.InvokeAsync(async () =>
+                await Dispatcher.InvokeAsync(() =>
                 {
                     try
                     {

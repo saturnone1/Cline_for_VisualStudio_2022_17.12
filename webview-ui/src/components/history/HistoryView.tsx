@@ -155,6 +155,10 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 		})
 	}, [])
 
+	const handleTaskOpened = useCallback(() => {
+		onDone()
+	}, [onDone])
+
 	const handleDeleteHistoryItem = useCallback(
 		async (id: string) => {
 			setTasks((prev) => prev.filter((task) => task.id !== id))
@@ -418,6 +422,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							<HistoryViewItem
 								handleDeleteHistoryItem={handleDeleteHistoryItem}
 								handleHistorySelect={handleHistorySelect}
+								handleTaskOpened={handleTaskOpened}
 								index={index}
 								item={item}
 								pendingFavoriteToggles={pendingFavoriteToggles}
