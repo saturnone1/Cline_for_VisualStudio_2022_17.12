@@ -5016,6 +5016,12 @@ export class VisualStudioWebviewRouter {
 			} as typeof this.state.browserSettings
 			this.refreshWebToolFeatureState()
 		}
+		if ("focusChainSettings" in request) {
+			this.state.focusChainSettings = {
+				...asRecord(this.state.focusChainSettings),
+				...asRecord(request.focusChainSettings),
+			} as typeof this.state.focusChainSettings
+		}
 		for (const key of [
 			"apiConfiguration",
 			"autoApprovalSettings",
@@ -5028,6 +5034,12 @@ export class VisualStudioWebviewRouter {
 			"subagentsEnabled",
 			"scheduledAgentsEnabled",
 			"hooksEnabled",
+			"showFeatureTips",
+			"backgroundEditEnabled",
+			"enableCheckpointsSetting",
+			"yoloModeToggled",
+			"doubleCheckCompletionEnabled",
+			"lazyTeammateModeEnabled",
 			"enableParallelToolCalling",
 			"nativeToolCallEnabled",
 			"strictPlanModeEnabled",
