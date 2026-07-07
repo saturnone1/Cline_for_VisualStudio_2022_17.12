@@ -5022,6 +5022,9 @@ export class VisualStudioWebviewRouter {
 				...asRecord(request.focusChainSettings),
 			} as typeof this.state.focusChainSettings
 		}
+		if ("mcpDisplayMode" in request) {
+			this.state.mcpDisplayMode = normalizeMcpDisplayMode(request.mcpDisplayMode, this.state.mcpDisplayMode)
+		}
 		for (const key of [
 			"apiConfiguration",
 			"autoApprovalSettings",
@@ -5030,7 +5033,6 @@ export class VisualStudioWebviewRouter {
 			"uiLanguage",
 			"preferredLanguage",
 			"telemetrySetting",
-			"mcpDisplayMode",
 			"subagentsEnabled",
 			"scheduledAgentsEnabled",
 			"hooksEnabled",
@@ -5040,6 +5042,7 @@ export class VisualStudioWebviewRouter {
 			"yoloModeToggled",
 			"doubleCheckCompletionEnabled",
 			"lazyTeammateModeEnabled",
+			"mcpResponsesCollapsed",
 			"enableParallelToolCalling",
 			"nativeToolCallEnabled",
 			"strictPlanModeEnabled",
@@ -7874,6 +7877,16 @@ function formatAttachmentSummaryValue(value: string) {
 	}
 
 	return value
+}
+
+function normalizeMcpDisplayMode(value: unknown, fallback: unknown = "plain") {
+	const normalized = String(value || "").trim().toLowerCase()
+	if (normalized === "rich" || normalized === "plain" || normalized === "markdown") {
+		return normalized
+	}
+
+	const fallbackNormalized = String(fallback || "").trim().toLowerCase()
+	return fallbackNormalized === "rich" || fallbackNormalized === "markdown" ? fallbackNormalized : "plain"
 }
 
 function createId() {

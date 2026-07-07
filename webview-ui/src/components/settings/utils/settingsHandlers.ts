@@ -1,4 +1,4 @@
-import { McpDisplayMode, UpdateSettingsRequest } from "@shared/proto/cline/state"
+import { UpdateSettingsRequest } from "@shared/proto/cline/state"
 import { StateServiceClient } from "@/services/grpc-client"
 
 /**
@@ -12,11 +12,9 @@ const convertToProtoValue = (field: keyof UpdateSettingsRequest, value: any): an
 	if (field === "mcpDisplayMode" && typeof value === "string") {
 		switch (value) {
 			case "rich":
-				return McpDisplayMode.RICH
 			case "plain":
-				return McpDisplayMode.PLAIN
 			case "markdown":
-				return McpDisplayMode.MARKDOWN
+				return value
 			default:
 				throw new Error(`Invalid MCP display mode value: ${value}`)
 		}
