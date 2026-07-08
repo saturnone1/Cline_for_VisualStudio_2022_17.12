@@ -621,7 +621,7 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, { value: false }, false))
 
 			case "UiService.openUrl":
-				await host.envClient.openExternal({ value: getString(message, "url") })
+				await host.envClient.openExternal({ value: getExternalUrlValue(message) })
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "UiService.openWalkthrough":
@@ -629,7 +629,7 @@ export class VisualStudioWebviewRouter {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "WebService.openInBrowser":
-				await host.envClient.openExternal({ value: getString(message, "value") })
+				await host.envClient.openExternal({ value: getExternalUrlValue(message) })
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "WebService.checkIsImageUrl":
@@ -7877,6 +7877,10 @@ function formatAttachmentSummaryValue(value: string) {
 	}
 
 	return value
+}
+
+function getExternalUrlValue(message: unknown) {
+	return getString(message, "value") || getString(message, "url") || getString(message, "uri") || getString(message, "href")
 }
 
 function normalizeMcpDisplayMode(value: unknown, fallback: unknown = "plain") {

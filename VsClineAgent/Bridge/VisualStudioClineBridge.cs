@@ -4200,6 +4200,18 @@ namespace VsClineAgent.Bridge
                 return;
             }
 
+            url = url.Trim();
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                return;
+            }
+
+            var scheme = uri.Scheme.ToLowerInvariant();
+            if (scheme != Uri.UriSchemeHttp && scheme != Uri.UriSchemeHttps && scheme != Uri.UriSchemeMailto)
+            {
+                return;
+            }
+
             try
             {
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });

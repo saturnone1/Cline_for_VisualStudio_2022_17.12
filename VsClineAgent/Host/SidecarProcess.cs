@@ -263,8 +263,7 @@ namespace VsClineAgent.Host
                     InvokeOnUiThread(() => Clipboard.SetText(GetStringParameter(parameters, "value")));
                     return new JObject();
                 case "env.openExternal":
-                    OpenExternal(GetStringParameter(parameters, "value"));
-                    return new JObject();
+                    return new JObject { ["opened"] = OpenExternal(GetExternalTarget(parameters)) };
                 case "env.debugLog":
                     CaptureSidecarLine("sidecar:debug", GetStringParameter(parameters, "message"));
                     return new JObject();
@@ -965,16 +964,41 @@ namespace VsClineAgent.Host
             return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
-        private static void OpenExternal(string value)
+        private static string GetExternalTarget(JToken? parameters)
+        {
+            return GetStringParameter(parameters, "value")
+                ?? GetStringParameter(parameters, "url")
+                ?? GetStringParameter(parameters, "uri")
+                ?? GetStringParameter(parameters, "href")
+                ?? "";
+        }
+
+        private static bool OpenExternal(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
-                return;
+                return false;
 
-            Process.Start(new ProcessStartInfo
+            value = value.Trim();
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+                return false;
+
+            var scheme = uri.Scheme.ToLowerInvariant();
+            if (scheme != Uri.UriSchemeHttp && scheme != Uri.UriSchemeHttps && scheme != Uri.UriSchemeMailto)
+                return false;
+
+            try
             {
-                FileName = value,
-                UseShellExecute = true
-            });
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = value,
+                    UseShellExecute = true
+                });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool FileContains(string filePath, string query)
