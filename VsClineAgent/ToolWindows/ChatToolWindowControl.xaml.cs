@@ -17,7 +17,7 @@ using VsClineAgent.Services;
 
 namespace VsClineAgent.ToolWindows
 {
-    public partial class ChatToolWindowControl : UserControl
+    public partial class ChatToolWindowControl : UserControl, IDisposable
     {
         private SidecarProcess? _sidecarProcess;
         private readonly VsEditorService _editorService;
@@ -28,6 +28,11 @@ namespace VsClineAgent.ToolWindows
         private string? _lastWebMessageJson;
         private bool _webViewReady;
         private bool _loaded;
+        private bool _disposed;
+        private CancellationTokenSource? _pendingUnloadDispose;
+        private readonly object _webViewPostLock = new object();
+        private readonly Queue<string> _pendingWebViewMessages = new Queue<string>();
+        private bool _webViewPostFlushScheduled;
 
         public ChatToolWindowControl()
         {
@@ -35,28 +40,38 @@ namespace VsClineAgent.ToolWindows
             _editorService = new VsEditorService();
             _commandExecutionService = new VsCommandExecutionService();
             Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            CancelPendingUnloadDispose();
             _ = OnLoadedAsync();
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            ScheduleUnloadDispose();
         }
 
         private async Task OnLoadedAsync()
         {
             if (_loaded)
+            {
+                await TryEnsureSidecarRunningAsync();
                 return;
+            }
 
             _loaded = true;
 
             try
             {
-                SetStatus("Initializing WebView2...");
+                SetStatus("WebView2를 초기화하는 중입니다...");
                 await InitializeWebViewAsync();
             }
             catch (Exception ex)
             {
-                ShowError($"Initialization failed:\n{ex.Message}");
+                ShowError($"초기화에 실패했습니다:\n{ex.Message}");
             }
         }
 
@@ -71,7 +86,7 @@ namespace VsClineAgent.ToolWindows
 
             try
             {
-                SetStatus("Preparing WebView2 runtime...");
+                SetStatus("WebView2 런타임을 준비하는 중입니다...");
                 await System.Windows.Threading.Dispatcher.Yield();
 
                 var runtimeCandidates = await Task.Run(() =>
@@ -91,7 +106,7 @@ namespace VsClineAgent.ToolWindows
 
                     try
                     {
-                        SetStatus($"Initializing WebView2 ({runtimeLabel})...");
+                        SetStatus($"WebView2를 초기화하는 중입니다 ({runtimeLabel})...");
                         EnsureWebView2RuntimeAvailable(browserExecutableFolder);
                         await CreateWebView2WithRetryAsync(runtimeLabel, browserExecutableFolder, userDataFolder);
                         initialized = true;
@@ -108,7 +123,7 @@ namespace VsClineAgent.ToolWindows
                     throw new InvalidOperationException(
                         "No WebView2 runtime could initialize.\n" + string.Join("\n", initializationFailures));
 
-                SetStatus("Starting LIG VS sidecar...");
+                SetStatus("LIG VS 사이드카를 시작하는 중입니다...");
                 await TryEnsureSidecarRunningAsync();
 
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
@@ -350,7 +365,9 @@ html, body, #root {
                 webView.CoreWebView2.Settings.IsScriptEnabled = true;
                 webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                 webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                webView.CoreWebView2.NavigationStarting += OnNavigationStarting;
                 webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
+                webView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
 
                 var webAppDirectory = Path.Combine(
                     assemblyDirectory,
@@ -399,7 +416,7 @@ html, body, #root {
                 ? string.Empty
                 : "\n\nAttempts:\n" + string.Join("\n", initializationFailures);
             var assembly = Assembly.GetExecutingAssembly();
-            var assemblyVersion = assembly.GetName().Version?.ToString() ?? "unknown";
+            var assemblyVersion = GetDisplayAssemblyVersion(assembly);
             var assemblyLocation = assembly.Location;
             var localRuntime = FindRuntimeFolder(localRuntimeRoot) ?? "(none)";
             var packagedRuntime = FindRuntimeFolder(bundledRuntimeRoot) ?? "(none)";
@@ -450,7 +467,7 @@ html, body, #root {
             }
             catch (Exception ex) when (ShouldRetryWebView2Initialization(ex))
             {
-                SetStatus("WebView2 profile failed. Recreating profile and retrying...");
+                SetStatus("WebView2 프로필을 다시 만들고 재시도하는 중입니다...");
                 ResetDirectory(userDataFolder);
                 await CreateWebView2Async(runtimeLabel, browserExecutableFolder, userDataFolder);
             }
@@ -670,6 +687,63 @@ html, body, #root {
             public string? BrowserExecutableFolder { get; }
         }
 
+        private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            if (ShouldOpenOutsideWebView(e.Uri))
+            {
+                e.Cancel = true;
+                OpenExternalBrowser(e.Uri);
+            }
+        }
+
+        private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            if (ShouldOpenOutsideWebView(e.Uri))
+            {
+                e.Handled = true;
+                OpenExternalBrowser(e.Uri);
+            }
+        }
+
+        private static bool ShouldOpenOutsideWebView(string? uri)
+        {
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+                return false;
+
+            if (string.Equals(parsed.Host, "vscline.local", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return IsExternalBrowserScheme(parsed.Scheme);
+        }
+
+        private static bool IsExternalBrowserScheme(string scheme)
+        {
+            return string.Equals(scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scheme, Uri.UriSchemeMailto, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void OpenExternalBrowser(string uri)
+        {
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) ||
+                !IsExternalBrowserScheme(parsed.Scheme))
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(parsed.AbsoluteUri)
+                {
+                    UseShellExecute = true
+                });
+            }
+            catch
+            {
+                // Keep the embedded app in place even when Windows cannot resolve the external URL.
+            }
+        }
+
         private void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             _ = OnNavigationCompletedAsync(e);
@@ -681,6 +755,9 @@ html, body, #root {
             {
                 if (!e.IsSuccess)
                 {
+                    if (e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled)
+                        return;
+
                     ShowError($"Page load failed: {e.WebErrorStatus}");
                     return;
                 }
@@ -766,9 +843,9 @@ html, body, #root {
                     Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ??
                     AppDomain.CurrentDomain.BaseDirectory;
 
-                _sidecarProcess?.Dispose();
+                DisposeSidecarProcessQuietly();
                 _sidecarProcess = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                SetStatus("Preparing LIG VS sidecar runtime...");
+                SetStatus("LIG VS 사이드카 런타임을 준비하는 중입니다...");
                 await System.Windows.Threading.Dispatcher.Yield();
 
                 var sidecarProcess = _sidecarProcess
@@ -776,7 +853,7 @@ html, body, #root {
                 var status = await Task.Run(() =>
                     sidecarProcess.EnsureStartedAsync(CancellationToken.None));
                 _lastSidecarError = null;
-                SetStatus($"LIG VS sidecar: {status}");
+                SetStatus($"LIG VS 사이드카: {status}");
                 return _sidecarProcess != null && _sidecarProcess.IsRunning;
             }
             catch (Exception ex)
@@ -796,6 +873,107 @@ html, body, #root {
             return string.IsNullOrWhiteSpace(_lastSidecarError)
                 ? "LIG VS SDK sidecar is not running."
                 : _lastSidecarError!;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            Loaded -= OnLoaded;
+            Unloaded -= OnUnloaded;
+            CancelPendingUnloadDispose();
+            ClearPendingWebViewMessages();
+
+            DisposeSidecarProcessQuietly();
+
+            try
+            {
+                _commandExecutionService.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        private void ClearPendingWebViewMessages()
+        {
+            lock (_webViewPostLock)
+            {
+                _webViewPostFlushScheduled = false;
+                _pendingWebViewMessages.Clear();
+            }
+        }
+
+        private void DisposeSidecarProcessQuietly()
+        {
+            try
+            {
+                _sidecarProcess?.Dispose();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _sidecarProcess = null;
+            }
+        }
+
+        private void ScheduleUnloadDispose()
+        {
+            if (_disposed)
+                return;
+
+            CancelPendingUnloadDispose();
+            var unloadDispose = new CancellationTokenSource();
+            _pendingUnloadDispose = unloadDispose;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), unloadDispose.Token).ConfigureAwait(false);
+                    if (unloadDispose.IsCancellationRequested)
+                        return;
+
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!IsLoaded)
+                        {
+                            ClearPendingWebViewMessages();
+                            DisposeSidecarProcessQuietly();
+                        }
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        private void CancelPendingUnloadDispose()
+        {
+            var pending = _pendingUnloadDispose;
+            _pendingUnloadDispose = null;
+            if (pending == null)
+                return;
+
+            try
+            {
+                pending.Cancel();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                pending.Dispose();
+            }
         }
 
         private static bool TryHandlePassiveStreamingSubscription(string rawJson)
@@ -1031,6 +1209,48 @@ html, body, #root {
                 var separateModels = persisted.Value<bool?>("planActSeparateModelsSetting");
                 if (separateModels.HasValue)
                     state["planActSeparateModelsSetting"] = separateModels.Value;
+
+                foreach (var key in new[]
+                {
+                    "enableCheckpointsSetting",
+                    "mcpResponsesCollapsed",
+                    "strictPlanModeEnabled",
+                    "yoloModeToggled",
+                    "useAutoCondense",
+                    "subagentsEnabled",
+                    "scheduledAgentsEnabled",
+                    "backgroundEditEnabled",
+                    "doubleCheckCompletionEnabled",
+                    "lazyTeammateModeEnabled",
+                    "showFeatureTips",
+                    "hooksEnabled",
+                    "nativeToolCallSetting",
+                    "enableParallelToolCalling"
+                })
+                {
+                    var value = persisted.Value<bool?>(key);
+                    if (value.HasValue)
+                        state[key] = value.Value;
+                }
+
+                var preferredLanguage = persisted.Value<string>("preferredLanguage");
+                if (!string.IsNullOrWhiteSpace(preferredLanguage))
+                    state["preferredLanguage"] = preferredLanguage;
+
+                var uiLanguage = persisted.Value<string>("uiLanguage");
+                if (string.Equals(uiLanguage, "en", StringComparison.Ordinal) ||
+                    string.Equals(uiLanguage, "ko", StringComparison.Ordinal))
+                    state["uiLanguage"] = uiLanguage;
+
+                var mcpDisplayMode = persisted.Value<string>("mcpDisplayMode");
+                if (string.Equals(mcpDisplayMode, "rich", StringComparison.Ordinal) ||
+                    string.Equals(mcpDisplayMode, "plain", StringComparison.Ordinal) ||
+                    string.Equals(mcpDisplayMode, "markdown", StringComparison.Ordinal))
+                    state["mcpDisplayMode"] = mcpDisplayMode;
+
+                var customPrompt = persisted.Value<string>("customPrompt");
+                if (customPrompt != null)
+                    state["customPrompt"] = customPrompt;
             }
             catch
             {
@@ -1127,23 +1347,74 @@ html, body, #root {
             }
         }
 
-        public async Task SendToWebViewAsync(object payload)
+        public Task SendToWebViewAsync(object payload)
         {
             try
             {
                 var json = JsonConvert.SerializeObject(payload);
                 InteractionLog.Write("host->webview", "webview.postMessage", json);
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    try
-                    {
-                        if (webView.CoreWebView2 != null)
-                            webView.CoreWebView2.PostWebMessageAsJson(json);
-                    }
-                    catch { }
-                });
+                EnqueueWebViewMessage(json);
             }
             catch { }
+
+            return Task.CompletedTask;
+        }
+
+        private void EnqueueWebViewMessage(string json)
+        {
+            lock (_webViewPostLock)
+            {
+                if (_disposed)
+                    return;
+
+                _pendingWebViewMessages.Enqueue(json);
+                if (_webViewPostFlushScheduled)
+                    return;
+
+                _webViewPostFlushScheduled = true;
+            }
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(FlushPendingWebViewMessages));
+            }
+            catch
+            {
+                lock (_webViewPostLock)
+                {
+                    _webViewPostFlushScheduled = false;
+                    _pendingWebViewMessages.Clear();
+                }
+            }
+        }
+
+        private void FlushPendingWebViewMessages()
+        {
+            string[] messages;
+            lock (_webViewPostLock)
+            {
+                _webViewPostFlushScheduled = false;
+                if (_disposed || _pendingWebViewMessages.Count == 0)
+                {
+                    _pendingWebViewMessages.Clear();
+                    return;
+                }
+
+                messages = _pendingWebViewMessages.ToArray();
+                _pendingWebViewMessages.Clear();
+            }
+
+            foreach (var json in messages)
+            {
+                try
+                {
+                    if (webView.CoreWebView2 != null)
+                        webView.CoreWebView2.PostWebMessageAsJson(json);
+                }
+                catch
+                {
+                }
+            }
         }
 
         private void SetStatus(string message)
@@ -1179,7 +1450,7 @@ html, body, #root {
             builder.AppendLine();
             builder.AppendLine("=== Snapshot ===");
             builder.AppendLine("Time: " + DateTime.Now.ToString("O"));
-            builder.AppendLine("VsClineAgent assembly: " + (Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown"));
+            builder.AppendLine("VsClineAgent assembly: " + GetDisplayAssemblyVersion(Assembly.GetExecutingAssembly()));
             builder.AppendLine("Assembly location: " + Assembly.GetExecutingAssembly().Location);
             builder.AppendLine("Assembly directory: " + (_assemblyDirectory ?? "(unset)"));
             builder.AppendLine("WebView ready: " + _webViewReady);
@@ -1220,6 +1491,18 @@ html, body, #root {
 
             builder.AppendLine("You can select this text with Ctrl+A and copy it with Ctrl+C.");
             return builder.ToString();
+        }
+
+        private static string GetDisplayAssemblyVersion(Assembly assembly)
+        {
+            var informationalVersion = assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion;
+
+            if (!string.IsNullOrWhiteSpace(informationalVersion))
+                return informationalVersion!;
+
+            return assembly.GetName().Version?.ToString() ?? "unknown";
         }
 
         private static string PrettyJsonOrRaw(string? value)

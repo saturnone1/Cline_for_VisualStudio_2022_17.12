@@ -1,4 +1,5 @@
 import { ClineMessage } from "@shared/ExtensionMessage"
+import type { ContextWindowUsage } from "@shared/getApiMetrics"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react"
 import Thumbnails from "@/components/common/Thumbnails"
@@ -25,10 +26,12 @@ interface TaskHeaderProps {
 	cacheReads?: number
 	totalCost: number
 	lastApiReqTotalTokens?: number
+	contextWindowUsage?: ContextWindowUsage
+	compactResetKey?: number
 	lastProgressMessageText?: string
 	showFocusChainPlaceholder?: boolean
+	onCompact?: () => Promise<void> | void
 	onClose: () => void
-	onSendMessage?: (command: string, files: string[], images: string[]) => void
 }
 
 const BUTTON_CLASS = "max-h-3 border-0 font-bold bg-transparent hover:opacity-100 text-foreground"
@@ -41,10 +44,12 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	cacheReads,
 	totalCost,
 	lastApiReqTotalTokens,
+	contextWindowUsage,
+	compactResetKey,
 	lastProgressMessageText,
 	showFocusChainPlaceholder,
+	onCompact,
 	onClose,
-	onSendMessage,
 }) => {
 	const {
 		apiConfiguration,
@@ -56,6 +61,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 		expandTaskHeader: isTaskExpanded,
 		setExpandTaskHeader: setIsTaskExpanded,
 		environment,
+		uiLanguage,
 		useAutoCondense,
 	} = useExtensionState()
 
@@ -213,9 +219,13 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 						<ContextWindow
 							cacheReads={cacheReads}
 							cacheWrites={cacheWrites}
+							compactResetKey={compactResetKey}
+							contextUsage={contextWindowUsage}
 							contextWindow={selectedModelInfo?.contextWindow}
+							language={uiLanguage}
 							lastApiReqTotalTokens={lastApiReqTotalTokens}
-							onSendMessage={onSendMessage}
+							onCompact={onCompact}
+							taskId={String(currentTaskItem?.id ?? "")}
 							tokensIn={tokensIn}
 							tokensOut={tokensOut}
 							useAutoCondense={useAutoCondense === true}

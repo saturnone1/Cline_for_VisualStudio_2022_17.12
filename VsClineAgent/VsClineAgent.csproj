@@ -12,9 +12,9 @@
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>VsClineAgent</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
-    <AssemblyVersion>1.3.9.0</AssemblyVersion>
-    <FileVersion>1.3.9.0</FileVersion>
-    <Version>1.3.9</Version>
+    <AssemblyVersion>1.3.28.0</AssemblyVersion>
+    <FileVersion>1.3.28.0</FileVersion>
+    <Version>1.3.28</Version>
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -121,6 +121,10 @@
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
     <Content Include="Assets\lig-ci-white.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Assets\lig-mark-white.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>

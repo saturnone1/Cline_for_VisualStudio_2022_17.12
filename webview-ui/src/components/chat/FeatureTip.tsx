@@ -26,7 +26,7 @@ const FEATURE_TIPS: FeatureTipItem[] = [
 		text: "LIG VS creates checkpoints after changes — you can always restore to a previous state.",
 	},
 	{
-		text: "Use /compact to condense long conversations and free up context window space.",
+		text: "Use the context window compact button to condense long conversations and free up context window space.",
 	},
 	{
 		text: "Enable auto-approve for read-only tools like file reads to speed up exploration.",

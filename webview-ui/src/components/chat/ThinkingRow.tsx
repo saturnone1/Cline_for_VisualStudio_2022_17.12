@@ -80,11 +80,11 @@ export const ThinkingRow = memo(
 		}
 
 		return (
-			<div className="lig-thinking-row ml-0 pl-0 mb-0">
+			<div className="lig-thinking-row ml-0 pl-0 mb-0.5">
 				{showTitle ? (
 					<Button
 						className={cn(
-							"inline-flex justify-baseline gap-0.5 text-left select-none px-0 py-0 my-0 h-auto min-h-0 w-full text-description overflow-visible",
+							"inline-flex justify-baseline gap-0.5 text-left select-none px-0 py-0 my-0 !h-4 min-h-0 w-full text-description overflow-visible",
 							{
 								"cursor-pointer": !!onToggle,
 								"cursor-default": !onToggle,
@@ -94,7 +94,7 @@ export const ThinkingRow = memo(
 						size="icon"
 						variant="icon">
 						<span
-							className={cn("text-[13px] leading-[1.2]", {
+							className={cn("text-[11px] leading-none", {
 								"animate-shimmer bg-linear-90 from-foreground to-description bg-[length:200%_100%] bg-clip-text text-transparent":
 									isStreaming,
 								"select-none": isStreaming,
@@ -103,9 +103,9 @@ export const ThinkingRow = memo(
 						</span>
 						{showChevron &&
 							(isExpanded ? (
-								<ChevronDownIcon className="!size-1 text-description" />
+								<ChevronDownIcon className="!size-2.5 text-description" />
 							) : (
-								<ChevronRightIcon className="!size-1 text-description" />
+								<ChevronRightIcon className="!size-2.5 text-description" />
 							))}
 					</Button>
 				) : null}
@@ -113,10 +113,10 @@ export const ThinkingRow = memo(
 				{isExpanded && safeReasoningContent?.trim() && (
 					<Button
 						className={cn(
-							"flex gap-0 overflow-hidden w-full min-w-0 max-h-0 opacity-0 items-baseline justify-baseline text-left !p-0 !pl-0",
+							"flex gap-0 overflow-hidden w-full min-w-0 max-h-0 opacity-0 items-baseline justify-baseline text-left !p-0 !pl-0 !min-h-0",
 							"disabled:cursor-text disabled:opacity-100",
 							{
-								"max-h-[200px] opacity-100": isVisible,
+								"max-h-[96px] opacity-100": isVisible,
 								"transition-[max-height] duration-[250ms] ease-[cubic-bezier(0.4,0,0.2,1)] [transition:max-height_250ms_cubic-bezier(0.4,0,0.2,1),opacity_150ms_ease-out]":
 									isVisible,
 							},
@@ -127,17 +127,17 @@ export const ThinkingRow = memo(
 						<div className="relative flex-1">
 							<div
 								className={cn(
-									"flex max-h-[150px] overflow-y-auto text-description leading-normal truncated whitespace-pre-wrap break-words pl-0 [scrollbar-width:thin] [direction:ltr]",
+									"flex max-h-[88px] overflow-y-auto text-description text-[11px] leading-[1.2] truncated whitespace-pre-wrap break-words pl-0 [scrollbar-width:thin] [direction:ltr]",
 								)}
 								onScroll={checkScrollable}
 								ref={scrollRef}>
-								<span className="pb-1 block text-sm leading-snug">{safeReasoningContent}</span>
+								<span className="pb-0.5 block text-[11px] leading-[1.2]">{safeReasoningContent}</span>
 							</div>
 							{canScrollUp && (
-								<div className="absolute top-0 left-0 right-0 h-6 pointer-events-none bg-gradient-to-b from-background to-transparent" />
+								<div className="absolute top-0 left-0 right-0 h-3 pointer-events-none bg-gradient-to-b from-background to-transparent" />
 							)}
 							{canScrollDown && (
-								<div className="absolute bottom-0 left-0 right-0 h-6 pointer-events-none bg-gradient-to-t from-background to-transparent" />
+								<div className="absolute bottom-0 left-0 right-0 h-3 pointer-events-none bg-gradient-to-t from-background to-transparent" />
 							)}
 						</div>
 					</Button>

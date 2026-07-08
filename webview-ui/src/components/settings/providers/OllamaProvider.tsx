@@ -32,6 +32,11 @@ export const OllamaProvider = ({ showModelOptions, isPopup, currentMode }: Ollam
 	const { ollamaModelId } = getModeSpecificFields(apiConfiguration, currentMode)
 
 	const [ollamaModels, setOllamaModels] = useState<string[]>([])
+	const normalizePositiveInteger = (value: string) => {
+		const trimmed = value.trim()
+		const parsed = Number.parseInt(trimmed, 10)
+		return Number.isFinite(parsed) && parsed > 0 ? parsed.toString() : undefined
+	}
 
 	const requestOllamaModels = useCallback(async () => {
 		try {
@@ -94,30 +99,13 @@ export const OllamaProvider = ({ showModelOptions, isPopup, currentMode }: Ollam
 
 			<DebouncedTextField
 				initialValue={apiConfiguration?.ollamaApiOptionsCtxNum || "32768"}
-				onChange={(v) => handleFieldChange("ollamaApiOptionsCtxNum", v || undefined)}
+				inputMode="numeric"
+				min={1}
+				onChange={(value) => handleFieldChange("ollamaApiOptionsCtxNum", normalizePositiveInteger(value))}
 				placeholder={"e.g. 32768"}
 				style={{ width: "100%" }}>
 				<span className="font-semibold">{t("settings.api.modelContextWindow")}</span>
 			</DebouncedTextField>
-
-			{showModelOptions && (
-				<>
-					<DebouncedTextField
-						initialValue={apiConfiguration?.requestTimeoutMs ? apiConfiguration.requestTimeoutMs.toString() : "30000"}
-						onChange={(value) => {
-							// Convert to number, with validation
-							const numValue = parseInt(value, 10)
-							if (!Number.isNaN(numValue) && numValue > 0) {
-								handleFieldChange("requestTimeoutMs", numValue)
-							}
-						}}
-						placeholder="Default: 30000 (30 seconds)"
-						style={{ width: "100%" }}>
-						<span className="font-semibold">{t("settings.api.requestTimeout")}</span>
-					</DebouncedTextField>
-					<p className="text-xs mt-0 text-description">{t("settings.api.requestTimeoutHelp")}</p>
-				</>
-			)}
 
 			<p
 				style={{

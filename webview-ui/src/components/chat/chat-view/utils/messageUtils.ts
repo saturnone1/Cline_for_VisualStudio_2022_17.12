@@ -50,24 +50,184 @@ function isEmptyJsonPlaceholder(value: string | undefined): boolean {
 	return trimmed === "{}" || trimmed === "[]" || trimmed === "null" || trimmed === "undefined"
 }
 
+function stripRawToolCallMarkup(value: string | undefined): string {
+	return (value || "")
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/invoke>\s*<\/[^>\s]*:?tool_call>/gi, "")
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/invoke>/gi, "")
+		.replace(/<function=[\s\S]*?<\/function>\s*<\/tool_call>/gi, "")
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/tool_call>/gi, "")
+		.replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, "")
+		.replace(/<\/?[^>\s]*:?tool_call>/gi, "")
+		.trim()
+}
+
+function isCompletedProgressTitle(value: string | undefined): boolean {
+	const normalized = (value || "").trim().toLowerCase()
+	return (
+		normalized === "파일/도구 처리 기록" ||
+		normalized === "파일 읽기 기록" ||
+		normalized === "터미널 실행 기록" ||
+		normalized === "검색 기록" ||
+		normalized === "응답 준비 기록" ||
+		normalized === "reading files and using tools history" ||
+		normalized === "running terminal history" ||
+		normalized === "preparing response history" ||
+		normalized === "model progress history" ||
+		normalized === "모델 진행 기록"
+	)
+}
+
 function isMeaninglessTextMessage(message: ClineMessage): boolean {
 	return message.type === "say" && message.say === "text" && isEmptyJsonPlaceholder(message.text)
 }
 
 function isMeaninglessReasoningMessage(message: ClineMessage): boolean {
-	return (
-		message.type === "say" &&
-		message.say === "reasoning" &&
-		isEmptyJsonPlaceholder(message.reasoning || message.text)
-	)
+	if (message.type !== "say" || message.say !== "reasoning") {
+		return false
+	}
+	const reasoning = stripRawToolCallMarkup(message.reasoning)
+	const text = stripRawToolCallMarkup(message.text)
+	const visibleContent = reasoning || text
+	if (isEmptyJsonPlaceholder(visibleContent)) {
+		return true
+	}
+	if (!visibleContent) {
+		return true
+	}
+	if (message.partial !== true && isCompletedProgressTitle(text) && (!reasoning || reasoning === text || isEmptyJsonPlaceholder(reasoning))) {
+		return true
+	}
+	return false
 }
 
 function getApiRequestSummaryText(message: ClineMessage): string {
 	try {
-		return String(JSON.parse(message.text || "{}").request || "").trim()
+		return stripRawToolCallMarkup(String(JSON.parse(message.text || "{}").request || ""))
 	} catch {
 		return ""
 	}
+}
+
+function getProgressMessageContent(message: ClineMessage): string {
+	if (message.say === "api_req_started") {
+		return getApiRequestSummaryText(message)
+	}
+	if (message.say === "reasoning") {
+		return stripRawToolCallMarkup(String(message.reasoning || message.text || ""))
+	}
+	return ""
+}
+
+function getProgressMessageCategory(message: ClineMessage): string | undefined {
+	if (message.say !== "reasoning" && message.say !== "api_req_started") {
+		return undefined
+	}
+
+	const content = getProgressMessageContent(message)
+	const label = String(message.text || "").trim()
+	const normalized = `${label}\n${content}`.toLowerCase()
+
+	if (
+		normalized.includes("터미널 실행") ||
+		normalized.includes("running terminal") ||
+		normalized.includes("commands:") ||
+		normalized.startsWith("lig vs ran")
+	) {
+		return "terminal"
+	}
+	if (
+		normalized.includes("응답 준비") ||
+		normalized.includes("preparing response") ||
+		normalized.includes("model progress") ||
+		normalized.includes("모델 진행")
+	) {
+		return "response"
+	}
+	if (
+		normalized.includes("파일/도구") ||
+		normalized.includes("파일 읽기") ||
+		normalized.includes("reading files") ||
+		normalized.includes("files:") ||
+		normalized.startsWith("lig vs read") ||
+		normalized.includes("tools:")
+	) {
+		return "files-tools"
+	}
+	if (normalized.includes("검색") || normalized.includes("searches:") || normalized.includes("performed")) {
+		return "search"
+	}
+	if (normalized.includes("파일 편집") || normalized.includes("edits:") || normalized.includes("prepared")) {
+		return "edits"
+	}
+	return content ? "progress" : undefined
+}
+
+function mergeProgressMessageContent(existing: string, next: string): string {
+	const existingTrimmed = existing.trim()
+	const nextTrimmed = next.trim()
+	if (!existingTrimmed) {
+		return nextTrimmed
+	}
+	if (!nextTrimmed || existingTrimmed.includes(nextTrimmed)) {
+		return existingTrimmed
+	}
+	return `${existingTrimmed}\n\n${nextTrimmed}`
+}
+
+function setProgressMessageContent(message: ClineMessage, content: string): ClineMessage {
+	if (message.say === "api_req_started") {
+		try {
+			const parsed = JSON.parse(message.text || "{}")
+			return {
+				...message,
+				text: JSON.stringify({
+					...parsed,
+					request: content,
+				}),
+			}
+		} catch {
+			return message
+		}
+	}
+
+	return {
+		...message,
+		reasoning: content,
+	}
+}
+
+function compactCompletedProgressMessages(messages: ClineMessage[]): ClineMessage[] {
+	const result: ClineMessage[] = []
+	const categoryIndex = new Map<string, number>()
+
+	for (const message of messages) {
+		const category = message.partial === true ? undefined : getProgressMessageCategory(message)
+		const content = getProgressMessageContent(message)
+		const isCompletedProgressMessage =
+			message.partial !== true && (message.say === "reasoning" || message.say === "api_req_started")
+
+		if (!content && isCompletedProgressMessage) {
+			continue
+		}
+
+		if (!category || !content) {
+			result.push(message)
+			continue
+		}
+
+		const existingIndex = categoryIndex.get(category)
+		if (existingIndex === undefined) {
+			categoryIndex.set(category, result.length)
+			result.push(setProgressMessageContent(message, content))
+			continue
+		}
+
+		const existing = result[existingIndex]
+		const mergedContent = mergeProgressMessageContent(getProgressMessageContent(existing), content)
+		result[existingIndex] = setProgressMessageContent(existing, mergedContent)
+	}
+
+	return result
 }
 
 function isVisibleProgressRequest(message: ClineMessage): boolean {
@@ -299,7 +459,7 @@ export function groupLowStakesTools(groupedMessages: (ClineMessage | ClineMessag
 			group._isToolGroup = true
 			result.push(group)
 		} else {
-			result.push(...toolGroup)
+			result.push(...compactCompletedProgressMessages(toolGroup))
 		}
 		toolGroup = []
 		hasTools = false
@@ -328,12 +488,18 @@ export function groupLowStakesTools(groupedMessages: (ClineMessage | ClineMessag
 		// Reasoning and api_req rows stay in order. If tools follow, they become
 		// part of the same folded progress group; otherwise they render as rows.
 		if (messageType === "reasoning") {
-			toolGroup.push(message)
+			const content = getProgressMessageContent(message)
+			if (content) {
+				toolGroup.push(setProgressMessageContent(message, content))
+			}
 			continue
 		}
 
 		if (messageType === "api_req_started") {
-			toolGroup.push(message)
+			const content = getProgressMessageContent(message)
+			if (content) {
+				toolGroup.push(setProgressMessageContent(message, content))
+			}
 			continue
 		}
 

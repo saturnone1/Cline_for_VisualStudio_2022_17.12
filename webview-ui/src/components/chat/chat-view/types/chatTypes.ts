@@ -67,6 +67,7 @@ export interface ChatState {
  */
 export interface MessageHandlers {
 	executeButtonAction: (action: ButtonActionType, text?: string, images?: string[], files?: string[]) => Promise<void>
+	handleCompactTask: () => Promise<void>
 	handleSendMessage: (text: string, images: string[], files: string[]) => Promise<void>
 	handleTaskCloseButtonClick: () => void
 	startNewTask: () => Promise<void>

@@ -1207,7 +1207,10 @@ namespace VsClineAgent.Host
             try
             {
                 if (_process != null && !_process.HasExited)
+                {
                     _process.Kill();
+                    _process.WaitForExit(2000);
+                }
             }
             catch
             {

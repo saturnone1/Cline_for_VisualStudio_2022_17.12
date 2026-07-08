@@ -10,6 +10,8 @@ const MAX_OBJECT_KEYS = 80
 const MAX_DEPTH = 8
 const VERBOSE_INTERACTION_LOG = process.env.VSCLINE_VERBOSE_INTERACTION_LOG === "1"
 const ENABLE_INTERACTION_LOG = VERBOSE_INTERACTION_LOG || process.env.VSCLINE_ENABLE_INTERACTION_LOG === "1"
+const LOG_FLUSH_INTERVAL_MS = 50
+const LOG_FLUSH_BATCH_SIZE = 100
 
 const SENSITIVE_KEYS = [
 	"apikey",
@@ -20,6 +22,10 @@ const SENSITIVE_KEYS = [
 	"secret",
 	"cookie",
 ]
+
+let pendingLogLines: string[] = []
+let flushTimer: NodeJS.Timeout | null = null
+let flushPromise: Promise<void> | null = null
 
 export function logInteraction(direction: string, event: string, payload?: unknown) {
 	try {
@@ -40,13 +46,70 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 		if (line.length > MAX_LINE_CHARS) {
 			line = `${line.slice(0, MAX_LINE_CHARS)}...[truncated]`
 		}
-		const filePath = getLogPath()
-		fs.mkdirSync(path.dirname(filePath), { recursive: true })
-		rotateIfNeeded(filePath)
-		fs.appendFileSync(filePath, `${line}\n`, "utf8")
+		enqueueLogLine(line)
 	} catch {
 		// Diagnostics must never interfere with the extension.
 	}
+}
+
+export async function flushInteractionLog() {
+	if (flushTimer) {
+		clearTimeout(flushTimer)
+		flushTimer = null
+	}
+	await flushLogLines()
+}
+
+function enqueueLogLine(line: string) {
+	pendingLogLines.push(`${line}\n`)
+	if (pendingLogLines.length >= LOG_FLUSH_BATCH_SIZE) {
+		scheduleFlush(0)
+		return
+	}
+	scheduleFlush(LOG_FLUSH_INTERVAL_MS)
+}
+
+function scheduleFlush(delayMs: number) {
+	if (flushTimer) {
+		return
+	}
+	flushTimer = setTimeout(() => {
+		flushTimer = null
+		void flushLogLines()
+	}, delayMs)
+	flushTimer.unref?.()
+}
+
+async function flushLogLines() {
+	if (flushPromise) {
+		await flushPromise
+		return
+	}
+	if (pendingLogLines.length === 0) {
+		return
+	}
+
+	flushPromise = (async () => {
+		try {
+			while (pendingLogLines.length > 0) {
+				const lines = pendingLogLines
+				pendingLogLines = []
+				const filePath = getLogPath()
+				fs.mkdirSync(path.dirname(filePath), { recursive: true })
+				rotateIfNeeded(filePath)
+				await fs.promises.appendFile(filePath, lines.join(""), "utf8")
+			}
+		} catch {
+			// Diagnostics must never interfere with the extension.
+		} finally {
+			flushPromise = null
+			if (pendingLogLines.length > 0) {
+				scheduleFlush(0)
+			}
+		}
+	})()
+
+	await flushPromise
 }
 
 function isImportantDiagnosticEvent(event: string) {

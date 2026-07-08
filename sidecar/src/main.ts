@@ -3,7 +3,7 @@ import { VisualStudioHostProvider } from "./host/VisualStudioHostProvider"
 import type { JsonRpcConnection } from "./ipc/types"
 import { ClineSdkRuntime } from "./sdk/ClineSdkRuntime"
 import { VisualStudioWebviewRouter } from "./webview/VisualStudioWebviewRouter"
-import { logInteraction } from "./diagnostics/InteractionLog"
+import { flushInteractionLog, logInteraction } from "./diagnostics/InteractionLog"
 
 type JsonRpcRequest = {
 	id?: string | null
@@ -133,6 +133,7 @@ async function flushAndExit(code: number) {
 	)
 	activeRouters.clear()
 	activeRuntimes.clear()
+	await flushInteractionLog().catch(() => undefined)
 	server.close(() => process.exit(code))
 	setTimeout(() => process.exit(code), 500).unref()
 }

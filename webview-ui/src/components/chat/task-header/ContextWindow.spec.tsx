@@ -24,4 +24,31 @@ describe("ContextWindow", () => {
 		expect(screen.getByLabelText("Context window usage progress")).toBeInTheDocument()
 		expect(screen.getByRole("button", { name: "Compact Task" })).toBeInTheDocument()
 	})
+
+	it("shows estimated usage when reported usage is unavailable", () => {
+		render(
+			<ContextWindow
+				contextUsage={{ used: 64000, source: "estimated", reliable: false }}
+				contextWindow={128000}
+				useAutoCondense={false}
+			/>,
+		)
+
+		expect(screen.getByLabelText("Context window usage progress")).toBeInTheDocument()
+		expect(screen.getByText(/50.0%/)).toBeInTheDocument()
+		expect(screen.getByText(/Estimated usage/)).toBeInTheDocument()
+	})
+
+	it("prompts for compaction once auto compact reaches the threshold", async () => {
+		render(
+			<ContextWindow
+				contextUsage={{ used: 116000, source: "estimated", reliable: false }}
+				contextWindow={128000}
+				taskId="task-1"
+				useAutoCondense
+			/>,
+		)
+
+		expect(await screen.findByText("Compact the current task?")).toBeInTheDocument()
+	})
 })

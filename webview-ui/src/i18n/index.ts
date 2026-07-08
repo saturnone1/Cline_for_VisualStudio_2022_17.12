@@ -456,7 +456,7 @@ const ko: Record<keyof typeof en, string> = {
 	"settings.api.modelExample": "예: llama3.1",
 	"settings.api.modelContextWindow": "모델 컨텍스트 창",
 	"settings.api.requestTimeout": "요청 제한 시간(ms)",
-	"settings.api.requestTimeoutHelp": "API 응답을 기다릴 최대 시간입니다.",
+	"settings.api.requestTimeoutHelp": "API 응답을 기다릴 최대 시간입니다. 기본값은 600000ms(10분)입니다.",
 	"settings.api.ollamaApiKeyHelp": "인증이 필요한 Ollama 인스턴스 또는 클라우드 서비스용 선택 API 키입니다. 로컬 설치라면 비워두세요.",
 	"settings.api.enterOptionalApiKey": "API 키 입력(선택)...",
 	"settings.api.customBaseUrlPlaceholder": "사용자 지정 base URL",

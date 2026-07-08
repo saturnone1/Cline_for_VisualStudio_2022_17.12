@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert"
 import { describe, it } from "mocha"
 import type { ClineMessage } from "../ExtensionMessage"
-import { getApiMetrics, getLastApiReqTotalTokens } from "../getApiMetrics"
+import { estimateConversationTokens, getApiMetrics, getContextWindowUsage, getCurrentContextMessages, getLastApiReqTotalTokens } from "../getApiMetrics"
 
 describe("getApiMetrics", () => {
 	it("includes subagent_usage in aggregate totals", () => {
@@ -147,5 +147,99 @@ describe("getLastApiReqTotalTokens", () => {
 
 		const total = getLastApiReqTotalTokens(messages)
 		assert.equal(total, 18)
+	})
+})
+
+describe("getContextWindowUsage", () => {
+	it("estimates only the current context after the latest compaction boundary", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "압축 전 아주 긴 대화 ".repeat(200),
+			},
+			{
+				ts: 2,
+				type: "say",
+				say: "reasoning",
+				text: "컨텍스트 압축 중입니다.",
+			},
+			{
+				ts: 3,
+				type: "say",
+				say: "text",
+				text: "압축 요약",
+			},
+		]
+
+		const currentContextMessages = getCurrentContextMessages(messages)
+		const usage = getContextWindowUsage(messages)
+
+		assert.equal(currentContextMessages.length, 1)
+		assert.equal(currentContextMessages[0].ts, 3)
+		assert.equal(usage?.source, "estimated")
+		assert.equal(usage?.used, estimateConversationTokens(currentContextMessages))
+		assert.ok((usage?.used ?? 0) < estimateConversationTokens(messages))
+	})
+
+	it("uses reported usage only after the latest compaction boundary", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({
+					tokensIn: 10_000,
+					tokensOut: 500,
+				}),
+			},
+			{
+				ts: 2,
+				type: "say",
+				say: "reasoning",
+				text: "Compacting context...",
+			},
+			{
+				ts: 3,
+				type: "say",
+				say: "text",
+				text: "Compact summary",
+			},
+		]
+
+		const usage = getContextWindowUsage(messages)
+
+		assert.equal(usage?.source, "estimated")
+		assert.ok((usage?.used ?? 0) < 10_500)
+	})
+
+	it("does not treat failed compaction as a context boundary", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "압축 전 아주 긴 대화 ".repeat(200),
+			},
+			{
+				ts: 2,
+				type: "say",
+				say: "reasoning",
+				text: "컨텍스트 압축 중입니다.",
+			},
+			{
+				ts: 3,
+				type: "say",
+				say: "error",
+				text: "compact failed",
+			},
+		]
+
+		const currentContextMessages = getCurrentContextMessages(messages)
+		const usage = getContextWindowUsage(messages)
+
+		assert.equal(currentContextMessages.length, messages.length)
+		assert.equal(usage?.used, estimateConversationTokens(messages))
 	})
 })

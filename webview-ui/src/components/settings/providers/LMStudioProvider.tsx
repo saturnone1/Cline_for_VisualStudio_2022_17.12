@@ -1,5 +1,5 @@
 import type { Mode } from "@shared/storage/types"
-import { VSCodeDropdown, VSCodeLink, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeDropdown, VSCodeLink, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useInterval } from "react-use"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -74,12 +74,15 @@ export const LMStudioProvider = ({ currentMode }: LMStudioProviderProps) => {
 
 	const lmStudioMaxTokens = currentLMStudioModel?.max_context_length?.toString()
 	const currentLoadedContext = currentLMStudioModel?.loaded_context_length?.toString()
+	const normalizePositiveInteger = (value: string) => {
+		const trimmed = value.trim()
+		const parsed = Number.parseInt(trimmed, 10)
+		return Number.isFinite(parsed) && parsed > 0 ? parsed.toString() : undefined
+	}
 
 	useEffect(() => {
 		const curr = currentLMStudioModel?.loaded_context_length?.toString()
-		const max = currentLMStudioModel?.max_context_length?.toString()
-		const choice = apiConfiguration?.lmStudioMaxTokens ?? max
-		if (curr && curr !== choice) {
+		if (curr && !apiConfiguration?.lmStudioMaxTokens) {
 			handleFieldChange("lmStudioMaxTokens", curr)
 		}
 	}, [
@@ -142,13 +145,15 @@ export const LMStudioProvider = ({ currentMode }: LMStudioProviderProps) => {
 				/>
 			)}
 
-			<div className="font-semibold">Context Window</div>
-			<VSCodeTextField
-				className="w-full pointer-events-none"
-				disabled={true}
-				title="Not editable - the value is returned by the connected endpoint"
-				value={String(currentLoadedContext ?? lmStudioMaxTokens ?? "0")}
-			/>
+			<DebouncedTextField
+				initialValue={apiConfiguration?.lmStudioMaxTokens ?? currentLoadedContext ?? lmStudioMaxTokens ?? "32768"}
+				inputMode="numeric"
+				min={1}
+				onChange={(value) => handleFieldChange("lmStudioMaxTokens", normalizePositiveInteger(value))}
+				placeholder="e.g. 32768"
+				style={{ width: "100%" }}>
+				<span className="font-semibold">Context Window</span>
+			</DebouncedTextField>
 
 			<div className="text-xs text-description">
 				LM Studio allows you to run models locally on your computer. For instructions on how to get started, see their

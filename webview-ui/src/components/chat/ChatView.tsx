@@ -2,7 +2,7 @@ import { combineApiRequests } from "@shared/combineApiRequests"
 import { combineCommandSequences } from "@shared/combineCommandSequences"
 import { combineErrorRetryMessages } from "@shared/combineErrorRetryMessages"
 import { combineHookSequences } from "@shared/combineHookSequences"
-import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
+import { getApiMetrics, getContextWindowUsage, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
 import { Settings } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -74,6 +74,21 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	const apiMetrics = useMemo(() => getApiMetrics(modifiedMessages), [modifiedMessages])
 
 	const lastApiReqTotalTokens = useMemo(() => getLastApiReqTotalTokens(modifiedMessages) || undefined, [modifiedMessages])
+	const contextWindowUsage = useMemo(() => getContextWindowUsage(messages), [messages])
+	const compactResetKey = useMemo(() => {
+		const resetMessage = [...modifiedMessages]
+			.reverse()
+			.find(
+				(message) =>
+					(message.type === "say" &&
+						(message.say === "text" ||
+							message.say === "error" ||
+							message.say === "completion_result" ||
+							message.say === "api_req_finished")) ||
+					(message.type === "ask" && message.ask === "condense"),
+			)
+		return resetMessage?.ts
+	}, [modifiedMessages])
 
 	// Use custom hooks for state management
 	const chatState = useChatState(messages)
@@ -354,6 +369,8 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				{task ? (
 					<TaskSection
 						apiMetrics={apiMetrics}
+						compactResetKey={compactResetKey}
+						contextWindowUsage={contextWindowUsage}
 						lastApiReqTotalTokens={lastApiReqTotalTokens}
 						lastProgressMessageText={lastProgressMessageText}
 						messageHandlers={messageHandlers}

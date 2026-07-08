@@ -8,6 +8,12 @@ interface ApiMetrics {
 	totalCost: number
 }
 
+export interface ContextWindowUsage {
+	used: number
+	source: "reported" | "estimated"
+	reliable: boolean
+}
+
 /**
  * Calculates API metrics from an array of ClineMessages.
  *
@@ -102,4 +108,126 @@ export function getLastApiReqTotalTokens(messages: ClineMessage[]): number {
 		}
 	}
 	return 0
+}
+
+export function getContextWindowUsage(messages: ClineMessage[]): ContextWindowUsage | undefined {
+	const currentContextMessages = getCurrentContextMessages(messages)
+	const reported = getLastApiReqTotalTokens(currentContextMessages)
+	if (reported > 0) {
+		return {
+			used: reported,
+			source: "reported",
+			reliable: true,
+		}
+	}
+
+	const estimated = estimateConversationTokens(currentContextMessages)
+	if (estimated <= 0) {
+		return undefined
+	}
+
+	return {
+		used: estimated,
+		source: "estimated",
+		reliable: false,
+	}
+}
+
+export function getCurrentContextMessages(messages: ClineMessage[]): ClineMessage[] {
+	const compactBoundaryIndex = findLastSuccessfulCompactionBoundaryIndex(messages)
+	if (compactBoundaryIndex < 0) {
+		return messages
+	}
+
+	const scopedMessages = messages.slice(compactBoundaryIndex + 1)
+	return scopedMessages.length > 0 ? scopedMessages : messages.slice(compactBoundaryIndex)
+}
+
+export function estimateConversationTokens(messages: ClineMessage[]): number {
+	return messages.reduce((total, message) => {
+		const textTokens = estimateTextTokens([message.text, message.reasoning].filter(Boolean).join("\n"))
+		const fileTokens = estimateTextTokens((message.files ?? []).join("\n"))
+		const imageTokens = (message.images?.length ?? 0) * 85
+		const messageOverhead = 12
+		return total + textTokens + fileTokens + imageTokens + messageOverhead
+	}, 0)
+}
+
+function estimateTextTokens(text: string): number {
+	const normalized = text.trim()
+	if (!normalized) {
+		return 0
+	}
+
+	let cjkChars = 0
+	let otherChars = 0
+	for (const char of normalized) {
+		const codePoint = char.codePointAt(0) ?? 0
+		if (isCjkCodePoint(codePoint)) {
+			cjkChars++
+		} else if (!isWhitespaceCodePoint(codePoint)) {
+			otherChars++
+		}
+	}
+
+	return Math.ceil(cjkChars + otherChars / 4)
+}
+
+function isCjkCodePoint(codePoint: number) {
+	return (
+		(codePoint >= 0x3040 && codePoint <= 0x30ff) ||
+		(codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+		(codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+		(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+		(codePoint >= 0xac00 && codePoint <= 0xd7af)
+	)
+}
+
+function isWhitespaceCodePoint(codePoint: number) {
+	return (
+		codePoint === 0x09 ||
+		codePoint === 0x0a ||
+		codePoint === 0x0b ||
+		codePoint === 0x0c ||
+		codePoint === 0x0d ||
+		codePoint === 0x20 ||
+		codePoint === 0x85 ||
+		codePoint === 0xa0 ||
+		codePoint === 0x1680 ||
+		(codePoint >= 0x2000 && codePoint <= 0x200a) ||
+		codePoint === 0x2028 ||
+		codePoint === 0x2029 ||
+		codePoint === 0x202f ||
+		codePoint === 0x205f ||
+		codePoint === 0x3000
+	)
+}
+
+function isContextCompactionBoundaryMessage(message: ClineMessage): boolean {
+	if (message.type !== "say" || message.say !== "reasoning") {
+		return false
+	}
+	const text = [message.text, message.reasoning].filter(Boolean).join("\n").toLowerCase()
+	return text.includes("컨텍스트 압축 중") || text.includes("compacting context")
+}
+
+function findLastSuccessfulCompactionBoundaryIndex(messages: ClineMessage[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (isContextCompactionBoundaryMessage(messages[i]) && hasAssistantTextAfterIndex(messages, i)) {
+			return i
+		}
+	}
+	return -1
+}
+
+function hasAssistantTextAfterIndex(messages: ClineMessage[], index: number): boolean {
+	return messages.slice(index + 1).some((message) => {
+		if (message.type !== "say") {
+			return false
+		}
+		if (message.say === "error") {
+			return false
+		}
+		return message.say === "text" && !!message.text?.trim()
+	})
 }

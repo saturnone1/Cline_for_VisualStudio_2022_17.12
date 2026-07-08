@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel.Design;
+using System.IO;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using VsClineAgent.ToolWindows;
 using Task = System.Threading.Tasks.Task;
 
@@ -32,15 +34,57 @@ namespace VsClineAgent.Commands
         {
             _ = _package.JoinableTaskFactory.RunAsync(async () =>
             {
-                var window = await _package.ShowToolWindowAsync(
-                    typeof(ChatToolWindow), 0, true, _package.DisposalToken);
-
-                await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);
-                if (window?.Frame is Microsoft.VisualStudio.Shell.Interop.IVsWindowFrame frame)
+                try
                 {
-                    Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+                    await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);
+
+                    var window = await _package.ShowToolWindowAsync(
+                        typeof(ChatToolWindow), 0, true, _package.DisposalToken);
+
+                    if (window?.Frame is IVsWindowFrame frame)
+                    {
+                        Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+                        return;
+                    }
+
+                    throw new InvalidOperationException("LIG VS tool window frame was not created.");
+                }
+                catch (Exception ex)
+                {
+                    LogOpenFailure(ex);
+
+                    await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);
+                    VsShellUtilities.ShowMessageBox(
+                        _package,
+                        "LIG VS 창을 열지 못했습니다.\n\n" + ex.Message,
+                        "LIG VS",
+                        OLEMSGICON.OLEMSGICON_CRITICAL,
+                        OLEMSGBUTTON.OLEMSGBUTTON_OK,
+                        OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
                 }
             });
+        }
+
+        private static void LogOpenFailure(Exception ex)
+        {
+            try
+            {
+                var logDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "VsClineAgent",
+                    "Logs");
+                Directory.CreateDirectory(logDirectory);
+
+                var logPath = Path.Combine(logDirectory, "tool-window.log");
+                File.AppendAllText(
+                    logPath,
+                    DateTimeOffset.Now.ToString("O") + " Failed to open LIG VS tool window" +
+                    Environment.NewLine + ex + Environment.NewLine + Environment.NewLine);
+            }
+            catch
+            {
+                // Avoid hiding the original tool-window error behind logging failures.
+            }
         }
     }
 }

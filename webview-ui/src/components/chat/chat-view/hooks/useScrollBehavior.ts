@@ -279,17 +279,20 @@ export function useScrollBehavior(
 	useEffect(() => {
 		if (!disableAutoScrollRef.current) {
 			scrollToBottomSmooth()
-			setTimeout(() => {
+			const settleTimer = setTimeout(() => {
 				if (!disableAutoScrollRef.current) {
 					scrollToBottomAuto()
 				}
 			}, 40)
-			setTimeout(() => {
+			const finalTimer = setTimeout(() => {
 				if (!disableAutoScrollRef.current) {
 					scrollToBottomAuto()
 				}
 			}, 70)
-			// return () => clearTimeout(timer) // dont cleanup since if visibleMessages.length changes it cancels.
+			return () => {
+				clearTimeout(settleTimer)
+				clearTimeout(finalTimer)
+			}
 		}
 	}, [groupedMessages.length, scrollToBottomSmooth, scrollToBottomAuto])
 

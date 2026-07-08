@@ -32,6 +32,10 @@ export abstract class ProtoBusClient {
 	): Promise<TResponse> {
 		return new Promise((resolve, reject) => {
 			const requestId = this.createRequestId()
+			const timeout = window.setTimeout(() => {
+				window.removeEventListener("message", handleResponse)
+				reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`))
+			}, 120_000)
 
 			// Set up one-time listener for this specific request
 			const handleResponse = (event: MessageEvent) => {
@@ -39,13 +43,14 @@ export abstract class ProtoBusClient {
 				if (message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
 					// Remove listener once we get our response
 					window.removeEventListener("message", handleResponse)
+					window.clearTimeout(timeout)
 					if (message.grpc_response.message) {
 						const response = PLATFORM_CONFIG.decodeMessage(message.grpc_response.message, decodeResponse)
 						resolve(response)
 					} else if (message.grpc_response.error) {
 						reject(new Error(message.grpc_response.error))
 					} else {
-						console.error("Received ProtoBus message with no response or error ", JSON.stringify(message))
+						resolve(PLATFORM_CONFIG.decodeMessage({}, decodeResponse))
 					}
 				}
 			}

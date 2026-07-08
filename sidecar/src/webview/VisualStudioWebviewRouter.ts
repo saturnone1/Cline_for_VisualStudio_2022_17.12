@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import childProcess from "node:child_process"
 import http from "node:http"
+import os from "node:os"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { promisify } from "node:util"
@@ -186,6 +187,9 @@ export class VisualStudioWebviewRouter {
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
 	private readonly sendLatencyTraces = new Map<string, SendLatencyTrace>()
+	private sdkRunGeneration = 0
+	private runtimeSettingsRevision = 0
+	private activeSessionRuntimeSettingsRevision = 0
 	private oauthCallbackServer: http.Server | null = null
 	private oauthCallbackPort = 0
 	private readonly oauthCallbackSessions = new Map<string, OAuthCallbackSession>()
@@ -510,6 +514,16 @@ export class VisualStudioWebviewRouter {
 					webviewMessages: [],
 				}
 			}
+			if (this.stateStreamRequestIds.delete(requestId) || this.partialMessageStreamRequestIds.delete(requestId)) {
+				this.lastStateBroadcastKeys.delete(requestId)
+				this.lastPartialMessageKeys.delete(requestId)
+				logInteraction("webview->sidecar", "grpc_request_cancel.streamDisposed", { requestId })
+				return {
+					handled: true,
+					owner: "sidecar",
+					webviewMessages: [],
+				}
+			}
 			if (this.mcpServerStreamRequestIds.delete(requestId)) {
 				logInteraction("webview->sidecar", "grpc_request_cancel.mcpStreamDisposed", { requestId })
 				return {
@@ -518,9 +532,6 @@ export class VisualStudioWebviewRouter {
 					webviewMessages: [],
 				}
 			}
-			// The Cline webview may cancel long-lived subscription request IDs while
-			// cancelling a task. Keep those host-owned streams alive so the user can
-			// continue the same conversation after Cancel.
 			logInteraction("webview->sidecar", "grpc_request_cancel.ignored", { requestId })
 			return {
 				handled: true,
@@ -905,12 +916,16 @@ export class VisualStudioWebviewRouter {
 					await this.sendAskResponse(message, requestId)
 					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 				}
-				await this.startNewTask(message, { broadcast: false, requestId })
-				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
+				await this.startNewTask(message, { broadcast: true, requestId })
+				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.askResponse":
 				await this.sendAskResponse(message, requestId)
 				return grpcHandled(grpcResponse(requestId, {}, false))
+
+			case "SlashService.condense":
+				await this.compactCurrentSession(requestId)
+				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
 
 			case "TaskService.cancelTask":
 				await this.cancelTask()
@@ -2619,7 +2634,6 @@ export class VisualStudioWebviewRouter {
 			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
-		this.closingSessionIds.clear()
 		const text = getString(message, "text")
 		const images = getStringArray(message, "images")
 		const files = getStringArray(message, "files")
@@ -2650,10 +2664,10 @@ export class VisualStudioWebviewRouter {
 		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
 		this.noteTaskActivity("start")
 		this.updateCurrentTaskItem()
+		this.schedulePersistedStateSave()
 		if (options.broadcast !== false) {
 			this.broadcastState().catch((error) => console.error(error))
 		}
-		this.schedulePersistedStateSave()
 
 		void this.prepareAndLaunchNewTask({
 			text,
@@ -2734,16 +2748,29 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		let runGeneration = 0
 		try {
 			const config = await this.buildSdkConfig(cwd, sessionId)
 			this.markSendLatencySdkSend(sessionId)
+			runGeneration = ++this.sdkRunGeneration
 			const result = await this.clineSdk.startSession({
 				...params,
 				config,
 				toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
 			})
-			await this.completeFromSdkResult(result, sessionId, source)
+			this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision
+			await this.completeFromSdkResult(result, sessionId, source, runGeneration)
 		} catch (error) {
+			if (runGeneration && runGeneration !== this.sdkRunGeneration) {
+				logInteraction("sidecar", "ignoredSupersededSdkError", {
+					source,
+					sessionId,
+					runGeneration,
+					currentRunGeneration: this.sdkRunGeneration,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return
+			}
 			this.clearTaskIdleWatchdog()
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			this.updateCurrentTaskItem()
@@ -2863,12 +2890,79 @@ export class VisualStudioWebviewRouter {
 			files: getStringArray(message, "files"),
 		})
 
+		const runGeneration = ++this.sdkRunGeneration
 		this.sendOrResumeSdkSession(sessionId, sendParams, text.length).then((result) =>
-			this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "send"),
+			this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "send", runGeneration),
 		).catch(async (error) => {
+			if (runGeneration !== this.sdkRunGeneration) {
+				logInteraction("sidecar", "ignoredSupersededSdkError", {
+					source: "send",
+					sessionId,
+					runGeneration,
+					currentRunGeneration: this.sdkRunGeneration,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return
+			}
 			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
 			await this.broadcastState()
 		})
+	}
+
+	private async compactCurrentSession(requestId = createId()) {
+		if (!this.clineSdk) {
+			throw new Error("LIG VS SDK runtime is not attached.")
+		}
+
+		const activeSessionId = this.clineSdk.status.activeSessionId
+		const selectedSessionId = String(this.state.currentTaskItem?.id || "")
+		const sessionId = activeSessionId || selectedSessionId
+		if (!sessionId) {
+			this.addMessage({
+				type: "say",
+				say: "error",
+				text: this.state.uiLanguage === "en" ? "No active session to compact." : "압축할 활성 세션이 없습니다.",
+			})
+			await this.broadcastState()
+			return
+		}
+
+		const prompt =
+			this.state.uiLanguage === "en"
+				? "Internal maintenance request: compact the current conversation context for future turns. Preserve the user's goals, important decisions, file paths, errors, pending tasks, and current state. Do not treat this as a user feature request."
+				: "내부 유지보수 요청: 이후 대화를 위해 현재 대화 컨텍스트를 압축해 주세요. 사용자의 목표, 중요한 결정, 파일 경로, 오류, 남은 작업, 현재 상태를 보존하세요. 이것을 사용자의 일반 기능 요청으로 처리하지 마세요."
+
+		this.startSendLatencyTrace(requestId, "askResponse", sessionId, prompt.length)
+		this.beginProgressPhase("reasoning")
+		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
+		this.schedulePersistedStateSave()
+		await this.broadcastState()
+
+		const sendParams = {
+			sessionId,
+			prompt,
+			mode: this.state.mode === "plan" ? "plan" : "act",
+			delivery: "steer" as const,
+		}
+
+		const runGeneration = ++this.sdkRunGeneration
+		try {
+			const result = await this.sendOrResumeSdkSession(sessionId, sendParams, prompt.length)
+			await this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "compact", runGeneration)
+		} catch (error) {
+			if (runGeneration !== this.sdkRunGeneration) {
+				logInteraction("sidecar", "ignoredSupersededSdkError", {
+					source: "compact",
+					sessionId,
+					runGeneration,
+					currentRunGeneration: this.sdkRunGeneration,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				return
+			}
+			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
+			await this.broadcastState()
+		}
 	}
 
 	private async sendOrResumeSdkSession(
@@ -2900,6 +2994,22 @@ export class VisualStudioWebviewRouter {
 
 		try {
 			if (activateMissing) {
+				return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
+			}
+			if (this.activeSessionRuntimeSettingsRevision !== this.runtimeSettingsRevision) {
+				logInteraction("sidecar", "sendAskResponse.restartForSettingsChange", {
+					sessionId,
+					activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision,
+					runtimeSettingsRevision: this.runtimeSettingsRevision,
+				})
+				this.closingSessionIds.add(sessionId)
+				await this.clineSdk.stop({ sessionId }).catch((error) => {
+					logInteraction("sidecar", "sendAskResponse.stopForSettingsChangeFailed", {
+						sessionId,
+						error: error instanceof Error ? error.message : String(error),
+					})
+				})
+				this.closingSessionIds.delete(sessionId)
 				return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
 			}
 			this.markSendLatencySdkSend(sessionId)
@@ -2962,30 +3072,53 @@ export class VisualStudioWebviewRouter {
 			interactive: true,
 			config: await this.buildSdkConfig(cwd, sessionId),
 			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
+		}).then((result) => {
+			this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision
+			return result
 		})
 	}
 
-	private async completeFromSdkResult(result: unknown, fallbackSessionId: string, source: string) {
+	private async completeFromSdkResult(result: unknown, fallbackSessionId: string, source: string, runGeneration: number) {
 		const resultRecord = asRecord(result)
+		const sessionId = getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || "")
+		if (runGeneration !== this.sdkRunGeneration) {
+			logInteraction("sidecar", "ignoredSupersededSdkResult", {
+				source,
+				sessionId,
+				runGeneration,
+				currentRunGeneration: this.sdkRunGeneration,
+			})
+			return
+		}
+
+		if (!this.isCurrentSdkResultSession(sessionId)) {
+			logInteraction("sidecar", "ignoredStaleSdkResult", {
+				source,
+				sessionId,
+				currentTaskId: this.state.currentTaskItem?.id,
+				activeSessionId: this.clineSdk?.status.activeSessionId,
+			})
+			return
+		}
+
 		const agentResult = asRecord(resultRecord.result ?? result)
 		if (Object.keys(agentResult).length === 0) {
 			logInteraction("sidecar", "emptySdkResult", {
 				source,
-				sessionId: fallbackSessionId,
+				sessionId,
 				lastTaskActivityReason: this.lastTaskActivityReason,
 				activePartialTextLength: this.getActivePartialText().length,
 				hasAssistantTextAfterLastUserMessage: this.hasAssistantTextAfterLastUserMessage(),
 			})
 			const activeText = this.getActivePartialText()
 			if (activeText || this.hasAssistantTextAfterLastUserMessage()) {
-				this.finishSdkTask(fallbackSessionId || String(this.state.currentTaskItem?.id || ""), "completed", activeText)
+				this.finishSdkTask(sessionId, "completed", activeText)
 				this.updateCurrentTaskItem()
 				await this.broadcastState()
 			}
 			return
 		}
 
-		const sessionId = getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || "")
 		const resultText = extractCompletionTextFromResult(agentResult, resultRecord)
 		const finishReason = getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed"
 		if (resultText) {
@@ -3008,10 +3141,13 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async cancelTask() {
+		this.sdkRunGeneration++
 		const sessionIdForHook = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		let cancelledSessionId = ""
 		if (this.clineSdk) {
 			const sessionId = this.clineSdk.status.activeSessionId
 			if (sessionId) {
+				cancelledSessionId = sessionId
 				await this.clineSdk.abort({ sessionId }).catch((error) => {
 					logInteraction("sidecar", "cancelAbortFailed", {
 						sessionId,
@@ -3019,6 +3155,9 @@ export class VisualStudioWebviewRouter {
 					})
 				})
 			}
+		}
+		if (cancelledSessionId) {
+			this.clineSdk?.markSessionInactive(cancelledSessionId)
 		}
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
@@ -3035,7 +3174,23 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async clearTask() {
+		this.sdkRunGeneration++
 		const sessionId = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
+		if (this.clineSdk && sessionId) {
+			this.closingSessionIds.add(sessionId)
+			await this.clineSdk.abort({ sessionId }).catch((error) => {
+				logInteraction("sidecar", "clearTaskAbortFailed", {
+					sessionId,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			})
+			await this.clineSdk.stop({ sessionId }).catch((error) => {
+				logInteraction("sidecar", "clearTaskStopFailed", {
+					sessionId,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			})
+		}
 
 		if (this.state.currentTaskItem && this.state.clineMessages.length > 0) {
 			const taskId = String(this.state.currentTaskItem.id || sessionId)
@@ -4195,6 +4350,15 @@ export class VisualStudioWebviewRouter {
 		await this.broadcastState()
 	}
 
+	private isCurrentSdkResultSession(sessionId: string) {
+		if (!sessionId || this.closingSessionIds.has(sessionId) || this.deletedTaskIds.has(sessionId)) {
+			return false
+		}
+
+		const currentTaskId = String(this.state.currentTaskItem?.id || "")
+		return !!currentTaskId && currentTaskId === sessionId
+	}
+
 	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
 		const type = getString(event, "type")
 		const contentType = getString(event, "contentType")
@@ -4725,6 +4889,7 @@ export class VisualStudioWebviewRouter {
 		const apiTimeoutMs = resolveRequestTimeoutMs(apiConfig)
 		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
 		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
+		const contextWindowTokens = resolveConfiguredContextWindow(apiConfig, providerId, modePrefix, modelId)
 		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
 		const maxParallelToolCalls = readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS")
 		const execution = buildOptionalExecutionConfig()
@@ -4756,6 +4921,8 @@ export class VisualStudioWebviewRouter {
 			apiTimeoutMs,
 			thinking,
 			reasoningEffort,
+			contextWindowTokens,
+			useAutoCondense: this.state.useAutoCondense === true,
 			sessionId: sessionId || undefined,
 			maxIterations,
 			maxParallelToolCalls,
@@ -4795,6 +4962,12 @@ export class VisualStudioWebviewRouter {
 			},
 			checkpoint: {
 				enabled: this.state.enableCheckpointsSetting !== false,
+			},
+			compaction: {
+				enabled: this.state.useAutoCondense === true,
+				strategy: "basic",
+				thresholdRatio: 0.9,
+				...(contextWindowTokens ? { maxInputTokens: contextWindowTokens } : {}),
 			},
 			...(execution ? { execution } : {}),
 			preferredLanguage,
@@ -4990,6 +5163,7 @@ export class VisualStudioWebviewRouter {
 
 	private applySettings(message: unknown) {
 		const request = asRecord(message)
+		let runtimeSettingsChanged = false
 		const apiConfigurationUpdate = extractApiConfigurationUpdate(request)
 		if (Object.keys(apiConfigurationUpdate).length > 0) {
 			this.state.apiConfiguration = normalizeApiConfiguration({
@@ -4997,6 +5171,7 @@ export class VisualStudioWebviewRouter {
 				...compactApiConfiguration(apiConfigurationUpdate),
 			}) as typeof this.state.apiConfiguration
 			this.syncActiveApiConfigurationProfile()
+			runtimeSettingsChanged = true
 		}
 		const autoApprovalUpdate = extractAutoApprovalSettingsUpdate(request)
 		if (Object.keys(autoApprovalUpdate).length > 0) {
@@ -5008,6 +5183,7 @@ export class VisualStudioWebviewRouter {
 					...asRecord(autoApprovalUpdate.actions),
 				},
 			}
+			runtimeSettingsChanged = true
 		}
 		if ("browserSettings" in request) {
 			this.state.browserSettings = {
@@ -5015,6 +5191,7 @@ export class VisualStudioWebviewRouter {
 				...asRecord(request.browserSettings),
 			} as typeof this.state.browserSettings
 			this.refreshWebToolFeatureState()
+			runtimeSettingsChanged = true
 		}
 		if ("focusChainSettings" in request) {
 			this.state.focusChainSettings = {
@@ -5052,18 +5229,31 @@ export class VisualStudioWebviewRouter {
 			if (key in request && key !== "apiConfiguration" && key !== "autoApprovalSettings") {
 				const stateKey = key === "nativeToolCallEnabled" ? "nativeToolCallSetting" : key
 				;(this.state as Record<string, unknown>)[stateKey] = request[key]
+				if (isRuntimeSettingsKey(key)) {
+					runtimeSettingsChanged = true
+				}
 			}
 		}
 		if ("apiConfigurationProfiles" in request) {
 			this.state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(request.apiConfigurationProfiles, this.state.apiConfiguration, this.state.planActSeparateModelsSetting)
+			runtimeSettingsChanged = true
 		}
 		if ("activeApiConfigurationProfileId" in request) {
 			this.activateApiConfigurationProfile(getString(request, "activeApiConfigurationProfileId"))
+			runtimeSettingsChanged = true
 		} else if ("apiConfigurationProfiles" in request) {
 			this.ensureApiConfigurationProfileState()
 		}
 		if ("planActSeparateModelsSetting" in request && !("activeApiConfigurationProfileId" in request)) {
 			this.syncActiveApiConfigurationProfile()
+			runtimeSettingsChanged = true
+		}
+		if (runtimeSettingsChanged) {
+			this.runtimeSettingsRevision++
+			logInteraction("sidecar", "runtimeSettingsChanged", {
+				runtimeSettingsRevision: this.runtimeSettingsRevision,
+				activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision,
+			})
 		}
 	}
 
@@ -5151,6 +5341,10 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private addMessage(message: Record<string, unknown>) {
+		if (isMeaninglessPlaceholderMessage(message)) {
+			logInteraction("sidecar", "skipMeaninglessPlaceholderMessage", message)
+			return undefined
+		}
 		if (isMeaninglessTextMessage(message)) {
 			logInteraction("sidecar", "skipMeaninglessTextMessage", message)
 			return undefined
@@ -5890,7 +6084,12 @@ export class VisualStudioWebviewRouter {
 	private upsertMessage(ts: number, updates: Record<string, unknown>) {
 		const index = this.state.clineMessages.findIndex((message) => message.ts === ts)
 		if (index >= 0) {
-			this.state.clineMessages[index] = normalizeClineMessagePayload({ ...this.state.clineMessages[index], ...updates, ts })
+			const normalized = normalizeClineMessagePayload({ ...this.state.clineMessages[index], ...updates, ts })
+			if (isMeaninglessPlaceholderMessage(normalized) || isMeaninglessToolMessage(normalized) || isMeaninglessTextMessage(normalized)) {
+				this.state.clineMessages.splice(index, 1)
+			} else {
+				this.state.clineMessages[index] = normalized
+			}
 			this.schedulePersistedStateSave()
 		}
 	}
@@ -7691,6 +7890,22 @@ function isMeaninglessToolMessage(message: Record<string, unknown>) {
 	)
 }
 
+function isMeaninglessPlaceholderMessage(message: Record<string, unknown>) {
+	const say = getString(message, "say")
+	if (say !== "reasoning" && say !== "api_req_started") {
+		return false
+	}
+
+	const text = getString(message, "text")
+	if (!isEmptyTranscriptPlaceholder(text)) {
+		return false
+	}
+
+	const images = Array.isArray(message.images) ? message.images : []
+	const files = Array.isArray(message.files) ? message.files : []
+	return images.length === 0 && files.length === 0 && !getString(message, "reasoning")
+}
+
 function isMeaninglessTextMessage(message: Record<string, unknown>) {
 	const say = getString(message, "say")
 	const ask = getString(message, "ask")
@@ -8683,8 +8898,19 @@ function shouldDelayAssistantTextUntilClassified(text: string) {
 	].some((prefix) => lower.startsWith(prefix))
 }
 
+function stripRawToolCallMarkup(text: string) {
+	return text
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/invoke>\s*<\/[^>\s]*:?tool_call>/gi, "")
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/invoke>/gi, "")
+		.replace(/<function=[\s\S]*?<\/function>\s*<\/tool_call>/gi, "")
+		.replace(/<function\b[^>]*>[\s\S]*?<\/function>\s*<\/tool_call>/gi, "")
+		.replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, "")
+		.replace(/<\/?[^>\s]*:?tool_call>/gi, "")
+		.trim()
+}
+
 function normalizeReasoningTranscriptText(text: string) {
-	const trimmed = text.trim()
+	const trimmed = stripRawToolCallMarkup(text)
 	if (!trimmed) {
 		return ""
 	}
@@ -8698,7 +8924,7 @@ function normalizeReasoningTranscriptText(text: string) {
 }
 
 function normalizeProgressTranscriptText(text: string) {
-	const trimmed = text.trim()
+	const trimmed = stripRawToolCallMarkup(text)
 	if (!trimmed) {
 		return ""
 	}
@@ -8711,7 +8937,7 @@ function normalizeProgressTranscriptText(text: string) {
 }
 
 function sanitizeProgressTranscriptForDisplay(text: string) {
-	return text
+	return stripRawToolCallMarkup(text)
 		.split(/\r?\n/)
 		.filter((line) => !isEmptyTranscriptPlaceholder(line))
 		.join("\n")
@@ -8720,7 +8946,7 @@ function sanitizeProgressTranscriptForDisplay(text: string) {
 }
 
 function normalizeAssistantTranscriptText(text: string) {
-	const trimmed = text.trim()
+	const trimmed = stripRawToolCallMarkup(text)
 	if (!trimmed || isEmptyJsonObjectString(trimmed)) {
 		return ""
 	}
@@ -9501,6 +9727,38 @@ function resolveModelId(apiConfig: Record<string, unknown>, providerId: string, 
 	return getString(apiConfig, `${modePrefix}ApiModelId`) || getString(apiConfig, `${modePrefix}OpenAiModelId`)
 }
 
+function resolveConfiguredContextWindow(
+	apiConfig: Record<string, unknown>,
+	providerId: string,
+	modePrefix: string,
+	modelId: string,
+) {
+	const providerInfoFields: Record<string, string> = {
+		openrouter: `${modePrefix}OpenRouterModelInfo`,
+		openai: `${modePrefix}OpenAiModelInfo`,
+		"openai-compatible": `${modePrefix}OpenAiModelInfo`,
+		aihubmix: `${modePrefix}AihubmixModelInfo`,
+		anthropic: `${modePrefix}ApiModelInfo`,
+	}
+	const explicitModelInfo = asRecord(apiConfig[providerInfoFields[providerId] || `${modePrefix}ApiModelInfo`])
+	const explicitContextWindow = positiveIntegerValue(explicitModelInfo.contextWindow) ?? positiveIntegerValue(explicitModelInfo.context_length)
+	if (explicitContextWindow && explicitContextWindow > 0) {
+		return explicitContextWindow
+	}
+	if (providerId === "ollama") {
+		return positiveIntegerValue(apiConfig.ollamaApiOptionsCtxNum) || positiveIntegerValue(inferModelInfo(modelId, providerId).contextWindow)
+	}
+	if (providerId === "lmstudio") {
+		return positiveIntegerValue(apiConfig.lmStudioMaxTokens) || positiveIntegerValue(inferModelInfo(modelId, providerId).contextWindow)
+	}
+	return positiveIntegerValue(inferModelInfo(modelId, providerId).contextWindow)
+}
+
+function positiveIntegerValue(value: unknown) {
+	const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN
+	return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined
+}
+
 function resolveApiKey(apiConfig: Record<string, unknown>, providerId: string) {
 	for (const field of providerCredentialFields(providerId)) {
 		const value = getString(apiConfig, field)
@@ -9710,7 +9968,11 @@ function pickApiConfigurationFields(request: Record<string, unknown>) {
 			key === "openAiBaseUrl" ||
 			key === "anthropicBaseUrl" ||
 			key === "geminiBaseUrl" ||
-			key === "requestTimeoutMs"
+			key === "requestTimeoutMs" ||
+			key === "ollamaApiOptionsCtxNum" ||
+			key === "lmStudioMaxTokens" ||
+			key === "fireworksModelMaxTokens" ||
+			key === "fireworksModelMaxCompletionTokens"
 		) {
 			result[key] = value
 		}
@@ -10018,6 +10280,25 @@ function webFetchDisabledReason(browserSettings: unknown) {
 	return ""
 }
 
+function isRuntimeSettingsKey(key: string) {
+	return (
+		key === "mode" ||
+		key === "planActSeparateModelsSetting" ||
+		key === "preferredLanguage" ||
+		key === "subagentsEnabled" ||
+		key === "scheduledAgentsEnabled" ||
+		key === "hooksEnabled" ||
+		key === "enableCheckpointsSetting" ||
+		key === "yoloModeToggled" ||
+		key === "doubleCheckCompletionEnabled" ||
+		key === "enableParallelToolCalling" ||
+		key === "nativeToolCallEnabled" ||
+		key === "strictPlanModeEnabled" ||
+		key === "useAutoCondense" ||
+		key === "customPrompt"
+	)
+}
+
 function cloneTaskSnapshot(snapshot: unknown): { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> } | null {
 	const record = asRecord(snapshot)
 	const taskItem = asRecord(record.taskItem)
@@ -10098,6 +10379,31 @@ function loadInitialState() {
 	if (typeof persisted.planActSeparateModelsSetting === "boolean") {
 		state.planActSeparateModelsSetting = persisted.planActSeparateModelsSetting
 	}
+	for (const key of [
+		"enableCheckpointsSetting",
+		"mcpResponsesCollapsed",
+		"strictPlanModeEnabled",
+		"yoloModeToggled",
+		"useAutoCondense",
+		"subagentsEnabled",
+		"scheduledAgentsEnabled",
+		"backgroundEditEnabled",
+		"doubleCheckCompletionEnabled",
+		"lazyTeammateModeEnabled",
+		"showFeatureTips",
+		"hooksEnabled",
+		"enableParallelToolCalling",
+	] as const) {
+		if (typeof persisted[key] === "boolean") {
+			state[key] = persisted[key] as never
+		}
+	}
+	if (typeof persisted.nativeToolCallSetting === "boolean") {
+		state.nativeToolCallSetting = persisted.nativeToolCallSetting
+	}
+	if (typeof persisted.mcpDisplayMode === "string") {
+		state.mcpDisplayMode = normalizeMcpDisplayMode(persisted.mcpDisplayMode, state.mcpDisplayMode)
+	}
 	if (persisted.uiLanguage === "en" || persisted.uiLanguage === "ko") {
 		state.uiLanguage = persisted.uiLanguage
 	} else if (getString(persisted, "preferredLanguage") === "English") {
@@ -10172,6 +10478,21 @@ function savePersistedState(state: ReturnType<typeof createInitialState>) {
 					customPrompt: state.customPrompt,
 					mode: state.mode,
 					planActSeparateModelsSetting: state.planActSeparateModelsSetting,
+					enableCheckpointsSetting: state.enableCheckpointsSetting,
+					mcpDisplayMode: state.mcpDisplayMode,
+					mcpResponsesCollapsed: state.mcpResponsesCollapsed,
+					strictPlanModeEnabled: state.strictPlanModeEnabled,
+					yoloModeToggled: state.yoloModeToggled,
+					useAutoCondense: state.useAutoCondense,
+					subagentsEnabled: state.subagentsEnabled,
+					scheduledAgentsEnabled: state.scheduledAgentsEnabled,
+					backgroundEditEnabled: state.backgroundEditEnabled,
+					doubleCheckCompletionEnabled: state.doubleCheckCompletionEnabled,
+					lazyTeammateModeEnabled: state.lazyTeammateModeEnabled,
+					showFeatureTips: state.showFeatureTips,
+					hooksEnabled: state.hooksEnabled,
+					nativeToolCallSetting: state.nativeToolCallSetting,
+					enableParallelToolCalling: state.enableParallelToolCalling,
 					taskHistory: state.taskHistory,
 					taskSnapshots: state.taskSnapshots,
 					currentTaskItem: state.currentTaskItem,
@@ -10205,10 +10526,62 @@ function createMcpServersLazyResponse() {
 }
 
 function getSettingsPath() {
-	const root =
-		process.env.VSCLINE_SETTINGS_DIR ||
-		path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || process.cwd(), "AppData", "Local"), "VsClineAgent")
-	return path.join(root, "settings.json")
+	return path.join(getSettingsRoot(), "settings.json")
+}
+
+function getSettingsRoot() {
+	const configured = process.env.VSCLINE_SETTINGS_DIR
+	if (isUsableDirectory(configured)) {
+		return path.resolve(configured)
+	}
+
+	const localAppData = process.env.LOCALAPPDATA || process.env.APPDATA
+	if (isUsableDirectory(localAppData)) {
+		return path.join(path.resolve(localAppData), "VsClineAgent")
+	}
+
+	const home = getUsableHomeDirectory()
+	return path.join(home, "AppData", "Local", "VsClineAgent")
+}
+
+function getUsableHomeDirectory() {
+	const candidates = [process.env.USERPROFILE, process.env.HOME, os.homedir(), getFallbackHomeDirectory()]
+	for (const candidate of candidates) {
+		if (isUsableDirectory(candidate)) {
+			return path.resolve(candidate)
+		}
+	}
+	return getFallbackHomeDirectory()
+}
+
+function getFallbackHomeDirectory() {
+	const root = process.env.LOCALAPPDATA || process.env.APPDATA || os.tmpdir()
+	const fallbackHome = path.join(root, "VsClineAgent", "home")
+	try {
+		fs.mkdirSync(fallbackHome, { recursive: true })
+		return fallbackHome
+	} catch {
+		return os.tmpdir()
+	}
+}
+
+function isUsableDirectory(value: string | undefined): value is string {
+	if (!value || value.trim().length === 0 || hasLiteralTildeSegment(value)) {
+		return false
+	}
+
+	try {
+		const resolved = path.resolve(value)
+		fs.mkdirSync(resolved, { recursive: true })
+		fs.accessSync(resolved, fs.constants.W_OK)
+		return true
+	} catch {
+		return false
+	}
+}
+
+function hasLiteralTildeSegment(value: string) {
+	return value.split(/[\\/]+/).some((part) => part === "~")
 }
 
 function getSidecarDataPath(fileName: string) {
@@ -10312,7 +10685,7 @@ function discoverLocalPlugins(workspaceRoot: string) {
 		workspaceRoot ? path.join(workspaceRoot, ".cline", "plugins") : "",
 		workspaceRoot ? path.join(workspaceRoot, ".cline", "plugins.json") : "",
 		path.join(path.dirname(getSettingsPath()), "plugins"),
-		path.join(process.env.USERPROFILE || "", ".cline", "plugins"),
+		path.join(getUsableHomeDirectory(), ".cline", "plugins"),
 	].filter(Boolean)
 	const plugins: Record<string, unknown>[] = []
 	for (const candidate of candidates) {

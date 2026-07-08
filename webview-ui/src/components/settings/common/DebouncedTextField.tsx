@@ -17,6 +17,10 @@ interface DebouncedTextFieldProps {
 	children?: React.ReactNode
 	disabled?: boolean
 	className?: string
+	inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"]
+	min?: string | number
+	max?: string | number
+	step?: string | number
 }
 
 /**
@@ -31,16 +35,21 @@ export const DebouncedTextField = ({
 	className,
 	...otherProps
 }: DebouncedTextFieldProps) => {
-	const [localValue, setLocalValue] = useDebouncedInput(initialValue, onChange)
+	const [localValue, setLocalValue, flushPendingChange] = useDebouncedInput(initialValue, onChange)
 
 	return (
 		<VSCodeTextField
 			{...otherProps}
 			className={className}
+			onChange={(e: any) => {
+				const value = e.target.value
+				setLocalValue(value)
+			}}
 			onInput={(e: any) => {
 				const value = e.target.value
 				setLocalValue(value)
 			}}
+			onBlur={flushPendingChange}
 			type={type}
 			value={localValue}>
 			{children}

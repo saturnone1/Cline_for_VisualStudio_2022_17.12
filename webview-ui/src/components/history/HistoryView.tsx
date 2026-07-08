@@ -18,7 +18,7 @@ type HistoryViewProps = {
 	onDone: () => void
 }
 
-type SortOption = "newest" | "oldest" | "mostExpensive" | "mostTokens" | "mostRelevant"
+type SortOption = "newest" | "oldest" | "mostTokens" | "mostRelevant"
 
 const isToday = (timestamp: number): boolean => {
 	const date = new Date(timestamp)
@@ -216,8 +216,6 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 			switch (sortOption) {
 				case "oldest":
 					return a.ts - b.ts
-				case "mostExpensive":
-					return (b.totalCost || 0) - (a.totalCost || 0)
 				case "mostTokens":
 					return (
 						(b.tokensIn || 0) +
@@ -363,15 +361,12 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							{Object.entries({
 								newest: t("history.newest"),
 								oldest: t("history.oldest"),
-								mostExpensive: t("history.mostExpensive"),
 								mostTokens: t("history.mostTokens"),
 								mostRelevant: t("history.mostRelevant"),
 								workspaceOnly: t("history.workspaceOnly"),
 								favoritesOnly: t("history.favoritesOnly"),
 							}).map(([key, value]) => {
-								const isSortOption = ["newest", "oldest", "mostExpensive", "mostTokens", "mostRelevant"].includes(
-									key,
-								)
+								const isSortOption = ["newest", "oldest", "mostTokens", "mostRelevant"].includes(key)
 								const isFilterOption = ["workspaceOnly", "favoritesOnly"].includes(key)
 								const isSelected = isSortOption
 									? sortOption === key

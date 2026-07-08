@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
-import { useRemark } from "react-remark"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -9,37 +10,37 @@ interface ModelDescriptionMarkdownProps {
 }
 
 export const ModelDescriptionMarkdown = memo(({ markdown, isPopup }: ModelDescriptionMarkdownProps) => {
-	// Update the markdown content when the prop changes
-	const [reactContent, setMarkdown] = useRemark()
 	const contentRef = useRef<HTMLDivElement>(null)
 	const [isTruncated, setIsTruncated] = useState(false)
 	const [isExpanded, setIsExpanded] = useState(false)
 
 	useEffect(() => {
-		if (markdown) {
-			setIsExpanded(false)
-			setMarkdown(markdown)
-		}
-	}, [markdown, setMarkdown])
+		setIsExpanded(false)
+	}, [markdown])
 
 	useEffect(() => {
-		if (contentRef.current && !isExpanded) {
-			const element = contentRef.current
-			// Check if content is truncated by comparing scrollHeight with clientHeight
-			setIsTruncated(element.scrollHeight > element.clientHeight)
+		const element = contentRef.current
+		if (!element) {
+			setIsTruncated(false)
+			return
 		}
-	}, [reactContent, isExpanded])
+		setIsTruncated(!isExpanded && element.scrollHeight > element.clientHeight)
+	}, [markdown, isExpanded])
+
+	if (!markdown) {
+		return null
+	}
 
 	return (
-		<div className="inline-block mb-2 description line-clamp-3">
+		<div className="inline-block mb-2 description">
 			<div className="relative wrap-anywhere overflow-y-hidden">
 				<div
-					className={cn("overflow-hidden text-sm line-clamp-3", {
+					className={cn("overflow-hidden text-sm [&>p]:m-0", {
 						"line-clamp-none": isExpanded,
-						"max-h-19": !isExpanded,
+						"line-clamp-3 max-h-19": !isExpanded,
 					})}
 					ref={contentRef}>
-					{reactContent}
+					<ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
 				</div>
 				{isTruncated && (
 					<div className="absolute bottom-0 right-0 flex items-center">

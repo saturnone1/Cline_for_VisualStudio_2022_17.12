@@ -14,7 +14,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 
 namespace VsClineAgent.Services
 {
-    internal sealed class VsCommandExecutionService
+    internal sealed class VsCommandExecutionService : IDisposable
     {
         private const int MaxRetainedOutputChars = 200000;
         private const int MaxOutputHistoryLines = 1000;
@@ -35,6 +35,7 @@ namespace VsClineAgent.Services
         private long _commandSequence;
         private long _outputSequence;
         private IVsOutputWindowPane? _outputPane;
+        private bool _disposed;
 
         public async Task<CommandExecutionResult> ExecuteCommandAsync(
             string command,
@@ -266,6 +267,9 @@ namespace VsClineAgent.Services
 
         private async Task<TerminalShellSession> AcquireSessionAsync(string cwd)
         {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(VsCommandExecutionService));
+
             var normalizedCwd = string.IsNullOrWhiteSpace(cwd) ? Environment.CurrentDirectory : Path.GetFullPath(cwd);
             var sessions = _sessionsByCwd.GetOrAdd(normalizedCwd, _ => new List<TerminalShellSession>());
 
@@ -459,11 +463,47 @@ namespace VsClineAgent.Services
             try
             {
                 if (!process.HasExited)
+                {
                     process.Kill();
+                    process.WaitForExit(2000);
+                }
             }
             catch
             {
             }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+
+            foreach (var command in _activeCommands.Values)
+            {
+                command.Status = "cancelled";
+                if (command.Process != null)
+                    TryKill(command.Process);
+            }
+
+            foreach (var sessions in _sessionsByCwd.Values)
+            {
+                lock (sessions)
+                {
+                    foreach (var session in sessions)
+                    {
+                        session.IsDisposed = true;
+                        TryKill(session.Process);
+                        session.InputLock.Dispose();
+                    }
+
+                    sessions.Clear();
+                }
+            }
+
+            _activeCommands.Clear();
+            _sessionsByCwd.Clear();
         }
 
         private void AppendCommandOutput(RunningCommandInfo command, string stream, string text, StringBuilder target)

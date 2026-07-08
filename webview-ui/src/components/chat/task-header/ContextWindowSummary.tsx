@@ -19,10 +19,12 @@ interface TaskContextWindowButtonsProps extends TokenUsageInfoProps {
 	percentage: number
 	tokenUsed: number
 	contextWindow: number
+	usageSource: "reported" | "estimated"
 	autoCompactEnabled?: boolean
 	autoCompactThreshold?: number
 	isThresholdChanged?: boolean
 	isThresholdFadingOut?: boolean
+	language?: "en" | "ko"
 }
 
 // New accordion item component
@@ -99,8 +101,10 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 	cacheWrites,
 	cacheReads,
 	percentage,
+	usageSource,
 	autoCompactEnabled = false,
 	autoCompactThreshold = 0,
+	language = "en",
 }) => {
 	// Accordion state
 	const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
@@ -122,6 +126,7 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 	}, [])
 
 	const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
+	const isKorean = language === "ko"
 
 	return (
 		<div className="context-window-tooltip-content flex flex-col gap-2 bg-menu rounded shadow-sm z-100 w-60 p-1">
@@ -144,27 +149,33 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 
 			{autoCompactEnabled && autoCompactThreshold <= 0 && (
 				<div className="rounded border border-[var(--vscode-widget-border)] p-1 text-xs text-muted-foreground">
-					Auto Compact is enabled, but automatic prompts require reliable usage and a configured threshold.
+					{isKorean
+						? "자동 압축이 켜져 있습니다. 사용량이 임계치에 도달하면 압축을 제안합니다."
+						: "Auto Compact is enabled. LIG VS will suggest compaction when usage reaches the threshold."}
 				</div>
 			)}
 
 			<AccordionItem
 				isExpanded={expandedSections.has("context")}
 				onToggle={(event) => toggleSection("context", event)}
-				title="Context Window"
+				title={isKorean ? "컨텍스트 창" : "Context Window"}
 				value={percentage ? `${percentage.toFixed(1)}%` : formatTokenNumber(contextWindow)}>
 				<div className="space-y-1">
 					<div className="flex justify-between">
-						<span>Used:</span>
+						<span>{isKorean ? "사용량:" : "Used:"}</span>
 						<span className="font-mono">{formatTokenNumber(tokenUsed)}</span>
 					</div>
 					<div className="flex justify-between">
-						<span>Total:</span>
+						<span>{isKorean ? "최대:" : "Total:"}</span>
 						<span className="font-mono">{formatTokenNumber(contextWindow)}</span>
 					</div>
 					<div className="flex justify-between">
-						<span>Remaining:</span>
+						<span>{isKorean ? "남음:" : "Remaining:"}</span>
 						<span className="font-mono">{formatTokenNumber(contextWindow - tokenUsed)}</span>
+					</div>
+					<div className="flex justify-between">
+						<span>{isKorean ? "출처:" : "Source:"}</span>
+						<span>{usageSource === "reported" ? (isKorean ? "보고됨" : "Reported") : isKorean ? "추정됨" : "Estimated"}</span>
 					</div>
 				</div>
 			</AccordionItem>

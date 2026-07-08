@@ -1,4 +1,5 @@
 import { ClineMessage } from "@shared/ExtensionMessage"
+import type { ContextWindowUsage } from "@shared/getApiMetrics"
 import React from "react"
 import TaskHeader from "@/components/chat/task-header/TaskHeader"
 import { MessageHandlers } from "../../types/chatTypes"
@@ -12,6 +13,8 @@ interface TaskSectionProps {
 		totalCacheReads?: number
 		totalCost: number
 	}
+	contextWindowUsage?: ContextWindowUsage
+	compactResetKey?: number
 	lastApiReqTotalTokens?: number
 	selectedModelInfo: {
 		supportsPromptCache: boolean
@@ -29,6 +32,8 @@ interface TaskSectionProps {
 export const TaskSection: React.FC<TaskSectionProps> = ({
 	task,
 	apiMetrics,
+	contextWindowUsage,
+	compactResetKey,
 	lastApiReqTotalTokens,
 	selectedModelInfo,
 	messageHandlers,
@@ -40,10 +45,12 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 			cacheReads={apiMetrics.totalCacheReads}
 			cacheWrites={apiMetrics.totalCacheWrites}
 			doesModelSupportPromptCache={selectedModelInfo.supportsPromptCache}
+			compactResetKey={compactResetKey}
+			contextWindowUsage={contextWindowUsage}
 			lastApiReqTotalTokens={lastApiReqTotalTokens}
 			lastProgressMessageText={lastProgressMessageText}
+			onCompact={messageHandlers.handleCompactTask}
 			onClose={messageHandlers.handleTaskCloseButtonClick}
-			onSendMessage={messageHandlers.handleSendMessage}
 			showFocusChainPlaceholder={showFocusChainPlaceholder}
 			task={task}
 			tokensIn={apiMetrics.totalTokensIn}

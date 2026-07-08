@@ -88,15 +88,6 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 						font-size: 0.85em;
 						white-space: nowrap;
 					}
-					.history-cost-chip {
-						background-color: var(--vscode-badge-background);
-						color: var(--vscode-badge-foreground);
-						padding: 2px 8px;
-						border-radius: 12px;
-						font-size: 0.85em;
-						font-weight: 500;
-						white-space: nowrap;
-					}
 					.history-view-all-btn {
 						background: none;
 						border: none;
@@ -176,9 +167,6 @@ const HistoryPreview = ({ showHistoryView }: HistoryPreviewProps) => {
 								</div>
 								<div className="history-meta-stack">
 									<span className="history-date">{formatDate(item.ts)}</span>
-									{item.totalCost != null && (
-										<span className="history-cost-chip">${item.totalCost.toFixed(2)}</span>
-									)}
 								</div>
 							</div>
 						))

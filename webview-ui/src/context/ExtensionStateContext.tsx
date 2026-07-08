@@ -27,6 +27,49 @@ import { Environment } from "../../../src/shared/config-types"
 import type { McpMarketplaceCatalog, McpServer, McpViewTab } from "../../../src/shared/mcp"
 import { ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpc-client"
 
+function mergeLivePartialMessages(prevState: ExtensionState, incomingState: ExtensionState): ExtensionState {
+	const currentTaskId = prevState.currentTaskItem?.id
+	const incomingTaskId = incomingState.currentTaskItem?.id
+	if (!currentTaskId || currentTaskId !== incomingTaskId) {
+		return incomingState
+	}
+
+	const incomingMessages = incomingState.clineMessages ?? []
+	const incomingByTs = new Map(incomingMessages.map((message) => [message.ts, message]))
+	let mergedMessages = incomingMessages
+
+	for (const previousMessage of prevState.clineMessages ?? []) {
+		if (!previousMessage.ts || previousMessage.partial !== true) {
+			continue
+		}
+
+		const incomingMessage = incomingByTs.get(previousMessage.ts)
+		const previousTextLength = previousMessage.text?.length ?? 0
+		const incomingTextLength = incomingMessage?.text?.length ?? 0
+		if (!incomingMessage || previousTextLength > incomingTextLength) {
+			mergedMessages = upsertMessageByTimestamp(mergedMessages, previousMessage)
+		}
+	}
+
+	return mergedMessages === incomingMessages
+		? incomingState
+		: {
+			...incomingState,
+			clineMessages: mergedMessages,
+		}
+}
+
+function upsertMessageByTimestamp(messages: ClineMessage[], message: ClineMessage): ClineMessage[] {
+	const index = messages.findIndex((item) => item.ts === message.ts)
+	if (index >= 0) {
+		const next = [...messages]
+		next[index] = message
+		return next
+	}
+
+	return [...messages, message].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
+}
+
 export interface ExtensionStateContextType extends ExtensionState {
 	didHydrateState: boolean
 	showWelcome: boolean
@@ -362,16 +405,17 @@ export const ExtensionStateContextProvider: React.FC<{
 							const currentVersion = prevState.autoApprovalSettings?.version ?? 1
 							const shouldUpdateAutoApproval = incomingVersion > currentVersion
 
+							const mergedState = mergeLivePartialMessages(prevState, stateData)
 							const newState = {
-								...stateData,
+								...mergedState,
 								uiLanguage:
-									stateData.uiLanguage === "en" || stateData.uiLanguage === "ko"
-										? stateData.uiLanguage
-										: stateData.preferredLanguage === "English"
+									mergedState.uiLanguage === "en" || mergedState.uiLanguage === "ko"
+										? mergedState.uiLanguage
+										: mergedState.preferredLanguage === "English"
 											? "en"
 											: "ko",
 								autoApprovalSettings: shouldUpdateAutoApproval
-									? stateData.autoApprovalSettings
+									? mergedState.autoApprovalSettings
 									: prevState.autoApprovalSettings,
 							}
 

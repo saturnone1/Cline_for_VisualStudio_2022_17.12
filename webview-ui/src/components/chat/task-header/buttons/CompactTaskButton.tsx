@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils"
 
 const CompactTaskButton: React.FC<{
 	className?: string
+	disabled?: boolean
 	onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
 	showLabel?: boolean
-}> = ({ onClick, className, showLabel = false }) => {
+}> = ({ onClick, className, disabled = false, showLabel = false }) => {
 	return (
 		<Tooltip>
 			<TooltipContent side="left">Compact Task</TooltipContent>
@@ -15,9 +16,13 @@ const CompactTaskButton: React.FC<{
 				<Button
 					aria-label="Compact Task"
 					className={cn("[&_svg]:size-3", showLabel && "px-2 h-6 text-xs")}
+					disabled={disabled}
 					onClick={(e) => {
 						e.preventDefault()
 						e.stopPropagation()
+						if (disabled) {
+							return
+						}
 						onClick(e)
 					}}
 					size={showLabel ? "xs" : "icon"}

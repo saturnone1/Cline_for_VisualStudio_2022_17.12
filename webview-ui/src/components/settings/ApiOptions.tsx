@@ -55,6 +55,7 @@ import { VSCodeLmProvider } from "./providers/VSCodeLmProvider"
 import { WandbProvider } from "./providers/WandbProvider"
 import { XaiProvider } from "./providers/XaiProvider"
 import { ZAiProvider } from "./providers/ZAiProvider"
+import { DebouncedTextField } from "./common/DebouncedTextField"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
 
 interface ApiOptionsProps {
@@ -97,7 +98,7 @@ const ApiOptions = ({
 
 	const { selectedProvider } = normalizeApiConfiguration(apiConfiguration, currentMode)
 
-	const { handleModeFieldChange } = useApiConfigurationHandlers()
+	const { handleFieldChange, handleModeFieldChange } = useApiConfigurationHandlers()
 
 	const [_ollamaModels, setOllamaModels] = useState<string[]>([])
 
@@ -276,6 +277,16 @@ const ApiOptions = ({
 
 		return configured ? t("settings.api.configSaved") : t("settings.api.configEmpty")
 	}, [apiConfiguration, selectedProvider, t])
+
+	const handleRequestTimeoutChange = useCallback(
+		(value: string) => {
+			const parsed = Number.parseInt(value.trim(), 10)
+			if (Number.isFinite(parsed) && parsed > 0) {
+				handleFieldChange("requestTimeoutMs", parsed)
+			}
+		},
+		[handleFieldChange],
+	)
 
 	/*
 	VSCodeDropdown has an open bug where dynamically rendered options don't auto select the provided value prop. You can see this for yourself by comparing  it with normal select/option elements, which work as expected.
@@ -541,6 +552,21 @@ const ApiOptions = ({
 
 			{apiConfiguration && selectedProvider === "aihubmix" && (
 				<AIhubmixProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
+			)}
+
+			{showModelOptions && apiConfiguration && (
+				<div className="mt-2">
+					<DebouncedTextField
+						initialValue={apiConfiguration.requestTimeoutMs ? apiConfiguration.requestTimeoutMs.toString() : "600000"}
+						inputMode="numeric"
+						min={1}
+						onChange={handleRequestTimeoutChange}
+						placeholder="Default: 600000 (10 minutes)"
+						style={{ width: "100%" }}>
+						<span className="font-semibold">{t("settings.api.requestTimeout")}</span>
+					</DebouncedTextField>
+					<p className="text-xs mt-1 mb-0 text-description">{t("settings.api.requestTimeoutHelp")}</p>
+				</div>
 			)}
 
 			{apiErrorMessage && (

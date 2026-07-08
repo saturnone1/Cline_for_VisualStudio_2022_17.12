@@ -26,6 +26,17 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 
+	const handleCompactTask = useCallback(async () => {
+		setSendingDisabled(true)
+		setEnableButtons(false)
+		await SlashServiceClient.condense(StringRequest.create({ value: lastMessage?.text })).catch((err) => {
+			console.error(err)
+			setSendingDisabled(false)
+			setEnableButtons(true)
+			throw err
+		})
+	}, [lastMessage?.text, setEnableButtons, setSendingDisabled])
+
 	// Handle sending a message
 	const handleSendMessage = useCallback(
 		async (text: string, images: string[], files: string[]) => {
@@ -168,7 +179,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			}
 		},
 		[
-			messages.length,
+			messages,
 			clineAsk,
 			currentTaskItem?.id,
 			activeQuote,
@@ -312,14 +323,13 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				case "utility":
 					switch (clineAsk) {
 						case "condense":
-							await SlashServiceClient.condense(StringRequest.create({ value: lastMessage?.text })).catch((err) =>
-								console.error(err),
-							)
+							await handleCompactTask()
 							break
 						case "report_bug":
-							await SlashServiceClient.reportBug(StringRequest.create({ value: lastMessage?.text })).catch((err) =>
-								console.error(err),
-							)
+							await SlashServiceClient.reportBug(StringRequest.create({ value: lastMessage?.text })).catch(async (err) => {
+								console.error(err)
+								await handleSendMessage("/reportbug", [], [])
+							})
 							break
 					}
 					break
@@ -331,6 +341,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		},
 		[
 			clineAsk,
+			handleCompactTask,
 			lastMessage,
 			messages,
 			clearInputState,
@@ -349,8 +360,9 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 	}, [startNewTask])
 
 	return {
-		handleSendMessage,
 		executeButtonAction,
+		handleCompactTask,
+		handleSendMessage,
 		handleTaskCloseButtonClick,
 		startNewTask,
 	}

@@ -14,5 +14,13 @@ namespace VsClineAgent.ToolWindows
         }
 
         public ChatToolWindowControl? Control => Content as ChatToolWindowControl;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                Control?.Dispose();
+
+            base.Dispose(disposing);
+        }
     }
 }

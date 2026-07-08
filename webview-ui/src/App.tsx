@@ -6,6 +6,7 @@ import HistoryView from "./components/history/HistoryView"
 import McpView from "./components/mcp/configuration/McpConfigurationView"
 import OnboardingView from "./components/onboarding/OnboardingView"
 import SettingsView from "./components/settings/SettingsView"
+import LoadingScreen from "./components/welcome/LoadingScreen"
 import WorktreesView from "./components/worktrees/WorktreesView"
 import { useClineAuth } from "./context/ClineAuthContext"
 import { useExtensionState } from "./context/ExtensionStateContext"
@@ -57,7 +58,7 @@ const AppContent = () => {
 	}, [didHydrateState, showWelcome, shouldShowAnnouncement, showAnnouncement, showUpdateAnnouncementModal])
 
 	if (!didHydrateState) {
-		return null
+		return <LoadingScreen />
 	}
 
 	if (showWelcome) {
