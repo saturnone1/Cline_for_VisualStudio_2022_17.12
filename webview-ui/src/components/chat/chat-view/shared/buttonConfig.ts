@@ -36,17 +36,17 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 		sendingDisabled: true,
 		enableButtons: true,
 		primaryText: "다시 시도",
-		secondaryText: "새 작업 시작",
+		secondaryText: undefined,
 		primaryAction: "retry",
-		secondaryAction: "new_task",
+		secondaryAction: undefined,
 	},
 	mistake_limit_reached: {
 		sendingDisabled: false,
 		enableButtons: true,
 		primaryText: "그래도 계속",
-		secondaryText: "새 작업 시작",
+		secondaryText: undefined,
 		primaryAction: "proceed",
-		secondaryAction: "new_task",
+		secondaryAction: undefined,
 	},
 
 	// Tool approval states - most common during task execution
@@ -130,10 +130,10 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 	// Task lifecycle states
 	completion_result: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "새 작업 시작",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "new_task",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 	resume_task: {
@@ -146,18 +146,18 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 	},
 	resume_completed_task: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "새 작업 시작",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "new_task",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 	new_task: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "컨텍스트로 새 작업 시작",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "new_task",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 
@@ -305,7 +305,9 @@ function isApiRequestStillActive(message: ClineMessage) {
 		typeof info.cost === "number" ||
 		typeof info.totalCost === "number" ||
 		typeof info.tokensIn === "number" ||
-		typeof info.tokensOut === "number"
+		typeof info.tokensOut === "number" ||
+		typeof info.cacheWrites === "number" ||
+		typeof info.cacheReads === "number"
 
 	return !hasUsage
 }

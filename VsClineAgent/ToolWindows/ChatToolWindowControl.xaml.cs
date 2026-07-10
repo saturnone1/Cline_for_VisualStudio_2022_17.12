@@ -9,6 +9,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -19,6 +21,30 @@ namespace VsClineAgent.ToolWindows
 {
     public partial class ChatToolWindowControl : UserControl, IDisposable
     {
+        static ChatToolWindowControl()
+        {
+            AppDomain.CurrentDomain.AssemblyResolve += ResolveControlAssembly;
+        }
+
+        private static Assembly? ResolveControlAssembly(object? sender, ResolveEventArgs args)
+        {
+            try
+            {
+                var requestedAssembly = new AssemblyName(args.Name);
+                var controlAssembly = typeof(ChatToolWindowControl).Assembly;
+                return string.Equals(
+                    requestedAssembly.Name,
+                    controlAssembly.GetName().Name,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? controlAssembly
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private SidecarProcess? _sidecarProcess;
         private readonly VsEditorService _editorService;
         private readonly VsCommandExecutionService _commandExecutionService;
@@ -33,15 +59,126 @@ namespace VsClineAgent.ToolWindows
         private readonly object _webViewPostLock = new object();
         private readonly Queue<string> _pendingWebViewMessages = new Queue<string>();
         private bool _webViewPostFlushScheduled;
+        private const int MaxPendingWebViewMessages = 1000;
+		private const string LightTheme = "light";
+		private const string DarkTheme = "dark";
 
         public ChatToolWindowControl()
         {
             InitializeComponent();
+			ApplyLoadingTheme(ReadPersistedTheme());
+            InitializeLoadingLogo();
             _editorService = new VsEditorService();
             _commandExecutionService = new VsCommandExecutionService();
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
         }
+
+        private void InitializeLoadingLogo()
+        {
+            try
+            {
+                var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+                    ?? AppDomain.CurrentDomain.BaseDirectory;
+                var logoPath = Path.Combine(assemblyDirectory, "Assets", "lig-mark-white.png");
+                if (!File.Exists(logoPath))
+                    return;
+
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(logoPath, UriKind.Absolute);
+                bitmap.EndInit();
+                bitmap.Freeze();
+                loadingLogoImage.Source = bitmap;
+            }
+            catch
+            {
+            }
+        }
+
+		private static string GetThemePreferencePath()
+		{
+			var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+			return Path.Combine(localAppData, "VsClineAgent", "ui-theme.txt");
+		}
+
+		private static string ReadPersistedTheme()
+		{
+			try
+			{
+				return string.Equals(File.ReadAllText(GetThemePreferencePath()).Trim(), LightTheme, StringComparison.OrdinalIgnoreCase)
+					? LightTheme
+					: DarkTheme;
+			}
+			catch
+			{
+				return DarkTheme;
+			}
+		}
+
+		private static void PersistTheme(string theme)
+		{
+			try
+			{
+				var themePath = GetThemePreferencePath();
+				Directory.CreateDirectory(Path.GetDirectoryName(themePath)!);
+				File.WriteAllText(themePath, theme == LightTheme ? LightTheme : DarkTheme);
+			}
+			catch
+			{
+			}
+		}
+
+		private static SolidColorBrush ThemeBrush(string color)
+		{
+			var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+			brush.Freeze();
+			return brush;
+		}
+
+		private void ApplyLoadingTheme(string theme)
+		{
+			void Apply()
+			{
+				var isLight = string.Equals(theme, LightTheme, StringComparison.OrdinalIgnoreCase);
+				Background = ThemeBrush(isLight ? "#F7F8FA" : "#1E1E1E");
+				loadingTitleText.Foreground = ThemeBrush(isLight ? "#172033" : "#CCCCCC");
+				loadingBrandText.Foreground = ThemeBrush(isLight ? "#4B5563" : "#888888");
+				statusText.Foreground = ThemeBrush(isLight ? "#4B5563" : "#888888");
+				loadingProgress.Foreground = ThemeBrush(isLight ? "#0969B7" : "#0E70C0");
+				loadingProgress.Background = ThemeBrush(isLight ? "#D9DEE7" : "#333333");
+				errorText.Foreground = ThemeBrush(isLight ? "#B42318" : "#F44747");
+				errorText.Background = ThemeBrush(isLight ? "#FFFFFF" : "#1E1E1E");
+				errorText.BorderBrush = ThemeBrush(isLight ? "#C7CCD4" : "#3C3C3C");
+			}
+
+			if (Dispatcher.CheckAccess())
+				Apply();
+			else
+				Dispatcher.BeginInvoke(new Action(Apply));
+		}
+
+		private bool TryHandleThemePreference(string webMessageAsJson)
+		{
+			try
+			{
+				var message = JObject.Parse(webMessageAsJson);
+				if (!string.Equals((string?)message["type"], "ligvs_theme_changed", StringComparison.Ordinal))
+					return false;
+
+				var theme = string.Equals((string?)message["theme"], LightTheme, StringComparison.OrdinalIgnoreCase)
+					? LightTheme
+					: DarkTheme;
+				PersistTheme(theme);
+				ApplyLoadingTheme(theme);
+				return true;
+			}
+			catch
+			{
+				return false;
+			}
+		}
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
@@ -51,7 +188,7 @@ namespace VsClineAgent.ToolWindows
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            ScheduleUnloadDispose();
+            CancelPendingUnloadDispose();
         }
 
         private async Task OnLoadedAsync()
@@ -138,10 +275,35 @@ namespace VsClineAgent.ToolWindows
                 return false;
             }
 
-            document.documentElement.classList.add('dark');
-            if (document.body) {
-                document.body.classList.add('dark');
+            function getThemeMode() {
+                try {
+                    return window.localStorage && window.localStorage.getItem('ligVsTheme') === 'light'
+                        ? 'light'
+                        : 'dark';
+                } catch (_) {
+                    return 'dark';
+                }
             }
+
+            function applyThemeMode(theme) {
+                const mode = theme === 'light' ? 'light' : getThemeMode();
+                const isDark = mode !== 'light';
+                document.documentElement.classList.toggle('dark', isDark);
+                document.documentElement.dataset.vsclineTheme = mode;
+                if (document.body) {
+                    document.body.classList.toggle('dark', isDark);
+                    document.body.dataset.vsclineTheme = mode;
+                }
+                try {
+                    window.chrome && window.chrome.webview && window.chrome.webview.postMessage({
+                        type: 'ligvs_theme_changed',
+                        theme: mode
+                    });
+                } catch (_) {
+                }
+            }
+
+            applyThemeMode();
 
             if (document.getElementById('vscline-vscode-theme-shim')) {
                 return true;
@@ -228,6 +390,80 @@ namespace VsClineAgent.ToolWindows
     --vscode-diffEditor-insertedLineBackground: rgba(46, 160, 67, 0.25);
     --vscode-diffEditor-removedLineBackground: rgba(248, 81, 73, 0.25);
 }
+:root[data-vscline-theme='light'] {
+    color-scheme: light;
+    --vscode-foreground: #111827;
+    --vscode-descriptionForeground: #374151;
+    --vscode-disabledForeground: #6b7280;
+    --vscode-focusBorder: #0969da;
+    --vscode-contrastActiveBorder: #0969da;
+    --vscode-sideBar-background: #f3f6fb;
+    --vscode-sideBar-foreground: #111827;
+    --vscode-editor-background: #ffffff;
+    --vscode-editor-foreground: #111827;
+    --vscode-editor-border: #cbd5e1;
+    --vscode-editorGroup-border: #cbd5e1;
+    --vscode-editorWidget-background: #ffffff;
+    --vscode-editorWidget-border: #cbd5e1;
+    --vscode-panel-border: #cbd5e1;
+    --vscode-input-background: #ffffff;
+    --vscode-input-foreground: #111827;
+    --vscode-input-border: #64748b;
+    --vscode-input-placeholderForeground: #4b5563;
+    --vscode-button-background: #0969da;
+    --vscode-button-hoverBackground: #0757b8;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-secondaryBackground: #e2e8f0;
+    --vscode-button-secondaryHoverBackground: #cbd5e1;
+    --vscode-button-secondaryForeground: #111827;
+    --vscode-toolbar-background: #f3f6fb;
+    --vscode-toolbar-hoverBackground: #e2e8f0;
+    --vscode-list-hoverBackground: #e2e8f0;
+    --vscode-list-activeSelectionBackground: #0969da;
+    --vscode-list-activeSelectionForeground: #ffffff;
+    --vscode-list-inactiveSelectionBackground: #dbeafe;
+    --vscode-editor-inactiveSelectionBackground: #dbeafe;
+    --vscode-dropdown-background: #ffffff;
+    --vscode-dropdown-foreground: #111827;
+    --vscode-dropdown-border: #64748b;
+    --vscode-menu-background: #ffffff;
+    --vscode-menu-foreground: #111827;
+    --vscode-menu-border: #cbd5e1;
+    --vscode-menu-shadow: rgba(31, 35, 40, 0.16);
+    --vscode-scrollbarSlider-background: rgba(31, 35, 40, 0.22);
+    --vscode-scrollbarSlider-hoverBackground: rgba(31, 35, 40, 0.34);
+    --vscode-scrollbarSlider-activeBackground: rgba(31, 35, 40, 0.48);
+    --vscode-badge-background: #0969da;
+    --vscode-badge-foreground: #ffffff;
+    --vscode-textLink-foreground: #0969da;
+    --vscode-textLink-activeForeground: #0550ae;
+    --vscode-textCodeBlock-background: #f6f8fa;
+    --vscode-textBlockQuote-background: #f6f8fa;
+    --vscode-textBlockQuote-foreground: #57606a;
+    --vscode-textPreformat-foreground: #8250df;
+    --vscode-textSeparator-foreground: #d0d7de;
+    --vscode-icon-foreground: #57606a;
+    --vscode-widget-shadow: rgba(31, 35, 40, 0.16);
+    --vscode-errorForeground: #cf222e;
+    --vscode-problemsErrorIcon-foreground: #cf222e;
+    --vscode-testing-iconFailed: #cf222e;
+    --vscode-editorWarning-foreground: #9a6700;
+    --vscode-charts-green: #1a7f37;
+    --vscode-charts-yellow: #bf8700;
+    --vscode-progressBar-background: #0969da;
+    --vscode-banner-background: #e2e8f0;
+    --vscode-banner-foreground: #111827;
+    --vscode-banner-iconForeground: #0969da;
+    --vscode-editor-findMatchHighlightBackground: #fff8c5;
+    --vscode-debugTokenExpression-string: #953800;
+    --vscode-debugTokenExpression-number: #116329;
+    --vscode-debugTokenExpression-name: #0550ae;
+    --vscode-debugTokenExpression-type: #8250df;
+    --vscode-diffEditor-insertedTextBackground: rgba(26, 127, 55, 0.18);
+    --vscode-diffEditor-removedTextBackground: rgba(207, 34, 46, 0.16);
+    --vscode-diffEditor-insertedLineBackground: rgba(26, 127, 55, 0.14);
+    --vscode-diffEditor-removedLineBackground: rgba(207, 34, 46, 0.12);
+}
 html, body, #root {
     background: var(--vscode-sideBar-background) !important;
     color: var(--vscode-foreground) !important;
@@ -258,6 +494,14 @@ html, body, #root {
 }
 `;
             (document.head || document.documentElement).appendChild(themeStyle);
+            window.addEventListener('storage', function (event) {
+                if (event.key === 'ligVsTheme') {
+                    applyThemeMode(event.newValue);
+                }
+            });
+            window.addEventListener('ligvs-theme-change', function (event) {
+                applyThemeMode(event.detail);
+            });
             return true;
         } catch (error) {
             return false;
@@ -558,12 +802,24 @@ html, body, #root {
                 : Path.GetFileName(browserExecutableFolder!.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? "Bundled";
 
             runtimeId = SanitizePathSegment(runtimeId);
-            return Path.Combine(
+            var profileVersion = GetWebView2ProfileVersion();
+            var profileRoot = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "VsClineAgent",
                 "WebView2Data",
-                "1.0.8",
+                profileVersion);
+            CleanupVersionedCacheDirectory(Path.GetDirectoryName(profileRoot), profileVersion, 2);
+            return Path.Combine(
+                profileRoot,
                 runtimeId);
+        }
+
+        private static string GetWebView2ProfileVersion()
+        {
+            var assemblyName = Assembly.GetExecutingAssembly().GetName();
+            var name = string.IsNullOrWhiteSpace(assemblyName.Name) ? "VsClineAgent" : assemblyName.Name!;
+            var version = assemblyName.Version?.ToString() ?? "unknown";
+            return SanitizePathSegment(name + "-" + version);
         }
 
         private static string SanitizePathSegment(string value)
@@ -603,7 +859,42 @@ html, body, #root {
 
             CopyDirectory(sourceRuntimeFolder, targetRuntimeFolder);
             File.WriteAllText(stampPath, expectedStamp);
+            CleanupVersionedCacheDirectory(Path.GetDirectoryName(targetRuntimeFolder), version, 1);
             return targetRuntimeFolder;
+        }
+
+        private static void CleanupVersionedCacheDirectory(string? cacheRoot, string currentVersion, int keepRecentCount)
+        {
+            if (string.IsNullOrWhiteSpace(cacheRoot) || !Directory.Exists(cacheRoot))
+                return;
+
+            var root = Path.GetFullPath(cacheRoot);
+            var candidates = Directory.EnumerateDirectories(root)
+                .Select(path => new DirectoryInfo(path))
+                .Where(info => !string.Equals(info.Name, currentVersion, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(info => info.LastWriteTimeUtc)
+                .Skip(Math.Max(0, keepRecentCount))
+                .ToList();
+
+            foreach (var candidate in candidates)
+                TryDeleteDirectoryUnderRoot(candidate.FullName, root);
+        }
+
+        private static void TryDeleteDirectoryUnderRoot(string path, string root)
+        {
+            try
+            {
+                var resolved = Path.GetFullPath(path);
+                var resolvedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                if (!resolved.StartsWith(resolvedRoot, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                Directory.Delete(resolved, true);
+            }
+            catch
+            {
+            }
         }
 
         private static void CopyDirectory(string sourceDirectory, string targetDirectory)
@@ -693,7 +984,10 @@ html, body, #root {
             {
                 e.Cancel = true;
                 OpenExternalBrowser(e.Uri);
+                return;
             }
+
+            _webViewReady = false;
         }
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -763,11 +1057,20 @@ html, body, #root {
                 }
 
                 _webViewReady = true;
-                Dispatcher.Invoke(() =>
+                if (Dispatcher.CheckAccess())
                 {
                     loadingPanel.Visibility = Visibility.Collapsed;
                     webView.Visibility = Visibility.Visible;
-                });
+                }
+                else
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        loadingPanel.Visibility = Visibility.Collapsed;
+                        webView.Visibility = Visibility.Visible;
+                    });
+                }
+                ScheduleWebViewMessageFlush();
 
                 await ReportBlankWebviewIfNeededAsync();
             }
@@ -789,6 +1092,8 @@ html, body, #root {
             {
                 _lastWebMessageJson = webMessageAsJson;
                 InteractionLog.Write("webview->host", "webview.message", webMessageAsJson);
+				if (TryHandleThemePreference(webMessageAsJson))
+					return;
                 if (TryHandleHostDiagnostic(webMessageAsJson))
                     return;
 
@@ -883,6 +1188,7 @@ html, body, #root {
             _disposed = true;
             Loaded -= OnLoaded;
             Unloaded -= OnUnloaded;
+            DetachWebViewEventHandlers();
             CancelPendingUnloadDispose();
             ClearPendingWebViewMessages();
 
@@ -921,6 +1227,23 @@ html, body, #root {
             }
         }
 
+        private void DetachWebViewEventHandlers()
+        {
+            try
+            {
+                if (webView.CoreWebView2 == null)
+                    return;
+
+                webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                webView.CoreWebView2.NavigationStarting -= OnNavigationStarting;
+                webView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
+                webView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+            }
+            catch
+            {
+            }
+        }
+
         private void ScheduleUnloadDispose()
         {
             if (_disposed)
@@ -941,10 +1264,7 @@ html, body, #root {
                     await Dispatcher.InvokeAsync(() =>
                     {
                         if (!IsLoaded)
-                        {
-                            ClearPendingWebViewMessages();
-                            DisposeSidecarProcessQuietly();
-                        }
+                            ScheduleWebViewMessageFlush();
                     });
                 }
                 catch (OperationCanceledException)
@@ -1368,22 +1688,97 @@ html, body, #root {
                     return;
 
                 _pendingWebViewMessages.Enqueue(json);
+                TrimPendingWebViewMessages();
                 if (_webViewPostFlushScheduled)
                     return;
 
                 _webViewPostFlushScheduled = true;
             }
 
+            ScheduleWebViewMessageFlush();
+        }
+
+        private void TrimPendingWebViewMessages()
+        {
+            if (_pendingWebViewMessages.Count <= MaxPendingWebViewMessages)
+                return;
+
+            CoalescePendingStateMessages();
+            while (_pendingWebViewMessages.Count > MaxPendingWebViewMessages)
+                _pendingWebViewMessages.Dequeue();
+        }
+
+        private void CoalescePendingStateMessages()
+        {
+            var latestStateByRequest = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ordered = _pendingWebViewMessages.ToList();
+            foreach (var message in ordered)
+            {
+                var requestId = TryGetStateResponseRequestId(message);
+                if (!string.IsNullOrWhiteSpace(requestId))
+                    latestStateByRequest[requestId!] = message;
+            }
+
+            if (latestStateByRequest.Count == 0)
+                return;
+
+            _pendingWebViewMessages.Clear();
+            var emittedLatestState = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var message in ordered)
+            {
+                var requestId = TryGetStateResponseRequestId(message);
+                if (string.IsNullOrWhiteSpace(requestId))
+                {
+                    _pendingWebViewMessages.Enqueue(message);
+                    continue;
+                }
+
+                if (emittedLatestState.Contains(requestId!))
+                    continue;
+
+                var latest = latestStateByRequest[requestId!];
+                if (ReferenceEquals(message, latest) || string.Equals(message, latest, StringComparison.Ordinal))
+                {
+                    _pendingWebViewMessages.Enqueue(latest);
+                    emittedLatestState.Add(requestId!);
+                }
+            }
+        }
+
+        private static string? TryGetStateResponseRequestId(string json)
+        {
             try
             {
-                Dispatcher.BeginInvoke(new Action(FlushPendingWebViewMessages));
+                var envelope = JObject.Parse(json);
+                if (!string.Equals(envelope.Value<string>("type"), "grpc_response", StringComparison.Ordinal))
+                    return null;
+
+                var response = envelope["grpc_response"] as JObject;
+                var message = response?["message"] as JObject;
+                if (message?["stateJson"] == null)
+                    return null;
+
+                return response?.Value<string>("request_id");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ScheduleWebViewMessageFlush()
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(
+                    new Action(FlushPendingWebViewMessages),
+                    System.Windows.Threading.DispatcherPriority.Background);
             }
             catch
             {
                 lock (_webViewPostLock)
                 {
                     _webViewPostFlushScheduled = false;
-                    _pendingWebViewMessages.Clear();
                 }
             }
         }
@@ -1399,6 +1794,9 @@ html, body, #root {
                     _pendingWebViewMessages.Clear();
                     return;
                 }
+
+                if (!_webViewReady || webView.CoreWebView2 == null)
+                    return;
 
                 messages = _pendingWebViewMessages.ToArray();
                 _pendingWebViewMessages.Clear();
@@ -1430,7 +1828,7 @@ html, body, #root {
 
         private void ShowError(string message)
         {
-            Dispatcher.Invoke(() =>
+            void ApplyError()
             {
                 var detailedMessage = message.IndexOf("=== Snapshot ===", StringComparison.Ordinal) >= 0
                     ? message
@@ -1440,7 +1838,12 @@ html, body, #root {
                 errorText.Text = detailedMessage;
                 errorText.Visibility = Visibility.Visible;
                 WriteDiagnosticSnapshot(detailedMessage);
-            });
+            }
+
+            if (Dispatcher.CheckAccess())
+                ApplyError();
+            else
+                Dispatcher.BeginInvoke(new Action(ApplyError));
         }
 
         private string BuildDetailedDiagnostic(string summary, string? hint, JObject? webState)

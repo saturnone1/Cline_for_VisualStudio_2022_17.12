@@ -25,7 +25,7 @@ Studio parity requires:
   output.
 - MCP settings-file lifecycle routes through SDK helpers where available and
   keeps reduced/operation diagnostics visible after refresh.
-- Browser/Web fetch paths are gated, diagnostic, transcript-visible, and backed
+- Browser/Web fetch paths are settings-controlled, diagnostic, transcript-visible, and backed
   by sidecar DevTools session/action/tab ids.
 - OpenAI Codex/OCA/LIG provider auth state tracks token expiry and refresh.
 - Checkpoint compare/restore is visible in the transcript, with SDK diff-stream
@@ -63,7 +63,7 @@ Studio parity requires:
 - VS Code webview URI helpers map to packaged WebView2 assets.
 - VS Code terminal, diff, comments, storage, and secrets APIs map to
   Visual Studio-specific adapters.
-- Air-gap policy disables online marketplace install and web fetch by default.
+- Air-gap policy disables online marketplace install; web fetch is controlled by browser settings.
 
 ## Next Implementation Order
 

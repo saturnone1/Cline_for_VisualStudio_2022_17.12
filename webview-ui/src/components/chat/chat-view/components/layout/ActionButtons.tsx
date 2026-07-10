@@ -14,6 +14,7 @@ interface ActionButtonsProps {
 	chatState: ChatState
 	messageHandlers: MessageHandlers
 	mode: Mode
+	requestPending: boolean
 	scrollBehavior: {
 		scrollToBottomSmooth: () => void
 		disableAutoScrollRef: React.MutableRefObject<boolean>
@@ -30,10 +31,11 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	messages,
 	chatState,
 	mode,
+	requestPending,
 	messageHandlers,
 	scrollBehavior,
 }) => {
-	const { inputValue, selectedImages, selectedFiles, sendingDisabled, enableButtons: chatEnableButtons, setSendingDisabled } = chatState
+	const { inputValue, selectedImages, selectedFiles, setSendingDisabled } = chatState
 	const { language } = useI18n()
 	const [isProcessing, setIsProcessing] = useState(false)
 
@@ -50,9 +52,9 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 
 	// Single effect to handle all configuration updates
 	useEffect(() => {
-		setSendingDisabled(buttonConfig.sendingDisabled)
+		setSendingDisabled(requestPending ? true : buttonConfig.sendingDisabled)
 		setIsProcessing(false)
-	}, [buttonConfig, setSendingDisabled])
+	}, [buttonConfig, requestPending, setSendingDisabled])
 
 	// Clear input when transitioning from command_output to api_req
 	// This happens when user provides feedback during command execution
@@ -96,25 +98,28 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 		return () => window.removeEventListener("keydown", handleKeyDown)
 	}, [handleKeyDown])
 
+	const { showScrollToBottom, scrollToBottomSmooth, disableAutoScrollRef } = scrollBehavior
+
+	const runningButtonConfig = useMemo(
+		() => ({
+			sendingDisabled: true,
+			enableButtons: true,
+			primaryText: undefined,
+			secondaryText: language === "ko" ? "취소" : "Cancel",
+			primaryAction: undefined,
+			secondaryAction: "cancel" as const,
+		}),
+		[language],
+	)
+	const effectiveButtonConfig = requestPending ? runningButtonConfig : buttonConfig
+	const { primaryText, secondaryText, primaryAction, secondaryAction, enableButtons } = effectiveButtonConfig
+	const hasButtons = primaryText || secondaryText
+	const isStreaming = task?.partial === true
+	const canInteract = enableButtons && !isProcessing
+
 	if (!task) {
 		return null
 	}
-
-	const { showScrollToBottom, scrollToBottomSmooth, disableAutoScrollRef } = scrollBehavior
-
-	const pendingCancelConfig = sendingDisabled && !chatEnableButtons
-	const effectiveButtonConfig = pendingCancelConfig && !buttonConfig.primaryText && !buttonConfig.secondaryText
-		? {
-			...buttonConfig,
-			enableButtons: true,
-			secondaryText: language === "ko" ? "취소" : "Cancel",
-			secondaryAction: "cancel" as ButtonActionType,
-		}
-		: buttonConfig
-	const { primaryText, secondaryText, primaryAction, secondaryAction, enableButtons } = effectiveButtonConfig
-	const hasButtons = primaryText || secondaryText
-	const isStreaming = task.partial === true
-	const canInteract = enableButtons && !isProcessing
 
 	// Keep scroll affordance visually separate from task actions. When there are no
 	// task actions, do not render a full-width button that looks like approval UI.

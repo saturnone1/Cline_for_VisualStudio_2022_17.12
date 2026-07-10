@@ -1,8 +1,11 @@
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
+import { getLigTheme, setLigTheme, type LigTheme } from "@/utils/ligTheme"
 import PreferredLanguageSetting from "../PreferredLanguageSetting"
 import Section from "../Section"
 import { updateSetting } from "../utils/settingsHandlers"
@@ -14,9 +17,19 @@ interface GeneralSettingsSectionProps {
 const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionProps) => {
 	const { telemetrySetting, remoteConfigSettings, customPrompt } = useExtensionState()
 	const { t } = useI18n()
+	const [theme, setTheme] = useState<LigTheme>(() => getLigTheme())
 	const [localCustomPrompt, setLocalCustomPrompt] = useState(customPrompt || "")
 	const [isEditingCustomPrompt, setIsEditingCustomPrompt] = useState(false)
 	const lastSentCustomPromptRef = useRef(customPrompt || "")
+
+	useEffect(() => {
+		const handleThemeChange = (event: Event) => {
+			const nextTheme = (event as CustomEvent<LigTheme>).detail
+			setTheme(nextTheme === "light" ? "light" : "dark")
+		}
+		window.addEventListener("ligvs-theme-change", handleThemeChange)
+		return () => window.removeEventListener("ligvs-theme-change", handleThemeChange)
+	}, [])
 
 	useEffect(() => {
 		const incoming = customPrompt || ""
@@ -45,6 +58,30 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 		<div>
 			{renderSectionHeader("general")}
 			<Section>
+				<div className="mb-5 rounded-md border border-(--vscode-editorWidget-border) bg-(--lig-panel-raised) p-3">
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div className="min-w-[180px] flex-1">
+							<Label className="block font-semibold">{t("settings.general.theme")}</Label>
+							<p className="mt-1 text-sm text-description">{t("settings.general.themeHelp")}</p>
+						</div>
+						<Select
+							onValueChange={(value) => {
+								const nextTheme = value === "light" ? "light" : "dark"
+								setTheme(nextTheme)
+								setLigTheme(nextTheme)
+							}}
+							value={theme}>
+							<SelectTrigger className="w-[128px] border-(--vscode-input-border) bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground)">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="dark">{t("settings.general.themeDark")}</SelectItem>
+								<SelectItem value="light">{t("settings.general.themeLight")}</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+				</div>
+
 				<PreferredLanguageSetting />
 
 				<div className="mb-5">

@@ -8,6 +8,7 @@ interface InputSectionProps {
 	messageHandlers: MessageHandlers
 	scrollBehavior: ScrollBehavior
 	placeholderText: string
+	requestPending: boolean
 	shouldDisableFilesAndImages: boolean
 	selectFilesAndImages: () => Promise<void>
 }
@@ -20,6 +21,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 	messageHandlers,
 	scrollBehavior,
 	placeholderText,
+	requestPending,
 	shouldDisableFilesAndImages,
 	selectFilesAndImages,
 }) => {
@@ -66,7 +68,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 				onSend={() => messageHandlers.handleSendMessage(inputValue, selectedImages, selectedFiles)}
 				placeholderText={placeholderText}
 				ref={textAreaRef}
-				requestPending={sendingDisabled}
+				requestPending={requestPending}
 				selectedFiles={selectedFiles}
 				selectedImages={selectedImages}
 				sendingDisabled={sendingDisabled}

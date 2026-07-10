@@ -12,6 +12,7 @@ import { useClineAuth } from "./context/ClineAuthContext"
 import { useExtensionState } from "./context/ExtensionStateContext"
 import { Providers } from "./Providers"
 import { UiServiceClient } from "./services/grpc-client"
+import { applyLigTheme, getLigTheme } from "./utils/ligTheme"
 
 const AppContent = () => {
 	const {
@@ -91,6 +92,10 @@ const AppContent = () => {
 }
 
 const App = () => {
+	useEffect(() => {
+		applyLigTheme(getLigTheme())
+	}, [])
+
 	return (
 		<Providers>
 			<AppContent />

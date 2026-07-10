@@ -170,6 +170,8 @@ export class VisualStudioWebviewRouter {
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private persistedStateSaveTimer: NodeJS.Timeout | null = null
+	private stateBroadcastInFlight: Promise<void> | null = null
+	private stateBroadcastQueued = false
 	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private lastPartialStateBroadcastAt = 0
 	private stateHydrationRefreshInFlight = false
@@ -225,6 +227,26 @@ export class VisualStudioWebviewRouter {
 	}
 
 	dispose() {
+		this.clearPartialIdleWatchdog()
+		this.clearPartialStateBroadcastTimer()
+		this.clearTaskIdleWatchdog()
+		if (this.terminalStateTimer) {
+			clearTimeout(this.terminalStateTimer)
+			this.terminalStateTimer = null
+		}
+		if (this.changeSummaryTimer) {
+			clearTimeout(this.changeSummaryTimer)
+			this.changeSummaryTimer = null
+		}
+		this.stateStreamRequestIds.clear()
+		this.partialMessageStreamRequestIds.clear()
+		this.mcpServerStreamRequestIds.clear()
+		this.lastStateBroadcastKeys.clear()
+		this.lastPartialMessageKeys.clear()
+		this.pendingApproval?.resolve({ approved: false, reason: "LIG VS webview router was disposed." })
+		this.pendingApproval = null
+		this.pendingQuestion?.resolve("")
+		this.pendingQuestion = null
 		this.flushPersistedStateSave()
 	}
 
@@ -514,18 +536,8 @@ export class VisualStudioWebviewRouter {
 					webviewMessages: [],
 				}
 			}
-			if (this.stateStreamRequestIds.delete(requestId) || this.partialMessageStreamRequestIds.delete(requestId)) {
-				this.lastStateBroadcastKeys.delete(requestId)
-				this.lastPartialMessageKeys.delete(requestId)
+			if (this.disposeStreamRequest(requestId)) {
 				logInteraction("webview->sidecar", "grpc_request_cancel.streamDisposed", { requestId })
-				return {
-					handled: true,
-					owner: "sidecar",
-					webviewMessages: [],
-				}
-			}
-			if (this.mcpServerStreamRequestIds.delete(requestId)) {
-				logInteraction("webview->sidecar", "grpc_request_cancel.mcpStreamDisposed", { requestId })
 				return {
 					handled: true,
 					owner: "sidecar",
@@ -1240,6 +1252,16 @@ export class VisualStudioWebviewRouter {
 			default:
 				return null
 		}
+	}
+
+	private disposeStreamRequest(requestId: string) {
+		const removed =
+			this.stateStreamRequestIds.delete(requestId) ||
+			this.partialMessageStreamRequestIds.delete(requestId) ||
+			this.mcpServerStreamRequestIds.delete(requestId)
+		this.lastStateBroadcastKeys.delete(requestId)
+		this.lastPartialMessageKeys.delete(requestId)
+		return removed
 	}
 
 	private logSlowGrpcRequest(key: string, startedAt: number, streaming: boolean) {
@@ -2570,6 +2592,9 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private grpcMcpServersMutation(requestId: string, response: unknown) {
+		// MCP tools are fixed when an SDK session starts. Restart the session on the
+		// next user turn so the model receives the updated tool schemas.
+		this.runtimeSettingsRevision++
 		return grpcHandled(
 			grpcResponse(requestId, response, false),
 			...this.buildMcpServerStreamMessages(response),
@@ -2771,10 +2796,7 @@ export class VisualStudioWebviewRouter {
 				})
 				return
 			}
-			this.clearTaskIdleWatchdog()
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-			this.updateCurrentTaskItem()
-			await this.broadcastState()
+			await this.recoverFromSdkRunError(sessionId, source, runGeneration, error)
 		}
 	}
 
@@ -2904,8 +2926,7 @@ export class VisualStudioWebviewRouter {
 				})
 				return
 			}
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-			await this.broadcastState()
+			await this.recoverFromSdkRunError(sessionId, "send", runGeneration, error)
 		})
 	}
 
@@ -2960,8 +2981,7 @@ export class VisualStudioWebviewRouter {
 				})
 				return
 			}
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-			await this.broadcastState()
+			await this.recoverFromSdkRunError(sessionId, "compact", runGeneration, error)
 		}
 	}
 
@@ -3064,12 +3084,20 @@ export class VisualStudioWebviewRouter {
 			cwd,
 		})
 		void this.runLifecycleHooks("TaskResume", { prompt, cwd, userImages, userFiles, sessionId })
+		const initialMessages = buildResumedConversationMessages(
+			this.state.clineMessages,
+			prompt,
+			this.getResumedConversationCharBudget(),
+		)
+		const taskTitle = String(taskItem.task || "").trim()
 		return this.clineSdk.startSession({
-			prompt: buildResumedConversationPrompt(this.state.clineMessages, prompt, this.getUiLanguage()),
+			prompt,
 			cwd,
 			userImages: normalizeSdkImageInputs(userImages),
 			userFiles,
 			interactive: true,
+			initialMessages,
+			sessionMetadata: taskTitle ? { title: taskTitle, ligVsResumed: true } : { ligVsResumed: true },
 			config: await this.buildSdkConfig(cwd, sessionId),
 			toolPolicies: createToolPolicies(this.state.autoApprovalSettings, this.state.browserSettings, this.state.mode),
 		}).then((result) => {
@@ -3091,6 +3119,10 @@ export class VisualStudioWebviewRouter {
 			return
 		}
 
+		if (sessionId && fallbackSessionId && sessionId !== fallbackSessionId && String(this.state.currentTaskItem?.id || "") === fallbackSessionId) {
+			this.bindCurrentTaskToSession(sessionId)
+		}
+
 		if (!this.isCurrentSdkResultSession(sessionId)) {
 			logInteraction("sidecar", "ignoredStaleSdkResult", {
 				source,
@@ -3098,6 +3130,11 @@ export class VisualStudioWebviewRouter {
 				currentTaskId: this.state.currentTaskItem?.id,
 				activeSessionId: this.clineSdk?.status.activeSessionId,
 			})
+			return
+		}
+
+		if (await this.hydrateCurrentTaskFromSdk(sessionId, `complete:${source}`, true)) {
+			await this.broadcastState()
 			return
 		}
 
@@ -3114,6 +3151,8 @@ export class VisualStudioWebviewRouter {
 			if (activeText || this.hasAssistantTextAfterLastUserMessage()) {
 				this.finishSdkTask(sessionId, "completed", activeText)
 				this.updateCurrentTaskItem()
+				await this.broadcastState()
+			} else if (await this.hydrateCurrentTaskFromSdk(sessionId, `empty:${source}`, true)) {
 				await this.broadcastState()
 			}
 			return
@@ -3136,6 +3175,61 @@ export class VisualStudioWebviewRouter {
 			this.addCompletionResultMarker(finishReason)
 		}
 
+		this.updateCurrentTaskItem()
+		await this.broadcastState()
+	}
+
+	private async recoverFromSdkRunError(sessionId: string, source: string, runGeneration: number, error: unknown) {
+		logInteraction("sidecar", "sdkRunErrorRecoveryStarted", {
+			source,
+			sessionId,
+			runGeneration,
+			error: stringify(error),
+			activePartialTextLength: this.getActivePartialText().length,
+			hasAssistantTextAfterLastUserMessage: this.hasAssistantTextAfterLastUserMessage(),
+		})
+
+		const recoveryDelays = [0, 500, 1500, 3000]
+		for (const delayMs of recoveryDelays) {
+			if (runGeneration && runGeneration !== this.sdkRunGeneration) {
+				logInteraction("sidecar", "sdkRunErrorRecoveryCancelled", {
+					source,
+					sessionId,
+					runGeneration,
+					currentRunGeneration: this.sdkRunGeneration,
+				})
+				return
+			}
+
+			if (delayMs > 0) {
+				await delay(delayMs)
+			}
+
+			if (await this.hydrateCurrentTaskFromSdk(sessionId, `error:${source}:${delayMs}`, true)) {
+				this.updateCurrentTaskItem()
+				await this.broadcastState()
+				logInteraction("sidecar", "sdkRunErrorRecoveredByHydration", { source, sessionId, delayMs })
+				return
+			}
+		}
+
+		const activeText = this.getActivePartialText()
+		if (activeText || this.hasAssistantTextAfterLastUserMessage()) {
+			this.finishSdkTask(sessionId, "completed", activeText)
+			this.updateCurrentTaskItem()
+			await this.broadcastState()
+			logInteraction("sidecar", "sdkRunErrorRecoveredByPartialText", {
+				source,
+				sessionId,
+				activeTextLength: activeText.length,
+			})
+			return
+		}
+
+		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.clearReasoningStatus()
+		this.addMessage({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
 	}
@@ -3415,7 +3509,7 @@ export class VisualStudioWebviewRouter {
 			})
 			return
 		}
-		if (this.state.clineMessages.some((message) => message.partial === true)) {
+		if (activeSessionId === taskId && this.state.clineMessages.some((message) => message.partial === true)) {
 			logInteraction("sidecar", "stateHydration.selectedTaskSkipped", {
 				reason: "partial_messages",
 				taskId,
@@ -3456,6 +3550,59 @@ export class VisualStudioWebviewRouter {
 		this.state.clineMessages = clineMessages
 		this.rememberTaskSnapshot(taskId, taskItem, this.state.clineMessages)
 		this.schedulePersistedStateSave()
+	}
+
+	private async hydrateCurrentTaskFromSdk(sessionId: string, source: string, force = false) {
+		if (!this.clineSdk || !this.state.currentTaskItem || !sessionId) {
+			return false
+		}
+
+		const currentTaskId = String(this.state.currentTaskItem.id || "")
+		if (currentTaskId && currentTaskId !== sessionId) {
+			return false
+		}
+		if (!force && (this.activePartialTextTs || this.activeReasoningTextTs || this.activeToolActivityTs)) {
+			return false
+		}
+
+		const session = asRecord(await this.clineSdk.getSession({ sessionId }).catch(() => null))
+		if (!session || Object.keys(session).length === 0) {
+			return false
+		}
+
+		const messages = await this.clineSdk.readMessages({ sessionId }).catch(() => null)
+		if (!Array.isArray(messages) || messages.length === 0) {
+			return false
+		}
+
+		const taskItem = sdkSessionToHistoryItem(session)
+		const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
+		if (clineMessages.length === 0) {
+			return false
+		}
+
+		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.clearReasoningStatus()
+		this.activePartialTextTs = null
+		this.activeReasoningTextTs = null
+		this.activeToolActivityTs = null
+		this.activeAssistantTextBuffer = ""
+		this.state.currentTaskItem = taskItem
+		this.state.clineMessages = clineMessages
+		this.finalizeOpenPartialMessages()
+		this.addCompletionResultMarker("completed")
+		this.updateCurrentTaskItem()
+		this.rememberTaskSnapshot(sessionId, taskItem, this.state.clineMessages)
+		this.schedulePersistedStateSave()
+		logInteraction("sidecar", "sdkMessagesHydrated", {
+			source,
+			sessionId,
+			sdkCount: messages.length,
+			clineCount: this.state.clineMessages.length,
+			force,
+		})
+		return true
 	}
 
 	private async restoreCheckpoint(message: unknown) {
@@ -6159,6 +6306,17 @@ export class VisualStudioWebviewRouter {
 		return resolveModelId(apiConfig, providerId, modePrefix) || process.env.CLINE_MODEL_ID || "claude-sonnet-4-6"
 	}
 
+	private getResumedConversationCharBudget() {
+		const apiConfig = asRecord(this.state.apiConfiguration)
+		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
+		const providerId = normalizeProviderId(getString(apiConfig, `${modePrefix}ApiProvider`) || "anthropic")
+		const modelId = this.getModelId()
+		const contextWindowTokens = resolveConfiguredContextWindow(apiConfig, providerId, modePrefix, modelId)
+		return contextWindowTokens
+			? Math.min(RESUMED_CONVERSATION_MAX_CHARS, Math.max(2_000, Math.floor(contextWindowTokens * 0.5)))
+			: RESUMED_CONVERSATION_MAX_CHARS
+	}
+
 	private createCurrentModelCatalog() {
 		const id = this.getModelId()
 		return createModelCatalog([id], {
@@ -6286,6 +6444,24 @@ export class VisualStudioWebviewRouter {
 	}
 
 	private async broadcastState() {
+		if (this.stateBroadcastInFlight) {
+			this.stateBroadcastQueued = true
+			return this.stateBroadcastInFlight
+		}
+
+		this.stateBroadcastInFlight = this.broadcastStateCore()
+		try {
+			await this.stateBroadcastInFlight
+		} finally {
+			this.stateBroadcastInFlight = null
+			if (this.stateBroadcastQueued) {
+				this.stateBroadcastQueued = false
+				await this.broadcastState()
+			}
+		}
+	}
+
+	private async broadcastStateCore() {
 		const messages = this.buildStateMessages()
 		if (messages.length === 0) {
 			return
@@ -6335,7 +6511,10 @@ export class VisualStudioWebviewRouter {
 				this.connection,
 				"webview.postMessage",
 				{ message: grpcResponse(requestId, toProtoClineMessage(message), true) },
-			).catch((error) => console.error(error))
+			).catch((error) => {
+				this.lastPartialMessageKeys.delete(requestId)
+				console.error(error)
+			})
 		}
 	}
 
@@ -7205,8 +7384,8 @@ function waitForDevToolsSettle(ms = 500) {
 
 async function checkIsImageUrl(url: string) {
 	const normalized = normalizeHttpUrl(url)
-	if (!normalized || process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
-		return { value: false, success: false, disabled: process.env.VSCLINE_ENABLE_WEB_FETCH !== "1" }
+	if (!normalized) {
+		return { value: false, success: false }
 	}
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 5000))
@@ -7226,15 +7405,6 @@ async function fetchOpenGraphData(url: string) {
 	if (!normalized) {
 		return { success: false, error: "Invalid URL." }
 	}
-	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
-		return {
-			success: false,
-			disabled: true,
-			url: normalized,
-			message: "Web preview fetching is disabled for air-gap mode. Set VSCLINE_ENABLE_WEB_FETCH=1 to enable it.",
-		}
-	}
-
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 8000))
 	try {
@@ -7832,6 +8002,9 @@ function normalizeClineMessagePayload(message: Record<string, unknown>) {
 	const text = getString(normalized, "text")
 	const say = getString(normalized, "say")
 	const ask = getString(normalized, "ask")
+	if ((say === "task" || say === "user_feedback") && text) {
+		normalized.text = stripLegacyMcpContext(text)
+	}
 
 	if ((say === "tool" || ask === "tool") && text && !isJsonObjectString(text)) {
 		normalized.text = JSON.stringify({
@@ -8137,7 +8310,9 @@ function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 	const checkpoint = asRecord(metadata.checkpoint)
 	const latestCheckpoint = asRecord(checkpoint.latest)
 	const id = getString(session, "sessionId") || getString(session, "id") || createId()
-	const task = getString(metadata, "title") || getString(session, "title") || getString(session, "prompt") || "LIG VS SDK task"
+	const task = stripLegacyMcpContext(
+		getString(metadata, "title") || getString(session, "title") || getString(session, "prompt") || "LIG VS SDK task",
+	)
 	return {
 		id,
 		ts: getNumber(session, "updatedAt") || getNumber(session, "createdAt") || Date.now(),
@@ -8224,7 +8399,7 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 		const ts = sdkMessageTimestamp(record, taskItem, messageIndex++)
 		let partOffset = 0
 		if (role === "user") {
-			const text = contentToText(record.content)
+			const text = stripLegacyMcpContext(contentToText(record.content))
 			const entries = sdkContentToToolActivityEntries(record.content)
 			if (result.length === 0) {
 				result.push({ ts: ts + partOffset++, type: "say", say: "task", text })
@@ -8269,6 +8444,10 @@ function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, 
 	flushToolEntries(tailTs)
 	flushReasoning(tailTs + 1)
 	return result
+}
+
+function stripLegacyMcpContext(value: string) {
+	return value.replace(/<lig-vs-mcp-context>[\s\S]*?<\/lig-vs-mcp-context>\s*/gi, "").trimStart()
 }
 
 function sdkMessageTimestamp(message: Record<string, unknown>, taskItem: Record<string, unknown>, index: number) {
@@ -8958,7 +9137,11 @@ const RESUMED_CONVERSATION_MAX_MESSAGES = 40
 const RESUMED_CONVERSATION_MAX_CHARS = 20_000
 const RESUMED_CONVERSATION_MAX_ENTRY_CHARS = 2_500
 
-function buildResumedConversationPrompt(messages: Array<Record<string, unknown>>, prompt: string, uiLanguage: string) {
+function buildResumedConversationMessages(
+	messages: Array<Record<string, unknown>>,
+	prompt: string,
+	maxChars = RESUMED_CONVERSATION_MAX_CHARS,
+) {
 	const currentPrompt = prompt.trim()
 	const entries = messages
 		.filter((message) => message.partial !== true)
@@ -8970,35 +9153,46 @@ function buildResumedConversationPrompt(messages: Array<Record<string, unknown>>
 	}
 
 	if (entries.length === 0 || !currentPrompt) {
-		return prompt
+		return []
 	}
 
-	const selected: string[] = []
+	const selected: Array<{ role: string; text: string }> = []
 	let totalChars = currentPrompt.length
 	for (let index = entries.length - 1; index >= 0 && selected.length < RESUMED_CONVERSATION_MAX_MESSAGES; index--) {
 		const entry = entries[index]
-		const line = `${entry.role}:\n${truncateText(entry.text, RESUMED_CONVERSATION_MAX_ENTRY_CHARS)}`
-		if (totalChars + line.length > RESUMED_CONVERSATION_MAX_CHARS) {
+		const text = truncateText(entry.text, RESUMED_CONVERSATION_MAX_ENTRY_CHARS)
+		if (totalChars + text.length > maxChars) {
 			if (selected.length > 0) {
 				break
 			}
-			selected.unshift(truncateText(line, Math.max(1_000, RESUMED_CONVERSATION_MAX_CHARS - totalChars)))
+			selected.unshift({ ...entry, text: truncateText(text, Math.max(1_000, maxChars - totalChars)) })
 			break
 		}
-		selected.unshift(line)
-		totalChars += line.length
+		selected.unshift({ ...entry, text })
+		totalChars += text.length
 	}
 
-	if (selected.length === 0) {
-		return prompt
+	while (selected.length > 0 && selected[0].role !== "User" && selected[0].role !== "Tool") {
+		selected.shift()
 	}
 
-	const korean = uiLanguage === "ko"
-	const header = korean
-		? "아래는 Visual Studio 재시작 후 복원된 이전 대화 기록입니다. 이 기록을 현재 대화 문맥으로 사용해 이어서 답하세요."
-		: "The following is the previous conversation restored after Visual Studio restarted. Use it as context and continue the conversation."
-	const currentLabel = korean ? "현재 사용자 메시지" : "Current user message"
-	return `${header}\n\n${selected.join("\n\n")}\n\n${currentLabel}:\n${currentPrompt}`
+	const restored: Array<{ role: "user" | "assistant"; content: string }> = []
+	for (const entry of selected) {
+		const role = entry.role === "Assistant" ? "assistant" : "user"
+		const content =
+			entry.role === "Tool"
+				? `Tool result:\n${entry.text}`
+				: entry.role === "System"
+					? `Previous session status:\n${entry.text}`
+					: entry.text
+		const previous = restored[restored.length - 1]
+		if (previous?.role === role) {
+			previous.content += `\n\n${content}`
+		} else {
+			restored.push({ role, content })
+		}
+	}
+	return restored
 }
 
 function clineMessageToResumedTranscriptEntry(message: Record<string, unknown>) {
@@ -10223,7 +10417,7 @@ function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unkn
 		run_command: { enabled: true, autoApprove: commandAuto },
 		run_commands: { enabled: true, autoApprove: commandAuto },
 		fetch_web_content: { enabled: webFetchEnabled, autoApprove: false },
-		skills: { enabled: false, autoApprove: false },
+		skills: { enabled: true, autoApprove: false },
 		useMcpServer: { enabled: true, autoApprove: mcpAuto },
 		use_mcp_server: { enabled: true, autoApprove: mcpAuto },
 		ask_question: { enabled: true, autoApprove: true },
@@ -10267,13 +10461,10 @@ function resolveRequestedPlanActMode(message: unknown, currentMode: string) {
 
 function isWebFetchEnabled(browserSettings: unknown) {
 	const settings = asRecord(browserSettings)
-	return process.env.VSCLINE_ENABLE_WEB_FETCH === "1" && settings.disableToolUse !== true
+	return settings.disableToolUse !== true
 }
 
 function webFetchDisabledReason(browserSettings: unknown) {
-	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
-		return "VSCLINE_ENABLE_WEB_FETCH is not set to 1."
-	}
 	if (asRecord(browserSettings).disableToolUse === true) {
 		return "Browser/web tool usage is disabled in settings."
 	}
@@ -11075,7 +11266,7 @@ async function getOpenAiCompatibleModels(
 function createInitialState() {
 	const defaultProvider = process.env.CLINE_PROVIDER_ID || "ollama"
 	const defaultModelId = process.env.CLINE_MODEL_ID || ""
-	const browserSettings = { viewport: { width: 900, height: 600 }, remoteBrowserEnabled: false, disableToolUse: process.env.VSCLINE_ENABLE_WEB_FETCH !== "1" }
+	const browserSettings = { viewport: { width: 900, height: 600 }, remoteBrowserEnabled: false, disableToolUse: false }
 	const webFetchEnabled = isWebFetchEnabled(browserSettings)
 
 	return {
@@ -11969,4 +12160,19 @@ function grpcError(requestId: string, error: string, isStreaming: boolean) {
 			is_streaming: isStreaming,
 		},
 	}
+}
+
+function delay(ms: number) {
+	return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+function formatSdkErrorForUi(error: unknown, language: "en" | "ko") {
+	const text = error instanceof Error ? error.message : String(error ?? "")
+	if (text && text !== "[object Object]" && text !== "{}") {
+		return text
+	}
+
+	return language === "en"
+		? "The SDK request ended before a final response could be synchronized."
+		: "SDK 요청이 최종 응답을 동기화하기 전에 종료되었습니다."
 }

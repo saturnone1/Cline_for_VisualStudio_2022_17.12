@@ -133,6 +133,13 @@ describe("getButtonConfig", () => {
 		expect(config).toEqual(BUTTON_CONFIGS.default)
 	})
 
+	it("does not duplicate the task header back action with new-task buttons", () => {
+		for (const config of Object.values(BUTTON_CONFIGS)) {
+			expect(config.primaryAction).not.toBe("new_task")
+			expect(config.secondaryAction).not.toBe("new_task")
+		}
+	})
+
 	// Test mode parameter (though not extensively used in the current implementation)
 	it("handles mode parameter without changing core behavior", () => {
 		const message: ClineMessage = {

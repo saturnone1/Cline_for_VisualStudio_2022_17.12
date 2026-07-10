@@ -87,7 +87,70 @@ body {
 	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 16%, transparent);
 	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, transparent);
 	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
+	--lig-mode-active-background: #f5f5f5;
+	--lig-mode-active-foreground: #111827;
 	--lig-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-vscline-theme="light"] {
+	--lig-bg: color-mix(in srgb, var(--vscode-editor-background, #ffffff) 92%, #dbeafe);
+	--lig-panel: color-mix(in srgb, var(--vscode-sideBar-background, #f3f6fb) 88%, #ffffff);
+	--lig-panel-raised: color-mix(in srgb, var(--vscode-editorWidget-background, #ffffff) 90%, #e2e8f0);
+	--lig-panel-soft: color-mix(in srgb, var(--vscode-toolbar-hoverBackground, #e2e8f0) 82%, transparent);
+	--lig-border: color-mix(in srgb, var(--vscode-panel-border, #cbd5e1) 88%, transparent);
+	--lig-border-strong: color-mix(in srgb, var(--vscode-focusBorder, #0969da) 48%, var(--lig-border));
+	--lig-accent: #1a7f37;
+	--lig-accent-2: #0969da;
+	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 12%, transparent);
+	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #9a6700) 12%, transparent);
+	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 74%, transparent);
+	--lig-mode-active-background: #111827;
+	--lig-mode-active-foreground: #ffffff;
+	--lig-shadow: 0 10px 24px rgba(31, 35, 40, 0.1);
+}
+
+:root[data-vscline-theme="light"] .text-description,
+:root[data-vscline-theme="light"] .text-muted-foreground {
+	color: var(--vscode-descriptionForeground);
+}
+
+:root[data-vscline-theme="light"] vscode-checkbox::part(control),
+:root[data-vscline-theme="light"] vscode-radio::part(control) {
+	background: var(--vscode-input-background);
+	border-color: var(--vscode-input-border);
+	color: var(--vscode-foreground);
+}
+
+:root[data-vscline-theme="light"] vscode-checkbox[checked]::part(control),
+:root[data-vscline-theme="light"] vscode-radio[checked]::part(control) {
+	background: var(--vscode-button-background);
+	border-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+:root[data-vscline-theme="light"] vscode-dropdown::part(control),
+:root[data-vscline-theme="light"] vscode-text-field::part(root),
+:root[data-vscline-theme="light"] vscode-text-area::part(root) {
+	background: var(--vscode-input-background);
+	border-color: var(--vscode-input-border);
+	color: var(--vscode-input-foreground);
+}
+
+:root[data-vscline-theme="light"] [data-slot="select-trigger"] {
+	border-color: var(--vscode-input-border);
+	background: var(--vscode-dropdown-background);
+	color: var(--vscode-dropdown-foreground);
+}
+
+:root[data-vscline-theme="light"] [data-slot="select-content"] {
+	border-color: var(--vscode-menu-border);
+	background: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+}
+
+:root[data-vscline-theme="light"] [data-slot="select-item"]:focus {
+	background: color-mix(in srgb, var(--vscode-button-background) 14%, var(--vscode-menu-background));
+	color: var(--vscode-foreground);
 }
 
 button,
@@ -247,9 +310,17 @@ vscode-tag {
 		background 120ms ease;
 }
 
+:root[data-vscline-theme="light"] .lig-input-shell {
+	background: color-mix(in srgb, var(--vscode-input-background, #ffffff) 90%, #eef6ff);
+}
+
 .lig-input-shell:focus-within {
 	border-color: var(--lig-border-strong);
 	background: color-mix(in srgb, var(--vscode-input-background, #1e1e1e) 90%, #0f1815);
+}
+
+:root[data-vscline-theme="light"] .lig-input-shell:focus-within {
+	background: color-mix(in srgb, var(--vscode-input-background, #ffffff) 94%, #eef6ff);
 }
 
 .lig-input-toolbar {

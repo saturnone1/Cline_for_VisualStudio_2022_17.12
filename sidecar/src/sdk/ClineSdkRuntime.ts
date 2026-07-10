@@ -29,6 +29,7 @@ export class ClineSdkRuntime {
 	private mcpManager: McpManagerInstance | null = null
 	private mcpStarting: Promise<McpManagerInstance> | null = null
 	private mcpSettingsPath: string | null = null
+	private mcpSettingsMutationQueue: Promise<void> = Promise.resolve()
 	private readonly mcpOperationStates = new Map<string, "connecting" | "restarting" | "deleting" | "authenticating" | "toggling">()
 	private readonly mcpOperationErrors = new Map<string, string>()
 	private activeSessionId: string | null = null
@@ -104,6 +105,7 @@ export class ClineSdkRuntime {
 		const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
 		const userImages = stringArrayValue(request.userImages)
 		const userFiles = stringArrayValue(request.userFiles)
+		const initialMessages = sdkInitialMessages(request.initialMessages)
 		const startInput: any = {
 			config: {
 				...config,
@@ -117,7 +119,7 @@ export class ClineSdkRuntime {
 				enableTools: config.enableTools !== false,
 				enableSpawnAgent: config.enableSpawnAgent === true,
 				enableAgentTeams: config.enableAgentTeams === true,
-				extraTools: await this.createMcpExtraTools(),
+				extraTools: await this.createMcpExtraToolsForSession(),
 				systemPrompt,
 			},
 			prompt: stringValue(request.prompt) || "",
@@ -126,6 +128,7 @@ export class ClineSdkRuntime {
 			toolPolicies: asRecord(request.toolPolicies),
 			userImages: userImages.length > 0 ? userImages : undefined,
 			userFiles: userFiles.length > 0 ? userFiles : undefined,
+			initialMessages: initialMessages.length > 0 ? initialMessages : undefined,
 		}
 
 		if (requestedSessionId) {
@@ -431,16 +434,16 @@ export class ClineSdkRuntime {
 
 		new URL(serverUrl)
 		const sdk = await importClineSdk()
-		const settings = this.loadMcpSettings(sdk)
-		settings.mcpServers[serverName] = {
-			transport: {
-				type: transportType,
-				url: serverUrl,
-			},
-			disabled: false,
-			timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
-		} as any
-		await this.saveMcpSettings(sdk, settings)
+		await this.mutateMcpSettings(sdk, (settings) => {
+			settings.mcpServers[serverName] = {
+				transport: {
+					type: transportType,
+					url: serverUrl,
+				},
+				disabled: false,
+				timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
+			} as any
+		})
 		await this.withMcpOperation(serverName, "connecting", async () => {
 			await this.reloadMcpServers()
 		})
@@ -456,7 +459,13 @@ export class ClineSdkRuntime {
 		const disabled = request.disabled === true
 		const sdk = await importClineSdk()
 		await this.withMcpOperation(name, "toggling", async () => {
-			sdk.setMcpServerDisabled({ filePath: this.resolveMcpSettingsPath(sdk), name, disabled })
+			await this.mutateMcpSettings(sdk, (settings) => {
+				const current = asRecord(settings.mcpServers[name])
+				if (Object.keys(current).length === 0) {
+					throw new Error(`MCP server not found: ${name}`)
+				}
+				settings.mcpServers[name] = { ...current, disabled } as any
+			})
 			const manager = await this.ensureMcpManager()
 			await manager.setServerDisabled(name, disabled).catch(() => undefined)
 			await this.reloadMcpServers()
@@ -476,13 +485,13 @@ export class ClineSdkRuntime {
 		}
 
 		const sdk = await importClineSdk()
-		const settings = this.loadMcpSettings(sdk)
-		const current = asRecord(settings.mcpServers[name])
-		if (Object.keys(current).length === 0) {
-			throw new Error(`MCP server not found: ${name}`)
-		}
-		settings.mcpServers[name] = { ...current, timeout } as any
-		await this.saveMcpSettings(sdk, settings)
+		await this.mutateMcpSettings(sdk, (settings) => {
+			const current = asRecord(settings.mcpServers[name])
+			if (Object.keys(current).length === 0) {
+				throw new Error(`MCP server not found: ${name}`)
+			}
+			settings.mcpServers[name] = { ...current, timeout } as any
+		})
 		await this.reloadMcpServers()
 		return this.getMcpServersResponse()
 	}
@@ -495,9 +504,9 @@ export class ClineSdkRuntime {
 		}
 		await this.withMcpOperation(name, "deleting", async () => {
 			const sdk = await importClineSdk()
-			const settings = this.loadMcpSettings(sdk)
-			delete settings.mcpServers[name]
-			await this.saveMcpSettings(sdk, settings)
+			await this.mutateMcpSettings(sdk, (settings) => {
+				delete settings.mcpServers[name]
+			})
 			const manager = await this.ensureMcpManager()
 			await manager.unregisterServer(name).catch(() => undefined)
 			await this.reloadMcpServers()
@@ -531,28 +540,28 @@ export class ClineSdkRuntime {
 		}
 
 		const sdk = await importClineSdk()
-		const settings = this.loadMcpSettings(sdk)
-		const current = asRecord(settings.mcpServers[name])
-		if (Object.keys(current).length === 0) {
-			throw new Error(`MCP server not found: ${name}`)
-		}
-		const metadata = asRecord(current.metadata)
-		const autoApproveTools = new Set(stringArrayValue(metadata.autoApproveTools))
-		for (const toolName of toolNames) {
-			if (autoApprove) {
-				autoApproveTools.add(toolName)
-			} else {
-				autoApproveTools.delete(toolName)
+		await this.mutateMcpSettings(sdk, (settings) => {
+			const current = asRecord(settings.mcpServers[name])
+			if (Object.keys(current).length === 0) {
+				throw new Error(`MCP server not found: ${name}`)
 			}
-		}
-		settings.mcpServers[name] = {
-			...current,
-			metadata: {
-				...metadata,
-				autoApproveTools: [...autoApproveTools],
-			},
-		} as any
-		await this.saveMcpSettings(sdk, settings)
+			const metadata = asRecord(current.metadata)
+			const autoApproveTools = new Set(stringArrayValue(metadata.autoApproveTools))
+			for (const toolName of toolNames) {
+				if (autoApprove) {
+					autoApproveTools.add(toolName)
+				} else {
+					autoApproveTools.delete(toolName)
+				}
+			}
+			settings.mcpServers[name] = {
+				...current,
+				metadata: {
+					...metadata,
+					autoApproveTools: [...autoApproveTools],
+				},
+			} as any
+		})
 		return this.getMcpServersResponse()
 	}
 
@@ -874,6 +883,21 @@ export class ClineSdkRuntime {
 		return tools.length > 0 ? tools : undefined
 	}
 
+	private async createMcpExtraToolsForSession() {
+		if (process.env.VSCLINE_ENABLE_MCP_EXTRA_TOOLS === "0") {
+			return undefined
+		}
+
+		try {
+			return await this.createMcpExtraTools()
+		} catch (error) {
+			this.logSdkMessage("warn", "MCP extra tools were skipped for this session.", {
+				error: error instanceof Error ? error.message : String(error),
+			})
+			return undefined
+		}
+	}
+
 	private async ensureMcpManager() {
 		if (this.mcpManager) {
 			return this.mcpManager
@@ -945,18 +969,51 @@ export class ClineSdkRuntime {
 		return settings
 	}
 
+	private async mutateMcpSettings(
+		sdk: ClineSdkModule,
+		mutate: (settings: { mcpServers: Record<string, Record<string, unknown>> }) => void | Promise<void>,
+	) {
+		const operation = this.mcpSettingsMutationQueue.then(async () => {
+			const settings = this.loadMcpSettings(sdk)
+			await mutate(settings)
+			await this.saveMcpSettings(sdk, settings)
+		})
+		this.mcpSettingsMutationQueue = operation.catch(() => undefined)
+		await operation
+	}
+
 	private async saveMcpSettings(sdk: ClineSdkModule, settings: { mcpServers: Record<string, unknown> }) {
 		const filePath = this.resolveMcpSettingsPath(sdk)
 		await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
-		await fs.promises.writeFile(filePath, `${JSON.stringify({ mcpServers: settings.mcpServers || {} }, null, 2)}\n`, "utf8")
+		const content = `${JSON.stringify({ mcpServers: settings.mcpServers || {} }, null, 2)}\n`
+		const previous = await fs.promises.readFile(filePath, "utf8").catch(() => "")
+		if (isValidJsonObject(previous)) {
+			await writeFileAtomic(`${filePath}.bak`, previous)
+		}
+		await writeFileAtomic(filePath, content)
 	}
 
 	private ensureMcpSettingsFile(filePath: string) {
-		if (fs.existsSync(filePath)) {
-			return
-		}
 		fs.mkdirSync(path.dirname(filePath), { recursive: true })
-		fs.writeFileSync(filePath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`, "utf8")
+		if (fs.existsSync(filePath)) {
+			const content = fs.readFileSync(filePath, "utf8")
+			if (isValidJsonObject(content)) {
+				return
+			}
+
+			const backupPath = `${filePath}.bak`
+			const backup = fs.existsSync(backupPath) ? fs.readFileSync(backupPath, "utf8") : ""
+			if (isValidJsonObject(backup)) {
+				writeFileAtomicSync(filePath, backup)
+				return
+			}
+
+			if (content.trim()) {
+				const corruptPath = `${filePath}.corrupt-${Date.now()}`
+				fs.renameSync(filePath, corruptPath)
+			}
+		}
+		writeFileAtomicSync(filePath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`)
 	}
 
 	private logSdkMessage(level: string, message: string, metadata?: unknown) {
@@ -1057,10 +1114,41 @@ function truncateText(value: string, maxChars: number) {
 	return `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`
 }
 
-async function fetchWebContentForSdk(url: string, prompt: string, context?: AgentToolContext) {
-	if (process.env.VSCLINE_ENABLE_WEB_FETCH !== "1") {
-		throw new Error("fetch_web_content is disabled for air-gap mode. Set VSCLINE_ENABLE_WEB_FETCH=1 to enable explicit web fetching.")
+function isValidJsonObject(content: string) {
+	if (!content.trim()) {
+		return false
 	}
+	try {
+		const parsed = JSON.parse(content)
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+	} catch {
+		return false
+	}
+}
+
+async function writeFileAtomic(filePath: string, content: string) {
+	const tempPath = `${filePath}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`
+	try {
+		await fs.promises.writeFile(tempPath, content, "utf8")
+		await fs.promises.rename(tempPath, filePath)
+	} finally {
+		await fs.promises.unlink(tempPath).catch(() => undefined)
+	}
+}
+
+function writeFileAtomicSync(filePath: string, content: string) {
+	const tempPath = `${filePath}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`
+	try {
+		fs.writeFileSync(tempPath, content, "utf8")
+		fs.renameSync(tempPath, filePath)
+	} finally {
+		if (fs.existsSync(tempPath)) {
+			fs.unlinkSync(tempPath)
+		}
+	}
+}
+
+async function fetchWebContentForSdk(url: string, prompt: string, context?: AgentToolContext) {
 	const normalizedUrl = normalizeHttpUrl(url)
 	if (!normalizedUrl) {
 		throw new Error(`Invalid URL for fetch_web_content: ${url}`)
@@ -1143,6 +1231,19 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 function stringArrayValue(value: unknown) {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : []
+}
+
+function sdkInitialMessages(value: unknown) {
+	if (!Array.isArray(value)) {
+		return []
+	}
+
+	return value.flatMap((entry) => {
+		const message = asRecord(entry)
+		const role = message.role === "user" || message.role === "assistant" ? message.role : ""
+		const content = stringValue(message.content)
+		return role && content ? [{ role, content }] : []
+	})
 }
 
 function isToolAutoApproved(serverConfig: Record<string, unknown>, toolName: string) {

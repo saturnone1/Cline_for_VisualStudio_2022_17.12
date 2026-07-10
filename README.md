@@ -135,7 +135,7 @@ Model: qwen3-coder:latest
 - 명령 실행: 실제 명령 실행과 출력 카드는 동작하지만 Visual Studio 터미널 pane과 완전 통합되지는 않았습니다.
 - 체크포인트: SDK restore 경로는 있으나 diff/review/undo parity는 제한적입니다.
 - MCP: settings-file 서버와 SDK tool 연결은 일부 지원하지만 marketplace 설치, OAuth callback, resource/prompt listing은 완전하지 않습니다.
-- Browser/web fetch: 폐쇄망을 고려해 `fetch_web_content`는 기본 비활성화이며, `VSCLINE_ENABLE_WEB_FETCH=1`이고 브라우저 도구 사용이 설정에서 비활성화되어 있지 않을 때만 SDK tool policy로 노출됩니다. 설정 화면은 현재 web fetch 사용 가능 여부, 비활성화 사유, Chrome DevTools 연결의 버전/탭 진단을 표시합니다. SDK 0.0.42 기본 도구에는 `webFetch`만 있으므로 Chrome debugging 기반 browser action adapter는 아직 별도 구현이 필요합니다.
+- Browser/web fetch: `fetch_web_content`는 기본 활성화되며 설정의 브라우저 도구 비활성화 옵션으로만 제어됩니다. 설정 화면은 현재 web fetch 사용 가능 여부, 비활성화 사유, Chrome DevTools 연결의 버전/탭 진단을 표시합니다. SDK 0.0.43 기본 도구에는 `webFetch`만 있으므로 Chrome debugging 기반 browser action adapter는 별도 구현을 사용합니다.
 - Provider/model catalog: Ollama, LM Studio, LiteLLM, OpenAI-compatible, OpenRouter, Requesty, Groq, Vercel AI Gateway 및 내부 OpenAI-compatible 엔드포인트는 모델 목록을 조회하고 기본 capability/pricing metadata를 표시할 수 있지만, provider 고유 catalog API와 OAuth 기반 provider 설정은 축소되어 있습니다.
 - Account/auth: 인증되지 않은 상태 snapshot, provider auth 버튼의 안전한 응답, SDK provider auth requirements metadata, 로컬/환경변수 provider credential 저장/상태/삭제 RPC, 설정 기반 provider authorization URL 실행, localhost OAuth callback 수신 bridge, 설정 기반 authorization-code token exchange와 SDK session credential 전달은 가능하지만, provider별 refresh/account signed-in propagation은 Visual Studio에서 별도 구현이 필요합니다.
 - Rules/workflows/skills: 설정 조회/토글은 일부 가능하지만 `skills` 실행 도구는 승인/실행 UX가 완성될 때까지 비활성화 상태입니다.

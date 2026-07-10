@@ -3,17 +3,17 @@ import { combineCommandSequences } from "@shared/combineCommandSequences"
 import { combineErrorRetryMessages } from "@shared/combineErrorRetryMessages"
 import { combineHookSequences } from "@shared/combineHookSequences"
 import { getApiMetrics, getContextWindowUsage, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
+import type { ClineMessage } from "@shared/ExtensionMessage"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
-import { Settings } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react"
 import { useMount } from "react-use"
 import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useShowNavbar } from "@/context/PlatformContext"
 import { FileServiceClient, UiServiceClient } from "@/services/grpc-client"
 import { Navbar } from "../menu/Navbar"
 import AutoApproveBar from "./auto-approve-menu/AutoApproveBar"
+import { deriveRequestPendingState, type RequestPendingState } from "./chat-view/utils/requestPendingState"
 // Import utilities and hooks from the new structure
 import {
 	ActionButtons,
@@ -56,8 +56,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		currentFocusChainChecklist,
 		focusChainSettings,
 		hooksEnabled,
-		navigateToSettings,
-		uiLanguage,
+		currentTaskItem,
 	} = useExtensionState()
 	const isProdHostedApp = userInfo?.apiBaseUrl === "https://app.cline.bot"
 	const shouldShowQuickWins = isProdHostedApp && (!taskHistory || taskHistory.length < QUICK_WINS_HISTORY_THRESHOLD)
@@ -362,6 +361,13 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		return text
 	}, [task])
 
+	const taskKey = String(currentTaskItem?.id || task?.ts || "")
+	const [requestPendingState, setRequestPendingState] = useState<RequestPendingState>({ taskKey: "", turnTs: 0, pending: false })
+	useLayoutEffect(() => {
+		setRequestPendingState((previous) => deriveRequestPendingState(previous, taskKey, messages))
+	}, [messages, taskKey])
+	const requestPending = requestPendingState.pending
+
 	return (
 		<ChatLayout isHidden={isHidden}>
 			<div className="flex flex-col flex-1 overflow-hidden">
@@ -405,25 +411,12 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			</div>
 			<footer className="bg-(--vscode-sidebar-background)" style={{ gridRow: "2" }}>
 				<AutoApproveBar />
-				<div className="flex justify-end px-3.5 pt-1">
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<button
-								aria-label="Open settings"
-								className="size-[26px] flex items-center justify-center rounded-[3px] border-0 bg-transparent text-(--vscode-icon-foreground) hover:bg-(--vscode-toolbar-hoverBackground) cursor-pointer"
-								onClick={() => navigateToSettings()}
-								type="button">
-								<Settings className="size-4" />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>{uiLanguage === "ko" ? "설정" : "Settings"}</TooltipContent>
-					</Tooltip>
-				</div>
 				<ActionButtons
 					chatState={chatState}
 					messageHandlers={messageHandlers}
 					messages={messages}
 					mode={mode}
+					requestPending={requestPending}
 					scrollBehavior={{
 						scrollToBottomSmooth: scrollBehavior.scrollToBottomSmooth,
 						disableAutoScrollRef: scrollBehavior.disableAutoScrollRef,
@@ -441,6 +434,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					chatState={chatState}
 					messageHandlers={messageHandlers}
 					placeholderText={placeholderText}
+					requestPending={requestPending}
 					scrollBehavior={scrollBehavior}
 					selectFilesAndImages={selectFilesAndImages}
 					shouldDisableFilesAndImages={shouldDisableFilesAndImages}

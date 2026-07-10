@@ -14,6 +14,10 @@ export interface ContextWindowUsage {
 	reliable: boolean
 }
 
+const MAX_ESTIMATED_TEXT_CHARS_PER_MESSAGE = 32_000
+const MAX_ESTIMATED_TOKENS_PER_MESSAGE = 8_000
+const MAX_ESTIMATED_FILE_TOKENS_PER_MESSAGE = 1_000
+
 /**
  * Calculates API metrics from an array of ClineMessages.
  *
@@ -145,12 +149,34 @@ export function getCurrentContextMessages(messages: ClineMessage[]): ClineMessag
 
 export function estimateConversationTokens(messages: ClineMessage[]): number {
 	return messages.reduce((total, message) => {
-		const textTokens = estimateTextTokens([message.text, message.reasoning].filter(Boolean).join("\n"))
-		const fileTokens = estimateTextTokens((message.files ?? []).join("\n"))
+		if (isEmptyJsonNoise(message.text) && !message.reasoning && !message.files?.length && !message.images?.length) {
+			return total
+		}
+
+		const text = [message.text, message.reasoning].filter(Boolean).join("\n")
+		const textTokens = Math.min(
+			estimateTextTokens(limitEstimatedText(text)),
+			MAX_ESTIMATED_TOKENS_PER_MESSAGE,
+		)
+		const fileTokens = Math.min(
+			estimateTextTokens((message.files ?? []).join("\n")),
+			MAX_ESTIMATED_FILE_TOKENS_PER_MESSAGE,
+		)
 		const imageTokens = (message.images?.length ?? 0) * 85
 		const messageOverhead = 12
 		return total + textTokens + fileTokens + imageTokens + messageOverhead
 	}, 0)
+}
+
+function limitEstimatedText(text: string): string {
+	if (text.length <= MAX_ESTIMATED_TEXT_CHARS_PER_MESSAGE) {
+		return text
+	}
+	return text.slice(0, MAX_ESTIMATED_TEXT_CHARS_PER_MESSAGE)
+}
+
+function isEmptyJsonNoise(text?: string) {
+	return text?.trim() === "{}"
 }
 
 function estimateTextTokens(text: string): number {

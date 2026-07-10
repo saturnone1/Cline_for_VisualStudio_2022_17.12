@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -24,6 +25,7 @@ namespace VsClineAgent.Host
         private readonly VsCommandExecutionService _commandExecutionService;
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
+        private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
         private Func<object, Task>? _postToWebviewAsync;
         private readonly object _recentOutputLock = new object();
         private readonly Queue<string> _recentOutput = new Queue<string>();
@@ -125,8 +127,12 @@ namespace VsClineAgent.Host
             }
 
             _process.EnableRaisingEvents = true;
-            _process.Exited += (_, __) =>
+            OwnedProcesses[_process.Id] = _process;
+            _process.Exited += (sender, args) =>
+            {
+                OwnedProcesses.TryRemove(_process.Id, out var removedProcess);
                 CaptureSidecarLine("sidecar:exit", "exitCode=" + SafeExitCode(_process));
+            };
             _process.OutputDataReceived += (_, e) => CaptureSidecarLine("sidecar", e.Data);
             _process.ErrorDataReceived += (_, e) => CaptureSidecarLine("sidecar:error", e.Data);
             _process.BeginOutputReadLine();
@@ -1204,20 +1210,43 @@ namespace VsClineAgent.Host
             _client?.Dispose();
             _client = null;
 
+            var process = _process;
             try
             {
-                if (_process != null && !_process.HasExited)
+                if (process != null && !process.HasExited)
                 {
-                    _process.Kill();
-                    _process.WaitForExit(2000);
+                    OwnedProcesses.TryRemove(process.Id, out _);
+                    process.Kill();
+                    process.WaitForExit(2000);
                 }
             }
             catch
             {
             }
 
-            _process?.Dispose();
+            process?.Dispose();
             _process = null;
+        }
+
+        public static void DisposeAllRunning()
+        {
+            foreach (var item in OwnedProcesses.ToArray())
+            {
+                if (!OwnedProcesses.TryRemove(item.Key, out var process))
+                    continue;
+
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                        process.WaitForExit(2000);
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static async Task ConnectWithRetryAsync(
@@ -1274,6 +1303,7 @@ namespace VsClineAgent.Host
                 "VsClineAgent",
                 "Sidecar",
                 runtimeVersion);
+            CleanupVersionedCacheDirectory(Path.GetDirectoryName(cacheRoot), runtimeVersion, 2);
             var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
@@ -1398,6 +1428,40 @@ namespace VsClineAgent.Host
             var name = string.IsNullOrWhiteSpace(assemblyName.Name) ? "VsClineAgent" : assemblyName.Name!;
             var version = assemblyName.Version?.ToString() ?? "unknown";
             return name + "-" + version;
+        }
+
+        private static void CleanupVersionedCacheDirectory(string? cacheRoot, string currentVersion, int keepRecentCount)
+        {
+            if (string.IsNullOrWhiteSpace(cacheRoot) || !Directory.Exists(cacheRoot))
+                return;
+
+            var root = Path.GetFullPath(cacheRoot);
+            var candidates = Directory.EnumerateDirectories(root)
+                .Select(path => new DirectoryInfo(path))
+                .Where(info => !string.Equals(info.Name, currentVersion, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(info => info.LastWriteTimeUtc)
+                .Skip(Math.Max(0, keepRecentCount))
+                .ToList();
+
+            foreach (var candidate in candidates)
+                TryDeleteDirectoryUnderRoot(candidate.FullName, root);
+        }
+
+        private static void TryDeleteDirectoryUnderRoot(string path, string root)
+        {
+            try
+            {
+                var resolved = Path.GetFullPath(path);
+                var resolvedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                if (!resolved.StartsWith(resolvedRoot, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                Directory.Delete(resolved, true);
+            }
+            catch
+            {
+            }
         }
 
         private static string GetRuntimeStamp(string sourceDirectory)

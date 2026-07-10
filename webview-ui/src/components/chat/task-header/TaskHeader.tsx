@@ -35,6 +35,7 @@ interface TaskHeaderProps {
 }
 
 const BUTTON_CLASS = "max-h-3 border-0 font-bold bg-transparent hover:opacity-100 text-foreground"
+const BACK_BUTTON_CLASS = "size-7 border-0 bg-transparent hover:bg-toolbar-hover text-foreground rounded-[3px]"
 
 const TaskHeader: React.FC<TaskHeaderProps> = ({
 	task,
@@ -183,7 +184,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 								<span className="text-xs sm:text-sm">${totalCost?.toFixed(4)}</span>
 							</div>
 						)}
-						<NewTaskButton className={BUTTON_CLASS} onClick={onClose} />
+						<NewTaskButton className={BACK_BUTTON_CLASS} onClick={onClose} />
 					</div>
 				</div>
 

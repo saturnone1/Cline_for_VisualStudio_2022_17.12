@@ -29,7 +29,8 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	chatState,
 	messageHandlers,
 }) => {
-	const { clineMessages } = useExtensionState()
+	const { clineMessages, currentTaskItem } = useExtensionState()
+	const taskRenderKey = String(currentTaskItem?.id || task.ts || "current-task")
 
 	const {
 		virtuosoRef,
@@ -130,7 +131,7 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 					}}
 					initialTopMostItemIndex={displayedGroupedMessages.length - 1} // messages is the raw format returned by extension, modifiedMessages is the manipulated structure that combines certain messages of related type, and visibleMessages is the filtered structure that removes messages that should not be rendered
 					itemContent={itemContent}
-					key={task.ts}
+					key={taskRenderKey}
 					rangeChanged={handleRangeChanged}
 					ref={virtuosoRef} // anything lower causes issues with followOutput
 					style={{

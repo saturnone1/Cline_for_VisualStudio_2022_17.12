@@ -27,7 +27,7 @@ import { Environment } from "../../../src/shared/config-types"
 import type { McpMarketplaceCatalog, McpServer, McpViewTab } from "../../../src/shared/mcp"
 import { ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpc-client"
 
-function mergeLivePartialMessages(prevState: ExtensionState, incomingState: ExtensionState): ExtensionState {
+export function mergeLivePartialMessages(prevState: ExtensionState, incomingState: ExtensionState): ExtensionState {
 	const currentTaskId = prevState.currentTaskItem?.id
 	const incomingTaskId = incomingState.currentTaskItem?.id
 	if (!currentTaskId || currentTaskId !== incomingTaskId) {
@@ -35,18 +35,40 @@ function mergeLivePartialMessages(prevState: ExtensionState, incomingState: Exte
 	}
 
 	const incomingMessages = incomingState.clineMessages ?? []
+	const incomingHasTerminalMessage = incomingMessages.some(
+		(message) =>
+			(message.type === "say" && (message.say === "completion_result" || message.say === "error")) ||
+			(message.type === "ask" && message.ask === "completion_result"),
+	)
+	if (incomingHasTerminalMessage) {
+		return incomingState
+	}
+
 	const incomingByTs = new Map(incomingMessages.map((message) => [message.ts, message]))
+	const latestIncomingTs = incomingMessages.reduce((latest, message) => Math.max(latest, message.ts ?? 0), 0)
+	const incomingHasRegressedPartial = (prevState.clineMessages ?? []).some((previousMessage) => {
+		const incomingMessage = incomingByTs.get(previousMessage.ts)
+		return (
+			previousMessage.partial === true &&
+			incomingMessage?.partial === true &&
+			(previousMessage.text?.length ?? 0) > (incomingMessage.text?.length ?? 0)
+		)
+	})
 	let mergedMessages = incomingMessages
 
 	for (const previousMessage of prevState.clineMessages ?? []) {
-		if (!previousMessage.ts || previousMessage.partial !== true) {
+		if (!previousMessage.ts) {
 			continue
 		}
 
 		const incomingMessage = incomingByTs.get(previousMessage.ts)
 		const previousTextLength = previousMessage.text?.length ?? 0
 		const incomingTextLength = incomingMessage?.text?.length ?? 0
-		if (!incomingMessage || previousTextLength > incomingTextLength) {
+		const isNewerThanSnapshot = !incomingMessage && previousMessage.ts > latestIncomingTs
+		const isMissingFromEmptySnapshot = !incomingMessage && incomingMessages.length === 0
+		const isMissingFromRegressedSnapshot = !incomingMessage && incomingHasRegressedPartial
+		const isLongerLivePartial = incomingMessage?.partial === true && previousMessage.partial === true && previousTextLength > incomingTextLength
+		if (isNewerThanSnapshot || isMissingFromEmptySnapshot || isMissingFromRegressedSnapshot || isLongerLivePartial) {
 			mergedMessages = upsertMessageByTimestamp(mergedMessages, previousMessage)
 		}
 	}
@@ -370,6 +392,8 @@ export const ExtensionStateContextProvider: React.FC<{
 
 	// References to store subscription cancellation functions
 	const stateSubscriptionRef = useRef<(() => void) | null>(null)
+	const stateSubscriptionGenerationRef = useRef(0)
+	const partialMessageSubscriptionGenerationRef = useRef(0)
 
 	const mcpButtonUnsubscribeRef = useRef<(() => void) | null>(null)
 	const historyButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
@@ -393,9 +417,14 @@ export const ExtensionStateContextProvider: React.FC<{
 	}, [])
 	// Subscribe to state updates and UI events using the gRPC streaming API
 	useEffect(() => {
+		const stateGeneration = ++stateSubscriptionGenerationRef.current
+		const partialMessageGeneration = ++partialMessageSubscriptionGenerationRef.current
 		// Set up state subscription
 		stateSubscriptionRef.current = StateServiceClient.subscribeToState(EmptyRequest.create({}), {
 			onResponse: (response) => {
+				if (stateSubscriptionGenerationRef.current !== stateGeneration) {
+					return
+				}
 				if (response.stateJson) {
 					try {
 						const stateData = JSON.parse(response.stateJson) as ExtensionState
@@ -434,10 +463,8 @@ export const ExtensionStateContextProvider: React.FC<{
 						})
 					} catch (error) {
 						console.error("Error parsing state JSON:", error)
-						console.log("[DEBUG] ERR getting state", error)
 					}
 				}
-				console.log('[DEBUG] ended "got subscribed state"')
 			},
 			onError: (error) => {
 				console.error("Error in state subscription:", error)
@@ -532,6 +559,9 @@ export const ExtensionStateContextProvider: React.FC<{
 		// Subscribe to partial message events
 		partialMessageUnsubscribeRef.current = UiServiceClient.subscribeToPartialMessage(EmptyRequest.create({}), {
 			onResponse: (protoMessage) => {
+				if (partialMessageSubscriptionGenerationRef.current !== partialMessageGeneration) {
+					return
+				}
 				try {
 					// Validate critical fields
 					if (!protoMessage.ts || protoMessage.ts <= 0) {
@@ -544,6 +574,12 @@ export const ExtensionStateContextProvider: React.FC<{
 						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
 						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === partialMessage.ts)
 						if (lastIndex !== -1) {
+							const existingMessage = prevState.clineMessages[lastIndex]
+							const existingTextLength = existingMessage.text?.length ?? 0
+							const incomingTextLength = partialMessage.text?.length ?? 0
+							if (existingMessage.partial === true && partialMessage.partial === true && existingTextLength > incomingTextLength) {
+								return prevState
+							}
 							const newClineMessages = [...prevState.clineMessages]
 							newClineMessages[lastIndex] = partialMessage
 							return { ...prevState, clineMessages: newClineMessages }
@@ -614,6 +650,8 @@ export const ExtensionStateContextProvider: React.FC<{
 
 		// Clean up subscriptions when component unmounts
 		return () => {
+			stateSubscriptionGenerationRef.current++
+			partialMessageSubscriptionGenerationRef.current++
 			if (stateSubscriptionRef.current) {
 				stateSubscriptionRef.current()
 				stateSubscriptionRef.current = null

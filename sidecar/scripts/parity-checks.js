@@ -43,7 +43,7 @@ const requiredMarkers = [
 	["completion payload field fallback", "extractCompletionTextFromResult"],
 	["completion after progress guard", "hasAssistantTextAfterLastUserOrProgressMessage"],
 	["missing SDK session resumes from selected task", "resumeSdkSessionForSend(sessionId, sendParams, textLength)"],
-	["missing SDK session preserves restored transcript context", "buildResumedConversationPrompt"],
+	["missing SDK session preserves restored transcript context", "buildResumedConversationMessages"],
 	["persisted state flush on sidecar dispose", "flushPersistedStateSave"],
 	["persisted state save on message mutation", "this.schedulePersistedStateSave()"],
 	["persisted task snapshots", "taskSnapshots: state.taskSnapshots"],
@@ -51,7 +51,7 @@ const requiredMarkers = [
 	["long API timeout default", "VSCLINE_API_TIMEOUT_MS\", 600_000"],
 	["long idle watchdog default", "VSCLINE_TASK_IDLE_COMPLETE_MS\", 600_000"],
 	["MCP server stream updates after mutations", "buildMcpServerStreamMessages(response)"],
-	["MCP server stream cancellation cleanup", "grpc_request_cancel.mcpStreamDisposed"],
+	["stream cancellation cleanup", "disposeStreamRequest"],
 	["API profile snapshot replacement", "applyApiConfigurationProfileSnapshot"],
 ]
 
@@ -113,8 +113,16 @@ requireSequence("MCP server subscription", router, [
 
 requireSequence("MCP server stream cancellation", router, [
 	'if (envelope?.type === "grpc_request_cancel")',
+	"this.disposeStreamRequest(requestId)",
+	"grpc_request_cancel.streamDisposed",
+])
+requireSequence("all stream registries are cleaned", router, [
+	"private disposeStreamRequest(requestId: string)",
+	"this.stateStreamRequestIds.delete(requestId)",
+	"this.partialMessageStreamRequestIds.delete(requestId)",
 	"this.mcpServerStreamRequestIds.delete(requestId)",
-	"grpc_request_cancel.mcpStreamDisposed",
+	"this.lastStateBroadcastKeys.delete(requestId)",
+	"this.lastPartialMessageKeys.delete(requestId)",
 ])
 
 for (const rpc of [
@@ -132,7 +140,22 @@ for (const rpc of [
 requireSequence("missing SDK session resume prompt", router, [
 	"private async resumeSdkSessionForSend",
 	"void this.runLifecycleHooks(\"TaskResume\"",
-	"prompt: buildResumedConversationPrompt(this.state.clineMessages, prompt, this.getUiLanguage())",
+	"const initialMessages = buildResumedConversationMessages(",
+	"this.getResumedConversationCharBudget()",
+	"prompt,",
+	"initialMessages,",
+	"sessionMetadata: taskTitle",
+])
+
+requireSequence("resumed transcript respects configured context window", router, [
+	"private getResumedConversationCharBudget()",
+	"resolveConfiguredContextWindow",
+	"Math.floor(contextWindowTokens * 0.5)",
+])
+
+requireSequence("SDK restored transcript transport", sdkRuntime, [
+	"const initialMessages = sdkInitialMessages(request.initialMessages)",
+	"initialMessages: initialMessages.length > 0 ? initialMessages : undefined",
 ])
 
 requireSequence("sidecar shutdown state flush", main, [
@@ -147,7 +170,8 @@ requireSequence("persisted state message mutation saves", router, [
 	"this.state.clineMessages.push(normalizedMessage)",
 	"this.schedulePersistedStateSave()",
 	"private upsertMessage(ts: number, updates: Record<string, unknown>)",
-	"this.state.clineMessages[index] = normalizeClineMessagePayload",
+	"const normalized = normalizeClineMessagePayload",
+	"this.state.clineMessages[index] = normalized",
 	"this.schedulePersistedStateSave()",
 	"private updateCurrentTaskItem(updates?: Record<string, unknown>)",
 	"this.rememberTaskSnapshot",
@@ -202,15 +226,48 @@ requireSequence("task snapshot helpers sync memory and persisted state", router,
 	"this.state.taskSnapshots = {}",
 ])
 
-requireSequence("resumed conversation prompt limits", router, [
+requireSequence("resumed conversation message limits", router, [
 	"const RESUMED_CONVERSATION_MAX_MESSAGES = 40",
 	"const RESUMED_CONVERSATION_MAX_CHARS = 20_000",
 	"while (entries.length > 0 && normalizeTranscriptText(entries[entries.length - 1].text) === normalizeTranscriptText(currentPrompt))",
-	"Use it as context and continue the conversation.",
+	"const restored: Array<{ role: \"user\" | \"assistant\"; content: string }>",
+	"return restored",
 ])
+if (router.includes("Visual Studio restarted. Use it as context") || router.includes("Visual Studio 재시작 후 복원된")) {
+	fail("restored transcripts must not be embedded in a visible user prompt.")
+}
 
 requireMatch("long API timeout default", router, /readPositiveIntEnv\("VSCLINE_API_TIMEOUT_MS", 600_000\)/)
 requireMatch("long idle watchdog default", router, /readPositiveIntEnv\("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000\)/)
+requireMatch("web fetch controlled by browser settings", router, /function isWebFetchEnabled\(browserSettings: unknown\) \{[\s\S]{0,180}return settings\.disableToolUse !== true/)
+requireMatch("skills tool enabled by default", router, /skills: \{ enabled: true, autoApprove: false \}/)
+if (router.includes("VSCLINE_ENABLE_WEB_FETCH") || sdkRuntime.includes("VSCLINE_ENABLE_WEB_FETCH")) {
+	fail("web fetch must be controlled by user settings, not an environment-variable gate.")
+}
+requireSequence("serialized atomic MCP settings writes", sdkRuntime, [
+	"private mcpSettingsMutationQueue: Promise<void> = Promise.resolve()",
+	"private async mutateMcpSettings(",
+	"this.mcpSettingsMutationQueue.then(async () =>",
+	"await this.saveMcpSettings(sdk, settings)",
+	"private async saveMcpSettings(",
+	"await writeFileAtomic(`${filePath}.bak`, previous)",
+	"await writeFileAtomic(filePath, content)",
+])
+requireMatch("MCP empty/corrupt settings recovery", sdkRuntime, /private ensureMcpSettingsFile[\s\S]{0,900}\.corrupt-\$\{Date\.now\(\)\}[\s\S]{0,300}writeFileAtomicSync/)
+if (sdkRuntime.includes("fs.promises.writeFile(filePath")) {
+	fail("MCP settings must never be truncated in place.")
+}
+requireMatch("MCP tools attached to SDK sessions", sdkRuntime, /extraTools: await this\.createMcpExtraToolsForSession\(\)/)
+requireMatch("SDK sends the user's prompt unchanged", sdkRuntime, /return await core\.send\(\{[\s\S]{0,120}prompt: stringValue\(request\.prompt\) \|\| ""/)
+if (sdkRuntime.includes("<lig-vs-mcp-context>")) {
+	fail("MCP status context must not be injected into user or system prompts.")
+}
+requireSequence("MCP mutations refresh SDK session tools", router, [
+	"private grpcMcpServersMutation(requestId: string, response: unknown)",
+	"this.runtimeSettingsRevision++",
+	"this.buildMcpServerStreamMessages(response)",
+])
+requireMatch("legacy MCP prompt context is hidden", router, /function stripLegacyMcpContext[\s\S]{0,180}<lig-vs-mcp-context>/)
 
 for (const method of [
 	"authenticateMcpServer",

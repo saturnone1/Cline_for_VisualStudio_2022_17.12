@@ -24,6 +24,7 @@ try {
         "manifest.json",
         "catalog.json",
         "VsClineAgent.dll",
+        "Newtonsoft.Json.dll",
         "WebApp/assets/index.css",
         "WebApp/assets/index.js",
         "WebApp/assets/lig-mark-black.png",

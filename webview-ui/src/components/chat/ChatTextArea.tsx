@@ -5,7 +5,7 @@ import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state
 import { type SlashCommand } from "@shared/slashCommands"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import { AtSignIcon, PlusIcon } from "lucide-react"
+import { AtSignIcon, PlusIcon, Settings } from "lucide-react"
 import type React from "react"
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import DynamicTextArea from "react-textarea-autosize"
@@ -94,9 +94,6 @@ interface GitCommit {
 	description: string
 }
 
-const PLAN_MODE_COLOR = "var(--vscode-activityWarningBadge-background)"
-const ACT_MODE_COLOR = "var(--vscode-focusBorder)"
-
 const SwitchContainer = styled.div<{ disabled: boolean }>`
 	display: flex;
 	align-items: center;
@@ -114,12 +111,12 @@ const SwitchContainer = styled.div<{ disabled: boolean }>`
 `
 
 const Slider = styled.div.withConfig({
-	shouldForwardProp: (prop) => !["isAct", "isPlan"].includes(prop),
-})<{ isAct: boolean; isPlan?: boolean }>`
+	shouldForwardProp: (prop) => prop !== "isAct",
+})<{ isAct: boolean }>`
 	position: absolute;
 	height: 100%;
 	width: 50%;
-	background-color: ${(props) => (props.isPlan ? PLAN_MODE_COLOR : ACT_MODE_COLOR)};
+	background-color: var(--lig-mode-active-background);
 	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent);
 	transition: transform 0.2s ease;
 	transform: translateX(${(props) => (props.isAct ? "100%" : "0%")});
@@ -150,44 +147,22 @@ const ModelContainer = styled.div`
 	min-width: 0;
 `
 
-const ModelButtonWrapper = styled.div`
+const ModelTextWrapper = styled.div`
 	display: inline-flex; // Make it shrink to content
 	min-width: 0; // Allow shrinking
 	max-width: 100%; // Don't overflow parent
 `
 
-const ModelDisplayButton = styled.a<{ isActive?: boolean; disabled?: boolean }>`
+const ModelDisplayText = styled.span`
 	padding: 0px 0px;
 	height: 20px;
 	width: 100%;
 	min-width: 0;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	text-decoration: ${(props) => (props.isActive ? "underline" : "none")};
-	color: ${(props) => (props.isActive ? "var(--vscode-foreground)" : "var(--vscode-descriptionForeground)")};
+	color: var(--vscode-descriptionForeground);
 	display: flex;
 	align-items: center;
 	font-size: 10px;
-	outline: none;
 	user-select: none;
-	opacity: ${(props) => (props.disabled ? 0.5 : 1)};
-	pointer-events: ${(props) => (props.disabled ? "none" : "auto")};
-
-	&:hover,
-	&:focus {
-		color: ${(props) => (props.disabled ? "var(--vscode-descriptionForeground)" : "var(--vscode-foreground)")};
-		text-decoration: ${(props) => (props.disabled ? "none" : "underline")};
-		outline: none;
-	}
-
-	&:active {
-		color: ${(props) => (props.disabled ? "var(--vscode-descriptionForeground)" : "var(--vscode-foreground)")};
-		text-decoration: ${(props) => (props.disabled ? "none" : "underline")};
-		outline: none;
-	}
-
-	&:focus-visible {
-		outline: none;
-	}
 `
 
 const ModelButtonContent = styled.div`
@@ -228,7 +203,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			globalWorkflowToggles,
 			remoteWorkflowToggles,
 			remoteConfigSettings,
-			navigateToSettingsModelPicker,
+			navigateToSettings,
 			mcpServers,
 		} = useExtensionState()
 		const { t } = useI18n()
@@ -1100,10 +1075,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			openContextMenu()
 		}, [inputValue, handleInputChange, updateHighlights])
 
-		const handleModelButtonClick = () => {
-			navigateToSettingsModelPicker({ targetSection: "api-config" })
-		}
-
 		// Get model display name
 		const modelDisplayName = useMemo(() => {
 			const { selectedProvider, selectedModelId } = normalizeApiConfiguration(apiConfiguration, mode)
@@ -1624,19 +1595,29 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							<ClineRulesToggleModal />
 
 							<ModelContainer>
-								<ModelButtonWrapper>
-									<ModelDisplayButton
-										disabled={false}
-										onClick={handleModelButtonClick}
-										role="button"
-										tabIndex={0}
-										title={t("chat.openApiSettings")}>
+								<ModelTextWrapper>
+									<ModelDisplayText title={modelDisplayName}>
 										<ModelButtonContent className="text-xs">{modelDisplayName}</ModelButtonContent>
-									</ModelDisplayButton>
-								</ModelButtonWrapper>
+									</ModelDisplayText>
+								</ModelTextWrapper>
 							</ModelContainer>
 						</ButtonGroup>
 					</div>
+					<Tooltip>
+						<TooltipContent>{t("common.settings")}</TooltipContent>
+						<TooltipTrigger>
+							<VSCodeButton
+								appearance="icon"
+								aria-label={t("common.settings")}
+								className="p-0 m-0 mr-1 shrink-0 flex items-center"
+								onClick={() => navigateToSettings()}
+								data-testid="settings-button">
+								<ButtonContainer>
+									<Settings size={13} />
+								</ButtonContainer>
+							</VSCodeButton>
+						</TooltipTrigger>
+					</Tooltip>
 					{/* Tooltip for Plan/Act toggle remains outside the conditional rendering */}
 					<Tooltip>
 						<TooltipContent
@@ -1651,7 +1632,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						</TooltipContent>
 						<TooltipTrigger>
 							<SwitchContainer data-testid="mode-switch" disabled={false} onClick={onModeToggle}>
-								<Slider isAct={mode === "act"} isPlan={mode === "plan"} />
+								<Slider isAct={mode === "act"} />
 								{(["plan", "act"] as const).map((m) => (
 									<div
 										aria-checked={mode === m}
@@ -1660,7 +1641,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 										})}
 										className={cn(
 											"pt-0.5 pb-px px-2 z-10 text-xs w-1/2 text-center bg-transparent transition-colors",
-											mode === m ? "text-white font-semibold" : "text-input-foreground",
+										mode === m ? "text-(--lig-mode-active-foreground) font-semibold" : "text-input-foreground",
 										)}
 										onMouseLeave={() => setShownTooltipMode(null)}
 										onMouseOver={() => setShownTooltipMode(m)}

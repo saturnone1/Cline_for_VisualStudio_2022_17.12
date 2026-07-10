@@ -67,8 +67,8 @@
   command cards, but native terminal-pane parity is still future work.
 - MCP server lifecycle and resource/prompt metadata use SDK APIs when exposed,
   with explicit fallback diagnostics.
-- Browser/web fetch paths are gated for air-gap and executed through sidecar
-  DevTools helpers when enabled.
+- Browser/web fetch paths are controlled by browser settings and executed through
+  sidecar DevTools helpers when enabled.
 - Checkpoint restore/compare is visible through SDK/session metadata and stored
   edit snapshots; true SDK diff streams are pending upstream support.
 - Hooks, scheduled agents, plugins, subagents, provider catalogs, and OAuth
@@ -81,8 +81,8 @@
   `sidecar/src/sdk/ClineSdkRuntime.ts`; the old standalone ProtoBus core path is
   historical.
 - Node 22+ remains required by the SDK and bundled native modules.
-- Air-gap is the default. Online MCP marketplace install and web fetch/browser
-  launch are not automatically enabled.
+- Air-gap remains available for deployment. Online MCP marketplace install is
+  disabled, while web fetch/browser use is controlled by user settings.
 - `*.vsix`, `bin/`, `obj/`, `VsClineAgent/Sidecar/`, and generated WebApp/VSIX
   outputs are build artifacts, not commit targets unless explicitly requested.
 

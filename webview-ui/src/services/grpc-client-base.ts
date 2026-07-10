@@ -32,18 +32,38 @@ export abstract class ProtoBusClient {
 	): Promise<TResponse> {
 		return new Promise((resolve, reject) => {
 			const requestId = this.createRequestId()
-			const timeout = window.setTimeout(() => {
+			let closed = false
+			const cleanup = () => {
+				if (closed) {
+					return
+				}
+				closed = true
 				window.removeEventListener("message", handleResponse)
+				window.clearTimeout(timeout)
+			}
+			const cancelHostRequest = () => {
+				PLATFORM_CONFIG.postMessage({
+					type: "grpc_request_cancel",
+					grpc_request_cancel: {
+						request_id: requestId,
+					},
+				})
+			}
+			const timeout = window.setTimeout(() => {
+				cancelHostRequest()
+				cleanup()
 				reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`))
 			}, 120_000)
 
 			// Set up one-time listener for this specific request
 			const handleResponse = (event: MessageEvent) => {
+				if (closed) {
+					return
+				}
 				const message = event.data
 				if (message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
 					// Remove listener once we get our response
-					window.removeEventListener("message", handleResponse)
-					window.clearTimeout(timeout)
+					cleanup()
 					if (message.grpc_response.message) {
 						const response = PLATFORM_CONFIG.decodeMessage(message.grpc_response.message, decodeResponse)
 						resolve(response)
@@ -77,8 +97,20 @@ export abstract class ProtoBusClient {
 		callbacks: Callbacks<TResponse>,
 	): () => void {
 		const requestId = this.createRequestId()
+		let closed = false
+		const cleanup = () => {
+			if (closed) {
+				return false
+			}
+			closed = true
+			window.removeEventListener("message", handleResponse)
+			return true
+		}
 		// Set up listener for streaming responses
 		const handleResponse = (event: MessageEvent) => {
+			if (closed) {
+				return
+			}
 			const message = event.data
 			if (message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
 				if (message.grpc_response.message) {
@@ -90,8 +122,7 @@ export abstract class ProtoBusClient {
 					if (callbacks.onError) {
 						callbacks.onError(new Error(message.grpc_response.error))
 					}
-					// Only remove the event listener on error
-					window.removeEventListener("message", handleResponse)
+					cleanup()
 				} else {
 					console.error("Received ProtoBus message with no response or error ", JSON.stringify(message))
 				}
@@ -99,8 +130,7 @@ export abstract class ProtoBusClient {
 					if (callbacks.onComplete) {
 						callbacks.onComplete()
 					}
-					// Only remove the event listener when the stream is explicitly ended
-					window.removeEventListener("message", handleResponse)
+					cleanup()
 				}
 			}
 		}
@@ -117,14 +147,15 @@ export abstract class ProtoBusClient {
 		})
 		// Return a function to cancel the stream
 		return () => {
-			window.removeEventListener("message", handleResponse)
+			if (!cleanup()) {
+				return
+			}
 			PLATFORM_CONFIG.postMessage({
 				type: "grpc_request_cancel",
 				grpc_request_cancel: {
 					request_id: requestId,
 				},
 			})
-			console.log(`[DEBUG] Sent cancellation for request: ${requestId}`)
 		}
 	}
 }
