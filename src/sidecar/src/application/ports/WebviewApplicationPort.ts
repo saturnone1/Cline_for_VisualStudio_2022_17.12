@@ -1,4 +1,5 @@
 import type { AskQuestionResult, ToolApprovalResult } from "./AgentInteraction"
+import type { WebviewEnvelope } from "../dto/WebviewRpc"
 
 export interface WebviewApplicationPort {
 	dispose(): void
@@ -6,5 +7,5 @@ export interface WebviewApplicationPort {
 	requestToolApproval(request: unknown): Promise<ToolApprovalResult>
 	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult>
 	handleSdkEvent(event: unknown): void
-	handle(params: unknown): Promise<unknown>
+	handle(envelope: WebviewEnvelope): Promise<unknown>
 }

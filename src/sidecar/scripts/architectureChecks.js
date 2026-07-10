@@ -57,22 +57,58 @@ if (controller.split(/\r?\n/).length > 100) {
 	violations.push("VisualStudioWebviewController must remain a thin presentation adapter (100 lines maximum).")
 }
 
-for (const relativePort of [
-	"application/ports/McpRuntimePort.ts",
-	"application/ports/StateStorePort.ts",
-	"application/ports/TaskSessionRuntimePort.ts",
-	"application/ports/WebviewApplicationPort.ts",
-]) {
-	const port = fs.readFileSync(path.join(sourceRoot, ...relativePort.split("/")), "utf8")
+const portsRoot = path.join(sourceRoot, "application", "ports")
+for (const portPath of walk(portsRoot).filter((filePath) => filePath.endsWith(".ts"))) {
+	const relativePort = normalize(path.relative(sourceRoot, portPath))
+	const port = fs.readFileSync(portPath, "utf8")
 	if (/\bany\b/.test(port)) {
 		violations.push(`${relativePort} must use explicit boundary types instead of any.`)
 	}
 }
 
+const mainPath = path.join(sourceRoot, "main.ts")
+const main = fs.readFileSync(mainPath, "utf8")
+if (main.split(/\r?\n/).length > 100) {
+	violations.push("main.ts must remain a composition root (100 lines maximum).")
+}
+if (main.includes("net.createServer") || main.includes("JSON.parse")) {
+	violations.push("main.ts must delegate transport and JSON-RPC concerns to infrastructure.")
+}
+if (!router.includes("TaskLifecycleUseCase") || !router.includes("StatePersistenceUseCase")) {
+	violations.push("VisualStudioWebviewBackend must delegate lifecycle and persistence orchestration to application use cases.")
+}
+if (router.includes("function connectDevTools") || router.includes("function fetchOpenGraphData")) {
+	violations.push("VisualStudioWebviewBackend must delegate browser protocol details to BrowserDevToolsAdapter.")
+}
+if (router.includes("function sdkMessagesToClineMessages") || router.includes("function buildResumedConversationMessages")) {
+	violations.push("VisualStudioWebviewBackend must delegate transcript conversion to ConversationSupport.")
+}
+if (router.includes("function normalizeApiConfiguration") || router.includes("function createToolPolicies")) {
+	violations.push("VisualStudioWebviewBackend must delegate provider policy to ProviderConfiguration.")
+}
+if (router.includes("function createInitialState") || router.includes("function createPersistedStateSnapshot")) {
+	violations.push("VisualStudioWebviewBackend must delegate WebView state assembly to WebviewState.")
+}
+if (router.includes("function createProviderAuthInfo") || router.includes("function createOAuthAuthorizationRequest")) {
+	violations.push("VisualStudioWebviewBackend must delegate provider authentication support to ProviderAuthSupport.")
+}
+
 for (const requiredFile of [
 	"application/useCases/McpUseCase.ts",
+	"application/useCases/StatePersistenceUseCase.ts",
+	"application/useCases/TaskLifecycleUseCase.ts",
 	"application/useCases/TaskSessionUseCase.ts",
 	"infrastructure/persistence/JsonStateStore.ts",
+	"infrastructure/browser/BrowserDevToolsAdapter.ts",
+	"infrastructure/conversation/ConversationSupport.ts",
+	"infrastructure/configuration/ProviderConfiguration.ts",
+	"infrastructure/auth/ProviderAuthSupport.ts",
+	"infrastructure/hooks/HookRuntime.ts",
+	"infrastructure/models/ModelCatalog.ts",
+	"infrastructure/persistence/LocalAutomationStore.ts",
+	"infrastructure/worktree/WorktreeSupport.ts",
+	"infrastructure/webview/WebviewState.ts",
+	"infrastructure/transport/SidecarRpcServer.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)

@@ -692,25 +692,26 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 					readFile: async (request: { path: string; start_line?: number | null; end_line?: number | null }) => {
 						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 						const filePath = resolveWorkspacePath(request.path, workspaceRoots)
-						const result = await this.host.workspaceClient.readTextFile({ path: filePath })
-						if (!result.exists) {
+						const result = asRecord(await this.host.workspaceClient.readTextFile({ path: filePath }))
+						if (result.exists !== true) {
 							throw new Error(`File not found: ${filePath}`)
 						}
+						const content = stringValue(result.content) || ""
 
 						if (request.start_line || request.end_line) {
-							const lines = result.content.split(/\r?\n/)
+							const lines = content.split(/\r?\n/)
 							const start = Math.max((request.start_line || 1) - 1, 0)
 							const end = request.end_line ? Math.min(request.end_line, lines.length) : lines.length
 							return lines.slice(start, end).join("\n")
 						}
 
-						return result.content
+						return content
 					},
 					search: async (query: string, cwd: string) => {
 						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 						const searchRoot = resolveWorkspacePath(cwd, workspaceRoots)
-						const result = await this.host.workspaceClient.searchFiles({ path: searchRoot, query, limit: 500 })
-						return result.matches.join("\n")
+						const result = asRecord(await this.host.workspaceClient.searchFiles({ path: searchRoot, query, limit: 500 }))
+						return (Array.isArray(result.matches) ? result.matches : []).map(String).join("\n")
 					},
 					bash: async (command: string | { command: string; args?: string[] }, cwd: string, context: AgentToolContext) => {
 						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
@@ -758,9 +759,9 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 					) => {
 						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 						const filePath = resolveWorkspacePath(input.path, workspaceRoots, cwd)
-						const current = await this.host.workspaceClient.readTextFile({ path: filePath })
-						const before = current.exists ? current.content : ""
-						let next = current.exists ? current.content : ""
+						const current = asRecord(await this.host.workspaceClient.readTextFile({ path: filePath }))
+						const before = current.exists === true ? stringValue(current.content) || "" : ""
+						let next = before
 						if (input.old_text) {
 							if (!next.includes(input.old_text)) {
 								throw new Error(`old_text not found in ${filePath}`)
@@ -781,7 +782,7 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 							filePath,
 							beforePath,
 							afterPath: filePath,
-							action: current.exists ? "modified" : "created",
+							action: current.exists === true ? "modified" : "created",
 							...countLineChanges(before, next),
 						})
 						return `Wrote ${filePath}`
@@ -794,8 +795,8 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 						for (const change of changes) {
 							const beforeFilePath = resolveWorkspacePath(change.path, workspaceRoots, cwd)
 							const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd)
-							const current = await this.host.workspaceClient.readTextFile({ path: beforeFilePath })
-							const before = current.exists ? current.content : ""
+							const current = asRecord(await this.host.workspaceClient.readTextFile({ path: beforeFilePath }))
+							const before = current.exists === true ? stringValue(current.content) || "" : ""
 							const beforePath = await this.writeChangeSnapshot(beforeFilePath, before, context, "before")
 							snapshots.push({
 								...change,
@@ -809,10 +810,10 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 						const result = await defaultExecutors.applyPatch?.(input, cwd, context)
 
 						for (const snapshot of snapshots) {
-							const after = await this.host.workspaceClient.readTextFile({ path: snapshot.afterFilePath })
-							const afterContent = after.exists ? after.content : ""
+							const after = asRecord(await this.host.workspaceClient.readTextFile({ path: snapshot.afterFilePath }))
+							const afterContent = after.exists === true ? stringValue(after.content) || "" : ""
 							const afterPath =
-								after.exists
+								after.exists === true
 									? snapshot.afterFilePath
 									: await this.writeChangeSnapshot(snapshot.afterFilePath, afterContent, context, "after")
 							this.emitFileChanged({

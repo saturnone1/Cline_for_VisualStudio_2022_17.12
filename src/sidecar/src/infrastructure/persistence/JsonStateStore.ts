@@ -11,28 +11,71 @@ export class JsonStateStore implements StateStorePort {
 	}
 
 	load() {
-		try {
-			return JSON.parse(fs.readFileSync(this.filePath, "utf8")) as Record<string, unknown>
-		} catch {
+		const primary = readSnapshot(this.filePath)
+		if (primary) {
+			return primary
+		}
+
+		const backup = readSnapshot(this.backupPath)
+		if (!backup) {
 			return null
 		}
+
+		console.warn(`Recovered LIG VS settings from backup: ${this.backupPath}`)
+		this.save(backup)
+		return backup
 	}
 
 	save(snapshot: Record<string, unknown>) {
+		const temporaryPath = `${this.filePath}.${process.pid}.tmp`
 		try {
 			fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
-			fs.writeFileSync(this.filePath, JSON.stringify(snapshot, null, 2), "utf8")
+			fs.writeFileSync(temporaryPath, JSON.stringify(snapshot, null, 2), "utf8")
+			flushFile(temporaryPath)
+			if (readSnapshot(this.filePath)) {
+				fs.copyFileSync(this.filePath, this.backupPath)
+			}
+			fs.renameSync(temporaryPath, this.filePath)
 		} catch (error) {
 			console.error("Failed to persist LIG VS settings:", error)
+		} finally {
+			try {
+				fs.rmSync(temporaryPath, { force: true })
+			} catch {
+				// A stale temporary file is ignored on the next startup.
+			}
 		}
 	}
 
 	clear() {
 		try {
 			fs.rmSync(this.filePath, { force: true })
+			fs.rmSync(this.backupPath, { force: true })
 		} catch {
 			// Reset still applies to in-memory state when cleanup is unavailable.
 		}
+	}
+
+	private get backupPath() {
+		return `${this.filePath}.bak`
+	}
+}
+
+function readSnapshot(filePath: string): Record<string, unknown> | null {
+	try {
+		const value = JSON.parse(fs.readFileSync(filePath, "utf8"))
+		return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+	} catch {
+		return null
+	}
+}
+
+function flushFile(filePath: string) {
+	const descriptor = fs.openSync(filePath, "r+")
+	try {
+		fs.fsyncSync(descriptor)
+	} finally {
+		fs.closeSync(descriptor)
 	}
 }
 

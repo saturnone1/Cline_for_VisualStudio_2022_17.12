@@ -34,7 +34,25 @@ src/sidecar/src/
 └── main.ts          # composition root
 ```
 
-`VisualStudioWebviewRouter` depends on `ClineRuntimePort`, `HostProviderPort`, `WebviewTransportPort`, and `InteractionLoggerPort`. Concrete implementations are wired in `main.ts`.
+`VisualStudioWebviewController` parses raw WebView messages and invokes `WebviewApplicationPort`. `VisualStudioWebviewBackend` remains a legacy application facade while feature behavior is moved into focused use cases. Concrete implementations are wired only in `main.ts`.
+
+Current extracted use cases:
+
+- `TaskLifecycleUseCase`: owns accepted task transitions and duplicate cancellation protection.
+- `TaskSessionUseCase`: activates and hydrates SDK sessions.
+- `McpUseCase`: owns MCP queries and mutations.
+- `StatePersistenceUseCase`: owns debounced persistence and shutdown flush behavior.
+
+Browser executable discovery, DevTools WebSocket communication, browser actions, and OpenGraph fetching live in `infrastructure/browser/BrowserDevToolsAdapter`. The legacy backend only coordinates browser RPC state with this adapter.
+
+Additional feature boundaries extracted from the legacy backend:
+
+- `ConversationSupport`: transcript, reasoning, attachment, and tool-message normalization.
+- `ProviderConfiguration`, `ProviderIdentity`, and `ProviderAuthSupport`: provider settings, aliases, credentials, and OAuth support.
+- `HookRuntime`, `ModelCatalog`, `WorktreeSupport`, and `LocalAutomationStore`: focused infrastructure behavior for their respective external systems.
+- `WebviewState`: WebView adapter state creation, restoration, and persistence snapshots.
+
+`SidecarRpcServer` owns named-pipe, JSON-RPC, and process shutdown behavior. `main.ts` is limited to object construction and dependency wiring.
 
 Run `npm test` in `src/sidecar` to enforce the dependency direction. The architecture check rejects inward layers importing outward layers and rejects concrete infrastructure imports from the WebView router.
 
@@ -42,9 +60,9 @@ Run `npm test` in `src/sidecar` to enforce the dependency direction. The archite
 
 The current router remains large, so migration continues by behavior rather than by arbitrary file size:
 
-1. Extract task/session lifecycle use cases into `application/task`.
-2. Extract MCP management into `application/mcp`.
-3. Extract worktree and browser orchestration into dedicated application use cases.
+1. Continue extracting conversation orchestration from the legacy backend into focused application use cases.
+2. Extract worktree and browser orchestration into dedicated application use cases and infrastructure adapters.
+3. Replace remaining broad `unknown` RPC payloads with service-specific DTOs.
 4. Keep SDK, filesystem, network, process, and Visual Studio calls in infrastructure adapters.
 5. Keep React components free of host implementations and access RPC through presentation gateways.
 

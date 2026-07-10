@@ -4,13 +4,22 @@ const path = require("node:path")
 const root = path.resolve(__dirname, "..")
 const routerPath = path.join(root, "src", "infrastructure", "webview", "VisualStudioWebviewBackend.ts")
 const sdkRuntimePath = path.join(root, "src", "infrastructure", "sdk", "ClineSdkRuntime.ts")
+const conversationPath = path.join(root, "src", "infrastructure", "conversation", "ConversationSupport.ts")
+const providerConfigurationPath = path.join(root, "src", "infrastructure", "configuration", "ProviderConfiguration.ts")
+const webviewStatePath = path.join(root, "src", "infrastructure", "webview", "WebviewState.ts")
 const mainPath = path.join(root, "src", "main.ts")
+const serverPath = path.join(root, "src", "infrastructure", "transport", "SidecarRpcServer.ts")
 const repoRoot = path.resolve(root, "..", "..")
 const apiConfigurationSectionPath = path.join(repoRoot, "src", "webview", "src", "components", "settings", "sections", "ApiConfigurationSection.tsx")
 const generalSettingsSectionPath = path.join(repoRoot, "src", "webview", "src", "components", "settings", "sections", "GeneralSettingsSection.tsx")
 const router = fs.readFileSync(routerPath, "utf8")
 const sdkRuntime = fs.readFileSync(sdkRuntimePath, "utf8")
+const conversation = fs.readFileSync(conversationPath, "utf8")
+const providerConfiguration = fs.readFileSync(providerConfigurationPath, "utf8")
+const webviewState = fs.readFileSync(webviewStatePath, "utf8")
+const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}`
 const main = fs.readFileSync(mainPath, "utf8")
+const server = fs.readFileSync(serverPath, "utf8")
 const apiConfigurationSection = fs.readFileSync(apiConfigurationSectionPath, "utf8")
 const generalSettingsSection = fs.readFileSync(generalSettingsSectionPath, "utf8")
 
@@ -55,7 +64,7 @@ const requiredMarkers = [
 	["API profile snapshot replacement", "applyApiConfigurationProfileSnapshot"],
 ]
 
-const missing = requiredMarkers.filter(([, marker]) => !router.includes(marker))
+const missing = requiredMarkers.filter(([, marker]) => !paritySource.includes(marker))
 
 if (missing.length > 0) {
 	console.error("VS2022 SDK parity smoke failed. Missing markers:")
@@ -112,7 +121,7 @@ requireSequence("MCP server subscription", router, [
 ])
 
 requireSequence("MCP server stream cancellation", router, [
-	'if (envelope?.type === "grpc_request_cancel")',
+	'if (envelope.type === "grpc_request_cancel")',
 	"this.disposeStreamRequest(requestId)",
 	"grpc_request_cancel.streamDisposed",
 ])
@@ -158,11 +167,18 @@ requireSequence("SDK restored transcript transport", sdkRuntime, [
 	"initialMessages: initialMessages.length > 0 ? initialMessages : undefined",
 ])
 
-requireSequence("sidecar shutdown state flush", main, [
-	"const activeRouters = new Set<VisualStudioWebviewController>()",
-	"process.on(\"SIGTERM\", () => void flushAndExit(0))",
-	"router.dispose()",
-	"runtime.dispose()",
+requireSequence("sidecar composition root", main, [
+	"new SidecarRpcServer(",
+	"new VisualStudioWebviewBackend(",
+	"new VisualStudioWebviewController(backend)",
+	"server.start()",
+])
+
+requireSequence("sidecar shutdown state flush", server, [
+	"process.on(\"SIGTERM\", () => void this.shutdown(0))",
+	"scope.webview.dispose()",
+	"scope.runtime.dispose()",
+	"await this.flushLogs()",
 ])
 
 requireSequence("persisted state message mutation saves", router, [
@@ -180,10 +196,10 @@ requireSequence("persisted state message mutation saves", router, [
 
 requireMatch(
 	"persisted task snapshots initial state",
-	router,
+	webviewState,
 	/taskSnapshots: \{\} as Record<string, \{ taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> \}>/,
 )
-requireSequence("persisted task snapshots load/save", router, [
+requireSequence("persisted task snapshots load/save", webviewState, [
 	"const taskSnapshots = asRecord(persisted.taskSnapshots)",
 	"state.taskSnapshots[taskId] = normalized",
 	"taskSnapshots: state.taskSnapshots",
@@ -226,21 +242,21 @@ requireSequence("task snapshot helpers sync memory and persisted state", router,
 	"this.state.taskSnapshots = {}",
 ])
 
-requireSequence("resumed conversation message limits", router, [
+requireSequence("resumed conversation message limits", conversation, [
 	"const RESUMED_CONVERSATION_MAX_MESSAGES = 40",
 	"const RESUMED_CONVERSATION_MAX_CHARS = 20_000",
 	"while (entries.length > 0 && normalizeTranscriptText(entries[entries.length - 1].text) === normalizeTranscriptText(currentPrompt))",
 	"const restored: Array<{ role: \"user\" | \"assistant\"; content: string }>",
 	"return restored",
 ])
-if (router.includes("Visual Studio restarted. Use it as context") || router.includes("Visual Studio 재시작 후 복원된")) {
+if (conversation.includes("Visual Studio restarted. Use it as context") || conversation.includes("Visual Studio 재시작 후 복원된")) {
 	fail("restored transcripts must not be embedded in a visible user prompt.")
 }
 
 requireMatch("long API timeout default", router, /readPositiveIntEnv\("VSCLINE_API_TIMEOUT_MS", 600_000\)/)
 requireMatch("long idle watchdog default", router, /readPositiveIntEnv\("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000\)/)
-requireMatch("web fetch controlled by browser settings", router, /function isWebFetchEnabled\(browserSettings: unknown\) \{[\s\S]{0,180}return settings\.disableToolUse !== true/)
-requireMatch("skills tool enabled by default", router, /skills: \{ enabled: true, autoApprove: false \}/)
+requireMatch("web fetch controlled by browser settings", providerConfiguration, /function isWebFetchEnabled\(browserSettings: unknown\) \{[\s\S]{0,180}return settings\.disableToolUse !== true/)
+requireMatch("skills tool enabled by default", providerConfiguration, /skills: \{ enabled: true, autoApprove: false \}/)
 if (router.includes("VSCLINE_ENABLE_WEB_FETCH") || sdkRuntime.includes("VSCLINE_ENABLE_WEB_FETCH")) {
 	fail("web fetch must be controlled by user settings, not an environment-variable gate.")
 }
@@ -267,7 +283,7 @@ requireSequence("MCP mutations refresh SDK session tools", router, [
 	"this.runtimeSettingsRevision++",
 	"this.buildMcpServerStreamMessages(response)",
 ])
-requireMatch("legacy MCP prompt context is hidden", router, /function stripLegacyMcpContext[\s\S]{0,180}<lig-vs-mcp-context>/)
+requireMatch("legacy MCP prompt context is hidden", conversation, /function stripLegacyMcpContext[\s\S]{0,180}<lig-vs-mcp-context>/)
 
 for (const method of [
 	"authenticateMcpServer",

@@ -1,34 +1,36 @@
+export type HostResponse = Record<string, unknown>
+
 export interface WorkspacePort {
 	getWorkspacePaths(request: unknown): Promise<string[]>
-	searchFiles(request: any): Promise<any>
-	executeCommandInTerminal(request: any): Promise<any>
-	cancelCommands(): Promise<any>
-	readTextFile(request: any): Promise<any>
-	writeTextFile(request: any): Promise<any>
-	deleteFile(request: any): Promise<any>
-	selectFiles(request: any): Promise<any>
-	openTerminalPanel(request: any): Promise<any>
-	attachTerminalCommand(request: any): Promise<any>
-	continueTerminalCommand(request: any): Promise<any>
-	getTerminalState(request: unknown): Promise<any>
-	getUnretrievedTerminalOutput(request: any): Promise<any>
-	openFolder(request: any): Promise<any>
-	openSolution(request: any): Promise<any>
+	searchFiles(request: HostResponse): Promise<unknown>
+	executeCommandInTerminal(request: HostResponse): Promise<unknown>
+	cancelCommands(): Promise<unknown>
+	readTextFile(request: HostResponse): Promise<unknown>
+	writeTextFile(request: HostResponse): Promise<unknown>
+	deleteFile(request: HostResponse): Promise<unknown>
+	selectFiles(request: HostResponse): Promise<unknown>
+	openTerminalPanel(request: HostResponse): Promise<unknown>
+	attachTerminalCommand(request: HostResponse): Promise<unknown>
+	continueTerminalCommand(request: HostResponse): Promise<unknown>
+	getTerminalState(request: HostResponse): Promise<unknown>
+	getUnretrievedTerminalOutput(request: HostResponse): Promise<unknown>
+	openFolder(request: HostResponse): Promise<unknown>
+	openSolution(request: HostResponse): Promise<unknown>
 }
 
 export interface EnvironmentPort {
-	clipboardWriteText(request: any): Promise<any>
-	openExternal(request: any): Promise<any>
-	debugLog(request: any): Promise<any>
+	clipboardWriteText(request: HostResponse): Promise<unknown>
+	openExternal(request: HostResponse): Promise<unknown>
+	debugLog(request: HostResponse): Promise<unknown>
 }
 
 export interface WindowPort {
-	openFile(request: any): Promise<any>
-	showMessage(request: any): Promise<any>
+	openFile(request: HostResponse): Promise<unknown>
+	showMessage(request: HostResponse): Promise<unknown>
 }
 
 export interface DiffPort {
-	openDiff(request: any): Promise<any>
+	openDiff(request: HostResponse): Promise<unknown>
 }
 
 export interface HostProviderPort {
