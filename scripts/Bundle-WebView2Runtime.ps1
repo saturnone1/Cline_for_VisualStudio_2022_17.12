@@ -37,7 +37,7 @@ if ($runtimeFolderName -notlike "Microsoft.WebView2.FixedVersionRuntime.*.x64") 
 }
 
 $version = $runtimeFolderName -replace "^Microsoft\.WebView2\.FixedVersionRuntime\.", "" -replace "\.x64$", ""
-$targetRoot = Join-Path $ProjectRoot "VsClineAgent\WebView2Runtime"
+$targetRoot = Join-Path $ProjectRoot "vendor\WebView2Runtime"
 $target = Join-Path $targetRoot $runtimeFolderName
 
 if (Test-Path $targetRoot) {

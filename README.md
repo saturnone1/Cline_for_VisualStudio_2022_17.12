@@ -8,7 +8,7 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 
 - 확장 이름: `VS AI Agent (Cline Port)`
 - 대상 IDE: Visual Studio 2022 17.x amd64
-- VSIX 프로젝트: `VsClineAgent/VsClineAgent.csproj`
+- VSIX 프로젝트: `src/extension/VsClineAgent.csproj`
 - 대상 프레임워크: .NET Framework 4.7.2
 - 런타임 구조: Visual Studio VSIX + WebView2 + Node sidecar + `@cline/sdk`
 - 주요 용도: Visual Studio 안에서 Cline 스타일의 채팅, 파일 읽기/수정, 검색, 명령 실행, 작업 기록, 일부 MCP/체크포인트 기능 사용
@@ -18,14 +18,15 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 
 ```text
 .
-├─ VsClineAgent/            # Visual Studio VSIX host, WebView2 tool window, VS host adapters
-├─ sidecar/                 # Node sidecar TypeScript source, @cline/sdk integration
-├─ webview-ui/              # React/Vite 기반 Cline WebView UI
-├─ src/shared/              # WebView와 sidecar가 공유하는 Cline 타입/유틸 일부
-├─ LocalPackages/           # 폐쇄망 빌드용 NuGet 패키지 캐시
-├─ scripts/                 # 패키지 다운로드, WebView2 번들링, 설치 정리 스크립트
-├─ VS2022-SDK-COVERAGE.md   # 현재 구현 상태와 parity backlog의 기준 문서
-└─ AIR-GAP-BUILD.md         # 폐쇄망 빌드/설치 참고 문서
+├─ src/extension/           # Visual Studio VSIX host와 VS host adapters
+├─ src/sidecar/             # Node sidecar와 @cline/sdk 통합
+├─ src/shared/              # WebView와 sidecar가 공유하는 TypeScript
+├─ src/webview/             # React/Vite 기반 WebView UI
+├─ assets/                  # 소스에서 사용하는 이미지와 정적 자산
+├─ artifacts/               # 빌드가 생성하는 WebApp/Sidecar 패키지 산출물
+├─ docs/                    # 아키텍처, 호환성, 폐쇄망 문서
+├─ scripts/                 # 빌드와 배포 보조 스크립트
+└─ vendor/                  # 로컬 NuGet과 선택적 WebView2 런타임
 ```
 
 ## 빌드 준비
@@ -37,7 +38,7 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 - .NET Framework 4.7.2 Developer Pack
 - Node.js 22 이상(개발/빌드용)
 - WebView2 Runtime 또는 WebView2 Fixed Version Runtime
-- 인터넷 연결이 없는 환경에서는 `LocalPackages/`, WebView2 Fixed Runtime, sidecar `node_modules.zip` 준비 필요
+- 인터넷 연결이 없는 환경에서는 `vendor/LocalPackages/`, WebView2 Fixed Runtime, sidecar `node_modules.zip` 준비 필요
 
 NuGet 패키지를 로컬 캐시에 내려받으려면 인터넷이 되는 PC에서 다음을 실행합니다.
 
@@ -60,7 +61,7 @@ WebView2 Fixed Version Runtime을 VSIX에 포함하려면 다음 중 하나를 �
 sidecar 빌드:
 
 ```powershell
-cd sidecar
+cd src/sidecar
 npm install
 npm run build
 ```
@@ -68,7 +69,7 @@ npm run build
 WebView UI 빌드:
 
 ```powershell
-cd webview-ui
+cd src/webview
 npm install
 npm run build
 ```
@@ -76,13 +77,13 @@ npm run build
 VSIX 빌드:
 
 ```powershell
-msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPath=.\LocalPackages
+msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPath=.\vendor\LocalPackages
 ```
 
 빌드 결과는 일반적으로 다음 위치에 생성됩니다.
 
 ```text
-VsClineAgent/bin/Release/VsClineAgent.vsix
+src/extension/bin/Release/VsClineAgent.vsix
 ```
 
 ## 실행
@@ -186,8 +187,8 @@ Node sidecar와 `@cline/sdk`가 담당하는 것:
 
 ## 참고 문서
 
-- `VS2022-SDK-COVERAGE.md`: 현재 구현 상태, parity gap, 작업 우선순위
-- `PORT-FIDELITY-GAPS.md`: 이전 gap 문서에서 현재 기준 문서로 가는 포인터
-- `UPSTREAM_BASELINE.md`: upstream 기준 정보
-- `AIR-GAP-BUILD.md`: 폐쇄망 빌드와 설치 참고
-- `sidecar/README.md`: sidecar 개발 참고
+- `docs/Vs2022SdkCoverage.md`: 현재 구현 상태, parity gap, 작업 우선순위
+- `docs/PortFidelityGaps.md`: 이전 gap 문서에서 현재 기준 문서로 가는 포인터
+- `docs/UpstreamBaseline.md`: upstream 기준 정보
+- `docs/AirGapBuild.md`: 폐쇄망 빌드와 설치 참고
+- `src/sidecar/README.md`: sidecar 개발 참고

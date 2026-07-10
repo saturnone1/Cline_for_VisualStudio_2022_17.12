@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type Boolean = any
 export const Boolean = createProtoStub("Boolean")

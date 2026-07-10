@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type ApiProvider = any
 export const ApiProvider = createProtoStub("ApiProvider")

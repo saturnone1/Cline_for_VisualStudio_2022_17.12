@@ -1,4 +1,4 @@
-import { createProtoStub } from "./proto-stub"
+import { createProtoStub } from "./protoStub"
 
 export type CreateHookRequest = any
 export const CreateHookRequest = createProtoStub("CreateHookRequest")

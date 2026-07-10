@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type McpDisplayMode = any
 export const McpDisplayMode = createProtoStub("McpDisplayMode")

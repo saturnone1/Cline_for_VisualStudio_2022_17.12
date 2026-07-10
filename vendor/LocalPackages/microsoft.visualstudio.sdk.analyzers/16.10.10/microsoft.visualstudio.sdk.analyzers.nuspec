@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.SDK.Analyzers</id>
+    <version>16.10.10</version>
+    <authors>Microsoft</authors>
+    <developmentDependency>true</developmentDependency>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://github.com/Microsoft/VSSDK-Analyzers</projectUrl>
+    <description>A collection of analyzers to help Visual Studio extension developers write quality code.</description>
+    <releaseNotes>https://github.com/microsoft/vssdk-analyzers/releases/tag/v16.10.10</releaseNotes>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>analyzers visualstudio vssdk sdk</tags>
+    <repository type="git" url="https://github.com/microsoft/VSSDK-Analyzers" commit="d26f76802a5598d74c7568a1e8f44eecadf19224" />
+    <dependencies>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.CodeAnalysis.BannedApiAnalyzers" version="3.3.2" include="All" />
+        <dependency id="Microsoft.VisualStudio.Threading.Analyzers" version="16.10.56" include="All" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

@@ -14,59 +14,21 @@ msbuild VsClineAgent.sln /p:Configuration=Release
 - 코드 편집은 Linux 서버에서 가능, 빌드/설치는 Windows에서
 
 ## 프로젝트 구조
+```text
+src/
+├── extension/    # C# VSIX host, ToolWindow, Visual Studio adapters
+├── src/sidecar/      # Node runtime and @cline/sdk integration
+├── shared/       # shared TypeScript contracts and utilities
+└── webview/      # React/Vite WebView UI
+
+assets/           # source-controlled static assets
+artifacts/        # generated WebApp and Sidecar package inputs
+docs/             # architecture and deployment documentation
+scripts/          # build, validation, and cleanup scripts
+vendor/           # offline NuGet feed and optional WebView2 runtime
 ```
-VsClineAgent/
-├── VsClineAgent.csproj          # net472, LangVersion=latest, Nullable=enable
-├── VsClineAgentPackage.cs       # AsyncPackage 진입점
-├── Guids.cs                     # Package/Command/Window GUID 상수
-├── VsClineAgentPackage.vsct     # 메뉴 커맨드 정의 (View 메뉴 → AI Agent)
-├── source.extension.vsixmanifest
-│
-├── Agent/                       # 핵심 에이전트 로직 (Cline 포트)
-│   ├── AgentController.cs       # 메인 에이전트 루프 (Task.startTask 포트)
-│   ├── LlmClient.cs             # Ollama/OpenAI 호환 HTTP 클라이언트
-│   ├── AssistantMessage/
-│   │   ├── AssistantMessageTypes.cs   # ToolUse, TextStreamContent, ClineToolNames
-│   │   ├── AssistantMessageParser.cs  # parseAssistantMessageV2 포트 (XML 파싱)
-│   │   └── DiffApplier.cs             # constructNewFileContentV1 포트 (SEARCH/REPLACE)
-│   ├── Models/
-│   │   ├── ChatMessage.cs       # ChatMessage, ChatRequest, ChatResponse (plain text)
-│   │   └── LlmModels.cs        # 빈 파일 (구 OpenAI function-calling 클래스 제거됨)
-│   ├── Prompts/
-│   │   ├── SystemPrompt.cs      # Cline 시스템 프롬프트 전체 (agent_role, rules, tools 등)
-│   │   └── FormatResponse.cs    # formatResponse 포트 (noToolsUsed, toolError 등)
-│   └── Tools/
-│       ├── IAgentTool.cs        # IAgentTool, IToolCallbacks 인터페이스
-│       ├── ToolRegistry.cs      # 툴 등록/디스패치
-│       ├── ReadFileTool.cs      # read_file (N | line 포맷)
-│       ├── WriteFileTool.cs     # write_to_file (디렉토리 자동 생성, 승인 요구)
-│       ├── ReplaceInFileTool.cs # replace_in_file (DiffApplier 사용)
-│       ├── ListFilesTool.cs     # list_files (재귀 옵션)
-│       ├── SearchFilesTool.cs   # search_files (regex, 컨텍스트 2줄)
-│       ├── ExecuteCommandTool.cs # execute_command (cmd.exe 래퍼)
-│       ├── ListCodeDefinitionsTool.cs # list_code_definition_names (regex 기반)
-│       ├── AskFollowupQuestionTool.cs # ask_followup_question
-│       ├── AttemptCompletionTool.cs   # attempt_completion (루프 종료 신호)
-│       └── ToolResult.cs        # 빈 파일 (placeholder)
-│
-├── Commands/
-│   └── OpenChatWindowCommand.cs # View 메뉴 → AI Agent 커맨드
-│
-├── ToolWindows/
-│   ├── ChatToolWindow.cs        # ToolWindowPane (AI Agent 창)
-│   ├── ChatToolWindowControl.xaml     # WPF UI (WebView2 + 로딩/에러 패널)
-│   └── ChatToolWindowControl.xaml.cs  # WebView2 브릿지, AgentController 연동
-│
-├── Services/
-│   ├── AgentSettings.cs         # 설정 모델 (LlmBaseUrl, ModelName, ApiKey 등)
-│   ├── SettingsService.cs       # JSON 파일 기반 설정 저장/로드
-│   └── VsEditorService.cs       # VS DTE2 API 래퍼 (파일, 솔루션, 진단)
-│
-└── WebApp/                      # 채팅 UI (WebView2로 렌더링)
-    ├── index.html
-    ├── app.js                   # 에이전트 이벤트 핸들러, UI 렌더링
-    └── styles.css               # VS 다크테마 스타일
-```
+
+VSIX 내부에서는 호환성을 위해 `Assets/`, `WebApp/`, `Sidecar/`, `WebView2Runtime/` 경로를 유지하며, `src/extension/VsClineAgent.csproj`의 `Link` 항목이 저장소 경로와 패키지 경로를 연결합니다.
 
 ## 핵심 아키텍처 (Cline 포트)
 

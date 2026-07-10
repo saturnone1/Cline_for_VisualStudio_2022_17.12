@@ -1,5 +1,5 @@
 import { ApiFormat } from "./proto/cline/models"
-import type { ApiHandlerSettings } from "./storage/state-keys"
+import type { ApiHandlerSettings } from "./storage/stateKeys"
 
 export type ApiProvider =
 	| "anthropic"

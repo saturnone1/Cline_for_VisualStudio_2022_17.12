@@ -19,8 +19,8 @@ if ($webview2) {
 } else {
     Write-Host "  WebView2 Runtime이 없습니다." -ForegroundColor Red
 
-    # 현재 폴더에 MicrosoftEdgeWebview2Setup.exe 있으면 자동 설치
-    $installer = Join-Path $PSScriptRoot "MicrosoftEdgeWebview2Setup.exe"
+    # vendor/installers에 WebView2 bootstrapper가 있으면 자동 설치
+    $installer = Join-Path $PSScriptRoot "..\vendor\installers\MicrosoftEdgeWebView2Setup.exe"
     if (Test-Path $installer) {
         Write-Host "  설치 파일 발견 — 설치 중..." -ForegroundColor Yellow
         Start-Process $installer -ArgumentList "/silent /install" -Wait
@@ -30,7 +30,7 @@ if ($webview2) {
         Write-Host "  ▶ 오프라인 설치 방법:" -ForegroundColor Yellow
         Write-Host "    1. 인터넷 PC에서 다운로드:"
         Write-Host "       https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-        Write-Host "    2. MicrosoftEdgeWebview2Setup.exe를 이 scripts\ 폴더에 복사"
+        Write-Host "    2. MicrosoftEdgeWebView2Setup.exe를 vendor\installers\ 폴더에 복사"
         Write-Host "    3. 이 스크립트 재실행"
         Write-Host ""
         Write-Host "  ※ 또는 수동 설치 후 계속 진행하세요."

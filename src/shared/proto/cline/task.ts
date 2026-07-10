@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type AskResponseRequest = any
 export const AskResponseRequest = createProtoStub("AskResponseRequest")

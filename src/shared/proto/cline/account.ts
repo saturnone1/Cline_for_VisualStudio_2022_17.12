@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type UsageTransaction = any
 export const UsageTransaction = createProtoStub("UsageTransaction")

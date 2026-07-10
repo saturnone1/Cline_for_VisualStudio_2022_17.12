@@ -1,4 +1,4 @@
-import { createProtoStub } from "../proto-stub"
+import { createProtoStub } from "../protoStub"
 
 export type AddRemoteMcpServerRequest = any
 export const AddRemoteMcpServerRequest = createProtoStub("AddRemoteMcpServerRequest")

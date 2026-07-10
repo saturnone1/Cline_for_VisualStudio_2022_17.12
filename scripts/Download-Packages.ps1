@@ -1,9 +1,9 @@
 # Download-Packages.ps1
 # 에어갭 환경 빌드 준비용 — 인터넷 연결된 PC에서 실행
-# 모든 NuGet 패키지를 ./LocalPackages 폴더에 다운로드
+# 모든 NuGet 패키지를 ./vendor/LocalPackages 폴더에 다운로드
 
 param(
-    [string]$PackagesFolder = "$PSScriptRoot\..\LocalPackages"
+    [string]$PackagesFolder = "$PSScriptRoot\..\vendor\LocalPackages"
 )
 
 $ErrorActionPreference = "Stop"

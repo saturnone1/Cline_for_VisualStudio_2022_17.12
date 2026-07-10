@@ -30,14 +30,37 @@ try {
         "WebApp/assets/lig-mark-black.png",
         "Sidecar/runtime/cline-sidecar.js",
         "Sidecar/runtime/node.exe",
-        "Sidecar/runtime/sdk/ClineSdkRuntime.js",
-        "Sidecar/runtime/webview/VisualStudioWebviewRouter.js"
+        "Sidecar/runtime/application/ports/ClineRuntimePort.js",
+        "Sidecar/runtime/application/useCases/McpUseCase.js",
+        "Sidecar/runtime/application/useCases/TaskSessionUseCase.js",
+        "Sidecar/runtime/application/services/CommandPolicy.js",
+        "Sidecar/runtime/application/services/PatchPolicy.js",
+        "Sidecar/runtime/domain/task/TaskLifecycle.js",
+        "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
+        "Sidecar/runtime/infrastructure/sdk/ClineSdkRuntime.js",
+        "Sidecar/runtime/infrastructure/transport/JsonRpcConnection.js",
+        "Sidecar/runtime/infrastructure/webview/VisualStudioWebviewBackend.js",
+        "Sidecar/runtime/presentation/webview/VisualStudioWebviewController.js"
     )
 
     foreach ($entryName in $requiredEntries) {
         if (-not $zip.GetEntry($entryName)) {
             Fail "Missing required entry: $entryName"
         }
+    }
+
+    $nodeEntries = @($zip.Entries | Where-Object { $_.FullName -like "*node.exe" })
+    if ($nodeEntries.Count -gt 2) {
+        Fail "Unexpected duplicate node.exe payloads: $($nodeEntries.Count)"
+    }
+
+    $nestedWebView2Entries = @($zip.Entries | Where-Object { $_.FullName -like "Sidecar/runtime/Microsoft.WebView2*" })
+    if ($nestedWebView2Entries.Count -gt 0) {
+        Fail "WebView2 runtime was duplicated under Sidecar/runtime."
+    }
+
+    if ($vsixItem.Length -gt 700MB) {
+        Fail "VSIX is unexpectedly large: $($vsixItem.Length) bytes"
     }
 
     $extensionEntry = $zip.GetEntry("extension.vsixmanifest")
