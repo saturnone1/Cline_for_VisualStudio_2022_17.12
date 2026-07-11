@@ -43,12 +43,8 @@ namespace VsClineAgent.ToolWindows
             }
         }
 
-        private SidecarProcess? _sidecarProcess;
-        private readonly VsEditorService _editorService;
-        private readonly VsCommandExecutionService _commandExecutionService;
-        private readonly SemaphoreSlim _sidecarStartLock = new SemaphoreSlim(1, 1);
+        private readonly SidecarLifecycle _sidecar;
         private string? _assemblyDirectory;
-        private string? _lastSidecarError;
         private string? _lastWebMessageJson;
         private readonly WebviewMessageQueue _webviewMessages;
         private bool _loaded;
@@ -63,8 +59,7 @@ namespace VsClineAgent.ToolWindows
 			_webviewMessages = new WebviewMessageQueue(Dispatcher, () => webView.CoreWebView2);
 			ApplyLoadingTheme(ReadPersistedTheme());
             InitializeLoadingLogo();
-            _editorService = new VsEditorService();
-            _commandExecutionService = new VsCommandExecutionService();
+            _sidecar = new SidecarLifecycle(new VsEditorService(), new VsCommandExecutionService(), SetStatus);
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
         }
@@ -190,7 +185,7 @@ namespace VsClineAgent.ToolWindows
         {
             if (_loaded)
             {
-                await TryEnsureSidecarRunningAsync();
+                await _sidecar.EnsureRunningAsync();
                 return;
             }
 
@@ -212,6 +207,7 @@ namespace VsClineAgent.ToolWindows
             var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
                 ?? AppDomain.CurrentDomain.BaseDirectory;
             _assemblyDirectory = assemblyDirectory;
+            _sidecar.AssemblyDirectory = assemblyDirectory;
             string? browserExecutableFolder = null;
             string? runtimeLabel = null;
             List<string> initializationFailures = new List<string>();
@@ -256,7 +252,7 @@ namespace VsClineAgent.ToolWindows
                         "No WebView2 runtime could initialize.\n" + string.Join("\n", initializationFailures));
 
                 SetStatus("LIG VS 사이드카를 시작하는 중입니다...");
-                await TryEnsureSidecarRunningAsync();
+                await _sidecar.EnsureRunningAsync();
 
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(WebviewBootstrapScript.Source);
 
@@ -433,7 +429,7 @@ namespace VsClineAgent.ToolWindows
             }
             catch (Exception ex)
             {
-                _lastSidecarError = ex.ToString();
+                _sidecar.RecordError(ex);
                 ShowError("WebView navigation handling failed:\n" + ex.Message);
             }
         }
@@ -454,28 +450,27 @@ namespace VsClineAgent.ToolWindows
                 if (TryHandleHostDiagnostic(webMessageAsJson))
                     return;
 
-                if ((_sidecarProcess == null || !_sidecarProcess.IsRunning) &&
+                if (!_sidecar.IsRunning &&
                     WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
                     return;
 
-                if (_sidecarProcess == null || !_sidecarProcess.IsRunning)
+                if (!_sidecar.IsRunning)
                 {
-                    var restarted = await TryEnsureSidecarRunningAsync();
+                    var restarted = await _sidecar.EnsureRunningAsync();
                     if (!restarted)
                     {
-                        await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, GetSidecarNotRunningMessage()));
+                        await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, _sidecar.GetNotRunningMessage()));
                         return;
                     }
                 }
 
-                var sidecarProcess = _sidecarProcess;
-                if (sidecarProcess == null || !sidecarProcess.IsRunning)
+                if (!_sidecar.IsRunning)
                 {
-                    await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, GetSidecarNotRunningMessage()));
+                    await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, _sidecar.GetNotRunningMessage()));
                     return;
                 }
 
-                var handledBySidecar = await sidecarProcess.TryHandleWebviewMessageAsync(
+                var handledBySidecar = await _sidecar.TryHandleWebviewMessageAsync(
                     webMessageAsJson,
                     SendToWebViewAsync,
                     CancellationToken.None);
@@ -485,56 +480,12 @@ namespace VsClineAgent.ToolWindows
             }
             catch (Exception ex)
             {
-                _lastSidecarError = ex.ToString();
+                _sidecar.RecordError(ex);
                 if (WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
                     return;
 
                 await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, ex.Message));
             }
-        }
-
-        private async Task<bool> TryEnsureSidecarRunningAsync()
-        {
-            await _sidecarStartLock.WaitAsync();
-            try
-            {
-                if (_sidecarProcess != null && _sidecarProcess.IsRunning)
-                    return true;
-
-                var assemblyDirectory = _assemblyDirectory ??
-                    Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ??
-                    AppDomain.CurrentDomain.BaseDirectory;
-
-                DisposeSidecarProcessQuietly();
-                _sidecarProcess = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                SetStatus("LIG VS 사이드카 런타임을 준비하는 중입니다...");
-                await System.Windows.Threading.Dispatcher.Yield();
-
-                var sidecarProcess = _sidecarProcess
-                    ?? throw new InvalidOperationException("Cline sidecar process was not created.");
-                var status = await Task.Run(() =>
-                    sidecarProcess.EnsureStartedAsync(CancellationToken.None));
-                _lastSidecarError = null;
-                SetStatus($"LIG VS 사이드카: {status}");
-                return _sidecarProcess != null && _sidecarProcess.IsRunning;
-            }
-            catch (Exception ex)
-            {
-                _lastSidecarError = "LIG VS sidecar failed to start: " + ex.Message;
-                SetStatus(_lastSidecarError);
-                return false;
-            }
-            finally
-            {
-                _sidecarStartLock.Release();
-            }
-        }
-
-        private string GetSidecarNotRunningMessage()
-        {
-            return string.IsNullOrWhiteSpace(_lastSidecarError)
-                ? "LIG VS SDK sidecar is not running."
-                : _lastSidecarError!;
         }
 
         public void Dispose()
@@ -549,30 +500,7 @@ namespace VsClineAgent.ToolWindows
             CancelPendingUnloadDispose();
             _webviewMessages.Dispose();
 
-            DisposeSidecarProcessQuietly();
-
-            try
-            {
-                _commandExecutionService.Dispose();
-            }
-            catch
-            {
-            }
-        }
-
-        private void DisposeSidecarProcessQuietly()
-        {
-            try
-            {
-                _sidecarProcess?.Dispose();
-            }
-            catch
-            {
-            }
-            finally
-            {
-                _sidecarProcess = null;
-            }
+            _sidecar.Dispose();
         }
 
         private void DetachWebViewEventHandlers()
@@ -773,8 +701,8 @@ namespace VsClineAgent.ToolWindows
                 AssemblyDirectory = _assemblyDirectory,
                 WebviewReady = _webviewMessages.IsReady,
                 Loaded = _loaded,
-                SidecarRunning = _sidecarProcess != null && _sidecarProcess.IsRunning,
-                LastSidecarError = _lastSidecarError,
+                SidecarRunning = _sidecar.IsRunning,
+                LastSidecarError = _sidecar.LastError,
                 LastWebMessageJson = _lastWebMessageJson
             };
         }

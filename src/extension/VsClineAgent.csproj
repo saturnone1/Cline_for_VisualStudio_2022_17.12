@@ -113,6 +113,7 @@
     <Compile Include="Host\Adapters\WorkspaceHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\WebviewHostRpcAdapter.cs" />
     <Compile Include="Host\SidecarProcess.cs" />
+    <Compile Include="Host\SidecarLifecycle.cs" />
     <Compile Include="$(VsVersionInfoPath)">
       <Link>Host\VisualStudioVersionInfo.cs</Link>
     </Compile>
