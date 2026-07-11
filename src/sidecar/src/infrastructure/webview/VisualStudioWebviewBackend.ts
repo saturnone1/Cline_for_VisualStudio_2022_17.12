@@ -35,7 +35,7 @@ import type { OAuthCallbackHandler } from "../../features/providers/OAuthCallbac
 import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
 import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
-import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
+import { rebindTaskHistoryId, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -66,6 +66,7 @@ import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalog
 import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import { TaskHistorySync } from "../../features/taskHistory/TaskHistorySync"
+import { TaskHistoryCommands } from "../../features/taskHistory/TaskHistoryCommands"
 import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
@@ -243,6 +244,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly foldedProgressProjector: FoldedProgressProjector
 	private readonly taskSnapshots: TaskSnapshotStore
 	private readonly taskHistorySync: TaskHistorySync
+	private readonly taskHistoryCommands: TaskHistoryCommands
 	private readonly agentTextEvents: AgentTextEventProjector
 	private readonly agentToolEvents: AgentToolEventProjector
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
@@ -293,6 +295,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.state = loadInitialState(this.stateStore.load())
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
@@ -1034,12 +1037,12 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.deleteTasksWithIds":
-				await this.deleteTasks(getStringArray(message, "value"))
+				await this.taskHistoryCommands.delete(getStringArray(message, "value"))
 				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "TaskService.deleteAllTaskHistory":
-				await this.deleteAllTasks()
+				await this.taskHistoryCommands.deleteAll()
 				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
@@ -1323,7 +1326,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				)
 
 			case "TaskService.toggleTaskFavorite":
-				this.toggleTaskFavorite(getString(message, "taskId"), asRecord(message).isFavorited === true)
+				this.taskHistoryCommands.toggleFavorite(getString(message, "taskId"), asRecord(message).isFavorited === true)
 				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
@@ -2227,93 +2230,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				})
 			}
 		}
-	}
-
-	private async deleteTasks(taskIds: string[]) {
-		if (taskIds.length === 0) {
-			return
-		}
-
-		const ids = new Set(taskIds)
-		for (const id of ids) {
-			this.taskHistorySync.markDeleted(id)
-			const deleted = await this.clineSdk?.deleteSession({ sessionId: id }).catch((error) => {
-				this.logger.log("sidecar", "deleteSessionFailed", {
-					sessionId: id,
-					error: error instanceof Error ? error.message : String(error),
-				})
-				return false
-			})
-			this.logger.log("sidecar", "deleteSessionRequested", { sessionId: id, deleted })
-			this.forgetTaskSnapshot(id)
-		}
-		this.state.taskHistory = this.taskHistorySync.removeDeleted(this.state.taskHistory)
-		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
-			this.clearLiveInteractionState("deleteTasks")
-			this.state.currentTaskItem = null
-			this.state.clineMessages = []
-		}
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-	}
-
-	private async deleteAllTasks() {
-		const ids = new Set(this.state.taskHistory.map((item) => String(item.id || "")).filter(Boolean))
-		if (this.clineSdk) {
-			const sdkHistory = await this.clineSdk.listHistory({ limit: 1000 }).catch((error) => {
-				this.logger.log("sidecar", "deleteAllListHistoryFailed", {
-					error: error instanceof Error ? error.message : String(error),
-				})
-				return null
-			})
-			if (Array.isArray(sdkHistory)) {
-				for (const session of sdkHistory) {
-					const id = getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")
-					if (id) {
-						ids.add(id)
-					}
-				}
-			}
-		}
-
-		for (const id of ids) {
-			this.taskHistorySync.markDeleted(id)
-			await this.clineSdk?.deleteSession({ sessionId: id }).catch((error) => {
-				this.logger.log("sidecar", "deleteAllSessionFailed", {
-					sessionId: id,
-					error: error instanceof Error ? error.message : String(error),
-				})
-				return false
-			})
-		}
-
-		this.clearTaskSnapshots()
-		this.state.taskHistory = []
-		if (this.state.currentTaskItem && ids.has(String(this.state.currentTaskItem.id || ""))) {
-			this.clearLiveInteractionState("deleteAllTasks")
-			this.state.currentTaskItem = null
-		}
-		if (!this.state.currentTaskItem) {
-			this.state.clineMessages = []
-		}
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-	}
-
-	private toggleTaskFavorite(taskId: string, isFavorited: boolean) {
-		if (!taskId) {
-			return
-		}
-
-		this.state.taskHistory = setTaskHistoryFavorite(this.state.taskHistory, taskId, isFavorited)
-		const snapshot = this.getTaskSnapshot(taskId)
-		if (snapshot) {
-			snapshot.taskItem = { ...snapshot.taskItem, isFavorited }
-			this.rememberTaskSnapshot(taskId, snapshot.taskItem, snapshot.messages)
-		}
-		if (this.state.currentTaskItem?.id === taskId) {
-			this.state.currentTaskItem = { ...this.state.currentTaskItem, isFavorited }
-		}
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-		this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }).catch(() => undefined)
 	}
 
 	private async refreshSelectedTaskFromSdk() {
