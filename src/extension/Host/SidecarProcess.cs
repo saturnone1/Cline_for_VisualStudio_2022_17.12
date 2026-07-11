@@ -113,8 +113,12 @@ namespace VsClineAgent.Host
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                StandardOutputEncoding = new UTF8Encoding(false),
+                StandardErrorEncoding = new UTF8Encoding(false)
             };
+            startInfo.EnvironmentVariables["LANG"] = "ko_KR.UTF-8";
+            startInfo.EnvironmentVariables["LC_ALL"] = "ko_KR.UTF-8";
 
             try
             {

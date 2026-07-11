@@ -3363,6 +3363,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				await this.broadcastState()
 			} else if (await this.hydrateCurrentTaskFromSdk(sessionId, `empty:${source}`, true)) {
 				await this.broadcastState()
+			} else {
+				this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage()))
+				this.updateCurrentTaskItem()
+				await this.broadcastState()
 			}
 			return
 		}
@@ -3378,7 +3382,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				finishReason,
 				lastTaskActivityReason: this.lastTaskActivityReason,
 			})
-			this.finishSdkTask(sessionId, finishReason)
+			this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage()))
 		} else {
 			this.finalizeOpenPartialMessages()
 			this.addCompletionResultMarker(finishReason)
@@ -5451,6 +5455,20 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.stateStore.save(createPersistedStateSnapshot(this.state))
 	}
 
+	private failSdkTaskWithMessage(sessionId: string, text: string) {
+		this.transitionTask("failed", "finish:empty-model-response")
+		this.clearTaskIdleWatchdog()
+		this.clearPartialIdleWatchdog()
+		this.clearReasoningStatus()
+		this.finalizeActivePartialText()
+		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
+		this.finalizeOpenPartialMessages()
+		this.addMessage({ type: "say", say: "error", text })
+		void this.runLifecycleHooks("TaskComplete", { sessionId, status: "failed", text })
+		this.stateStore.save(createPersistedStateSnapshot(this.state))
+	}
+
 	private addCompletionResultMarker(status: string) {
 		if (this.hasCompletionResultAfterLastUserMessage()) {
 			return
@@ -7068,15 +7086,28 @@ function isSessionNotFoundError(error: unknown) {
 	return /session not found/i.test(message)
 }
 
-function stringify(value: unknown) {
+function stringify(value: unknown): string {
 	if (typeof value === "string") {
 		return value
 	}
+	if (value instanceof Error) {
+		const details = [value.name, value.message].filter(Boolean).join(": ")
+		const errorWithCause = value as Error & { cause?: unknown }
+		const cause: string = errorWithCause.cause === undefined ? "" : stringify(errorWithCause.cause)
+		return cause ? `${details}\nCaused by: ${cause}` : details
+	}
 	try {
-		return JSON.stringify(value)
+		const serialized = JSON.stringify(value)
+		return serialized === "{}" ? String(value) : serialized
 	} catch {
 		return String(value)
 	}
+}
+
+function formatEmptyModelResponseForUi(language: "en" | "ko") {
+	return language === "ko"
+		? "모델이 응답 본문을 생성하지 못했습니다. 선택한 모델이 Ollama에서 정상적으로 실행되는지 확인하거나 다른 모델로 다시 시도해 주세요."
+		: "The model returned no response body. Verify that the selected model runs correctly in Ollama, or retry with another model."
 }
 
 function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko") {
