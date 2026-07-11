@@ -114,7 +114,7 @@ interface AccountUser extends RpcRequest {
 interface AccountOrganization extends RpcRequest {
 	active: boolean
 	organizationId: string
-	name?: string
+	name: string
 	memberId?: string
 	roles: string[]
 }

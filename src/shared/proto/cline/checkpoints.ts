@@ -1,4 +1,7 @@
 import { createProtoStub } from "../protoStub"
 
-export type CheckpointRestoreRequest = any
-export const CheckpointRestoreRequest = createProtoStub("CheckpointRestoreRequest")
+export type CheckpointRestoreRequest = {
+	number: number
+	restoreType: "task" | "workspace" | "taskAndWorkspace"
+}
+export const CheckpointRestoreRequest = createProtoStub<CheckpointRestoreRequest>("CheckpointRestoreRequest")
