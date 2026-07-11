@@ -16,3 +16,18 @@ test("task lifecycle use case reports accepted and rejected transitions", () => 
 	assert.equal(useCase.transition("streaming", "late-event").accepted, false)
 	assert.equal(useCase.reset("cancelled").current, "idle")
 })
+
+test("task lifecycle use case exposes explicit agent session and pending interaction state", () => {
+	const useCase = new TaskLifecycleUseCase()
+	useCase.bindSession("session-1")
+	useCase.transition("starting", "send")
+	useCase.transition("awaiting_user", "approval")
+	assert.equal(useCase.waitFor("tool_approval"), true)
+	assert.deepEqual(useCase.snapshot, {
+		sessionId: "session-1",
+		phase: "awaiting_user",
+		pendingInteraction: "tool_approval",
+	})
+	useCase.transition("streaming", "approved")
+	assert.equal(useCase.snapshot.pendingInteraction, "none")
+})

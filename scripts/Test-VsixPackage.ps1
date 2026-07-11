@@ -42,6 +42,7 @@ try {
 		"Sidecar/runtime/application/services/ProviderIdentity.js",
         "Sidecar/runtime/domain/task/TaskLifecycle.js",
 		"Sidecar/runtime/domain/agent/AgentRuntimeEvent.js",
+		"Sidecar/runtime/domain/agent/AgentSessionState.js",
         "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
 		"Sidecar/runtime/infrastructure/persistence/LocalAutomationStore.js",
 		"Sidecar/runtime/infrastructure/auth/ProviderAuthSupport.js",

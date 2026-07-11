@@ -110,6 +110,7 @@ if (router.includes("function createProviderAuthInfo") || router.includes("funct
 
 for (const requiredFile of [
 	"domain/agent/AgentRuntimeEvent.ts",
+	"domain/agent/AgentSessionState.ts",
 	"infrastructure/sdk/ClineSdkEventTranslator.ts",
 	"application/ports/AgentEnginePort.ts",
 	"application/useCases/McpUseCase.ts",

@@ -542,6 +542,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.transitionTask("awaiting_user", "tool-approval")
+		this.taskLifecycle.waitFor("tool_approval")
 		this.addMessage({ type: "ask", ask, text })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
@@ -574,6 +575,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	async requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> {
 		this.transitionTask("awaiting_user", "question")
+		this.taskLifecycle.waitFor("question")
 		this.logger.log("sdk->sidecar", "question.request", { question, options })
 		if (this.pendingQuestion) {
 			this.pendingQuestion.resolve("")
@@ -6450,6 +6452,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private bindCurrentTaskToSession(sessionId: string) {
+		this.taskLifecycle.bindSession(sessionId)
 		if (!sessionId || !this.state.currentTaskItem) {
 			return
 		}
