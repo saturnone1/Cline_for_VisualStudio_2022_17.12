@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, SessionSnapshotRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -73,6 +73,7 @@ import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
 import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
 import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEventProjector"
+import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
@@ -132,7 +133,6 @@ import {
 	formatAttachmentSummaryValue,
 	getExternalUrlValue,
 	normalizeMcpDisplayMode,
-	normalizeUsageSnapshot,
 	createId,
 	createHistoryItem,
 	sdkSessionToHistoryItem,
@@ -253,6 +253,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentToolEvents: AgentToolEventProjector
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
 	private readonly agentAuxiliaryEvents: AgentAuxiliaryEventProjector
+	private readonly agentSnapshotEvents: AgentSnapshotEventProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
@@ -330,6 +331,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
 		this.agentAuxiliaryEvents = new AgentAuxiliaryEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), addMessage: (message) => { this.addMessage(message) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.agentSnapshotEvents = new AgentSnapshotEventProjector({ bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), noteActivity: (reason) => this.noteTaskActivity(reason), activeText: () => this.getActivePartialText(), updateTask: (updates) => this.updateCurrentTaskItem(updates), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) } })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -587,7 +589,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 			this.markSendLatencyFirstSdkEvent(sessionId, type)
-			this.handleSessionSnapshot(event)
+			this.agentSnapshotEvents.handle(event)
 			return
 		}
 
@@ -2453,33 +2455,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		return this.state.clineMessages.slice(-3).some((message) => normalizeTranscriptText(getString(message, "text")) === normalized)
-	}
-
-	private handleSessionSnapshot(event: SessionSnapshotRuntimeEvent) {
-		const { sessionId, status, modelId } = event
-		if (sessionId) {
-			this.bindCurrentTaskToSession(sessionId)
-		}
-
-		const usage = normalizeUsageSnapshot(event.usage)
-		if (status === "idle") {
-			this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
-		} else {
-			this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
-		}
-		this.updateCurrentTaskItem({
-			modelId: modelId || undefined,
-			tokensIn: usage.reliable ? usage.inputTokens : undefined,
-			tokensOut: usage.reliable ? usage.outputTokens : undefined,
-			cacheReads: usage.reliable ? usage.cacheReadTokens : undefined,
-			cacheWrites: usage.reliable ? usage.cacheWriteTokens : undefined,
-			totalCost: usage.reliable ? usage.totalCost : undefined,
-		})
-		if (status && status !== "running" && status !== "pending" && status !== "starting" && status !== "idle") {
-			const activeText = this.getActivePartialText()
-			this.finishSdkTask(sessionId, status, activeText)
-		}
-		this.broadcastState().catch((error) => console.error(error))
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
