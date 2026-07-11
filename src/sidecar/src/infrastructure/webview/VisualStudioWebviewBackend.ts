@@ -59,15 +59,12 @@ import {
 	screenshotByteLength,
 } from "../browser/BrowserDevToolsAdapter"
 import {
-	classifyWorktreeGitError,
 	findSolutions,
 	isPathInside,
-	normalizeMergeRecoveryAction,
-	parseGitWorktreePorcelain,
 	pathExists,
 	samePath,
-	uniqueSortedLines,
 } from "../worktree/WorktreeSupport"
+import { classifyWorktreeGitError, normalizeMergeRecoveryAction, parseGitWorktreePorcelain, uniqueSortedLines } from "../../features/worktrees/WorktreePolicy"
 import {
 	appendScheduledAgentRun,
 	deleteScheduledAgentSpecFile,

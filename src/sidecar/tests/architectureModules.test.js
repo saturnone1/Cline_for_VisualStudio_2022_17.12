@@ -3,7 +3,7 @@ const test = require("node:test")
 const { normalizeProviderId, normalizeSdkProviderId, oauthCredentialsField } = require("../dist/application/services/ProviderIdentity")
 const { createFallbackProviderConfigFields, redactUrl } = require("../dist/infrastructure/auth/ProviderAuthSupport")
 const { extractHookJsonResponse, hookDecisionFromResponse } = require("../dist/infrastructure/hooks/HookRuntime")
-const { parseGitWorktreePorcelain } = require("../dist/infrastructure/worktree/WorktreeSupport")
+const { parseGitWorktreePorcelain } = require("../dist/features/worktrees/WorktreePolicy")
 const {
 	createInitialState,
 	createPersistedStateSnapshot,
