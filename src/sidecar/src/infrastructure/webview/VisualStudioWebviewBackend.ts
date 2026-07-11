@@ -90,6 +90,8 @@ import { TaskCompletionProjector } from "../conversation/TaskCompletionProjector
 import { ConversationMessageStore } from "../conversation/ConversationMessageStore"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
+import { SettingsRpcHandler } from "../../features/settings/SettingsRpcHandler"
+import { decodeSettingsRpcCommand } from "./SettingsRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -213,7 +215,6 @@ import {
 	webFetchDisabledReason,
 } from "../configuration/ProviderConfiguration"
 import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
-import { resolveRequestedPlanActMode } from "../../features/settings/PlanActMode"
 import {
 	createUnauthenticatedAccountState,
 	createVisualStudioAuthUnsupportedResponse,
@@ -267,6 +268,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly taskCompletion: TaskCompletionProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
+	private readonly settingsRpc: SettingsRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -331,6 +333,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.compactSession = new CompactSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", selectedSessionId: () => String(this.state.currentTaskItem?.id || ""), language: () => this.state.uiLanguage === "en" ? "en" : "ko", mode: () => this.state.mode === "plan" ? "plan" : "act", addError: (text) => { this.addMessage({ type: "say", say: "error", text }) }, startLatency: (requestId, sessionId, textLength) => this.startSendLatencyTrace(requestId, "askResponse", sessionId, textLength), showProgress: (text) => { this.foldedProgressProjector.beginReasoning(); this.upsertFoldedReasoningText(text) }, persist: () => this.schedulePersistedStateSave(), broadcast: () => this.broadcastState(), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, send: (sessionId, command, textLength) => this.sendOrResumeSdkSession(sessionId, command, textLength), resultSessionId: (result, fallback) => getString(asRecord(result), "sessionId") || fallback, complete: (result, sessionId, generation) => this.completeFromSdkResult(result, sessionId, "compact", generation), recover: (sessionId, generation, error) => this.recoverFromSdkRunError(sessionId, "compact", generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
+		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState() })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -806,6 +809,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async handleUnaryRequest(key: string, requestId: string, message: unknown) {
 		const host = this.host
+		const settingsCommand = decodeSettingsRpcCommand(key, message)
+		if (settingsCommand) {
+			const settingsResult = await this.settingsRpc.handle(settingsCommand)
+			return grpcHandled(
+				grpcResponse(requestId, settingsResult.payload, false),
+				...(settingsResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -990,68 +1001,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 					grpcResponse(requestId, await host.workspaceClient.continueTerminalCommand(asRecord(message)), false),
 					...this.buildStateMessages(),
 				)
-
-			case "StateService.updateSettings":
-			case "StateService.updateAutoApprovalSettings":
-			case "ModelsService.updateApiConfigurationProto":
-			case "ModelsService.updateApiConfiguration":
-				this.applySettings(message)
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
-
-			case "StateService.togglePlanActModeProto":
-				this.state.mode = resolveRequestedPlanActMode(message, this.state.mode)
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, { value: true, mode: this.state.mode }, false))
-
-			case "StateService.updateTelemetrySetting":
-				this.state.telemetrySetting = getString(message, "value") || getString(message, "telemetrySetting") || this.state.telemetrySetting
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.dismissBanner":
-				this.applyBannerDismissal(message)
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.updateInfoBannerVersion":
-				this.state.lastDismissedInfoBannerVersion = getNumber(message, "value") || getNumber(message, "version") || this.state.lastDismissedInfoBannerVersion
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.updateModelBannerVersion":
-				this.state.lastDismissedModelBannerVersion = getNumber(message, "value") || getNumber(message, "version") || this.state.lastDismissedModelBannerVersion
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.updateCliBannerVersion":
-				this.state.lastDismissedCliBannerVersion = getNumber(message, "value") || getNumber(message, "version") || this.state.lastDismissedCliBannerVersion
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.updateTerminalConnectionTimeout":
-				this.state.shellIntegrationTimeout = getNumber(message, "value") || getNumber(message, "timeout") || this.state.shellIntegrationTimeout
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.setWelcomeViewCompleted":
-				this.state.welcomeViewCompleted = true
-				this.state.isNewUser = false
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "StateService.captureOnboardingProgress":
-			case "StateService.refreshRemoteConfig":
-			case "StateService.testOtelConnection":
-			case "StateService.testPromptUploading":
-			case "StateService.installClineCli":
-				return grpcHandled(grpcResponse(requestId, { value: false }, false))
-
-			case "StateService.toggleFavoriteModel":
-				this.toggleFavoriteModel(getString(message, "value") || getString(message, "modelId"))
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "StateService.resetState":
 				this.stateStore.clear()
@@ -1823,32 +1772,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (!result.success) this.addMessage({ type: "say", say: "error", text: result.error })
 	}
 
-	private toggleFavoriteModel(modelId: string) {
-		if (!modelId) {
-			return
-		}
-
-		const current = new Set<string>(this.state.favoritedModelIds)
-		if (current.has(modelId)) {
-			current.delete(modelId)
-		} else {
-			current.add(modelId)
-		}
-		this.state.favoritedModelIds = [...current]
-	}
-
-	private applyBannerDismissal(message: unknown) {
-		const banner = getString(message, "value") || getString(message, "banner") || getString(message, "id")
-		const version = getNumber(message, "version") || Date.now()
-		if (banner.includes("model")) {
-			this.state.lastDismissedModelBannerVersion = version
-		} else if (banner.includes("cli")) {
-			this.state.lastDismissedCliBannerVersion = version
-		} else {
-			this.state.lastDismissedInfoBannerVersion = version
-		}
-	}
-
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
 		return this.hookLifecycle.run(hookName, context)
 	}
@@ -2132,10 +2055,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const content = getString(parsed, "content")
 		const summary = [tool, pathValue, content].filter(Boolean).join(": ")
 		this.conversationProjection.rememberToolSummary(truncateText(summary || text, 2000))
-	}
-
-	private applySettings(message: unknown) {
-		this.settingsMutations.apply(message)
 	}
 
 	private refreshWebToolFeatureState() {
