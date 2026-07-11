@@ -93,6 +93,8 @@ import { SettingsRpcHandler } from "../../features/settings/SettingsRpcHandler"
 import { decodeSettingsRpcCommand } from "./SettingsRpcDecoder"
 import { AccountRpcHandler } from "../../features/providers/AccountRpcHandler"
 import { decodeAccountRpcCommand } from "./AccountRpcDecoder"
+import { BrowserRpcHandler } from "../../features/browser/BrowserRpcHandler"
+import { decodeBrowserRpcCommand } from "./BrowserRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -266,6 +268,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly settingsMutations: SettingsMutationHandler
 	private readonly settingsRpc: SettingsRpcHandler
 	private readonly accountRpc: AccountRpcHandler
+	private readonly browserRpc: BrowserRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -332,6 +335,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState() })
 		this.accountRpc = new AccountRpcHandler({ authorization: () => this.requireOAuthAuthorization(), callback: () => this.requireOAuthCallbackHandler(), authActions: () => this.requireProviderAuthActions(), credentials: () => this.requireProviderCredentials(), configuration: () => asRecord(this.state.apiConfiguration), mutateConfiguration: (updates, deletes) => { const next = { ...asRecord(this.state.apiConfiguration), ...updates }; for (const field of deletes) delete next[field]; this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration }, syncProfiles: () => this.apiConfigurationProfiles.syncActive(), setCodexAuthenticated: (authenticated) => { this.state.openAiCodexIsAuthenticated = authenticated }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.browserRpc = new BrowserRpcHandler({ browser: () => this.requireBrowserHandler(), settings: () => this.getBrowserSettings() })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -823,6 +827,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(accountResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const browserCommand = decodeBrowserRpcCommand(key, message)
+		if (browserCommand) return grpcHandled(grpcResponse(requestId, await this.browserRpc.handle(browserCommand), false))
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -848,51 +854,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 			case "WebService.fetchOpenGraphData":
 				return grpcHandled(grpcResponse(requestId, await fetchOpenGraphData(getString(message, "value") || getString(message, "url")), false))
-
-			case "BrowserService.getDetectedChromePath": {
-				return grpcHandled(grpcResponse(requestId, this.requireBrowserHandler().getDetectedPath(this.getBrowserSettings()), false))
-			}
-
-			case "BrowserService.getBrowserConnectionInfo":
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().getConnectionInfo(this.getBrowserSettings()), false))
-
-			case "BrowserService.testBrowserConnection": {
-				const hostValue = getString(message, "value") || getString(message, "host") || getString(message, "url")
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().testConnection(hostValue, this.getBrowserSettings()), false))
-			}
-
-			case "BrowserService.discoverBrowser":
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().discover(this.getBrowserSettings()), false))
-
-			case "BrowserService.relaunchChromeDebugMode": {
-				const browserSettings = asRecord(this.state.browserSettings)
-				const host = getString(browserSettings, "remoteBrowserHost") || "http://localhost:9222"
-				return grpcHandled(
-					grpcResponse(
-						requestId,
-						{
-							success: false,
-							value:
-								"Automatic Chrome relaunch is not implemented in the Visual Studio host yet. " +
-								`Launch Chrome or Edge manually with remote debugging enabled, for example: chrome.exe --remote-debugging-port=9222, then reconnect to ${host}.`,
-							message:
-								"Automatic Chrome relaunch is not implemented in the Visual Studio host yet. " +
-								`Launch Chrome or Edge manually with remote debugging enabled, then reconnect to ${host}.`,
-						},
-						false,
-					),
-				)
-			}
-
-			case "BrowserService.listBrowserTabs":
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().listTabs(this.getBrowserSettings()), false))
-
-			case "BrowserService.captureScreenshot":
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().captureScreenshot(message, this.getBrowserSettings()), false))
-
-			case "BrowserService.performBrowserAction":
-			case "BrowserService.executeBrowserAction":
-				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().performAction(message, this.getBrowserSettings()), false))
 
 			case "StateService.getAvailableTerminalProfiles":
 				return grpcHandled(
