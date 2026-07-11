@@ -59,19 +59,18 @@ export abstract class ProtoBusClient {
 			}, 120_000)
 
 			// Set up one-time listener for this specific request
-			const handleResponse = (event: MessageEvent) => {
+			const handleResponse = (event: MessageEvent<unknown>) => {
 				if (closed) {
 					return
 				}
-				const message = event.data
-				if (message.protocol_version === WEBVIEW_RPC_PROTOCOL_VERSION && message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
+				const response = parseGrpcResponse(event.data, requestId)
+				if (response) {
 					// Remove listener once we get our response
 					cleanup()
-					if (message.grpc_response.message) {
-						const response = PLATFORM_CONFIG.decodeMessage(message.grpc_response.message, decodeResponse)
-						resolve(response)
-					} else if (message.grpc_response.error) {
-						reject(new Error(message.grpc_response.error))
+					if (response.message) {
+						resolve(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
+					} else if (response.error) {
+						reject(new Error(response.error))
 					} else {
 						resolve(PLATFORM_CONFIG.decodeMessage({}, decodeResponse))
 					}
@@ -111,26 +110,25 @@ export abstract class ProtoBusClient {
 			return true
 		}
 		// Set up listener for streaming responses
-		const handleResponse = (event: MessageEvent) => {
+		const handleResponse = (event: MessageEvent<unknown>) => {
 			if (closed) {
 				return
 			}
-			const message = event.data
-			if (message.protocol_version === WEBVIEW_RPC_PROTOCOL_VERSION && message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
-				if (message.grpc_response.message) {
+			const response = parseGrpcResponse(event.data, requestId)
+			if (response) {
+				if (response.message) {
 					// Process streaming message
-					const response = PLATFORM_CONFIG.decodeMessage(message.grpc_response.message, decodeResponse)
-					callbacks.onResponse(response)
-				} else if (message.grpc_response.error) {
+					callbacks.onResponse(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
+				} else if (response.error) {
 					// Handle error
 					if (callbacks.onError) {
-						callbacks.onError(new Error(message.grpc_response.error))
+						callbacks.onError(new Error(response.error))
 					}
 					cleanup()
 				} else {
-					console.error("Received ProtoBus message with no response or error ", JSON.stringify(message))
+					console.error("Received ProtoBus message with no response or error ", JSON.stringify(event.data))
 				}
-				if (message.grpc_response.is_streaming === false) {
+				if (response.isStreaming === false) {
 					if (callbacks.onComplete) {
 						callbacks.onComplete()
 					}
@@ -164,4 +162,22 @@ export abstract class ProtoBusClient {
 			})
 		}
 	}
+}
+
+type GrpcResponse = Readonly<{ message?: unknown; error?: string; isStreaming: boolean }>
+
+function parseGrpcResponse(value: unknown, requestId: string): GrpcResponse | null {
+	const envelope = asRecord(value)
+	if (envelope.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION || envelope.type !== "grpc_response") return null
+	const response = asRecord(envelope.grpc_response)
+	if (response.request_id !== requestId || typeof response.is_streaming !== "boolean") return null
+	return {
+		...(response.message !== undefined ? { message: response.message } : {}),
+		...(typeof response.error === "string" ? { error: response.error } : {}),
+		isStreaming: response.is_streaming,
+	}
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
