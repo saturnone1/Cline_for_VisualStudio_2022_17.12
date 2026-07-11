@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
+using VsClineAgent.Host.Adapters;
 using VsClineAgent.Services;
 
 namespace VsClineAgent.Host
@@ -24,6 +25,7 @@ namespace VsClineAgent.Host
         private readonly string _assemblyDirectory;
         private readonly VsEditorService _editorService;
         private readonly VsCommandExecutionService _commandExecutionService;
+        private readonly IHostRpcAdapter _environmentHostRpcAdapter;
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
         private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
@@ -40,6 +42,7 @@ namespace VsClineAgent.Host
             _assemblyDirectory = assemblyDirectory;
             _editorService = editorService;
             _commandExecutionService = commandExecutionService;
+            _environmentHostRpcAdapter = new EnvironmentHostRpcAdapter(CaptureSidecarLine);
         }
 
         public bool IsRunning => _process != null && !_process.HasExited && _client != null && _client.IsConnected;
@@ -218,6 +221,9 @@ namespace VsClineAgent.Host
         private async Task<JToken?> HandleSidecarRequestAsync(string method, JToken? parameters)
         {
             InteractionLog.Write("sidecar->host", method, parameters);
+            if (_environmentHostRpcAdapter.CanHandle(method))
+                return await _environmentHostRpcAdapter.HandleAsync(method, parameters).ConfigureAwait(false);
+
             switch (method)
             {
                 case "host.health":
@@ -271,25 +277,6 @@ namespace VsClineAgent.Host
                     await _editorService.OpenFileAsync(
                         GetStringParameter(parameters, "filePath"),
                         GetIntParameter(parameters, "line")).ConfigureAwait(false);
-                    return new JObject();
-                case "env.getPlatform":
-                case "env.getHostVersion":
-                    return new JObject
-                    {
-                        ["platform"] = "win32",
-                        ["appName"] = "Visual Studio",
-                        ["host"] = "vs2022",
-                        ["version"] = VisualStudioVersionInfo.Version
-                    };
-                case "env.clipboardReadText":
-                    return new JObject { ["value"] = InvokeOnUiThread(() => Clipboard.GetText()) };
-                case "env.clipboardWriteText":
-                    InvokeOnUiThread(() => Clipboard.SetText(GetStringParameter(parameters, "value")));
-                    return new JObject();
-                case "env.openExternal":
-                    return new JObject { ["opened"] = OpenExternal(GetExternalTarget(parameters)) };
-                case "env.debugLog":
-                    CaptureSidecarLine("sidecar:debug", GetStringParameter(parameters, "message"));
                     return new JObject();
                 case "webview.postMessage":
                     if (_postToWebviewAsync != null && parameters is JObject postMessage)
@@ -988,43 +975,6 @@ namespace VsClineAgent.Host
             return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
-        private static string GetExternalTarget(JToken? parameters)
-        {
-            return GetStringParameter(parameters, "value")
-                ?? GetStringParameter(parameters, "url")
-                ?? GetStringParameter(parameters, "uri")
-                ?? GetStringParameter(parameters, "href")
-                ?? "";
-        }
-
-        private static bool OpenExternal(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return false;
-
-            value = value.Trim();
-            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-                return false;
-
-            var scheme = uri.Scheme.ToLowerInvariant();
-            if (scheme != Uri.UriSchemeHttp && scheme != Uri.UriSchemeHttps && scheme != Uri.UriSchemeMailto)
-                return false;
-
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = value,
-                    UseShellExecute = true
-                });
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private static bool FileContains(string filePath, string query)
         {
             try
@@ -1200,18 +1150,6 @@ namespace VsClineAgent.Host
                    path.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal)
                 ? path
                 : path + Path.DirectorySeparatorChar;
-        }
-
-        private static void InvokeOnUiThread(Action action)
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher == null || dispatcher.CheckAccess())
-            {
-                action();
-                return;
-            }
-
-            dispatcher.Invoke(action);
         }
 
         private static T InvokeOnUiThread<T>(Func<T> action)

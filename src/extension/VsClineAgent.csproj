@@ -97,6 +97,8 @@
     <Compile Include="Guids.cs" />
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="Host\InteractionLog.cs" />
+    <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
     <Compile Include="Host\SidecarProcess.cs" />
     <Compile Include="$(VsVersionInfoPath)">
       <Link>Host\VisualStudioVersionInfo.cs</Link>
