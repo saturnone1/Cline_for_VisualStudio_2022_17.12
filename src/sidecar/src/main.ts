@@ -1,4 +1,4 @@
-import { McpUseCase } from "./application/useCases/McpUseCase"
+import { McpHandler } from "./features/mcp/McpHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -39,7 +39,7 @@ const server = new SidecarRpcServer(
 		)
 		backend.setAgentEngine(runtime)
 		backend.setTaskSessionUseCase(new TaskSessionUseCase(runtime))
-		backend.setMcpUseCase(new McpUseCase(runtime))
+		backend.setMcpHandler(new McpHandler(runtime))
 		backend.setSendMessageHandler(new SendMessageHandler(runtime))
 		backend.setStartTaskHandler(new StartTaskHandler(runtime))
 		backend.setCancelTaskHandler(new CancelTaskHandler(runtime))

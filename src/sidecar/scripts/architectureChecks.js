@@ -114,7 +114,7 @@ for (const requiredFile of [
 	"domain/agent/AgentSessionState.ts",
 	"infrastructure/sdk/ClineSdkEventTranslator.ts",
 	"application/ports/AgentEnginePort.ts",
-	"application/useCases/McpUseCase.ts",
+	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
 	"application/useCases/TaskSessionUseCase.ts",

@@ -33,7 +33,7 @@ try {
         "Sidecar/runtime/cline-sidecar.js",
         "Sidecar/runtime/node.exe",
         "Sidecar/runtime/application/ports/AgentEnginePort.js",
-        "Sidecar/runtime/application/useCases/McpUseCase.js",
+		"Sidecar/runtime/features/mcp/McpHandler.js",
         "Sidecar/runtime/application/useCases/StatePersistenceUseCase.js",
         "Sidecar/runtime/application/useCases/TaskLifecycleUseCase.js",
         "Sidecar/runtime/application/useCases/TaskSessionUseCase.js",

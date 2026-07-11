@@ -1,13 +1,13 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
-const { McpUseCase } = require("../dist/application/useCases/McpUseCase")
+const { McpHandler } = require("../dist/features/mcp/McpHandler")
 
 test("MCP queries are delegated without changing their result", async () => {
 	const runtime = {
 		getMcpServersResponse: async () => ({ servers: [{ name: "mcp-vs" }] }),
 		getMcpSettingsPath: async () => "C:\\settings\\mcp.json",
 	}
-	const useCase = new McpUseCase(runtime)
+	const useCase = new McpHandler(runtime)
 
 	assert.deepEqual(await useCase.listServers(), { servers: [{ name: "mcp-vs" }] })
 	assert.equal(await useCase.getSettingsPath(), "C:\\settings\\mcp.json")
@@ -28,7 +28,7 @@ test("MCP mutations select the matching runtime operation", async () => {
 		setMcpServerDisabled: operation("toggle"),
 		authenticateMcpServer: operation("authenticate"),
 	}
-	const useCase = new McpUseCase(runtime)
+	const useCase = new McpHandler(runtime)
 	const request = { name: "mcp-vs" }
 
 	for (const action of [

@@ -12,7 +12,7 @@ import type { InteractionLoggerPort } from "../../application/ports/InteractionL
 import type { WebviewTransportPort } from "../../application/ports/WebviewTransportPort"
 import type { WebviewApplicationPort } from "../../application/ports/WebviewApplicationPort"
 import type { TaskSessionUseCase } from "../../application/useCases/TaskSessionUseCase"
-import type { McpUseCase } from "../../application/useCases/McpUseCase"
+import type { McpHandler } from "../../features/mcp/McpHandler"
 import type { TaskLifecycleUseCase } from "../../application/useCases/TaskLifecycleUseCase"
 import type { StatePersistenceUseCase } from "../../application/useCases/StatePersistenceUseCase"
 import type { GrpcRequest, WebviewEnvelope } from "../../application/dto/WebviewRpc"
@@ -326,7 +326,7 @@ type BrowserSessionRecord = {
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
-	private mcp: McpUseCase | null = null
+	private mcp: McpHandler | null = null
 	private sendMessage: SendMessageHandler | null = null
 	private startTaskHandler: StartTaskHandler | null = null
 	private cancelTaskHandler: CancelTaskHandler | null = null
@@ -431,7 +431,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskSessions = taskSessions
 	}
 
-	setMcpUseCase(mcp: McpUseCase) {
+	setMcpHandler(mcp: McpHandler) {
 		this.mcp = mcp
 	}
 
