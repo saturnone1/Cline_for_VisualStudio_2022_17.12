@@ -44,14 +44,13 @@ import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQuer
 import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
 import type { OAuthAuthorizationHandler } from "../../features/providers/OAuthAuthorizationHandler"
 import type { OAuthCallbackHandler } from "../../features/providers/OAuthCallbackHandler"
-import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
+import type { ProviderCredentialHandler } from "../../features/providers/ProviderCredentialHandler"
 import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
-	normalizeProviderValue,
 	oauthCredentialsField,
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
@@ -92,6 +91,8 @@ import { ApiConfigurationProfileManager } from "../configuration/ApiConfiguratio
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
 import { SettingsRpcHandler } from "../../features/settings/SettingsRpcHandler"
 import { decodeSettingsRpcCommand } from "./SettingsRpcDecoder"
+import { AccountRpcHandler } from "../../features/providers/AccountRpcHandler"
+import { decodeAccountRpcCommand } from "./AccountRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -199,7 +200,6 @@ import {
 	resolveApiKey,
 	providerCredentialFields,
 	providerCredentialField,
-	extractProviderCredentialValue,
 	providerBaseUrlField,
 	resolveBaseUrl,
 	resolveProviderEnvApiKey,
@@ -215,11 +215,7 @@ import {
 	webFetchDisabledReason,
 } from "../configuration/ProviderConfiguration"
 import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
-import {
-	createUnauthenticatedAccountState,
-	createVisualStudioAuthUnsupportedResponse,
-	isOAuthBridgeProvider,
-} from "../auth/ProviderAuthSupport"
+import { createUnauthenticatedAccountState } from "../auth/ProviderAuthSupport"
 
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
@@ -269,6 +265,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
 	private readonly settingsRpc: SettingsRpcHandler
+	private readonly accountRpc: AccountRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -334,6 +331,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState() })
+		this.accountRpc = new AccountRpcHandler({ authorization: () => this.requireOAuthAuthorization(), callback: () => this.requireOAuthCallbackHandler(), authActions: () => this.requireProviderAuthActions(), credentials: () => this.requireProviderCredentials(), configuration: () => asRecord(this.state.apiConfiguration), mutateConfiguration: (updates, deletes) => { const next = { ...asRecord(this.state.apiConfiguration), ...updates }; for (const field of deletes) delete next[field]; this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration }, syncProfiles: () => this.apiConfigurationProfiles.syncActive(), setCodexAuthenticated: (authenticated) => { this.state.openAiCodexIsAuthenticated = authenticated }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -817,6 +815,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(settingsResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const accountCommand = decodeAccountRpcCommand(key, message)
+		if (accountCommand) {
+			const accountResult = await this.accountRpc.handle(accountCommand)
+			return grpcHandled(
+				grpcResponse(requestId, accountResult.payload, false),
+				...(accountResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -842,86 +848,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 			case "WebService.fetchOpenGraphData":
 				return grpcHandled(grpcResponse(requestId, await fetchOpenGraphData(getString(message, "value") || getString(message, "url")), false))
-
-			case "AccountService.getRedirectUrl":
-				return grpcHandled(grpcResponse(requestId, await this.createOAuthCallbackBridgeResponse(message, "account"), false))
-
-			case "AccountService.getUserOrganizations":
-				return grpcHandled(grpcResponse(requestId, { organizations: [] }, false))
-
-			case "AccountService.getUserCredits":
-			case "AccountService.getOrganizationCredits":
-				return grpcHandled(grpcResponse(requestId, { credits: 0, balance: 0, value: 0 }, false))
-
-			case "AccountService.setUserOrganization":
-			case "AccountService.submitLimitIncreaseRequest":
-				return grpcHandled(grpcResponse(requestId, createVisualStudioAuthUnsupportedResponse("account"), false))
-
-			case "AccountService.accountLoginClicked":
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("account"), false))
-
-			case "AccountService.accountLogoutClicked":
-				this.state.openAiCodexIsAuthenticated = false
-				await this.clearOAuthCredential("account")
-				await this.clearOAuthCredential("openai-codex")
-				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
-
-			case "AccountService.openrouterAuthClicked":
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("openrouter", message), false))
-
-			case "AccountService.requestyAuthClicked":
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("requesty", message), false))
-
-			case "AccountService.hicapAuthClicked":
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("hicap", message), false))
-
-			case "AccountService.openAiCodexSignIn":
-				this.state.openAiCodexIsAuthenticated = false
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("openAiCodex", message), false))
-
-			case "AccountService.openAiCodexSignOut":
-				this.state.openAiCodexIsAuthenticated = false
-				await this.clearOAuthCredential("openai-codex")
-				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false), ...this.buildStateMessages())
-
-			case "AccountService.saveProviderCredential":
-			case "AccountService.storeProviderCredential":
-			case "AccountService.saveProviderToken":
-				return grpcHandled(grpcResponse(requestId, await this.saveProviderCredential(message), false), ...this.buildStateMessages())
-
-			case "AccountService.getProviderCredentialStatus":
-			case "AccountService.getProviderAuthStatus":
-				return grpcHandled(grpcResponse(requestId, this.getProviderCredentialStatus(message), false))
-
-			case "AccountService.refreshProviderCredential":
-			case "AccountService.refreshProviderToken":
-			case "AccountService.refreshOAuthCredential":
-				return grpcHandled(grpcResponse(requestId, await this.refreshOAuthCredential(message), false), ...this.buildStateMessages())
-
-			case "AccountService.getProviderConfigFields":
-			case "AccountService.getProviderAuthRequirements":
-				return grpcHandled(grpcResponse(requestId, await this.getProviderConfigFields(message), false))
-
-			case "AccountService.getOAuthCallbackStatus":
-			case "AccountService.getProviderOAuthCallbackStatus":
-				return grpcHandled(grpcResponse(requestId, this.getOAuthCallbackStatus(message), false))
-
-			case "AccountService.submitOAuthCallback":
-			case "AccountService.completeOAuthCallback":
-			case "AccountService.saveOAuthCallback":
-				return grpcHandled(grpcResponse(requestId, await this.submitOAuthCallback(message), false), ...this.buildStateMessages())
-
-			case "AccountService.clearProviderCredential":
-			case "AccountService.deleteProviderCredential":
-			case "AccountService.clearProviderToken":
-				return grpcHandled(grpcResponse(requestId, await this.clearProviderCredential(message), false), ...this.buildStateMessages())
-
-			case "OcaAccountService.ocaAccountLoginClicked":
-				return grpcHandled(grpcResponse(requestId, await this.handleAccountAuthAction("oca", message), false))
-
-			case "OcaAccountService.ocaAccountLogoutClicked":
-				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
 
 			case "BrowserService.getDetectedChromePath": {
 				return grpcHandled(grpcResponse(requestId, this.requireBrowserHandler().getDetectedPath(this.getBrowserSettings()), false))
@@ -1363,81 +1289,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (durationMs >= thresholdMs) {
 			this.logger.log("sidecar", "webviewRpcSlow", { key, streaming, durationMs, thresholdMs })
 		}
-	}
-
-	private async handleAccountAuthAction(provider: string, message: unknown = {}) {
-		const request = asRecord(message)
-		const credential = extractProviderCredentialValue(request)
-		if (credential) {
-			return this.saveProviderCredential({ ...request, provider, value: credential, source: "auth_action" })
-		}
-
-		const bridge = isOAuthBridgeProvider(provider) ? await this.requireOAuthAuthorization().ensure(provider, request, (url) => this.handleOAuthCallbackUrl(url)) : null
-		const response = await this.requireProviderAuthActions().execute(provider, message, bridge)
-		if (provider === "openAiCodex") {
-			this.state.openAiCodexIsAuthenticated = false
-			await this.broadcastState()
-		}
-		return response
-	}
-
-	private async createOAuthCallbackBridgeResponse(message: unknown, fallbackProvider: string) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || fallbackProvider)
-		const bridge = await this.requireOAuthAuthorization().ensure(provider || fallbackProvider, request, (url) => this.handleOAuthCallbackUrl(url))
-		return this.requireOAuthAuthorization().response(bridge)
-	}
-
-	private async handleOAuthCallbackUrl(url: string) {
-		const result = await this.requireOAuthCallbackHandler().receive(url, (mutation) => this.applyProviderCredentialMutation(mutation))
-		await this.broadcastState().catch((error) => console.error(error))
-		return result
-	}
-
-	private async clearOAuthCredential(provider: string) {
-		return this.applyProviderCredentialMutation(this.requireProviderCredentials().clear({ provider }))
-	}
-
-	private getOAuthCallbackStatus(message: unknown) {
-		return this.requireOAuthCallbackHandler().status(message)
-	}
-
-	private async submitOAuthCallback(message: unknown) {
-		return this.requireOAuthCallbackHandler().submit(message, (mutation) => this.applyProviderCredentialMutation(mutation))
-	}
-
-	private async saveProviderCredential(message: unknown) {
-		return this.applyProviderCredentialMutation(this.requireProviderCredentials().save(message))
-	}
-
-	private getProviderCredentialStatus(message: unknown) {
-		return this.requireProviderCredentials().status(message, asRecord(this.state.apiConfiguration))
-	}
-
-	private async refreshOAuthCredential(message: unknown) {
-		return this.applyProviderCredentialMutation(await this.requireProviderCredentials().refresh(message, asRecord(this.state.apiConfiguration)))
-	}
-
-	private async getProviderConfigFields(message: unknown) {
-		return this.requireProviderCredentials().getConfigFields(message, asRecord(this.state.apiConfiguration))
-	}
-
-	private async clearProviderCredential(message: unknown) {
-		return this.applyProviderCredentialMutation(this.requireProviderCredentials().clear(message))
-	}
-
-	private async applyProviderCredentialMutation(mutation: ProviderCredentialMutation) {
-		if (mutation.updates || mutation.deletes?.length || mutation.openAiCodexAuthenticated !== undefined) {
-			const next = { ...asRecord(this.state.apiConfiguration), ...mutation.updates }
-			for (const field of mutation.deletes || []) delete next[field]
-			this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
-			if (mutation.openAiCodexAuthenticated !== undefined) this.state.openAiCodexIsAuthenticated = mutation.openAiCodexAuthenticated
-			this.apiConfigurationProfiles.syncActive()
-			this.stateStore.save(createPersistedStateSnapshot(this.state))
-			await this.broadcastState()
-		}
-		if (mutation.log) this.logger.log("sidecar", mutation.log.event, { ...mutation.log.details })
-		return { ...mutation.response }
 	}
 
 	private async getPrimaryWorkspaceRoot() {
