@@ -21,9 +21,36 @@ for (const service of [
 	"AccountServiceClient",
 	"FileServiceClient",
 	"ModelsServiceClient",
+	"StateServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"subscribeToState",
+	"getAvailableTerminalProfiles",
+	"updateSettings",
+	"updateAutoApprovalSettings",
+	"togglePlanActModeProto",
+	"updateTelemetrySetting",
+	"captureOnboardingProgress",
+	"setWelcomeViewCompleted",
+	"toggleFavoriteModel",
+	"refreshRemoteConfig",
+	"testOtelConnection",
+	"testPromptUploading",
+	"updateTerminalConnectionTimeout",
+	"resetState",
+	"dismissBanner",
+	"installClineCli",
+	"updateCliBannerVersion",
+	"updateInfoBannerVersion",
+	"updateModelBannerVersion",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`StateServiceContract is missing ${operation}.`)
 	}
 }
 

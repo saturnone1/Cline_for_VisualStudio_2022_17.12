@@ -276,6 +276,36 @@ interface ModelsServiceContract {
 	updateApiConfigurationProto: UnaryOperation<RpcRequest>
 }
 
+interface TerminalProfileInfo extends RpcRequest {
+	id?: string
+	name?: string
+	path?: string
+	shellPath?: string
+	args?: string[]
+}
+
+interface StateServiceContract {
+	subscribeToState: StreamingOperation<RpcRequest & { stateJson: string }>
+	getAvailableTerminalProfiles: UnaryOperation<RpcRequest, RpcRequest & { profiles: TerminalProfileInfo[] }>
+	updateSettings: UnaryOperation<RpcRequest>
+	updateAutoApprovalSettings: UnaryOperation<RpcRequest>
+	togglePlanActModeProto: UnaryOperation<RpcRequest, RpcRequest & { value: boolean }>
+	updateTelemetrySetting: UnaryOperation<RpcRequest>
+	captureOnboardingProgress: UnaryOperation<RpcRequest>
+	setWelcomeViewCompleted: UnaryOperation<RpcRequest>
+	toggleFavoriteModel: UnaryOperation<RpcRequest>
+	refreshRemoteConfig: UnaryOperation<RpcRequest>
+	testOtelConnection: UnaryOperation<RpcRequest, RpcRequest & { success: boolean; error?: string }>
+	testPromptUploading: UnaryOperation<RpcRequest, RpcRequest & { success: boolean; error?: string }>
+	updateTerminalConnectionTimeout: UnaryOperation<RpcRequest, RpcRequest & { timeoutMs?: number }>
+	resetState: UnaryOperation<RpcRequest>
+	dismissBanner: UnaryOperation<RpcRequest>
+	installClineCli: UnaryOperation<RpcRequest>
+	updateCliBannerVersion: UnaryOperation<RpcRequest>
+	updateInfoBannerVersion: UnaryOperation<RpcRequest>
+	updateModelBannerVersion: UnaryOperation<RpcRequest>
+}
+
 interface WorktreeInfo extends RpcRequest {
 	path: string
 	branch?: string
@@ -380,7 +410,7 @@ export const McpServiceClient = createServiceClient<McpServiceContract>("McpServ
 export const ModelsServiceClient = createServiceClient<ModelsServiceContract>("ModelsService")
 export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
 export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")
-export const StateServiceClient: any = createServiceClient("StateService")
+export const StateServiceClient = createServiceClient<StateServiceContract>("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
 export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
 export const WebServiceClient = createServiceClient<WebServiceContract>("WebService")
