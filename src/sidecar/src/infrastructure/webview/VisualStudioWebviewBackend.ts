@@ -72,6 +72,7 @@ import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHand
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
 import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
+import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -250,6 +251,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentTextEvents: AgentTextEventProjector
 	private readonly agentToolEvents: AgentToolEventProjector
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
+	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private sdkRunGeneration = 0
@@ -296,6 +298,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	) {
 		this.state = loadInitialState(this.stateStore.load())
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
+		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
@@ -1443,7 +1446,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			for (const field of mutation.deletes || []) delete next[field]
 			this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
 			if (mutation.openAiCodexAuthenticated !== undefined) this.state.openAiCodexIsAuthenticated = mutation.openAiCodexAuthenticated
-			this.syncActiveApiConfigurationProfile()
+			this.apiConfigurationProfiles.syncActive()
 			this.stateStore.save(createPersistedStateSnapshot(this.state))
 			await this.broadcastState()
 		}
@@ -3125,7 +3128,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...this.state.apiConfiguration,
 				...compactApiConfiguration(apiConfigurationUpdate),
 			}) as typeof this.state.apiConfiguration
-			this.syncActiveApiConfigurationProfile()
+			this.apiConfigurationProfiles.syncActive()
 			runtimeSettingsChanged = true
 		}
 		const autoApprovalUpdate = extractAutoApprovalSettingsUpdate(request)
@@ -3194,13 +3197,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			runtimeSettingsChanged = true
 		}
 		if ("activeApiConfigurationProfileId" in request) {
-			this.activateApiConfigurationProfile(getString(request, "activeApiConfigurationProfileId"))
+			this.apiConfigurationProfiles.activate(getString(request, "activeApiConfigurationProfileId"))
 			runtimeSettingsChanged = true
 		} else if ("apiConfigurationProfiles" in request) {
-			this.ensureApiConfigurationProfileState()
+			this.apiConfigurationProfiles.ensure()
 		}
 		if ("planActSeparateModelsSetting" in request && !("activeApiConfigurationProfileId" in request)) {
-			this.syncActiveApiConfigurationProfile()
+			this.apiConfigurationProfiles.syncActive()
 			runtimeSettingsChanged = true
 		}
 		if (runtimeSettingsChanged) {
@@ -3210,55 +3213,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision,
 			})
 		}
-	}
-
-	private ensureApiConfigurationProfileState() {
-		const profiles = normalizeApiConfigurationProfiles(
-			this.state.apiConfigurationProfiles,
-			this.state.apiConfiguration,
-			this.state.planActSeparateModelsSetting,
-		)
-		this.state.apiConfigurationProfiles = profiles
-		const activeId = getString(this.state, "activeApiConfigurationProfileId")
-		if (!profiles.some((profile) => getString(profile, "id") === activeId)) {
-			this.state.activeApiConfigurationProfileId = getString(profiles[0], "id")
-		}
-	}
-
-	private activateApiConfigurationProfile(profileId: string) {
-		this.ensureApiConfigurationProfileState()
-		const profiles = arrayOfRecords(this.state.apiConfigurationProfiles)
-		const profile = profiles.find((candidate) => getString(candidate, "id") === profileId) || profiles[0]
-		if (!profile) {
-			return
-		}
-		this.state.activeApiConfigurationProfileId = getString(profile, "id")
-		this.applyApiConfigurationProfileSnapshot(profile)
-	}
-
-	private applyApiConfigurationProfileSnapshot(profile: Record<string, unknown>) {
-		const profileApiConfiguration = asRecord(profile.apiConfiguration)
-		this.state.apiConfiguration = normalizeApiConfiguration(profileApiConfiguration) as typeof this.state.apiConfiguration
-		this.state.planActSeparateModelsSetting =
-			typeof profile.planActSeparateModelsSetting === "boolean"
-				? profile.planActSeparateModelsSetting
-				: this.state.planActSeparateModelsSetting
-	}
-
-	private syncActiveApiConfigurationProfile() {
-		this.ensureApiConfigurationProfileState()
-		const activeId = getString(this.state, "activeApiConfigurationProfileId")
-		const now = new Date().toISOString()
-		this.state.apiConfigurationProfiles = arrayOfRecords(this.state.apiConfigurationProfiles).map((profile) =>
-			getString(profile, "id") === activeId
-				? {
-					...profile,
-					apiConfiguration: normalizeApiConfiguration(asRecord(this.state.apiConfiguration)),
-					planActSeparateModelsSetting: this.state.planActSeparateModelsSetting,
-					updatedAt: now,
-				}
-				: profile,
-		) as typeof this.state.apiConfigurationProfiles
 	}
 
 	private refreshWebToolFeatureState() {

@@ -240,6 +240,7 @@ for (const requiredFile of [
 	"features/taskHistory/TaskHistoryCommands.ts",
 	"features/taskHistory/TaskTranscriptHydrator.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
+	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
 	"infrastructure/auth/FetchOAuthTokenExchangeAdapter.ts",
