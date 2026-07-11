@@ -82,6 +82,15 @@ body {
 	font-family: var(--lig-font-family) !important;
 }
 
+/*
+ * Codicons encode icons in a private-use font. The global Noto Sans KR rule
+ * must not replace that font or controls such as the chat send arrow render
+ * as missing-glyph boxes.
+ */
+:where(.codicon[class*="codicon-"]) {
+	font-family: codicon !important;
+}
+
 :where(pre, code, kbd, samp, .font-mono) {
 	font-family: var(--lig-mono-font-family) !important;
 }
