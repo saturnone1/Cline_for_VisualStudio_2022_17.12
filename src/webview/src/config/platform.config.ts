@@ -48,7 +48,7 @@ declare global {
 		// the JetBrains side as well. !!
 		standalonePostMessage?: (message: string) => void
 	}
-	function acquireVsCodeApi(): any
+	function acquireVsCodeApi(): { postMessage(message: unknown): void }
 }
 
 // Initialize the vscode API if available
@@ -56,14 +56,14 @@ const vsCodeApi = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : 
 
 // Implementations for post message handling
 const postMessageStrategies: Record<string, PostMessageFunction> = {
-	vscode: (message: any) => {
+	vscode: (message: unknown) => {
 		if (vsCodeApi) {
 			vsCodeApi.postMessage(message)
 		} else {
 			console.log("postMessage fallback: ", message)
 		}
 	},
-	standalone: (message: any) => {
+	standalone: (message: unknown) => {
 		if (!window.standalonePostMessage) {
 			console.error("Standalone postMessage not found.")
 			return
@@ -82,9 +82,12 @@ const messageEncoders: Record<string, MessageEncoder> = {
 
 // Implementations for message decoding
 const messageDecoders: Record<string, MessageDecoder> = {
-	none: <T>(message: any, _decoder: (_: { [key: string]: any }) => T) => message,
-	json: <T>(message: any, decoder: (_: { [key: string]: any }) => T) => decoder(message),
+	none: <T>(message: unknown, decoder: (value: Record<string, unknown>) => T) => decoder(asMessageRecord(message)),
+	json: <T>(message: unknown, decoder: (value: Record<string, unknown>) => T) => decoder(asMessageRecord(message)),
 }
+
+const asMessageRecord = (message: unknown): Record<string, unknown> =>
+	message !== null && typeof message === "object" && !Array.isArray(message) ? message as Record<string, unknown> : {}
 
 // Local declaration of the platform compile-time constant
 declare const __PLATFORM__: string
@@ -110,6 +113,6 @@ export const PLATFORM_CONFIG: PlatformConfig = {
 type MessageEncoding = "none" | "json"
 
 // Function types for platform-specific behaviors
-type PostMessageFunction = (message: any) => void
-type MessageEncoder = <T>(message: T, encoder: (_: T) => unknown) => any
-type MessageDecoder = <T>(message: any, decoder: (_: { [key: string]: any }) => T) => T
+type PostMessageFunction = (message: unknown) => void
+type MessageEncoder = <T>(message: T, encoder: (value: T) => unknown) => unknown
+type MessageDecoder = <T>(message: unknown, decoder: (value: Record<string, unknown>) => T) => T

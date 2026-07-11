@@ -28,7 +28,7 @@ export abstract class ProtoBusClient {
 		methodName: string,
 		request: TRequest,
 		encodeRequest: (_: TRequest) => unknown,
-		decodeResponse: (_: { [key: string]: any }) => TResponse,
+		decodeResponse: (value: Record<string, unknown>) => TResponse,
 	): Promise<TResponse> {
 		return new Promise((resolve, reject) => {
 			const requestId = this.createRequestId()
@@ -93,7 +93,7 @@ export abstract class ProtoBusClient {
 		methodName: string,
 		request: TRequest,
 		encodeRequest: (_: TRequest) => unknown,
-		decodeResponse: (_: { [key: string]: any }) => TResponse,
+		decodeResponse: (value: Record<string, unknown>) => TResponse,
 		callbacks: Callbacks<TResponse>,
 	): () => void {
 		const requestId = this.createRequestId()
