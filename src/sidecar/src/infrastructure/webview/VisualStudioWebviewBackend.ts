@@ -33,6 +33,7 @@ import { AgentRunCompletionFlow } from "../../features/chat/runtime/AgentRunComp
 import { SendOrResumeSessionFlow } from "../../features/chat/runtime/SendOrResumeSessionFlow"
 import { ResumeSessionFlow } from "../../features/chat/runtime/ResumeSessionFlow"
 import { LaunchAgentSessionFlow } from "../../features/chat/runtime/LaunchAgentSessionFlow"
+import { PrepareNewTaskFlow } from "../../features/chat/startTask/PrepareNewTaskFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -235,6 +236,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly sendOrResumeSession: SendOrResumeSessionFlow
 	private readonly resumeSession: ResumeSessionFlow
 	private readonly launchAgentSession: LaunchAgentSessionFlow
+	private readonly prepareNewTask: PrepareNewTaskFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -316,6 +318,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.sendOrResumeSession = new SendOrResumeSessionFlow(() => this.clineSdk, { activeSettingsRevision: () => this.activeSessionRuntimeSettingsRevision, settingsRevision: () => this.runtimeSettingsRevision, markClosing: (sessionId, closing) => { if (closing) this.closingSessionIds.add(sessionId); else this.closingSessionIds.delete(sessionId) }, send: (command) => { if (!this.sendMessage) return Promise.reject(new Error("SendMessageHandler is not attached.")); return this.sendMessage.execute(command) }, resume: (sessionId, command, textLength) => this.resumeSdkSessionForSend(sessionId, command, textLength), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), markError: (sessionId, error) => this.markSendLatencyError(sessionId, error), isSessionNotFound: (error) => isSessionNotFoundError(error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.resumeSession = new ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.getModelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.runLifecycleHooks("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.getResumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.launchAgentSession = new LaunchAgentSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, complete: (result, sessionId, source, generation) => this.completeFromSdkResult(result, sessionId, source, generation), recover: (sessionId, source, generation, error) => this.recoverFromSdkRunError(sessionId, source, generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.prepareNewTask = new PrepareNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), resolveWorkspacePath: (requestedPath) => requestedPath && fs.existsSync(requestedPath) ? path.resolve(requestedPath) : null, updateTask: () => this.updateCurrentTaskItem(), publishPreparing: () => this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)), activeSessionId: () => this.requireClineSdk().status.activeSessionId || "", markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, stopSession: (sessionId) => this.requireClineSdk().stop({ sessionId }), runHook: (name, context) => { void this.runLifecycleHooks(name, context) }, normalizeImages: (images) => normalizeSdkImageInputs(images), launch: (params, cwd, sessionId) => this.launchSdkStartSession(params, cwd, sessionId, "startSession"), projectError: async (error) => { this.clearTaskIdleWatchdog(); this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) }); this.updateCurrentTaskItem(); await this.broadcastState() }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1632,48 +1635,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		initialCwd: string
 		taskItem: Record<string, unknown>
 	}) {
-		if (!this.clineSdk) {
-			return
-		}
-
-		let cwd = initialCwd
-		try {
-			const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-			cwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
-				? path.resolve(requestedWorkspacePath)
-				: workspaceRoots[0] || initialCwd
-			taskItem.cwdOnTaskInitialization = cwd
-			if (requestedWorkspacePath) {
-				taskItem.workspacePath = cwd
-				taskItem.worktreePath = cwd
-			}
-			this.updateCurrentTaskItem()
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
-			const previousActiveSessionId = this.clineSdk.status.activeSessionId
-			if (previousActiveSessionId) {
-				this.closingSessionIds.add(previousActiveSessionId)
-				await this.clineSdk.stop({ sessionId: previousActiveSessionId }).catch((error) => {
-					this.logger.log("sidecar", "startNewTask.stopPreviousFailed", {
-						sessionId: previousActiveSessionId,
-						error: error instanceof Error ? error.message : String(error),
-					})
-				})
-			}
-			void this.runLifecycleHooks("TaskStart", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
-			void this.runLifecycleHooks("UserPromptSubmit", { prompt: text, cwd, files, images, sessionId: String(taskItem.id || "") })
-			await this.launchSdkStartSession({
-				prompt: text,
-				cwd,
-				userImages: await normalizeSdkImageInputs(images),
-				userFiles: files,
-				interactive: true,
-			}, cwd, String(taskItem.id || ""), "startSession")
-		} catch (error) {
-			this.clearTaskIdleWatchdog()
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-			this.updateCurrentTaskItem()
-			await this.broadcastState()
-		}
+		await this.prepareNewTask.execute({ text, images, files, requestedWorkspacePath, initialCwd, taskItem })
 	}
 
 	private async launchSdkStartSession(
