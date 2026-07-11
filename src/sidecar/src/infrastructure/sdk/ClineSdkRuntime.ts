@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
+import type { AgentEnginePort, AgentMessageRequest } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
@@ -146,10 +146,9 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		}
 	}
 
-	async send(params: unknown) {
+	async send(request: AgentMessageRequest) {
 		const core = await this.getCore()
-		const request = asRecord(params)
-		const sessionId = stringValue(request.sessionId) || this.activeSessionId
+		const sessionId = request.sessionId || this.activeSessionId
 		if (!sessionId) {
 			throw new Error("No active Cline SDK session. Call sdk.startSession first.")
 		}
@@ -157,11 +156,11 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		try {
 			return await core.send({
 				sessionId,
-				prompt: stringValue(request.prompt) || "",
+				prompt: request.prompt,
 				mode: agentMode(request.mode),
 				delivery: request.delivery === "queue" || request.delivery === "steer" ? request.delivery : undefined,
-				userImages: stringArrayValue(request.userImages),
-				userFiles: stringArrayValue(request.userFiles),
+				userImages: [...(request.userImages || [])],
+				userFiles: [...(request.userFiles || [])],
 			})
 		} catch (error) {
 			if (this.activeSessionId === sessionId && /session not found/i.test(error instanceof Error ? error.message : String(error))) {

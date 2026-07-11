@@ -27,6 +27,8 @@ import {
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
 import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
+import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -320,6 +322,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
 	private mcp: McpUseCase | null = null
+	private sendMessage: SendMessageHandler | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
@@ -427,6 +430,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	setMcpUseCase(mcp: McpUseCase) {
 		this.mcp = mcp
+	}
+
+	setSendMessageHandler(sendMessage: SendMessageHandler) {
+		this.sendMessage = sendMessage
 	}
 
 	dispose() {
@@ -3104,7 +3111,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.sendPartialMessage(userMessage)
 		this.broadcastState().catch((error) => console.error(error))
 
-		const sendParams = {
+		const sendParams: SendMessageCommand = {
 			sessionId,
 			prompt: getString(message, "text"),
 			mode: this.state.mode === "plan" ? "plan" : "act",
@@ -3166,7 +3173,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.schedulePersistedStateSave()
 		await this.broadcastState()
 
-		const sendParams = {
+		const sendParams: SendMessageCommand = {
 			sessionId,
 			prompt,
 			mode: this.state.mode === "plan" ? "plan" : "act",
@@ -3194,7 +3201,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async sendOrResumeSdkSession(
 		sessionId: string,
-		sendParams: Record<string, unknown>,
+		sendParams: SendMessageCommand,
 		textLength: number,
 	): Promise<unknown> {
 		if (!this.clineSdk) {
@@ -3241,7 +3248,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			}
 			this.markSendLatencySdkSend(sessionId)
 			this.logger.log("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength })
-			return await this.clineSdk.send(sendParams)
+			if (!this.sendMessage) {
+				throw new Error("SendMessageHandler is not attached.")
+			}
+			return await this.sendMessage.execute(sendParams)
 		} catch (error) {
 			this.markSendLatencyError(sessionId, error)
 			if (!isSessionNotFoundError(error)) {
@@ -3257,7 +3267,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async resumeSdkSessionForSend(
 		sessionId: string,
-		sendParams: Record<string, unknown>,
+		sendParams: SendMessageCommand,
 		textLength: number,
 	): Promise<unknown> {
 		if (!this.clineSdk) {

@@ -274,7 +274,7 @@ if (sdkRuntime.includes("fs.promises.writeFile(filePath")) {
 	fail("MCP settings must never be truncated in place.")
 }
 requireMatch("MCP tools attached to SDK sessions", sdkRuntime, /extraTools: await this\.createMcpExtraToolsForSession\(\)/)
-requireMatch("SDK sends the user's prompt unchanged", sdkRuntime, /return await core\.send\(\{[\s\S]{0,120}prompt: stringValue\(request\.prompt\) \|\| ""/)
+requireMatch("SDK sends the user's prompt unchanged", sdkRuntime, /return await core\.send\(\{[\s\S]{0,120}prompt: request\.prompt/)
 if (sdkRuntime.includes("<lig-vs-mcp-context>")) {
 	fail("MCP status context must not be injected into user or system prompts.")
 }

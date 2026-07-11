@@ -10,6 +10,7 @@ const layerRules = {
 	application: new Set(["infrastructure", "presentation"]),
 	infrastructure: new Set(["presentation"]),
 	presentation: new Set(["infrastructure"]),
+	features: new Set(["infrastructure", "presentation"]),
 }
 const violations = []
 
@@ -128,6 +129,8 @@ for (const requiredFile of [
 	"infrastructure/worktree/WorktreeSupport.ts",
 	"infrastructure/webview/WebviewState.ts",
 	"infrastructure/transport/SidecarRpcServer.ts",
+	"features/chat/sendMessage/SendMessageCommand.ts",
+	"features/chat/sendMessage/SendMessageHandler.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)

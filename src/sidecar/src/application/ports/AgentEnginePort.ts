@@ -1,3 +1,12 @@
+export type AgentMessageRequest = Readonly<{
+	sessionId: string
+	prompt: string
+	mode?: "plan" | "act"
+	delivery?: "queue" | "steer"
+	userImages?: readonly string[]
+	userFiles?: readonly string[]
+}>
+
 export type AgentEngineStatus = {
 	activeSessionId: string | null
 	started?: boolean
@@ -11,7 +20,7 @@ export interface AgentEnginePort {
 	markSessionInactive(sessionId?: string): void
 	activateSession(sessionId: string): Promise<unknown>
 	startSession(params: unknown): Promise<unknown>
-	send(params: unknown): Promise<unknown>
+	send(command: AgentMessageRequest): Promise<unknown>
 	stop(params: unknown): Promise<unknown>
 	abort(params: unknown): Promise<unknown>
 	listHistory(params: unknown): Promise<unknown>

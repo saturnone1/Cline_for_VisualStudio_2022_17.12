@@ -14,11 +14,11 @@ const source = path.join(dist, "main.js");
 const target = path.join(packageSidecar, "cline-sidecar.js");
 
 fs.mkdirSync(packageSidecar, { recursive: true });
-for (const directory of ["application", "domain", "infrastructure", "presentation", "diagnostics", "host", "ipc", "sdk", "webview", "runtime"]) {
+for (const directory of ["application", "domain", "features", "infrastructure", "presentation", "diagnostics", "host", "ipc", "sdk", "webview", "runtime"]) {
   fs.rmSync(path.join(packageSidecar, directory), { recursive: true, force: true });
 }
 fs.copyFileSync(source, target);
-for (const layer of ["application", "domain", "infrastructure", "presentation"]) {
+for (const layer of ["application", "domain", "features", "infrastructure", "presentation"]) {
   copyDirectory(path.join(dist, layer), path.join(packageSidecar, layer));
 }
 copyDirectory(path.join(root, "node_modules"), packageNodeModules, shouldCopyRuntimeNodeModuleEntry);

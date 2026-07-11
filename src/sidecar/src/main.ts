@@ -10,6 +10,7 @@ import { JsonRpcWebviewTransport } from "./infrastructure/transport/JsonRpcConne
 import { SidecarRpcServer } from "./infrastructure/transport/SidecarRpcServer"
 import { VisualStudioWebviewBackend } from "./infrastructure/webview/VisualStudioWebviewBackend"
 import { VisualStudioWebviewController } from "./presentation/webview/VisualStudioWebviewController"
+import { SendMessageHandler } from "./features/chat/sendMessage/SendMessageHandler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -37,6 +38,7 @@ const server = new SidecarRpcServer(
 		backend.setAgentEngine(runtime)
 		backend.setTaskSessionUseCase(new TaskSessionUseCase(runtime))
 		backend.setMcpUseCase(new McpUseCase(runtime))
+		backend.setSendMessageHandler(new SendMessageHandler(runtime))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,
