@@ -140,6 +140,13 @@ const grpcClientBase = fs.readFileSync(path.join(webviewSourceRoot, "services", 
 if (!grpcClientBase.includes("WEBVIEW_RPC_PROTOCOL_VERSION") || !grpcClientBase.includes("protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION")) {
 	violations.push("WebView gRPC request envelopes must carry an explicit protocol version.")
 }
+const streamPublisherSource = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewStreamPublisher.ts"), "utf8")
+if (!router.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION") || !streamPublisherSource.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
+	violations.push("All sidecar WebView RPC responses must carry an explicit protocol version.")
+}
+if (!grpcClientBase.includes("message.protocol_version === WEBVIEW_RPC_PROTOCOL_VERSION")) {
+	violations.push("The WebView client must reject unsupported sidecar response versions.")
+}
 if (!webviewContract.includes("unsupported_webview_protocol_version")) {
 	violations.push("The sidecar must reject unsupported WebView gRPC protocol versions.")
 }

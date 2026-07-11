@@ -1,5 +1,6 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { WebviewTransportPort } from "../../application/ports/WebviewTransportPort"
+import { HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION } from "../../application/dto/WebviewRpc"
 import { partialMessageDeliveryKey, toProtoClineMessage } from "../conversation/ConversationSupport"
 
 export class WebviewStreamPublisher {
@@ -61,6 +62,6 @@ export class WebviewStreamPublisher {
 	}
 }
 
-function grpcResponse(requestId: string, message: unknown, isStreaming: boolean) { return { type: "grpc_response", grpc_response: { request_id: requestId, message, is_streaming: isStreaming } } }
+function grpcResponse(requestId: string, message: unknown, isStreaming: boolean) { return { protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION, type: "grpc_response", grpc_response: { request_id: requestId, message, is_streaming: isStreaming } } }
 function fastStringHash(value: string) { let hash = 2166136261; for (let index = 0; index < value.length; index++) { hash ^= value.charCodeAt(index); hash = Math.imul(hash, 16777619) }; return (hash >>> 0).toString(16) }
 function summarizeMessage(message: Record<string, unknown>) { const text = typeof message.text === "string" ? message.text : ""; return { ts: message.ts, type: message.type, say: message.say, ask: message.ask, partial: message.partial === true, textLength: text.length, textPreview: text.slice(0, 240) } }

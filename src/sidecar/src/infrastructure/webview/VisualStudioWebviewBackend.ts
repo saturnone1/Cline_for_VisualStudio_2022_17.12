@@ -11,7 +11,7 @@ import type { TaskSessionUseCase } from "../../application/useCases/TaskSessionU
 import type { McpHandler } from "../../features/mcp/McpHandler"
 import type { TaskLifecycleUseCase } from "../../application/useCases/TaskLifecycleUseCase"
 import type { StatePersistenceUseCase } from "../../application/useCases/StatePersistenceUseCase"
-import type { GrpcRequest, WebviewEnvelope } from "../../application/dto/WebviewRpc"
+import { HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION, type GrpcRequest, type WebviewEnvelope } from "../../application/dto/WebviewRpc"
 import {
 	createInitialState,
 	createMcpServersLazyResponse,
@@ -4033,6 +4033,7 @@ function grpcHandled(...webviewMessages: unknown[]) {
 
 function grpcResponse(requestId: string, message: unknown, isStreaming: boolean) {
 	return {
+		protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
 		type: "grpc_response",
 		grpc_response: {
 			request_id: requestId,
@@ -4044,6 +4045,7 @@ function grpcResponse(requestId: string, message: unknown, isStreaming: boolean)
 
 function grpcError(requestId: string, error: string, isStreaming: boolean) {
 	return {
+		protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
 		type: "grpc_response",
 		grpc_response: {
 			request_id: requestId,

@@ -64,7 +64,7 @@ export abstract class ProtoBusClient {
 					return
 				}
 				const message = event.data
-				if (message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
+				if (message.protocol_version === WEBVIEW_RPC_PROTOCOL_VERSION && message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
 					// Remove listener once we get our response
 					cleanup()
 					if (message.grpc_response.message) {
@@ -116,7 +116,7 @@ export abstract class ProtoBusClient {
 				return
 			}
 			const message = event.data
-			if (message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
+			if (message.protocol_version === WEBVIEW_RPC_PROTOCOL_VERSION && message.type === "grpc_response" && message.grpc_response?.request_id === requestId) {
 				if (message.grpc_response.message) {
 					// Process streaming message
 					const response = PLATFORM_CONFIG.decodeMessage(message.grpc_response.message, decodeResponse)
