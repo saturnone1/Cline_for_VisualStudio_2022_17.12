@@ -58,6 +58,7 @@ import {
 import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
 import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHandler"
 import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMonitor"
+import { ConversationProjectionState, type ProgressPhase, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -236,14 +237,6 @@ type TrackedChangeSummary = {
 	deletions: number
 }
 
-type ToolActivityEntry = {
-	kind: "file" | "search" | "edit" | "command" | "tool"
-	label: string
-	detail?: string
-}
-
-type ProgressPhase = "activity" | "terminal" | "reasoning"
-
 type SendLatencyTrace = {
 	requestId: string
 	kind: "newTask" | "askResponse"
@@ -279,15 +272,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		  }
 		| null = null
 	private messageSequence = 0
-	private activePartialTextTs: number | null = null
-	private activeAssistantTextBuffer = ""
-	private activeReasoningTextTs: number | null = null
-	private activeFoldedReasoningText = ""
-	private activeFoldedActivityText = ""
-	private activeTerminalActivityText = ""
-	private activeProgressPhase: ProgressPhase | null = null
-	private activeToolActivityTs: number | null = null
-	private activeToolActivityEntries: ToolActivityEntry[] = []
+	private readonly conversationProjection = new ConversationProjectionState()
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private stateBroadcastInFlight: Promise<void> | null = null
@@ -299,10 +284,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private taskIdleTimer: NodeJS.Timeout | null = null
 	private lastTaskActivityAt = 0
 	private lastTaskActivityReason = ""
-	private reasoningStartedAt = 0
-	private reasoningChunkCount = 0
-	private lastReasoningStatusAt = 0
-	private lastToolSummaries: string[] = []
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
 	private changeSummaryTimer: NodeJS.Timeout | null = null
@@ -390,7 +371,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setHookExecutionHandler(hookExecution: HookExecutionHandler) { this.hookExecution = hookExecution }
 	setCheckpointHandler(checkpoints: CheckpointHandler) { this.checkpoints = checkpoints }
 	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
-	updateTerminalActivity(text: string) { this.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
+	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -1549,14 +1530,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const hadState =
 			this.approvals.hasPending ||
 			!!this.pendingQuestion ||
-			!!this.activePartialTextTs ||
-			!!this.activeReasoningTextTs ||
-			!!this.activeToolActivityTs ||
-			this.activeToolActivityEntries.length > 0 ||
-			!!this.activeAssistantTextBuffer ||
-			!!this.activeFoldedReasoningText ||
-			!!this.activeFoldedActivityText ||
-			!!this.activeTerminalActivityText ||
+			this.conversationProjection.hasActiveInteraction ||
 			this.terminalActivity?.isActive === true
 
 		this.clearTaskIdleWatchdog()
@@ -1566,15 +1540,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.approvals.clear({ approved: false, reason: `Cleared by ${reason}.` })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
-		this.activePartialTextTs = null
-		this.activeAssistantTextBuffer = ""
-		this.activeReasoningTextTs = null
-		this.activeFoldedReasoningText = ""
-		this.activeFoldedActivityText = ""
-		this.activeTerminalActivityText = ""
-		this.activeProgressPhase = null
-		this.activeToolActivityTs = null
-		this.activeToolActivityEntries = []
+		this.conversationProjection.clearActiveInteraction()
 
 		if (hadState) {
 			this.logger.log("sidecar", "clearedLiveInteractionState", { reason })
@@ -1602,15 +1568,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.state.clineMessages = []
-		this.lastToolSummaries = []
-		this.activeAssistantTextBuffer = ""
-		this.activeToolActivityTs = null
-		this.activeToolActivityEntries = []
-		this.activeReasoningTextTs = null
-		this.activeFoldedReasoningText = ""
-		this.activeFoldedActivityText = ""
-		this.activeTerminalActivityText = ""
-		this.activeProgressPhase = null
+		this.conversationProjection.beginTask()
 		this.state.currentTaskItem = taskItem
 		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, taskItem)
 		this.addMessage({ type: "say", say: "task", text, images, files })
@@ -1663,7 +1621,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				taskItem.worktreePath = cwd
 			}
 			this.updateCurrentTaskItem()
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
 			const previousActiveSessionId = this.clineSdk.status.activeSessionId
 			if (previousActiveSessionId) {
 				this.closingSessionIds.add(previousActiveSessionId)
@@ -2440,7 +2398,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (activeSessionId && activeSessionId !== taskId) {
 			return
 		}
-		if (this.activePartialTextTs || this.activeReasoningTextTs || this.activeToolActivityTs) {
+		if (this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs) {
 			this.logger.log("sidecar", "stateHydration.selectedTaskSkipped", {
 				reason: "live_interaction",
 				taskId,
@@ -2459,10 +2417,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (activeSessionId === taskId && this.state.clineMessages.length > 0) {
 			return
 		}
-		if (activeSessionId === taskId && this.activePartialTextTs) {
+		if (activeSessionId === taskId && this.conversationProjection.activePartialTextTs) {
 			return
 		}
-		if (activeSessionId === taskId && (this.activeReasoningTextTs || this.activeToolActivityTs)) {
+		if (activeSessionId === taskId && (this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs)) {
 			return
 		}
 
@@ -2504,7 +2462,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (currentTaskId && currentTaskId !== sessionId) {
 			return false
 		}
-		if (!force && (this.activePartialTextTs || this.activeReasoningTextTs || this.activeToolActivityTs)) {
+		if (!force && (this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs)) {
 			return false
 		}
 
@@ -2531,10 +2489,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
 		this.clearReasoningStatus()
-		this.activePartialTextTs = null
-		this.activeReasoningTextTs = null
-		this.activeToolActivityTs = null
-		this.activeAssistantTextBuffer = ""
+		this.conversationProjection.activePartialTextTs = null
+		this.conversationProjection.activeReasoningTextTs = null
+		this.conversationProjection.activeToolActivityTs = null
+		this.conversationProjection.activeAssistantTextBuffer = ""
 		this.state.currentTaskItem = taskItem
 		this.state.clineMessages = clineMessages
 		this.finalizeOpenPartialMessages()
@@ -3150,24 +3108,24 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (type === "content_end" && contentType === "text") {
 			this.noteTaskActivity("content_end:text")
 			this.clearReasoningStatus()
-			const text = getString(event, "accumulated") || getString(event, "text") || this.activeAssistantTextBuffer
+			const text = getString(event, "accumulated") || getString(event, "text") || this.conversationProjection.activeAssistantTextBuffer
 			if (text && shouldFoldTextContentAsReasoning(text)) {
 				this.upsertFoldedReasoningText(text)
 				shouldBroadcastState = false
 			} else if (text && shouldDropTokenizedReasoning(text)) {
 				shouldBroadcastState = false
-			} else if (text && this.activePartialTextTs) {
+			} else if (text && this.conversationProjection.activePartialTextTs) {
 				this.finishActiveToolActivity()
 				this.finishFoldedReasoningText()
-				this.upsertMessage(this.activePartialTextTs, { type: "say", say: "text", text, partial: false })
-				this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
-				this.activePartialTextTs = null
-				this.activeAssistantTextBuffer = ""
+				this.upsertMessage(this.conversationProjection.activePartialTextTs, { type: "say", say: "text", text, partial: false })
+				this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activePartialTextTs))
+				this.conversationProjection.activePartialTextTs = null
+				this.conversationProjection.activeAssistantTextBuffer = ""
 			} else if (text) {
 				this.finishActiveToolActivity()
 				this.finishFoldedReasoningText()
 				this.addMessage({ type: "say", say: "text", text })
-				this.activeAssistantTextBuffer = ""
+				this.conversationProjection.activeAssistantTextBuffer = ""
 			}
 		}
 
@@ -3180,7 +3138,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.noteTaskActivity("content_start:tool")
 			this.clearReasoningStatus()
 			this.clearPartialIdleWatchdog()
-			this.activePartialTextTs = null
+			this.conversationProjection.activePartialTextTs = null
 			const toolName = getString(event, "toolName")
 			if (toolName === "bash" || toolName === "run_commands") {
 				const command = getCommandText(asRecord(event.input))
@@ -3415,31 +3373,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (!this.reasoningStartedAt) {
-			this.reasoningStartedAt = Date.now()
-			this.logger.log("sidecar", "reasoningStarted", { textLength: text.length })
-		}
-
-		this.reasoningChunkCount++
 		const now = Date.now()
 		const intervalMs = readPositiveIntEnv("VSCLINE_REASONING_STATUS_INTERVAL_MS", 2000)
-		if (now - this.lastReasoningStatusAt < intervalMs) {
-			return
-		}
-
-		this.lastReasoningStatusAt = now
-		const elapsedSeconds = Math.max(1, Math.round((now - this.reasoningStartedAt) / 1000))
+		const status = this.conversationProjection.recordReasoning(now, intervalMs)
+		if (status.started) this.logger.log("sidecar", "reasoningStarted", { textLength: text.length })
+		if (!status.progress) return
 		this.logger.log("sidecar", "reasoningProgress", {
-			elapsedSeconds,
-			chunks: this.reasoningChunkCount,
+			...status.progress,
 			textLength: text.length,
 		})
 	}
 
 	private clearReasoningStatus() {
-		this.reasoningStartedAt = 0
-		this.reasoningChunkCount = 0
-		this.lastReasoningStatusAt = 0
+		this.conversationProjection.clearReasoningStatus()
 	}
 
 	private async handleFileChangedEvent(payload: Record<string, unknown>) {
@@ -3847,7 +3793,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private buildTerminalCompletionFallback(status: string) {
-		const toolSummary = this.lastToolSummaries.slice(-5).join("\n")
+		const toolSummary = this.conversationProjection.recentToolSummaries(5).join("\n")
 		if (status === "failed" || status === "error") {
 			return toolSummary ? `작업이 오류 상태로 종료되었습니다.\n\n${toolSummary}` : "작업이 오류 상태로 종료되었습니다."
 		}
@@ -3867,10 +3813,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const pathValue = getString(parsed, "path")
 		const content = getString(parsed, "content")
 		const summary = [tool, pathValue, content].filter(Boolean).join(": ")
-		this.lastToolSummaries.push(truncateText(summary || text, 2000))
-		if (this.lastToolSummaries.length > 20) {
-			this.lastToolSummaries = this.lastToolSummaries.slice(-20)
-		}
+		this.conversationProjection.rememberToolSummary(truncateText(summary || text, 2000))
 	}
 
 	private async resolveEffectiveModelId(
@@ -4141,14 +4084,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		for (const entry of entries) {
 			const key = toolActivityEntryKey(entry)
-			if (!this.activeToolActivityEntries.some((existing) => toolActivityEntryKey(existing) === key)) {
-				this.activeToolActivityEntries.push(entry)
+			if (!this.conversationProjection.activeToolActivityEntries.some((existing) => toolActivityEntryKey(existing) === key)) {
+				this.conversationProjection.activeToolActivityEntries.push(entry)
 			}
 		}
 
-		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, true, this.getUiLanguage())
+		const groupedText = buildGroupedToolActivityText(this.conversationProjection.activeToolActivityEntries, true, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
-		this.activeToolActivityTs = this.activeReasoningTextTs
+		this.conversationProjection.activeToolActivityTs = this.conversationProjection.activeReasoningTextTs
 	}
 
 	private startTerminalStatePolling() {
@@ -4164,22 +4107,22 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private finishActiveToolActivity() {
-		if (!this.activeToolActivityTs && this.activeToolActivityEntries.length === 0) {
+		if (!this.conversationProjection.activeToolActivityTs && this.conversationProjection.activeToolActivityEntries.length === 0) {
 			return
 		}
 
-		const groupedText = buildGroupedToolActivityText(this.activeToolActivityEntries, false, this.getUiLanguage())
+		const groupedText = buildGroupedToolActivityText(this.conversationProjection.activeToolActivityEntries, false, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
-		this.activeToolActivityTs = null
-		this.activeToolActivityEntries = []
+		this.conversationProjection.activeToolActivityTs = null
+		this.conversationProjection.activeToolActivityEntries = []
 	}
 
 	private moveActiveReasoningToEnd() {
-		if (!this.activeReasoningTextTs) {
+		if (!this.conversationProjection.activeReasoningTextTs) {
 			return
 		}
 
-		const index = this.state.clineMessages.findIndex((message) => message.ts === this.activeReasoningTextTs)
+		const index = this.state.clineMessages.findIndex((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
 		if (index < 0 || index === this.state.clineMessages.length - 1) {
 			return
 		}
@@ -4191,58 +4134,58 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private finalizeActivePartialText() {
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
-		if (!this.activePartialTextTs) {
+		if (!this.conversationProjection.activePartialTextTs) {
 			return
 		}
-		const message = this.state.clineMessages.find((item) => item.ts === this.activePartialTextTs)
+		const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs)
 		if (message) {
 			message.partial = false
 			this.sendPartialMessage(message)
 		}
-		this.activePartialTextTs = null
+		this.conversationProjection.activePartialTextTs = null
 	}
 
 	private getActivePartialText() {
-		if (!this.activePartialTextTs) {
+		if (!this.conversationProjection.activePartialTextTs) {
 			return ""
 		}
-		return getString(this.state.clineMessages.find((item) => item.ts === this.activePartialTextTs), "text")
+		return getString(this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs), "text")
 	}
 
 	private upsertPartialText(text: string) {
 		let created = false
-		if (!this.activePartialTextTs) {
+		if (!this.conversationProjection.activePartialTextTs) {
 			created = true
-			this.activePartialTextTs = Date.now() + this.messageSequence++
+			this.conversationProjection.activePartialTextTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
-				ts: this.activePartialTextTs,
+				ts: this.conversationProjection.activePartialTextTs,
 				type: "say",
 				say: "text",
 				text,
 				partial: true,
 			})
 		} else {
-			this.upsertMessage(this.activePartialTextTs, { type: "say", say: "text", text, partial: true })
+			this.upsertMessage(this.conversationProjection.activePartialTextTs, { type: "say", say: "text", text, partial: true })
 		}
 
 		this.schedulePartialIdleWatchdog()
 		if (created) {
 			this.broadcastPartialStateNow()
 		} else {
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activePartialTextTs))
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activePartialTextTs))
 			this.schedulePartialStateBroadcast()
 		}
 	}
 
 	private upsertAssistantTextFromEvent(accumulated: string, delta: string) {
-		const nextText = accumulated || mergeTextDelta(this.activeAssistantTextBuffer, delta)
+		const nextText = accumulated || mergeTextDelta(this.conversationProjection.activeAssistantTextBuffer, delta)
 		const normalized = normalizeAssistantTranscriptText(nextText)
 		if (!normalized) {
 			return
 		}
 		this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), normalized.length)
 
-		this.activeAssistantTextBuffer = normalized
+		this.conversationProjection.activeAssistantTextBuffer = normalized
 		if (shouldFoldTextContentAsReasoning(normalized)) {
 			this.upsertFoldedReasoningText(normalized)
 			return
@@ -4265,17 +4208,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		this.beginProgressPhase("reasoning")
 		const capped = truncateText(normalized, readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000))
-		const previous = this.activeFoldedReasoningText
+		const previous = this.conversationProjection.activeFoldedReasoningText
 		const previousNormalized = normalizeTranscriptText(previous)
 		const cappedNormalized = normalizeTranscriptText(capped)
 		if (previousNormalized.includes(cappedNormalized)) {
 			return
 		}
-		if (!this.activeReasoningTextTs && this.hasRecentFoldedReasoning(capped)) {
+		if (!this.conversationProjection.activeReasoningTextTs && this.hasRecentFoldedReasoning(capped)) {
 			return
 		}
 
-		this.activeFoldedReasoningText = truncateText(
+		this.conversationProjection.activeFoldedReasoningText = truncateText(
 			cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
 			readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
 		)
@@ -4304,7 +4247,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.beginProgressPhase("activity")
-		this.activeFoldedActivityText = truncateText(normalized, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
+		this.conversationProjection.activeFoldedActivityText = truncateText(normalized, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
 		this.upsertFoldedProgressMessage()
 	}
 
@@ -4315,14 +4258,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.beginProgressPhase("terminal")
-		const previous = this.activeTerminalActivityText
+		const previous = this.conversationProjection.activeTerminalActivityText
 		const previousNormalized = normalizeTranscriptText(previous)
 		const nextNormalized = normalizeTranscriptText(normalized)
 		if (previousNormalized.includes(nextNormalized)) {
 			return
 		}
 
-		this.activeTerminalActivityText = truncateText(
+		this.conversationProjection.activeTerminalActivityText = truncateText(
 			[nextNormalized.includes(previousNormalized) ? "" : previous, normalized].filter(Boolean).join("\n\n"),
 			readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
 		)
@@ -4330,29 +4273,29 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private beginProgressPhase(phase: ProgressPhase) {
-		if (!this.activeProgressPhase) {
-			this.activeProgressPhase = phase
+		if (!this.conversationProjection.activeProgressPhase) {
+			this.conversationProjection.activeProgressPhase = phase
 			return
 		}
-		if (this.activeProgressPhase === phase) {
+		if (this.conversationProjection.activeProgressPhase === phase) {
 			return
 		}
 
 		this.finishFoldedReasoningText(false)
-		this.activeFoldedReasoningText = ""
-		this.activeFoldedActivityText = ""
-		this.activeTerminalActivityText = ""
-		this.activeProgressPhase = null
-		this.activeToolActivityTs = null
-		this.activeToolActivityEntries = []
-		this.activeProgressPhase = phase
+		this.conversationProjection.activeFoldedReasoningText = ""
+		this.conversationProjection.activeFoldedActivityText = ""
+		this.conversationProjection.activeTerminalActivityText = ""
+		this.conversationProjection.activeProgressPhase = null
+		this.conversationProjection.activeToolActivityTs = null
+		this.conversationProjection.activeToolActivityEntries = []
+		this.conversationProjection.activeProgressPhase = phase
 	}
 
 	private upsertFoldedProgressMessage() {
 		const foldedText = [
-			this.activeFoldedActivityText,
-			this.activeTerminalActivityText,
-			this.activeFoldedReasoningText,
+			this.conversationProjection.activeFoldedActivityText,
+			this.conversationProjection.activeTerminalActivityText,
+			this.conversationProjection.activeFoldedReasoningText,
 		]
 			.filter(Boolean)
 			.join("\n\n")
@@ -4361,11 +4304,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		let created = false
-		if (!this.activeReasoningTextTs) {
+		if (!this.conversationProjection.activeReasoningTextTs) {
 			created = true
-			this.activeReasoningTextTs = Date.now() + this.messageSequence++
+			this.conversationProjection.activeReasoningTextTs = Date.now() + this.messageSequence++
 			this.state.clineMessages.push({
-				ts: this.activeReasoningTextTs,
+				ts: this.conversationProjection.activeReasoningTextTs,
 				type: "say",
 				say: "reasoning",
 				text: this.getProgressPhaseTitle(),
@@ -4375,7 +4318,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				isExpanded: false,
 			})
 		} else {
-			this.upsertMessage(this.activeReasoningTextTs, {
+			this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
 				type: "say",
 				say: "reasoning",
 				text: this.getProgressPhaseTitle(),
@@ -4387,7 +4330,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.moveActiveReasoningToEnd()
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
 		if (created) {
 			this.broadcastPartialStateNow()
 		} else {
@@ -4400,41 +4343,41 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (stopTerminalPolling) {
 			this.stopTerminalStatePolling()
 		}
-		if (!this.activeReasoningTextTs) {
+		if (!this.conversationProjection.activeReasoningTextTs) {
 			return
 		}
 
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs)
+		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
 		if (isEmptyTranscriptPlaceholder(getString(progressMessage, "reasoning") || getString(progressMessage, "text"))) {
-			this.upsertMessage(this.activeReasoningTextTs, {
+			this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
 				text: "",
 				reasoning: "",
 				partial: false,
 				isCollapsed: true,
 				isExpanded: false,
 			})
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
-			this.activeReasoningTextTs = null
-			this.activeFoldedReasoningText = ""
-			this.activeFoldedActivityText = ""
-			this.activeTerminalActivityText = ""
-			this.activeProgressPhase = null
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
+			this.conversationProjection.activeReasoningTextTs = null
+			this.conversationProjection.activeFoldedReasoningText = ""
+			this.conversationProjection.activeFoldedActivityText = ""
+			this.conversationProjection.activeTerminalActivityText = ""
+			this.conversationProjection.activeProgressPhase = null
 			return
 		}
 
-		this.upsertMessage(this.activeReasoningTextTs, {
+		this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
 			text: this.getProgressPhaseTitle(true),
 			reasoning: sanitizeProgressTranscriptForDisplay(getString(progressMessage, "reasoning")),
 			partial: false,
 			isCollapsed: true,
 			isExpanded: false,
 		})
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.activeReasoningTextTs))
-		this.activeReasoningTextTs = null
-		this.activeFoldedReasoningText = ""
-		this.activeFoldedActivityText = ""
-		this.activeTerminalActivityText = ""
-		this.activeProgressPhase = null
+		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
+		this.conversationProjection.activeReasoningTextTs = null
+		this.conversationProjection.activeFoldedReasoningText = ""
+		this.conversationProjection.activeFoldedActivityText = ""
+		this.conversationProjection.activeTerminalActivityText = ""
+		this.conversationProjection.activeProgressPhase = null
 	}
 
 	private getProgressPhaseTitle(completed = false) {
@@ -4442,7 +4385,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const suffix = completed
 			? language === "ko" ? " 기록" : " history"
 			: language === "ko" ? " 중" : "..."
-		switch (this.activeProgressPhase) {
+		switch (this.conversationProjection.activeProgressPhase) {
 			case "terminal":
 				return language === "ko" ? `터미널 실행${suffix}` : `Running terminal${suffix}`
 			case "activity":
@@ -4574,22 +4517,22 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (changed) {
 			this.logger.log("sidecar", "finalizedOpenPartials", {})
 		}
-		this.activePartialTextTs = null
-		this.activeReasoningTextTs = null
-		this.activeFoldedReasoningText = ""
-		this.activeFoldedActivityText = ""
-		this.activeTerminalActivityText = ""
-		this.activeToolActivityTs = null
-		this.activeToolActivityEntries = []
+		this.conversationProjection.activePartialTextTs = null
+		this.conversationProjection.activeReasoningTextTs = null
+		this.conversationProjection.activeFoldedReasoningText = ""
+		this.conversationProjection.activeFoldedActivityText = ""
+		this.conversationProjection.activeTerminalActivityText = ""
+		this.conversationProjection.activeToolActivityTs = null
+		this.conversationProjection.activeToolActivityEntries = []
 	}
 
 	private schedulePartialIdleWatchdog() {
 		this.clearPartialIdleWatchdog()
 		const timeoutMs = readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000)
 		this.partialIdleTimer = setTimeout(() => {
-			const message = this.state.clineMessages.find((item) => item.ts === this.activePartialTextTs)
+			const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs)
 			const text = getString(message, "text")
-			if (!this.activePartialTextTs || !text.trim()) {
+			if (!this.conversationProjection.activePartialTextTs || !text.trim()) {
 				return
 			}
 
@@ -4676,7 +4619,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)
 		if (noticeMs > 0 && noticeMs < timeoutMs) {
 			this.taskIdleNoticeTimer = setTimeout(() => {
-				if (!this.state.currentTaskItem || this.activePartialTextTs) {
+				if (!this.state.currentTaskItem || this.conversationProjection.activePartialTextTs) {
 					return
 				}
 				const idleForMs = Date.now() - this.lastTaskActivityAt
