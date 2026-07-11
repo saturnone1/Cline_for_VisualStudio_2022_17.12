@@ -66,6 +66,7 @@ import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalog
 import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
+import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -156,7 +157,6 @@ import {
 	isKnownAgentEventRecord,
 	agentContentEventToText,
 	unknownAgentChunkTextToTranscriptText,
-	shouldDropTokenizedReasoning,
 	shouldFoldTextContentAsReasoning,
 	shouldDelayAssistantTextUntilClassified,
 	stripRawToolCallMarkup,
@@ -244,6 +244,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly partialTextProjector: PartialTextProjector
 	private readonly foldedProgressProjector: FoldedProgressProjector
 	private readonly taskSnapshots: TaskSnapshotStore
+	private readonly agentTextEvents: AgentTextEventProjector
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
@@ -293,6 +294,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
+		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -3008,88 +3010,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private handleAgentEvent(semanticEvent: AgentEvent, sessionId = semanticEvent.sessionId) {
 		const event = semanticProjectionPayload(semanticEvent)
 		const { type, contentType } = legacyProjectionDiscriminator(semanticEvent)
-		let shouldBroadcastState = true
 		if (sessionId) {
 			this.bindCurrentTaskToSession(sessionId)
 		}
 
-		if (type === "content_start" && contentType === "text") {
-			this.noteTaskActivity("content_start:text")
-			this.clearReasoningStatus()
-			const accumulated = getString(event, "accumulated")
-			const delta = getString(event, "delta") || getString(event, "text")
-			const text = accumulated || delta
-			if (text) {
-				if (shouldFoldTextContentAsReasoning(text)) {
-					this.upsertFoldedReasoningText(text)
-				} else if (!shouldDropTokenizedReasoning(text)) {
-					this.upsertAssistantTextFromEvent(accumulated, delta)
-				}
-				shouldBroadcastState = false
-			}
-		}
-
-		if (type === "content_start" && contentType === "reasoning") {
-			this.noteTaskActivity("content_start:reasoning")
-			const reasoning = getString(event, "reasoning") || getString(event, "text") || getString(event, "accumulated")
-			this.handleReasoningDelta(reasoning)
-			if (reasoning && !shouldDropTokenizedReasoning(reasoning)) {
-				this.upsertFoldedReasoningText(reasoning)
-			}
-			shouldBroadcastState = false
-		}
-
-		if ((type === "content_update" || type === "content_delta") && contentType === "text") {
-			this.noteTaskActivity(`${type}:text`)
-			this.clearReasoningStatus()
-			const accumulated = getString(event, "accumulated")
-			const delta = getString(event, "delta") || getString(event, "text")
-			const text = accumulated || delta
-			if (text && shouldFoldTextContentAsReasoning(text)) {
-				this.upsertFoldedReasoningText(text)
-			} else if (text && !shouldDropTokenizedReasoning(text)) {
-				this.upsertAssistantTextFromEvent(accumulated, delta)
-			}
-			shouldBroadcastState = false
-		}
-
-		if ((type === "content_update" || type === "content_delta") && contentType === "reasoning") {
-			this.noteTaskActivity(`${type}:reasoning`)
-			const reasoning = getString(event, "reasoning") || getString(event, "text") || getString(event, "accumulated") || getString(event, "delta")
-			this.handleReasoningDelta(reasoning)
-			if (reasoning && !shouldDropTokenizedReasoning(reasoning)) {
-				this.upsertFoldedReasoningText(reasoning)
-			}
-			shouldBroadcastState = false
-		}
-
-		if (type === "content_end" && contentType === "text") {
-			this.noteTaskActivity("content_end:text")
-			this.clearReasoningStatus()
-			const text = getString(event, "accumulated") || getString(event, "text") || this.conversationProjection.activeAssistantTextBuffer
-			if (text && shouldFoldTextContentAsReasoning(text)) {
-				this.upsertFoldedReasoningText(text)
-				shouldBroadcastState = false
-			} else if (text && shouldDropTokenizedReasoning(text)) {
-				shouldBroadcastState = false
-			} else if (text && this.conversationProjection.activePartialTextTs) {
-				this.finishActiveToolActivity()
-				this.finishFoldedReasoningText()
-				this.upsertMessage(this.conversationProjection.activePartialTextTs, { type: "say", say: "text", text, partial: false })
-				this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activePartialTextTs))
-				this.conversationProjection.activePartialTextTs = null
-				this.conversationProjection.activeAssistantTextBuffer = ""
-			} else if (text) {
-				this.finishActiveToolActivity()
-				this.finishFoldedReasoningText()
-				this.addMessage({ type: "say", say: "text", text })
-				this.conversationProjection.activeAssistantTextBuffer = ""
-			}
-		}
-
-		if (type === "content_end" && contentType === "reasoning") {
-			this.noteTaskActivity("content_end:reasoning")
-			this.clearReasoningStatus()
+		const textProjection = this.agentTextEvents.handle(semanticEvent)
+		if (textProjection.handled) {
+			this.updateCurrentTaskItem()
+			if (textProjection.broadcast) this.broadcastState().catch((error) => console.error(error))
+			return
 		}
 
 		if (type === "content_start" && contentType === "tool") {
@@ -3321,9 +3250,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		this.updateCurrentTaskItem()
-		if (shouldBroadcastState) {
-			this.broadcastState().catch((error) => console.error(error))
-		}
+		this.broadcastState().catch((error) => console.error(error))
 	}
 
 	private handleReasoningDelta(text: string) {
@@ -3952,6 +3879,18 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
 		this.upsertPartialText(normalized)
+	}
+
+	private completeAssistantText(text: string) {
+		this.finishActiveToolActivity()
+		this.finishFoldedReasoningText()
+		const timestamp = this.conversationProjection.activePartialTextTs
+		if (timestamp) {
+			this.upsertMessage(timestamp, { type: "say", say: "text", text, partial: false })
+			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === timestamp))
+			this.conversationProjection.activePartialTextTs = null
+		} else this.addMessage({ type: "say", say: "text", text })
+		this.conversationProjection.activeAssistantTextBuffer = ""
 	}
 
 	private upsertFoldedReasoningText(text: string) { this.foldedProgressProjector.upsertReasoning(text) }
