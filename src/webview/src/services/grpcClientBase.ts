@@ -7,6 +7,8 @@
  */
 import { PLATFORM_CONFIG } from "../config/platform.config"
 
+const WEBVIEW_RPC_PROTOCOL_VERSION = 1 as const
+
 export interface Callbacks<TResponse> {
 	onResponse: (response: TResponse) => void
 	onError: (error: Error) => void
@@ -43,6 +45,7 @@ export abstract class ProtoBusClient {
 			}
 			const cancelHostRequest = () => {
 				PLATFORM_CONFIG.postMessage({
+					protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 					type: "grpc_request_cancel",
 					grpc_request_cancel: {
 						request_id: requestId,
@@ -77,6 +80,7 @@ export abstract class ProtoBusClient {
 
 			window.addEventListener("message", handleResponse)
 			PLATFORM_CONFIG.postMessage({
+				protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 				type: "grpc_request",
 				grpc_request: {
 					service: this.serviceName,
@@ -136,6 +140,7 @@ export abstract class ProtoBusClient {
 		}
 		window.addEventListener("message", handleResponse)
 		PLATFORM_CONFIG.postMessage({
+			protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 			type: "grpc_request",
 			grpc_request: {
 				service: this.serviceName,
@@ -151,6 +156,7 @@ export abstract class ProtoBusClient {
 				return
 			}
 			PLATFORM_CONFIG.postMessage({
+				protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 				type: "grpc_request_cancel",
 				grpc_request_cancel: {
 					request_id: requestId,

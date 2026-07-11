@@ -37,7 +37,7 @@ export type WebviewEnvelope =
 
 export type WebviewEnvelopeParseResult =
 	| { ok: true; value: WebviewEnvelope }
-	| { ok: false; reason: "invalid_webview_envelope" | "missing_grpc_service" | "missing_grpc_method" | "missing_grpc_request_id" | "missing_cancel_request_id" }
+	| { ok: false; reason: "invalid_webview_envelope" | "unsupported_webview_protocol_version" | "missing_grpc_service" | "missing_grpc_method" | "missing_grpc_request_id" | "missing_cancel_request_id" }
 
 export function parseHostSidecarWebviewRequest(value: unknown): HostSidecarWebviewRequestParseResult {
 	if (!isJsonObject(value)) {
@@ -79,6 +79,7 @@ export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult
 
 	const type = readString(value.type)
 	if (type === "grpc_request") {
+		if (value.protocol_version !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION && value.protocolVersion !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION) return { ok: false, reason: "unsupported_webview_protocol_version" }
 		if (!isJsonObject(value.grpc_request)) {
 			return { ok: false, reason: "invalid_webview_envelope" }
 		}
@@ -107,6 +108,7 @@ export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult
 	}
 
 	if (type === "grpc_request_cancel") {
+		if (value.protocol_version !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION && value.protocolVersion !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION) return { ok: false, reason: "unsupported_webview_protocol_version" }
 		const cancel = value.grpc_request_cancel
 		const requestId = isJsonObject(cancel) ? readString(cancel.request_id) || readString(cancel.requestId) : ""
 		return requestId

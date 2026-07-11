@@ -136,6 +136,13 @@ if (!themeHostSource.includes('message["protocolVersion"]') || !themeHostSource.
 	violations.push("The Visual Studio theme bridge must reject unsupported message versions.")
 }
 const webviewSourceRoot = path.join(productSourceRoot, "webview", "src")
+const grpcClientBase = fs.readFileSync(path.join(webviewSourceRoot, "services", "grpcClientBase.ts"), "utf8")
+if (!grpcClientBase.includes("WEBVIEW_RPC_PROTOCOL_VERSION") || !grpcClientBase.includes("protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION")) {
+	violations.push("WebView gRPC request envelopes must carry an explicit protocol version.")
+}
+if (!webviewContract.includes("unsupported_webview_protocol_version")) {
+	violations.push("The sidecar must reject unsupported WebView gRPC protocol versions.")
+}
 for (const filePath of walk(webviewSourceRoot)) {
 	if (!/\.(ts|tsx)$/.test(filePath) || /\.(test|spec|stories)\.(ts|tsx)$/.test(filePath)) continue
 	const source = fs.readFileSync(filePath, "utf8")
