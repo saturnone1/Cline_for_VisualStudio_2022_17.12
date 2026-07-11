@@ -88,6 +88,16 @@ interface WebServiceContract {
 	openInBrowser: UnaryOperation<RpcRequest>
 }
 
+interface OcaAuthStateEvent extends RpcRequest {
+	user?: RpcRequest & { uid?: string }
+}
+
+interface OcaAccountServiceContract {
+	ocaAccountLoginClicked: UnaryOperation
+	ocaAccountLogoutClicked: UnaryOperation
+	ocaSubscribeToAuthStatusUpdate: StreamingOperation<OcaAuthStateEvent>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -121,7 +131,7 @@ export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceCo
 export const FileServiceClient: any = createServiceClient("FileService")
 export const McpServiceClient: any = createServiceClient("McpService")
 export const ModelsServiceClient: any = createServiceClient("ModelsService")
-export const OcaAccountServiceClient: any = createServiceClient("OcaAccountService")
+export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
 export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")
 export const StateServiceClient: any = createServiceClient("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
