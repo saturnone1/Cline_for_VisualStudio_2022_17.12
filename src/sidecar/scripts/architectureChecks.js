@@ -71,6 +71,16 @@ const webviewPort = fs.readFileSync(path.join(portsRoot, "WebviewApplicationPort
 if (/handleSdkEvent\(event:\s*unknown\)/.test(webviewPort) || !webviewPort.includes("AgentRuntimeEvent")) {
 	violations.push("WebviewApplicationPort must accept the normalized AgentRuntimeEvent contract.")
 }
+const webviewContract = fs.readFileSync(path.join(sourceRoot, "application", "dto", "WebviewRpc.ts"), "utf8")
+for (const marker of ["HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION", "HostSidecarWebviewRequest", "HostSidecarWebviewResponse", "parseHostSidecarWebviewRequest"]) {
+	if (!webviewContract.includes(marker)) {
+		violations.push(`WebviewRpc contract is missing versioned host-sidecar marker: ${marker}`)
+	}
+}
+const webviewController = fs.readFileSync(controllerPath, "utf8")
+if (!webviewController.includes("parseHostSidecarWebviewRequest") || !webviewController.includes("createHostSidecarWebviewResponse")) {
+	violations.push("VisualStudioWebviewController must enforce the versioned host-sidecar WebView contract.")
+}
 const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
 	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")

@@ -2,6 +2,26 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 export type JsonObject = { [key: string]: JsonValue }
 
+export const HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION = 1 as const
+
+export type HostSidecarWebviewRequest = {
+	protocolVersion: typeof HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION
+	rawJson: string
+}
+
+export type HostSidecarWebviewResponse = {
+	protocolVersion: typeof HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION
+	handled: boolean
+	reason?: string
+	owner?: string
+	type?: string
+	webviewMessages: unknown[]
+}
+
+export type HostSidecarWebviewRequestParseResult =
+	| { ok: true; value: HostSidecarWebviewRequest }
+	| { ok: false; reason: "invalid_host_request" | "unsupported_protocol_version" | "missing_raw_json" }
+
 export type GrpcRequest = {
 	service: string
 	method: string
@@ -18,6 +38,37 @@ export type WebviewEnvelope =
 export type WebviewEnvelopeParseResult =
 	| { ok: true; value: WebviewEnvelope }
 	| { ok: false; reason: "invalid_webview_envelope" | "missing_grpc_service" | "missing_grpc_method" | "missing_grpc_request_id" | "missing_cancel_request_id" }
+
+export function parseHostSidecarWebviewRequest(value: unknown): HostSidecarWebviewRequestParseResult {
+	if (!isJsonObject(value)) {
+		return { ok: false, reason: "invalid_host_request" }
+	}
+	if (value.protocolVersion !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION) {
+		return { ok: false, reason: "unsupported_protocol_version" }
+	}
+	if (typeof value.rawJson !== "string" || value.rawJson.length === 0) {
+		return { ok: false, reason: "missing_raw_json" }
+	}
+	return {
+		ok: true,
+		value: {
+			protocolVersion: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
+			rawJson: value.rawJson,
+		},
+	}
+}
+
+export function createHostSidecarWebviewResponse(value: unknown): HostSidecarWebviewResponse {
+	const result = isJsonObject(value) ? value : {}
+	return {
+		protocolVersion: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
+		handled: result.handled === true,
+		...(typeof result.reason === "string" ? { reason: result.reason } : {}),
+		...(typeof result.owner === "string" ? { owner: result.owner } : {}),
+		...(typeof result.type === "string" ? { type: result.type } : {}),
+		webviewMessages: Array.isArray(result.webviewMessages) ? result.webviewMessages : [],
+	}
+}
 
 export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult {
 	if (!isJsonObject(value)) {

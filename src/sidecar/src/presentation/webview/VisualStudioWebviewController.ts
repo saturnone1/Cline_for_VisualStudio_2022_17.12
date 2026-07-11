@@ -1,6 +1,10 @@
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { WebviewApplicationPort } from "../../application/ports/WebviewApplicationPort"
-import { parseWebviewEnvelope } from "../../application/dto/WebviewRpc"
+import {
+	createHostSidecarWebviewResponse,
+	parseHostSidecarWebviewRequest,
+	parseWebviewEnvelope,
+} from "../../application/dto/WebviewRpc"
 import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 
@@ -14,21 +18,17 @@ export class VisualStudioWebviewController {
 	handleSdkEvent(event: AgentRuntimeEvent) { this.application.handleSdkEvent(event) }
 	handle(params: unknown) {
 		try {
-			const rawJson = readRawJson(params)
-			const parsed = parseWebviewEnvelope(JSON.parse(rawJson))
-			if (!parsed.ok) {
-				return Promise.resolve({ handled: false, reason: parsed.reason })
+			const hostRequest = parseHostSidecarWebviewRequest(params)
+			if (!hostRequest.ok) {
+				return Promise.resolve(createHostSidecarWebviewResponse({ handled: false, reason: hostRequest.reason }))
 			}
-			return this.application.handle(parsed.value)
+			const parsed = parseWebviewEnvelope(JSON.parse(hostRequest.value.rawJson))
+			if (!parsed.ok) {
+				return Promise.resolve(createHostSidecarWebviewResponse({ handled: false, reason: parsed.reason }))
+			}
+			return Promise.resolve(this.application.handle(parsed.value)).then(createHostSidecarWebviewResponse)
 		} catch {
-			return Promise.resolve({ handled: false, reason: "invalid_webview_json" })
+			return Promise.resolve(createHostSidecarWebviewResponse({ handled: false, reason: "invalid_webview_json" }))
 		}
 	}
-}
-
-function readRawJson(params: unknown) {
-	if (!params || typeof params !== "object" || !("rawJson" in params)) {
-		return "{}"
-	}
-	return String((params as { rawJson?: unknown }).rawJson ?? "{}")
 }

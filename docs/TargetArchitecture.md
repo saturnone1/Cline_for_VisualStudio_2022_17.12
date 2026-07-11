@@ -35,6 +35,13 @@ The principal risks are:
 - the two repositories duplicate nearly all authored sidecar and WebView source;
 - legacy, upstream, generated, and active source are not sufficiently distinct.
 
+Implemented guardrails now include a versioned `protocolVersion: 1` contract for the
+`webview.message` request and response crossing the .NET host/Node sidecar boundary.
+The JSON-RPC transport supplies the request ID and method, while the boundary adapter
+rejects missing or incompatible protocol versions before dispatching WebView intent.
+The upstream WebView gRPC envelope remains an external compatibility format and is
+normalized immediately by the sidecar presentation adapter.
+
 ## Non-negotiable invariants
 
 1. The two VSIX variants expose identical behavior, UI, settings, and fixes.

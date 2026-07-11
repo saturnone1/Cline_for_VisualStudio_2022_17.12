@@ -20,6 +20,7 @@ namespace VsClineAgent.Host
 {
     internal sealed class SidecarProcess : IDisposable
     {
+        private const int WebviewProtocolVersion = 1;
         private readonly string _assemblyDirectory;
         private readonly VsEditorService _editorService;
         private readonly VsCommandExecutionService _commandExecutionService;
@@ -57,7 +58,11 @@ namespace VsClineAgent.Host
             var stopwatch = Stopwatch.StartNew();
             var result = await _client.SendRequestAsync(
                 "webview.message",
-                new { rawJson },
+                new
+                {
+                    protocolVersion = WebviewProtocolVersion,
+                    rawJson
+                },
                 cancellationToken).ConfigureAwait(false) as JObject;
             stopwatch.Stop();
             WriteSlowTrace("webview.message.slow", stopwatch.ElapsedMilliseconds, new JObject
@@ -69,6 +74,15 @@ namespace VsClineAgent.Host
 
             if (result == null)
                 return false;
+
+            var responseProtocolVersion = result.Value<int?>("protocolVersion");
+            if (responseProtocolVersion != WebviewProtocolVersion)
+            {
+                throw new InvalidOperationException(
+                    "Unsupported sidecar WebView protocol version. Expected " +
+                    WebviewProtocolVersion + ", received " +
+                    (responseProtocolVersion?.ToString() ?? "missing") + ".");
+            }
 
             var webviewMessages = result["webviewMessages"] as JArray;
             if (webviewMessages != null)
