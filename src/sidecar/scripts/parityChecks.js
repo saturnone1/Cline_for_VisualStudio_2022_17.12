@@ -295,7 +295,7 @@ for (const method of [
 	requireMatch(
 		`SDK MCP operation ${method}`,
 		sdkRuntime,
-		new RegExp(`async ${method}\\([\\s\\S]*?await this\\.withMcpOperation\\([\\s\\S]*?\\n\\s*\\}\\)\\n\\s*return this\\.getMcpServersResponse\\(\\)`),
+		new RegExp(`async ${method}\\([\\s\\S]*?await this\\.withMcpOperation\\([\\s\\S]*?\\r?\\n\\s*\\}\\)\\r?\\n\\s*return this\\.getMcpServersResponse\\(\\)`),
 	)
 }
 

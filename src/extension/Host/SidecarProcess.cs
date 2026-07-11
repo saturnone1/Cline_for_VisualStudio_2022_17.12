@@ -265,7 +265,7 @@ namespace VsClineAgent.Host
                         ["platform"] = "win32",
                         ["appName"] = "Visual Studio",
                         ["host"] = "vs2022",
-                        ["version"] = "17.12"
+                        ["version"] = VisualStudioVersionInfo.Version
                     };
                 case "env.clipboardReadText":
                     return new JObject { ["value"] = InvokeOnUiThread(() => Clipboard.GetText()) };

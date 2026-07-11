@@ -1,68 +1,64 @@
-# Install-Prerequisites.ps1
-# 에어갭 PC에서 VSIX 설치 전 필수 구성 요소 설치
-# 관리자 권한으로 실행 필요
-
 #Requires -RunAsAdministrator
+param(
+    [ValidateSet("17.0", "17.12")]
+    [string]$VsTarget = "17.12",
+
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Release"
+)
+
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path $PSScriptRoot -Parent
 
-Write-Host "=== VsClineAgent 사전 요구사항 설치 ===" -ForegroundColor Cyan
+Write-Host "=== LIG VS installation prerequisites ===" -ForegroundColor Cyan
 
-# ── 1. WebView2 Runtime 확인 ──────────────────────────────────
-Write-Host "`n[1/2] WebView2 Runtime 확인..." -ForegroundColor Yellow
-
-$webview2 = Get-ItemProperty `
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" `
-    -ErrorAction SilentlyContinue
-
-if ($webview2) {
-    Write-Host "  ✓ WebView2 Runtime 이미 설치됨: $($webview2.pv)" -ForegroundColor Green
-} else {
-    Write-Host "  WebView2 Runtime이 없습니다." -ForegroundColor Red
-
-    # vendor/installers에 WebView2 bootstrapper가 있으면 자동 설치
-    $installer = Join-Path $PSScriptRoot "..\vendor\installers\MicrosoftEdgeWebView2Setup.exe"
-    if (Test-Path $installer) {
-        Write-Host "  설치 파일 발견 — 설치 중..." -ForegroundColor Yellow
-        Start-Process $installer -ArgumentList "/silent /install" -Wait
-        Write-Host "  ✓ WebView2 Runtime 설치 완료" -ForegroundColor Green
-    } else {
-        Write-Host ""
-        Write-Host "  ▶ 오프라인 설치 방법:" -ForegroundColor Yellow
-        Write-Host "    1. 인터넷 PC에서 다운로드:"
-        Write-Host "       https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-        Write-Host "    2. MicrosoftEdgeWebView2Setup.exe를 vendor\installers\ 폴더에 복사"
-        Write-Host "    3. 이 스크립트 재실행"
-        Write-Host ""
-        Write-Host "  ※ 또는 수동 설치 후 계속 진행하세요."
+$webView2RegistryPath = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+$webView2 = Get-ItemProperty $webView2RegistryPath -ErrorAction SilentlyContinue
+if ($webView2) {
+    Write-Host "WebView2 Runtime detected: $($webView2.pv)" -ForegroundColor Green
+}
+else {
+    $installer = Join-Path $repoRoot "vendor\installers\MicrosoftEdgeWebView2Setup.exe"
+    if (Test-Path -LiteralPath $installer) {
+        Write-Host "Installing bundled WebView2 Runtime..." -ForegroundColor Yellow
+        $process = Start-Process -FilePath $installer -ArgumentList "/silent", "/install" -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            throw "WebView2 installer failed with exit code $($process.ExitCode)."
+        }
+    }
+    else {
+        Write-Warning "WebView2 Runtime was not detected and no offline installer is bundled."
+        Write-Host "Download it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and rerun this script."
+        exit 1
     }
 }
 
-# ── 2. VSIX 설치 ───────────────────────────────────────────────
-Write-Host "`n[2/2] VsClineAgent VSIX 설치..." -ForegroundColor Yellow
-
-$vsix = Get-ChildItem (Split-Path $PSScriptRoot -Parent) -Filter "*.vsix" -Recurse |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
-if (-not $vsix) {
-    Write-Host "  .vsix 파일을 찾을 수 없습니다." -ForegroundColor Red
-    Write-Host "  프로젝트를 빌드하거나 Release에서 .vsix를 다운로드하세요."
-    exit 1
+$vsixName = if ($VsTarget -eq "17.0") { "VsClineAgent17.vsix" } else { "VsClineAgent.vsix" }
+$vsixPath = Join-Path $repoRoot "src\extension\bin\$VsTarget\$Configuration\$vsixName"
+if (-not (Test-Path -LiteralPath $vsixPath)) {
+    throw "VSIX was not found at $vsixPath. Run scripts\Build-VsixVariants.ps1 first."
 }
 
-Write-Host "  설치할 파일: $($vsix.FullName)"
-
-$vsInstaller = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
-    -latest -property installationPath 2>$null
-$vsixInstaller = Join-Path $vsInstaller "Common7\IDE\VSIXInstaller.exe"
-
-if (Test-Path $vsixInstaller) {
-    Write-Host "  VSIXInstaller 실행 중..."
-    Start-Process $vsixInstaller -ArgumentList "/quiet `"$($vsix.FullName)`"" -Wait
-    Write-Host "  ✓ VSIX 설치 완료" -ForegroundColor Green
-    Write-Host "  Visual Studio 2022를 재시작하면 View 메뉴에 'AI Agent'가 표시됩니다."
-} else {
-    Write-Host "  VSIXInstaller를 찾을 수 없습니다. .vsix 파일을 더블클릭하여 수동 설치하세요." -ForegroundColor Yellow
-    Start-Process $vsix.FullName
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path -LiteralPath $vswhere)) {
+    throw "vswhere.exe was not found. Install Visual Studio 2022 before installing the VSIX."
 }
 
-Write-Host "`n=== 완료 ===" -ForegroundColor Green
+$versionRange = if ($VsTarget -eq "17.0") { "[17.0,17.12)" } else { "[17.12,18.0)" }
+$installationPath = & $vswhere -latest -products * -version $versionRange -property installationPath
+if (-not $installationPath) {
+    throw "A Visual Studio instance matching target $VsTarget ($versionRange) was not found."
+}
+
+$vsixInstaller = Join-Path $installationPath "Common7\IDE\VSIXInstaller.exe"
+if (-not (Test-Path -LiteralPath $vsixInstaller)) {
+    throw "VSIXInstaller.exe was not found below $installationPath."
+}
+
+Write-Host "Installing $vsixName into Visual Studio $VsTarget..." -ForegroundColor Yellow
+$installProcess = Start-Process -FilePath $vsixInstaller -ArgumentList "/quiet", $vsixPath -Wait -PassThru
+if ($installProcess.ExitCode -ne 0) {
+    throw "VSIX installation failed with exit code $($installProcess.ExitCode)."
+}
+
+Write-Host "Installation completed successfully." -ForegroundColor Green

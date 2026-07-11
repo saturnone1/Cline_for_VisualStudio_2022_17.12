@@ -135,6 +135,8 @@ Contracts are grouped by boundary and operation. TypeScript and C# representatio
 
 The final repository has one sidecar, one WebView, and one extension-host implementation. Thin packaging profiles define only target framework, VS SDK versions, assembly and VSIX identity, installation range, and exceptional compatibility adapter selection. A build matrix validates both artifacts from the same commit.
 
+Repository consolidation is a prerequisite for architectural refactoring. Until one canonical source tree builds both variants, do not extract feature slices independently in the two repositories. Guardrail and packaging work needed to achieve consolidation is allowed.
+
 ## Source hygiene
 
 - WebView bundles, sidecar dist, bin, obj, and VSIX files are generated outputs.
@@ -152,33 +154,37 @@ The final repository has one sidecar, one WebView, and one extension-host implem
 - establish a two-variant build and package validation matrix;
 - capture behavior and contract baselines.
 
-### Phase 1: typed contracts
+### Phase 1: single common source
+
+- select one canonical repository while preserving both existing repositories as recoverable history;
+- move sidecar, WebView, shared contracts, and active extension-host source into one common tree;
+- introduce thin 17.0 and 17.12 packaging profiles;
+- build and validate both VSIX variants from the same commit;
+- stop making duplicated feature edits after the common build is proven.
+
+### Phase 2: typed contracts
 
 - introduce typed envelopes and operation-specific host/WebView contracts;
 - add cross-runtime contract tests;
 - normalize `unknown` and `JToken` at boundaries.
 
-### Phase 2: explicit agent runtime
+### Phase 3: explicit agent runtime
 
 - define internal agent events and session state;
 - wrap `@cline/sdk` behind `AgentEngine`;
 - characterize existing streaming and approval behavior.
 
-### Phase 3: first vertical slices
+### Phase 4: first vertical slices
 
 Extract Chat/SendMessage, Chat/StartTask, Chat/CancelTask, Approvals, and TaskHistory in that order.
 
-### Phase 4: remaining worker features
+### Phase 5: remaining worker features
 
 Extract providers/settings, MCP, worktrees, browser, hooks, scheduled agents, checkpoints, transcript projection, and diagnostics.
 
-### Phase 5: .NET host decomposition
+### Phase 6: .NET host decomposition
 
 Separate host RPC routing from sidecar lifecycle; create focused host adapters; separate WebView runtime resolution, cache, bridge, and diagnostics from the tool-window control.
-
-### Phase 6: single common source
-
-Move shared implementation into one tree, retain thin 17.0 and 17.12 packaging profiles, and prove both VSIX outputs from one build matrix.
 
 ### Phase 7: cleanup and enforcement
 
@@ -198,4 +204,3 @@ The target is complete only when:
 - host capabilities are focused adapters;
 - architecture, contract, integration, and packaging checks pass;
 - active source contains no ambiguous legacy runtime implementation.
-

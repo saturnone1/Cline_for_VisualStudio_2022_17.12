@@ -3,7 +3,9 @@ param(
     [string]$VsixPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+
+    [string]$ExpectedAssembly = "VsClineAgent.dll"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +25,7 @@ try {
         "extension.vsixmanifest",
         "manifest.json",
         "catalog.json",
-        "VsClineAgent.dll",
+        $ExpectedAssembly,
         "Newtonsoft.Json.dll",
         "WebApp/assets/index.css",
         "WebApp/assets/index.js",

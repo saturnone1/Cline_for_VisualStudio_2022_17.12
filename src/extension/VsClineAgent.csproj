@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VsTarget Condition="'$(VsTarget)' == ''">17.12</VsTarget>
+    <VsPackagingRoot>$(MSBuildProjectDirectory)\..\..\packaging</VsPackagingRoot>
+    <VsProfilePath>$(VsPackagingRoot)\vs2022-$(VsTarget)\Version.props</VsProfilePath>
+    <MSBuildProjectExtensionsPath>$(MSBuildProjectDirectory)\obj\$(VsTarget)\</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <Import Project="$(VsProfilePath)" Condition="Exists('$(VsProfilePath)')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
           Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
 
@@ -10,8 +17,8 @@
     <ProjectTypeGuids>{60DC8134-EBA5-43B8-BCC9-BB4BC16C2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <OutputType>Library</OutputType>
     <RootNamespace>VsClineAgent</RootNamespace>
-    <AssemblyName>VsClineAgent</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <AssemblyName>$(VsAssemblyName)</AssemblyName>
+    <TargetFrameworkVersion>$(VsTargetFrameworkVersion)</TargetFrameworkVersion>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
     <Version>2.0.0</Version>
@@ -37,7 +44,8 @@
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
+    <OutputPath>bin\$(VsTarget)\Debug\</OutputPath>
+    <IntermediateOutputPath>obj\$(VsTarget)\Debug\</IntermediateOutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
@@ -46,7 +54,8 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
+    <OutputPath>bin\$(VsTarget)\Release\</OutputPath>
+    <IntermediateOutputPath>obj\$(VsTarget)\Release\</IntermediateOutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
@@ -54,8 +63,8 @@
 
   <!-- NuGet 패키지 참조 -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.6.36389" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.6.2164" ExcludeAssets="build" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="$(VsSdkPackageVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="$(VsSdkBuildToolsPackageVersion)" ExcludeAssets="build" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
@@ -89,6 +98,9 @@
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="Host\InteractionLog.cs" />
     <Compile Include="Host\SidecarProcess.cs" />
+    <Compile Include="$(VsVersionInfoPath)">
+      <Link>Host\VisualStudioVersionInfo.cs</Link>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\VsCommandExecutionService.cs" />
     <Compile Include="Services\VsEditorService.cs" />
@@ -98,6 +110,11 @@
     </Compile>
     <Compile Include="VsClineAgentPackage.cs" />
   </ItemGroup>
+
+  <Target Name="ValidateVsPackagingProfile" BeforeTargets="PrepareForBuild"
+          Condition="!Exists('$(VsProfilePath)') Or '$(VsAssemblyName)' == '' Or '$(VsixManifestPath)' == ''">
+    <Error Text="Unknown or incomplete VsTarget '$(VsTarget)'. Expected a profile at $(VsProfilePath)." />
+  </Target>
 
   <!-- WPF XAML -->
   <ItemGroup>
@@ -117,7 +134,8 @@
 
   <!-- VSIX 매니페스트 -->
   <ItemGroup>
-    <None Include="source.extension.vsixmanifest">
+    <None Include="$(VsixManifestPath)">
+      <Link>source.extension.vsixmanifest</Link>
       <SubType>Designer</SubType>
     </None>
     <Content Include="VsClineAgent.pkgdef">
@@ -201,8 +219,8 @@
   <PropertyGroup>
     <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0</VSToolsPath>
     <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0</VSToolsPath>
-    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(NuGetPackageRoot)microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets')">$(NuGetPackageRoot)microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
-    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets')">$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\17.6.2164\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(NuGetPackageRoot)microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets')">$(NuGetPackageRoot)microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets')">$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
   </PropertyGroup>
   <!-- VSSDK 빌드 타겟: VS 설치 경로 또는 NuGet 패키지에서 임포트 -->
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"

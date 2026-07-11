@@ -1,4 +1,4 @@
-# Cline for Visual Studio 2022 17.12
+# LIG VS for Visual Studio 2022 17.0 and 17.12
 
 Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로젝트입니다.
 
@@ -7,9 +7,9 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 ## 프로젝트 개요
 
 - 확장 이름: `VS AI Agent (Cline Port)`
-- 대상 IDE: Visual Studio 2022 17.x amd64
+- 대상 IDE: Visual Studio 2022 17.0 계열 및 17.12 이상 amd64
 - VSIX 프로젝트: `src/extension/VsClineAgent.csproj`
-- 대상 프레임워크: .NET Framework 4.7.2
+- 대상 프레임워크: 17.0 profile은 .NET Framework 4.8, 17.12 profile은 .NET Framework 4.7.2
 - 런타임 구조: Visual Studio VSIX + WebView2 + Node sidecar + `@cline/sdk`
 - 주요 용도: Visual Studio 안에서 Cline 스타일의 채팅, 파일 읽기/수정, 검색, 명령 실행, 작업 기록, 일부 MCP/체크포인트 기능 사용
 - 오프라인/폐쇄망 방향: WebView2 Fixed Version Runtime, Node 런타임, SDK 의존성, NuGet 패키지를 VSIX 또는 로컬 패키지로 번들링
@@ -22,6 +22,7 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 ├─ src/sidecar/             # Node sidecar와 @cline/sdk 통합
 ├─ src/shared/              # WebView와 sidecar가 공유하는 TypeScript
 ├─ src/webview/             # React/Vite 기반 WebView UI
+├─ packaging/               # VS 17.0/17.12 전용 SDK, manifest, compatibility profile
 ├─ assets/                  # 소스에서 사용하는 이미지와 정적 자산
 ├─ artifacts/               # 빌드가 생성하는 WebApp/Sidecar 패키지 산출물
 ├─ docs/                    # 아키텍처, 호환성, 폐쇄망 문서
@@ -35,7 +36,7 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 
 - Visual Studio 2022 17.x
 - Visual Studio extension development 워크로드
-- .NET Framework 4.7.2 Developer Pack
+- .NET Framework 4.7.2 및 4.8 Developer Pack
 - Node.js 22 이상(개발/빌드용)
 - WebView2 Runtime 또는 WebView2 Fixed Version Runtime
 - 인터넷 연결이 없는 환경에서는 `vendor/LocalPackages/`, WebView2 Fixed Runtime, sidecar `node_modules.zip` 준비 필요
@@ -77,13 +78,16 @@ npm run build
 VSIX 빌드:
 
 ```powershell
-msbuild VsClineAgent.sln /p:Configuration=Release /restore /p:RestorePackagesPath=.\vendor\LocalPackages
+.\scripts\Build-VsixVariants.ps1 -Configuration Release
 ```
+
+하나의 공통 sidecar, WebView, C# host 소스에서 `17.0`과 `17.12` VSIX를 모두 생성합니다. 버전별 SDK, target framework, identity, 설치 범위는 `packaging/vs2022-17.0/`과 `packaging/vs2022-17.12/` profile에만 둡니다.
 
 빌드 결과는 일반적으로 다음 위치에 생성됩니다.
 
 ```text
-src/extension/bin/Release/VsClineAgent.vsix
+src/extension/bin/17.0/Release/VsClineAgent17.vsix
+src/extension/bin/17.12/Release/VsClineAgent.vsix
 ```
 
 ## 실행
