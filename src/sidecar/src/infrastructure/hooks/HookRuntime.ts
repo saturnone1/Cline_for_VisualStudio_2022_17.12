@@ -2,26 +2,10 @@ import childProcess from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { getSettingsPath } from "../persistence/LocalAutomationStore"
-import { hookDecisionFromResponse } from "../../features/hooks/HookPolicy"
-
-export type HookLifecycleName = "TaskStart" | "TaskResume" | "TaskCancel" | "TaskComplete" | "PreToolUse" | "PostToolUse" | "UserPromptSubmit"
-export type HookScript = { name: HookLifecycleName; source: "global" | "workspace"; path: string; enabled: boolean }
-export type HookExecutionResult = { hook: HookScript; exitCode: number; stdout: string; stderr: string; error?: string; jsonResponse?: Record<string, unknown> }
-
-export const SUPPORTED_HOOK_NAMES: HookLifecycleName[] = [
-	"TaskStart",
-	"TaskResume",
-	"TaskCancel",
-	"TaskComplete",
-	"PreToolUse",
-	"PostToolUse",
-	"UserPromptSubmit",
-]
-
-export function normalizeHookName(value: string): HookLifecycleName | "" {
-	const normalized = String(value || "").trim()
-	return SUPPORTED_HOOK_NAMES.find((name) => name.toLowerCase() === normalized.toLowerCase()) || ""
-}
+import { hookDecisionFromResponse, normalizeHookName } from "../../features/hooks/HookPolicy"
+export { SUPPORTED_HOOK_NAMES, normalizeHookName } from "../../features/hooks/HookPolicy"
+import type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
+export type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
 
 export function getGlobalHooksDirectory() {
 	const userProfile = process.env.USERPROFILE || process.env.HOME || process.cwd()

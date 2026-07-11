@@ -32,6 +32,8 @@ import { VisualStudioProviderAuthUiAdapter } from "./infrastructure/auth/VisualS
 import { ProviderOAuthAuthorizationAdapter } from "./infrastructure/auth/ProviderOAuthAuthorizationAdapter"
 import { ScheduledAgentHandler } from "./features/scheduledAgents/ScheduledAgentHandler"
 import { LocalScheduledAgentStore } from "./infrastructure/persistence/LocalScheduledAgentStore"
+import { HookSettingsHandler } from "./features/hooks/HookSettingsHandler"
+import { LocalHookStore } from "./infrastructure/hooks/LocalHookStore"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -75,6 +77,7 @@ const server = new SidecarRpcServer(
 		backend.setProviderCredentialHandler(providerCredentials)
 		backend.setProviderAuthActionHandler(new ProviderAuthActionHandler(new VisualStudioProviderAuthUiAdapter(host), interactionLogger))
 		backend.setScheduledAgentHandler(new ScheduledAgentHandler(new LocalScheduledAgentStore(), () => backend.isScheduledAgentsEnabled()))
+		backend.setHookSettingsHandler(new HookSettingsHandler(new LocalHookStore()))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

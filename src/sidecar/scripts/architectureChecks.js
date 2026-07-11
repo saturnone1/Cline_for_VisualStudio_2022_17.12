@@ -81,6 +81,9 @@ if (router.includes("completeOAuthCallbackSession") || router.includes("oauthTok
 if (router.includes("readScheduledAgentSpecs") || router.includes("writeScheduledAgentSpec") || router.includes("appendScheduledAgentRun")) {
 	violations.push("VisualStudioWebviewBackend must delegate scheduled agent persistence and orchestration to ScheduledAgentHandler.")
 }
+if (router.includes("getGlobalHooksDirectory") || router.includes("findHookScript") || router.includes("setHookToggle")) {
+	violations.push("VisualStudioWebviewBackend must delegate hook discovery and settings persistence to HookSettingsHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -165,6 +168,8 @@ for (const requiredFile of [
 	"application/ports/ProviderCredentialEnvironmentPort.ts",
 	"application/ports/ProviderAuthUiPort.ts",
 	"application/ports/ScheduledAgentStorePort.ts",
+	"application/ports/HookStorePort.ts",
+	"application/dto/HookContracts.ts",
 	"application/dto/OAuthContracts.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
@@ -182,6 +187,7 @@ for (const requiredFile of [
 	"infrastructure/auth/VisualStudioProviderAuthUiAdapter.ts",
 	"infrastructure/auth/ProviderOAuthAuthorizationAdapter.ts",
 	"infrastructure/hooks/HookRuntime.ts",
+	"infrastructure/hooks/LocalHookStore.ts",
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",
@@ -212,6 +218,7 @@ for (const requiredFile of [
 	"features/browser/BrowserPolicy.ts",
 	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",
+	"features/hooks/HookSettingsHandler.ts",
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentHandler.ts",
 	"features/checkpoints/CheckpointPolicy.ts",

@@ -62,18 +62,9 @@ import {
 	type HookLifecycleName,
 	type HookScript,
 	createHookMetadata,
-	createHookScriptTemplate,
 	executeHookScript,
-	findHookScript,
-	getGlobalHooksDirectory,
-	getHookToggle,
-	getWorkspaceHooksDirectory,
-	isExecutableHookFile,
-	normalizeHookName,
-	removeHookToggle,
-	safeReadDirFiles,
-	setHookToggle,
 } from "../hooks/HookRuntime"
+import type { HookSettingsHandler } from "../../features/hooks/HookSettingsHandler"
 import { applyPreToolUseInputPatch, extractHookJsonResponse, hookDecisionFromResponse, mergeOptionalRecords, type PreToolUseDecision } from "../../features/hooks/HookPolicy"
 import {
 	normalizeOllamaRootBaseUrl,
@@ -333,6 +324,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private providerCredentials: ProviderCredentialHandler | null = null
 	private providerAuthActions: ProviderAuthActionHandler | null = null
 	private scheduledAgents: ScheduledAgentHandler | null = null
+	private hookSettings: HookSettingsHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -398,6 +390,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
 	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
 	setScheduledAgentHandler(scheduledAgents: ScheduledAgentHandler) { this.scheduledAgents = scheduledAgents }
+	setHookSettingsHandler(hookSettings: HookSettingsHandler) { this.hookSettings = hookSettings }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2675,80 +2668,23 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async refreshHookSettings() {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const scripts = this.getHookScripts(workspaceRoot)
-		const globalHooks = scripts
-			.filter((hook) => hook.source === "global")
-			.map((hook) => ({ name: hook.name, enabled: hook.enabled, absolutePath: hook.path }))
-		const localHooks = scripts
-			.filter((hook) => hook.source === "workspace")
-			.map((hook) => ({ name: hook.name, enabled: hook.enabled, absolutePath: hook.path }))
-
 		this.state.hooksEnabled = true
-		return {
-			globalHooks,
-			workspaceHooks: workspaceRoot
-				? [
-						{
-							workspaceName: path.basename(workspaceRoot),
-							hooks: localHooks,
-						},
-					]
-				: [],
-		}
+		return this.requireHookSettings().settings(workspaceRoot)
 	}
 
 	private async createHook(message: unknown) {
-		const request = asRecord(message)
-		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
-		if (!hookName) {
-			throw new Error("A supported hook name is required.")
-		}
-
-		const isGlobal = request.isGlobal === true
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const directory = isGlobal ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
-		if (!directory) {
-			throw new Error("No workspace is open for workspace hooks.")
-		}
-
-		fs.mkdirSync(directory, { recursive: true })
-		const hookPath = findHookScript(directory, hookName)?.path || path.join(directory, `${hookName}.ps1`)
-		if (!fs.existsSync(hookPath)) {
-			fs.writeFileSync(hookPath, createHookScriptTemplate(hookName), "utf8")
-		}
-		setHookToggle(isGlobal ? "global" : "workspace", workspaceRoot, hookName, true)
-		return this.refreshHookSettings()
+		return this.requireHookSettings().create(message, workspaceRoot)
 	}
 
 	private async deleteHook(message: unknown) {
-		const request = asRecord(message)
-		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
-		if (!hookName) {
-			throw new Error("A supported hook name is required.")
-		}
-
-		const isGlobal = request.isGlobal === true
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const directory = isGlobal ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
-		const existing = directory ? findHookScript(directory, hookName) : null
-		if (existing) {
-			fs.rmSync(existing.path, { force: true })
-		}
-		removeHookToggle(isGlobal ? "global" : "workspace", workspaceRoot, hookName)
-		return this.refreshHookSettings()
+		return this.requireHookSettings().delete(message, workspaceRoot)
 	}
 
 	private async toggleHook(message: unknown) {
-		const request = asRecord(message)
-		const hookName = normalizeHookName(getString(request, "hookName") || getString(request, "name"))
-		if (!hookName) {
-			throw new Error("A supported hook name is required.")
-		}
-
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const source = request.isGlobal === true ? "global" : "workspace"
-		setHookToggle(source, workspaceRoot, hookName, request.enabled !== false)
-		return this.refreshHookSettings()
+		return this.requireHookSettings().toggle(message, workspaceRoot)
 	}
 
 	private async listScheduledAgentSpecs() {
@@ -2784,30 +2720,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			marketplaceInstallSupported: false,
 			marketplaceDisabledReason: "Air-gap Visual Studio mode only discovers local plugin configuration; online marketplace install is intentionally disabled.",
 		}
-	}
-
-	private getHookScripts(workspaceRoot: string): HookScript[] {
-		const scripts: HookScript[] = []
-		for (const source of ["global", "workspace"] as const) {
-			const directory = source === "global" ? getGlobalHooksDirectory() : getWorkspaceHooksDirectory(workspaceRoot)
-			if (!directory || !fs.existsSync(directory)) {
-				continue
-			}
-
-			for (const filePath of safeReadDirFiles(directory)) {
-				const hookName = normalizeHookName(path.basename(filePath, path.extname(filePath)))
-				if (!hookName || !isExecutableHookFile(filePath)) {
-					continue
-				}
-				scripts.push({
-					name: hookName,
-					source,
-					path: filePath,
-					enabled: getHookToggle(source, workspaceRoot, hookName),
-				})
-			}
-		}
-		return scripts.sort((left, right) => `${left.source}:${left.name}`.localeCompare(`${right.source}:${right.name}`))
 	}
 
 	private async refreshSdkSkills() {
@@ -3049,7 +2961,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
-		const scripts = this.getHookScripts(workspaceRoot).filter((hook) => hook.name === hookName && hook.enabled)
+		const scripts = this.requireHookSettings().scripts(workspaceRoot).filter((hook) => hook.name === hookName && hook.enabled)
 		if (scripts.length === 0) {
 			return []
 		}
@@ -3201,6 +3113,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireScheduledAgents() {
 		if (!this.scheduledAgents) throw new Error("Scheduled agent handler is not attached.")
 		return this.scheduledAgents
+	}
+
+	private requireHookSettings() {
+		if (!this.hookSettings) throw new Error("Hook settings handler is not attached.")
+		return this.hookSettings
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

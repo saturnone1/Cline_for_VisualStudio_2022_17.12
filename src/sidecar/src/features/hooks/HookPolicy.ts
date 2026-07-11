@@ -1,3 +1,12 @@
+import type { HookLifecycleName } from "../../application/dto/HookContracts"
+
+export const SUPPORTED_HOOK_NAMES: HookLifecycleName[] = ["TaskStart", "TaskResume", "TaskCancel", "TaskComplete", "PreToolUse", "PostToolUse", "UserPromptSubmit"]
+
+export function normalizeHookName(value: string): HookLifecycleName | "" {
+	const normalized = String(value || "").trim()
+	return SUPPORTED_HOOK_NAMES.find((name) => name.toLowerCase() === normalized.toLowerCase()) || ""
+}
+
 export type PreToolUseDecision = { blocked: boolean; reason: string; inputPatch?: Record<string, unknown>; replaceInput?: boolean; validationMessage?: string; contextPatch?: Record<string, unknown>; structuredDecision?: Record<string, unknown> }
 
 export function extractHookJsonResponse(stdout: string): Record<string, unknown> | undefined {
