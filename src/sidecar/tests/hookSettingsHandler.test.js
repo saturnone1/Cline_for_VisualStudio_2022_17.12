@@ -28,14 +28,14 @@ test("hook settings handler projects global and workspace hooks", () => {
 
 test("hook settings handler normalizes names and delegates create/delete/toggle", () => {
 	const { handler, calls } = fixture()
-	handler.create({ hookName: "taskstart", isGlobal: true }, "C:/repo")
-	handler.toggle({ name: "TaskStart", isGlobal: true, enabled: false }, "C:/repo")
-	handler.delete({ hookName: "TaskStart", isGlobal: true }, "C:/repo")
+	handler.create({ hookName: "taskstart", source: "global", enabled: true }, "C:/repo")
+	handler.toggle({ hookName: "TaskStart", source: "global", enabled: false }, "C:/repo")
+	handler.delete({ hookName: "TaskStart", source: "global", enabled: true }, "C:/repo")
 	assert.deepEqual(calls, [["create", "global", "TaskStart"], ["toggle", "global", "TaskStart", false], ["delete", "global", "TaskStart"]])
 })
 
 test("hook settings handler rejects unsupported hooks and workspace creation without a workspace", () => {
 	const { handler } = fixture()
-	assert.throws(() => handler.create({ hookName: "Unknown" }, "C:/repo"), /supported hook name/)
-	assert.throws(() => handler.create({ hookName: "TaskStart" }, ""), /No workspace/)
+	assert.throws(() => handler.create({ hookName: "Unknown", source: "workspace", enabled: true }, "C:/repo"), /supported hook name/)
+	assert.throws(() => handler.create({ hookName: "TaskStart", source: "workspace", enabled: true }, ""), /No workspace/)
 })

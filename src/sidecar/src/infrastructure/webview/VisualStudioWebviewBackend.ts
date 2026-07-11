@@ -101,6 +101,8 @@ import { TaskRpcHandler, type TaskPromptRequest } from "../../features/chat/Task
 import { decodeTaskRpcCommand } from "./TaskRpcDecoder"
 import { CheckpointRpcHandler } from "../../features/checkpoints/CheckpointRpcHandler"
 import { decodeCheckpointRpcCommand } from "./CheckpointRpcDecoder"
+import { HookRpcHandler } from "../../features/hooks/HookRpcHandler"
+import { decodeHookRpcCommand } from "./HookRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -277,6 +279,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly terminalRpc: TerminalRpcHandler
 	private readonly taskRpc: TaskRpcHandler
 	private readonly checkpointRpc: CheckpointRpcHandler
+	private readonly hookRpc: HookRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -350,6 +353,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskRpc = new TaskRpcHandler({ hasPendingQuestion: () => Boolean(this.pendingQuestion), hasCurrentTask: () => Boolean(this.state.currentTaskItem), start: (request, requestId) => this.startNewTask(request, { broadcast: true, requestId }), respond: (request, requestId) => this.sendAskResponse(request, requestId), compact: (requestId) => this.compactCurrentSession(requestId), cancel: () => this.cancelTask(), clear: () => this.clearTask(), refreshHistory: (source) => this.taskHistorySync.refreshInBackground(source), history: () => this.state.taskHistory, show: (taskId) => this.showTaskWithId(taskId), delete: (taskIds) => this.taskHistoryCommands.delete(taskIds), deleteAll: () => this.taskHistoryCommands.deleteAll(), toggleFavorite: (taskId, isFavorited) => this.taskHistoryCommands.toggleFavorite(taskId, isFavorited), broadcast: () => this.broadcastState() })
 		this.checkpointRpc = new CheckpointRpcHandler({ available: () => Boolean(this.clineSdk), checkpoints: () => this.requireCheckpoints(), currentTask: () => this.state.currentTaskItem, messages: () => this.state.clineMessages, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), showTask: (taskId) => this.showTaskWithId(taskId), addInfo: (text, checkpointRunCount) => { this.addMessage({ type: "say", say: "info", text, checkpointRunCount }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), trackedChanges: () => this.requireChangeTracking().pendingChanges() })
+		this.hookRpc = new HookRpcHandler({ hooks: () => this.requireHookSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enableHooks: () => { this.state.hooksEnabled = true } })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -864,6 +868,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(checkpointResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const hookCommand = decodeHookRpcCommand(key, message)
+		if (hookCommand) return grpcHandled(grpcResponse(requestId, await this.hookRpc.handle(hookCommand), false))
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -918,18 +924,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "FileService.toggleSkill":
 				await this.toggleSdkSetting("skills", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
-
-			case "FileService.refreshHooks":
-				return grpcHandled(grpcResponse(requestId, await this.refreshHookSettings(), false))
-
-			case "FileService.createHook":
-				return grpcHandled(grpcResponse(requestId, await this.createHook(message), false))
-
-			case "FileService.deleteHook":
-				return grpcHandled(grpcResponse(requestId, await this.deleteHook(message), false))
-
-			case "FileService.toggleHook":
-				return grpcHandled(grpcResponse(requestId, await this.toggleHook(message), false))
 
 			case "ScheduledAgentsService.listSpecs":
 			case "ScheduledAgentsService.listScheduledAgents":
@@ -1413,27 +1407,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			globalWorkflowToggles: { toggles: globalWorkflowToggles },
 			localWorkflowToggles: { toggles: localWorkflowToggles },
 		}
-	}
-
-	private async refreshHookSettings() {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		this.state.hooksEnabled = true
-		return this.requireHookSettings().settings(workspaceRoot)
-	}
-
-	private async createHook(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireHookSettings().create(message, workspaceRoot)
-	}
-
-	private async deleteHook(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireHookSettings().delete(message, workspaceRoot)
-	}
-
-	private async toggleHook(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireHookSettings().toggle(message, workspaceRoot)
 	}
 
 	private async listScheduledAgentSpecs() {

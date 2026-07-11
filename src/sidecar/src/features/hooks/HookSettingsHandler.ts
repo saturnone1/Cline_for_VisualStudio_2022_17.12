@@ -2,6 +2,8 @@ import type { HookLifecycleName, HookScript, HookSource } from "../../applicatio
 import type { HookStorePort } from "../../application/ports/HookStorePort"
 import { normalizeHookName } from "./HookPolicy"
 
+export type HookMutationRequest = Readonly<{ hookName: string; source: HookSource; enabled: boolean }>
+
 export class HookSettingsHandler {
 	constructor(private readonly store: HookStorePort) {}
 
@@ -16,32 +18,28 @@ export class HookSettingsHandler {
 		}
 	}
 
-	create(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message), hookName = requireHookName(request), source = hookSource(request)
+	create(request: HookMutationRequest, workspaceRoot: string) {
+		const hookName = requireHookName(request), source = request.source
 		if (source === "workspace" && !workspaceRoot) throw new Error("No workspace is open for workspace hooks.")
 		this.store.create(source, workspaceRoot, hookName)
 		return this.settings(workspaceRoot)
 	}
 
-	delete(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message), hookName = requireHookName(request), source = hookSource(request)
+	delete(request: HookMutationRequest, workspaceRoot: string) {
+		const hookName = requireHookName(request), source = request.source
 		this.store.delete(source, workspaceRoot, hookName)
 		return this.settings(workspaceRoot)
 	}
 
-	toggle(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message), hookName = requireHookName(request), source = hookSource(request)
-		this.store.setEnabled(source, workspaceRoot, hookName, request.enabled !== false)
+	toggle(request: HookMutationRequest, workspaceRoot: string) {
+		const hookName = requireHookName(request), source = request.source
+		this.store.setEnabled(source, workspaceRoot, hookName, request.enabled)
 		return this.settings(workspaceRoot)
 	}
 }
 
-function requireHookName(request: Record<string, unknown>) {
-	const value = readString(request.hookName) || readString(request.name)
-	const hookName = normalizeHookName(value)
+function requireHookName(request: HookMutationRequest) {
+	const hookName = normalizeHookName(request.hookName)
 	if (!hookName) throw new Error("A supported hook name is required.")
 	return hookName
 }
-function hookSource(request: Record<string, unknown>): HookSource { return request.isGlobal === true ? "global" : "workspace" }
-function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
-function readString(value: unknown) { return typeof value === "string" ? value : "" }
