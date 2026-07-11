@@ -5,6 +5,7 @@ import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
 import type { SkillInfo } from "@shared/proto/cline/file"
+import type { McpServers } from "@shared/proto/cline/mcp"
 import type { TerminalProfile } from "@shared/proto/cline/state"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
@@ -365,20 +366,18 @@ interface WorktreeServiceContract {
 	trackWorktreeViewOpened: UnaryOperation<RpcRequest>
 }
 
-type McpServersResponse = RpcRequest & { mcpServers: RpcRequest[] }
-
 interface McpServiceContract {
 	refreshMcpMarketplace: UnaryOperation<RpcRequest, McpMarketplaceCatalog>
-	getLatestMcpServers: UnaryOperation<RpcRequest, McpServersResponse>
-	addRemoteMcpServer: UnaryOperation<RpcRequest, McpServersResponse>
+	getLatestMcpServers: UnaryOperation<RpcRequest, McpServers>
+	addRemoteMcpServer: UnaryOperation<RpcRequest, McpServers>
 	downloadMcp: UnaryOperation<RpcRequest, RpcRequest & { error?: string }>
 	openMcpSettings: UnaryOperation
-	updateMcpTimeout: UnaryOperation<RpcRequest>
-	restartMcpServer: UnaryOperation<RpcRequest>
-	deleteMcpServer: UnaryOperation<RpcRequest>
-	toggleToolAutoApprove: UnaryOperation<RpcRequest>
-	toggleMcpServer: UnaryOperation<RpcRequest>
-	authenticateMcpServer: UnaryOperation<RpcRequest>
+	updateMcpTimeout: UnaryOperation<RpcRequest, McpServers>
+	restartMcpServer: UnaryOperation<RpcRequest, McpServers>
+	deleteMcpServer: UnaryOperation<RpcRequest, McpServers>
+	toggleToolAutoApprove: UnaryOperation<RpcRequest, McpServers>
+	toggleMcpServer: UnaryOperation<RpcRequest, McpServers>
+	authenticateMcpServer: UnaryOperation<RpcRequest, McpServers>
 }
 
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
