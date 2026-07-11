@@ -1685,41 +1685,6 @@ export function normalizeTranscriptText(text: string) {
 	return text.replace(/\s+/g, " ").trim()
 }
 
-export function findCheckpointRunCount(messages: Array<Record<string, unknown>>, messageTs?: number) {
-	if (messageTs !== undefined) {
-		const target = messages.find((message) => message.ts === messageTs)
-		const targetRunCount = getNumber(target, "checkpointRunCount")
-		if (targetRunCount !== undefined) {
-			return targetRunCount
-		}
-	}
-
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const runCount = getNumber(messages[index], "checkpointRunCount")
-		if (runCount !== undefined) {
-			return runCount
-		}
-	}
-	return undefined
-}
-
-export function findCheckpointMessage(messages: Array<Record<string, unknown>>, checkpointRunCount: number, messageTs?: number) {
-	if (messageTs !== undefined) {
-		const target = messages.find((message) => message.ts === messageTs)
-		if (getNumber(target, "checkpointRunCount") === checkpointRunCount) {
-			return target
-		}
-	}
-
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const message = messages[index]
-		if (getNumber(message, "checkpointRunCount") === checkpointRunCount) {
-			return message
-		}
-	}
-	return undefined
-}
-
 export function buildSettingsToggleMap(items: Array<Record<string, unknown>>, scope: "global" | "local") {
 	return Object.fromEntries(
 		items

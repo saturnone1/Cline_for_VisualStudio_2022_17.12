@@ -56,7 +56,7 @@ import {
 	getSidecarDataPath,
 } from "../persistence/LocalAutomationStore"
 import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
-import { createCheckpointDiffDescription, resolveCheckpointRestoreScope } from "../../features/checkpoints/CheckpointPolicy"
+import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHandler"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -172,8 +172,6 @@ import {
 	toolResultToText,
 	stringifyPretty,
 	normalizeTranscriptText,
-	findCheckpointRunCount,
-	findCheckpointMessage,
 	buildSettingsToggleMap,
 	isGlobalSettingsItem,
 	settingsItemKey,
@@ -324,6 +322,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private scheduledAgents: ScheduledAgentHandler | null = null
 	private hookSettings: HookSettingsHandler | null = null
 	private hookExecution: HookExecutionHandler | null = null
+	private checkpoints: CheckpointHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -391,6 +390,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setScheduledAgentHandler(scheduledAgents: ScheduledAgentHandler) { this.scheduledAgents = scheduledAgents }
 	setHookSettingsHandler(hookSettings: HookSettingsHandler) { this.hookSettings = hookSettings }
 	setHookExecutionHandler(hookExecution: HookExecutionHandler) { this.hookExecution = hookExecution }
+	setCheckpointHandler(checkpoints: CheckpointHandler) { this.checkpoints = checkpoints }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2559,34 +2559,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (!this.clineSdk || !this.state.currentTaskItem) {
 			throw new Error("No SDK-backed task is selected for checkpoint restore.")
 		}
-
-		const checkpointRunCount =
-			getNumber(message, "checkpointRunCount") ||
-			getNumber(message, "runCount") ||
-			findCheckpointRunCount(this.state.clineMessages, getNumber(message, "messageTs"))
-		if (checkpointRunCount === undefined) {
-			throw new Error("No SDK checkpoint run count is available for this restore target.")
-		}
-
-		const { restore } = resolveCheckpointRestoreScope(getString(message, "restoreType"))
 		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 		const cwd = workspaceRoots[0] || String(this.state.currentTaskItem.cwdOnTaskInitialization || process.cwd())
-		const result = await this.clineSdk.restore({
-			sessionId: String(this.state.currentTaskItem.id || ""),
-			checkpointRunCount,
+		const result = await this.requireCheckpoints().restore(message, {
+			taskItem: this.state.currentTaskItem,
+			messages: this.state.clineMessages,
 			cwd,
-			restore,
-			start: {
-				config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
-				interactive: true,
-				toolPolicies: this.createCurrentToolPolicies(),
-			},
+			config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
+			toolPolicies: this.createCurrentToolPolicies(),
 		})
-
-		const resultRecord = asRecord(result)
-		const restoredSessionId = getString(resultRecord, "sessionId") || getString(asRecord(resultRecord.startResult), "sessionId")
-		if (restoredSessionId) {
-			await this.showTaskWithId(restoredSessionId)
+		if (result.restoredSessionId) {
+			await this.showTaskWithId(result.restoredSessionId)
 		} else {
 			this.addMessage({ type: "say", say: "info", text: "Checkpoint workspace restore completed." })
 			await this.broadcastState()
@@ -2594,33 +2577,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async describeCheckpointDiff(message: unknown) {
-		if (!this.state.currentTaskItem) {
-			return {
-				success: false,
-				supported: false,
-				message: "No SDK-backed task is selected for checkpoint compare.",
-			}
-		}
-
-		const messageTs = getNumber(message, "messageTs") || getNumber(message, "value") || getNumber(message, "number")
-		const checkpointRunCount =
-			getNumber(message, "checkpointRunCount") ||
-			getNumber(message, "runCount") ||
-			findCheckpointRunCount(this.state.clineMessages, messageTs)
-		if (checkpointRunCount === undefined) {
-			return {
-				success: false,
-				supported: false,
-				message: "No SDK checkpoint run count is available for this compare target.",
-			}
-		}
-
-		const checkpointMessage = findCheckpointMessage(this.state.clineMessages, checkpointRunCount, messageTs)
-		const sessionId = String(this.state.currentTaskItem.id || "")
-		const workspaceRoot =
-			getString(checkpointMessage, "checkpointWorkspaceRoot") ||
-			String(this.state.currentTaskItem.cwdOnTaskInitialization || "")
-		const createdAt = numberValue(checkpointMessage?.ts)
 		const trackedChanges = Array.from(this.pendingChangeSummaries.values()).map((change) => ({
 			filePath: change.filePath,
 			action: change.action,
@@ -2629,15 +2585,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			beforePath: change.beforePath,
 			afterPath: change.afterPath,
 		}))
-		const description = createCheckpointDiffDescription({ checkpointRunCount, sessionId, workspaceRoot, createdAt, trackedChanges })
+		const description = this.requireCheckpoints().describe(message, { taskItem: this.state.currentTaskItem, messages: this.state.clineMessages, trackedChanges })
 
-		this.addMessage({
+		if (description.success) this.addMessage({
 			type: "say",
 			say: "info",
 			text: description.text,
-			checkpointRunCount,
+			checkpointRunCount: description.checkpointRunCount,
 		})
-		this.updateCurrentTaskItem()
+		if (description.success) this.updateCurrentTaskItem()
 		return description
 	}
 
@@ -3067,6 +3023,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireHookExecution() {
 		if (!this.hookExecution) throw new Error("Hook execution handler is not attached.")
 		return this.hookExecution
+	}
+
+	private requireCheckpoints() {
+		if (!this.checkpoints) throw new Error("Checkpoint handler is not attached.")
+		return this.checkpoints
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

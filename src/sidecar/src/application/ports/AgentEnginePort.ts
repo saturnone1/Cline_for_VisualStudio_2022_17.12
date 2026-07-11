@@ -26,6 +26,13 @@ export type AgentStartRequest = Readonly<{
 }>
 
 export type AgentSessionRequest = Readonly<{ sessionId: string }>
+export type AgentRestoreRequest = Readonly<{
+	sessionId: string
+	checkpointRunCount: number
+	cwd: string
+	restore: Readonly<{ messages: boolean; workspace: boolean }>
+	start: Readonly<{ config: Readonly<Record<string, unknown>>; interactive: boolean; toolPolicies: Readonly<Record<string, unknown>> }>
+}>
 
 export type AgentEngineStatus = {
 	activeSessionId: string | null
@@ -48,7 +55,7 @@ export interface AgentEnginePort {
 	readMessages(params: unknown): Promise<unknown>
 	deleteSession(params: unknown): Promise<unknown>
 	updateSession(params: unknown): Promise<unknown>
-	restore(params: unknown): Promise<unknown>
+	restore(params: AgentRestoreRequest): Promise<unknown>
 	listSettings(params: unknown): Promise<unknown>
 	toggleSetting(params: unknown): Promise<unknown>
 	getProviderConfigFields(providerId: string): Promise<unknown>

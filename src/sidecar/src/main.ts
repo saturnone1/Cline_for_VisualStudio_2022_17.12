@@ -36,6 +36,7 @@ import { HookSettingsHandler } from "./features/hooks/HookSettingsHandler"
 import { LocalHookStore } from "./infrastructure/hooks/LocalHookStore"
 import { HookExecutionHandler } from "./features/hooks/HookExecutionHandler"
 import { ProcessHookExecutionAdapter } from "./infrastructure/hooks/ProcessHookExecutionAdapter"
+import { CheckpointHandler } from "./features/checkpoints/CheckpointHandler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -82,6 +83,7 @@ const server = new SidecarRpcServer(
 		const hookSettings = new HookSettingsHandler(new LocalHookStore())
 		backend.setHookSettingsHandler(hookSettings)
 		backend.setHookExecutionHandler(new HookExecutionHandler(hookSettings, new ProcessHookExecutionAdapter(), interactionLogger))
+		backend.setCheckpointHandler(new CheckpointHandler(runtime))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

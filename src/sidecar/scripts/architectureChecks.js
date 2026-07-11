@@ -87,6 +87,9 @@ if (router.includes("getGlobalHooksDirectory") || router.includes("findHookScrip
 if (router.includes("executeHookScript") || router.includes("hookDecisionFromResponse")) {
 	violations.push("VisualStudioWebviewBackend must delegate hook execution and decision orchestration to HookExecutionHandler.")
 }
+if (router.includes("findCheckpointRunCount") || router.includes("resolveCheckpointRestoreScope")) {
+	violations.push("VisualStudioWebviewBackend must delegate checkpoint target and restore orchestration to CheckpointHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -228,6 +231,7 @@ for (const requiredFile of [
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentHandler.ts",
 	"features/checkpoints/CheckpointPolicy.ts",
+	"features/checkpoints/CheckpointHandler.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
