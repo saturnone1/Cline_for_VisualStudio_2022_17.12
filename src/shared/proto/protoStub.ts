@@ -1,24 +1,38 @@
-type ProtoFactory = ((...args: any[]) => any) & Record<string | symbol, any>
+type ProtoRecord = Record<string, unknown>
+
+export interface ProtoFactory {
+	<T>(value: T): T
+	create<T extends ProtoRecord>(value?: T): T
+	fromJson<T>(value: T): T
+	fromJSON<T>(value: T): T
+	fromBinary<T>(value: T): T
+	toJson<T>(value: T): T
+	toJSON<T>(value: T): T
+	toBinary<T>(value: T): T
+	equals(left: unknown, right: unknown): boolean
+	[key: string]: unknown
+	[key: symbol]: unknown
+}
 
 export const createProtoStub = (name: string): ProtoFactory => {
-	const stubTarget = (() => undefined) as ProtoFactory
+	const stubTarget = (<T>(value: T) => value) as ProtoFactory
 
 	return new Proxy(stubTarget, {
 		get: (_target, property) => {
 			if (property === "create") {
-				return (value: Record<string, any> = {}) => value
+				return <T extends ProtoRecord>(value: T = {} as T) => value
 			}
 
-			if (property === "fromJson" || property === "fromBinary") {
-				return (value: any) => value
+			if (property === "fromJson" || property === "fromJSON" || property === "fromBinary") {
+				return <T>(value: T) => value
 			}
 
-			if (property === "toJson" || property === "toBinary") {
-				return (value: any) => value
+			if (property === "toJson" || property === "toJSON" || property === "toBinary") {
+				return <T>(value: T) => value
 			}
 
 			if (property === "equals") {
-				return (left: any, right: any) => JSON.stringify(left) === JSON.stringify(right)
+				return (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 			}
 
 			if (property === Symbol.toPrimitive) {
@@ -35,6 +49,6 @@ export const createProtoStub = (name: string): ProtoFactory => {
 
 			return undefined
 		},
-		apply: (_target, _thisArg, [value]) => value,
+		apply: (_target, _thisArg, [value]: unknown[]) => value,
 	})
 }
