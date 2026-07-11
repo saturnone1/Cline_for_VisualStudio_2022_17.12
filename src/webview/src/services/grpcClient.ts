@@ -4,6 +4,7 @@ import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
+import type { TerminalProfile } from "@shared/proto/cline/state"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
 const decodeMessage = <TResponse>(response: TResponse) => response
@@ -277,17 +278,9 @@ interface ModelsServiceContract {
 	updateApiConfigurationProto: UnaryOperation<RpcRequest>
 }
 
-interface TerminalProfileInfo extends RpcRequest {
-	id?: string
-	name?: string
-	path?: string
-	shellPath?: string
-	args?: string[]
-}
-
 interface StateServiceContract {
 	subscribeToState: StreamingOperation<RpcRequest & { stateJson: string }>
-	getAvailableTerminalProfiles: UnaryOperation<RpcRequest, RpcRequest & { profiles: TerminalProfileInfo[] }>
+	getAvailableTerminalProfiles: UnaryOperation<RpcRequest, RpcRequest & { profiles: TerminalProfile[] }>
 	updateSettings: UnaryOperation<RpcRequest>
 	updateAutoApprovalSettings: UnaryOperation<RpcRequest>
 	togglePlanActModeProto: UnaryOperation<RpcRequest, RpcRequest & { value: boolean }>
