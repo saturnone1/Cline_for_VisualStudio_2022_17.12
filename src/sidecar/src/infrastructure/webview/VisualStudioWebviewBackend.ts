@@ -35,6 +35,7 @@ import { ResumeSessionFlow } from "../../features/chat/runtime/ResumeSessionFlow
 import { LaunchAgentSessionFlow } from "../../features/chat/runtime/LaunchAgentSessionFlow"
 import { PrepareNewTaskFlow } from "../../features/chat/startTask/PrepareNewTaskFlow"
 import { StartNewTaskFlow } from "../../features/chat/startTask/StartNewTaskFlow"
+import { AskResponseInteractionFlow } from "../../features/chat/sendMessage/AskResponseInteractionFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -239,6 +240,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly launchAgentSession: LaunchAgentSessionFlow
 	private readonly prepareNewTask: PrepareNewTaskFlow
 	private readonly startNewTaskFlow: StartNewTaskFlow
+	private readonly askResponseInteractions: AskResponseInteractionFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -322,6 +324,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.launchAgentSession = new LaunchAgentSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, complete: (result, sessionId, source, generation) => this.completeFromSdkResult(result, sessionId, source, generation), recover: (sessionId, source, generation, error) => this.recoverFromSdkRunError(sessionId, source, generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.prepareNewTask = new PrepareNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), resolveWorkspacePath: (requestedPath) => requestedPath && fs.existsSync(requestedPath) ? path.resolve(requestedPath) : null, updateTask: () => this.updateCurrentTaskItem(), publishPreparing: () => this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)), activeSessionId: () => this.requireClineSdk().status.activeSessionId || "", markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, stopSession: (sessionId) => this.requireClineSdk().stop({ sessionId }), runHook: (name, context) => { void this.runLifecycleHooks(name, context) }, normalizeImages: (images) => normalizeSdkImageInputs(images), launch: (params, cwd, sessionId) => this.launchSdkStartSession(params, cwd, sessionId, "startSession"), projectError: async (error) => { this.clearTaskIdleWatchdog(); this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) }); this.updateCurrentTaskItem(); await this.broadcastState() }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.startNewTaskFlow = new StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), transitionStarting: () => { this.transitionTask("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.getModelId()), startLatency: (requestId, taskId, textLength) => this.startSendLatencyTrace(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.addMessage({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => { void this.prepareAndLaunchNewTask({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) } })
+		this.askResponseInteractions = new AskResponseInteractionFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), takeApproval: () => this.approvals.take(), takeQuestion: () => { const pending = this.pendingQuestion; this.pendingQuestion = null; return pending?.resolve }, transitionStreaming: (source) => { this.transitionTask("streaming", source) }, removeFollowup: () => this.removeAskMessages("followup"), addFeedback: (text, images, files) => { this.addMessage({ type: "say", say: "user_feedback", text, images, files }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1624,7 +1627,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		const responseType = getString(message, "responseType")
-		const text = buildTaskInputWithAttachments(getString(message, "text"), getStringArray(message, "images"), getStringArray(message, "files"))
+		const images = getStringArray(message, "images"), files = getStringArray(message, "files")
+		const text = buildTaskInputWithAttachments(getString(message, "text"), images, files)
 		const activeSessionId = this.clineSdk.status.activeSessionId
 		const selectedSessionId = String(this.state.currentTaskItem?.id || "")
 		this.logger.log("sidecar", "sendAskResponse.received", {
@@ -1636,45 +1640,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			selectedSessionId,
 		})
 
-		if (this.approvals.hasPending && activeSessionId) {
-			this.transitionTask("streaming", "approval-response")
-			const approved = responseType === "yesButtonClicked"
-			const feedback = text
-			const pending = this.approvals.take()
-			this.logger.log("sidecar", "sendAskResponse.pendingApproval", { approved, activeSessionId })
-			this.addMessage({
-				type: "say",
-				say: "user_feedback",
-				text: feedback.trim() || (approved ? "승인됨" : "거부됨"),
-				images: getStringArray(message, "images"),
-				files: getStringArray(message, "files"),
-			})
-			this.updateCurrentTaskItem()
-			await this.broadcastState()
-			pending?.({ approved, reason: feedback.trim() || (approved ? "Visual Studio에서 승인됨." : "Visual Studio에서 거부됨.") })
-			return
-		}
-
-		if (this.pendingQuestion && activeSessionId) {
-			this.transitionTask("streaming", "question-response")
-			const answer = getAskResponseText(message)
-			const answerText = buildTaskInputWithAttachments(answer, getStringArray(message, "images"), getStringArray(message, "files"))
-			const pending = this.pendingQuestion
-			this.pendingQuestion = null
-			this.logger.log("sidecar", "sendAskResponse.pendingQuestion", { activeSessionId, answerLength: answerText.length })
-			this.removeAskMessages("followup")
-			this.addMessage({
-				type: "say",
-				say: "user_feedback",
-				text: answerText.trim() || "No response.",
-				images: getStringArray(message, "images"),
-				files: getStringArray(message, "files"),
-			})
-			this.updateCurrentTaskItem()
-			await this.broadcastState()
-			pending.resolve(answerText.trim())
-			return
-		}
+		const answerText = buildTaskInputWithAttachments(getAskResponseText(message), images, files)
+		if (await this.askResponseInteractions.handle({ responseType, text, answerText, images, files, activeSessionId: activeSessionId || "" })) return
 
 		if (!text.trim()) {
 			return

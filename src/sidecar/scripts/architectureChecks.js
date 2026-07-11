@@ -264,6 +264,7 @@ for (const requiredFile of [
 	"features/chat/runtime/LaunchAgentSessionFlow.ts",
 	"features/chat/startTask/PrepareNewTaskFlow.ts",
 	"features/chat/startTask/StartNewTaskFlow.ts",
+	"features/chat/sendMessage/AskResponseInteractionFlow.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/configuration/SettingsMutationHandler.ts",
