@@ -4,6 +4,7 @@ import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
+import type { SkillInfo } from "@shared/proto/cline/file"
 import type { TerminalProfile } from "@shared/proto/cline/state"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
@@ -190,13 +191,6 @@ interface WorkspaceHooks extends RpcRequest {
 	hooks: FileHookInfo[]
 }
 
-interface FileSkillInfo extends RpcRequest {
-	name?: string
-	path?: string
-	enabled?: boolean
-	description?: string
-}
-
 interface FileServiceContract {
 	openImage: UnaryOperation<RpcRequest>
 	openFile: UnaryOperation<RpcRequest>
@@ -214,7 +208,7 @@ interface FileServiceContract {
 	getRelativePaths: UnaryOperation<RpcRequest, RpcRequest & { paths: string[] }>
 	refreshRules: UnaryOperation<RpcRequest, FileRulesResponse>
 	refreshHooks: UnaryOperation<RpcRequest, RpcRequest & { globalHooks: FileHookInfo[]; workspaceHooks: WorkspaceHooks[] }>
-	refreshSkills: UnaryOperation<RpcRequest, RpcRequest & { globalSkills: FileSkillInfo[]; localSkills: FileSkillInfo[] }>
+	refreshSkills: UnaryOperation<RpcRequest, RpcRequest & { globalSkills: SkillInfo[]; localSkills: SkillInfo[] }>
 	toggleClineRule: UnaryOperation<RpcRequest, RpcRequest & {
 		globalClineRulesToggles?: FileRuleToggleGroup
 		localClineRulesToggles?: FileRuleToggleGroup
