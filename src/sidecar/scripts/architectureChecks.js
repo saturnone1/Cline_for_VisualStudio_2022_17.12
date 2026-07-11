@@ -131,6 +131,10 @@ for (const requiredFile of [
 	"infrastructure/transport/SidecarRpcServer.ts",
 	"features/chat/sendMessage/SendMessageCommand.ts",
 	"features/chat/sendMessage/SendMessageHandler.ts",
+	"features/chat/startTask/StartTaskCommand.ts",
+	"features/chat/startTask/StartTaskHandler.ts",
+	"features/chat/cancelTask/CancelTaskCommand.ts",
+	"features/chat/cancelTask/CancelTaskHandler.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)

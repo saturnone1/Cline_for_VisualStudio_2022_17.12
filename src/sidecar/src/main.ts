@@ -11,6 +11,8 @@ import { SidecarRpcServer } from "./infrastructure/transport/SidecarRpcServer"
 import { VisualStudioWebviewBackend } from "./infrastructure/webview/VisualStudioWebviewBackend"
 import { VisualStudioWebviewController } from "./presentation/webview/VisualStudioWebviewController"
 import { SendMessageHandler } from "./features/chat/sendMessage/SendMessageHandler"
+import { StartTaskHandler } from "./features/chat/startTask/StartTaskHandler"
+import { CancelTaskHandler } from "./features/chat/cancelTask/CancelTaskHandler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -39,6 +41,8 @@ const server = new SidecarRpcServer(
 		backend.setTaskSessionUseCase(new TaskSessionUseCase(runtime))
 		backend.setMcpUseCase(new McpUseCase(runtime))
 		backend.setSendMessageHandler(new SendMessageHandler(runtime))
+		backend.setStartTaskHandler(new StartTaskHandler(runtime))
+		backend.setCancelTaskHandler(new CancelTaskHandler(runtime))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

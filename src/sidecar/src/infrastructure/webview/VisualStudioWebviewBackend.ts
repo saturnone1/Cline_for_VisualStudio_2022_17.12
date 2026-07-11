@@ -29,6 +29,9 @@ import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
+import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCommand"
+import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
+import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -323,6 +326,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private taskSessions: TaskSessionUseCase | null = null
 	private mcp: McpUseCase | null = null
 	private sendMessage: SendMessageHandler | null = null
+	private startTaskHandler: StartTaskHandler | null = null
+	private cancelTaskHandler: CancelTaskHandler | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
@@ -435,6 +440,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setSendMessageHandler(sendMessage: SendMessageHandler) {
 		this.sendMessage = sendMessage
 	}
+
+	setStartTaskHandler(startTaskHandler: StartTaskHandler) { this.startTaskHandler = startTaskHandler }
+	setCancelTaskHandler(cancelTaskHandler: CancelTaskHandler) { this.cancelTaskHandler = cancelTaskHandler }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2975,7 +2983,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async launchSdkStartSession(
-		params: Record<string, unknown>,
+		params: StartTaskCommand,
 		cwd: string,
 		sessionId: string,
 		source: string,
@@ -2989,7 +2997,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			const config = await this.buildSdkConfig(cwd, sessionId)
 			this.markSendLatencySdkSend(sessionId)
 			runGeneration = ++this.sdkRunGeneration
-			const result = await this.clineSdk.startSession({
+			if (!this.startTaskHandler) throw new Error("StartTaskHandler is not attached.")
+			const result = await this.startTaskHandler.execute({
 				...params,
 				config,
 				toolPolicies: this.createCurrentToolPolicies(),
@@ -3307,7 +3316,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.getResumedConversationCharBudget(),
 		)
 		const taskTitle = String(taskItem.task || "").trim()
-		return this.clineSdk.startSession({
+		if (!this.startTaskHandler) throw new Error("StartTaskHandler is not attached.")
+		return this.startTaskHandler.execute({
 			prompt,
 			cwd,
 			userImages: await normalizeSdkImageInputs(userImages),
@@ -3464,20 +3474,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.sdkRunGeneration++
 		const sessionIdForHook = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
 		let cancelledSessionId = ""
-		if (this.clineSdk) {
+		if (this.clineSdk && this.cancelTaskHandler) {
 			const sessionId = this.clineSdk.status.activeSessionId
 			if (sessionId) {
 				cancelledSessionId = sessionId
-				await this.clineSdk.abort({ sessionId }).catch((error) => {
+				await this.cancelTaskHandler.execute({ sessionId }).catch((error) => {
 					this.logger.log("sidecar", "cancelAbortFailed", {
 						sessionId,
 						error: error instanceof Error ? error.message : String(error),
 					})
 				})
 			}
-		}
-		if (cancelledSessionId) {
-			this.clineSdk?.markSessionInactive(cancelledSessionId)
 		}
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()

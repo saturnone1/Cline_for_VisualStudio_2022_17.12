@@ -7,6 +7,26 @@ export type AgentMessageRequest = Readonly<{
 	userFiles?: readonly string[]
 }>
 
+export type AgentStartRequest = Readonly<{
+	prompt: string
+	cwd: string
+	sessionId?: string
+	providerId?: string
+	modelId?: string
+	apiKey?: string
+	systemPrompt?: string
+	mode?: "plan" | "act"
+	interactive?: boolean
+	userImages?: readonly string[]
+	userFiles?: readonly string[]
+	initialMessages?: readonly unknown[]
+	sessionMetadata?: Readonly<Record<string, unknown>>
+	config?: Readonly<Record<string, unknown>>
+	toolPolicies?: Readonly<Record<string, unknown>>
+}>
+
+export type AgentSessionRequest = Readonly<{ sessionId: string }>
+
 export type AgentEngineStatus = {
 	activeSessionId: string | null
 	started?: boolean
@@ -19,10 +39,10 @@ export interface AgentEnginePort {
 	readonly status: AgentEngineStatus
 	markSessionInactive(sessionId?: string): void
 	activateSession(sessionId: string): Promise<unknown>
-	startSession(params: unknown): Promise<unknown>
+	startSession(command: AgentStartRequest): Promise<unknown>
 	send(command: AgentMessageRequest): Promise<unknown>
-	stop(params: unknown): Promise<unknown>
-	abort(params: unknown): Promise<unknown>
+	stop(command: AgentSessionRequest): Promise<unknown>
+	abort(command: AgentSessionRequest): Promise<unknown>
 	listHistory(params: unknown): Promise<unknown>
 	getSession(params: unknown): Promise<unknown>
 	readMessages(params: unknown): Promise<unknown>

@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { AgentEnginePort, AgentMessageRequest } from "../../application/ports/AgentEnginePort"
+import type { AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
@@ -86,9 +86,8 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		}
 	}
 
-	async startSession(params: unknown) {
+	async startSession(request: AgentStartRequest) {
 		const core = await this.getCore()
-		const request = asRecord(params)
 		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 		const cwd = stringValue(request.cwd) || workspaceRoots[0] || process.cwd()
 		const config = asRecord(request.config)
@@ -170,8 +169,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		}
 	}
 
-	async stop(params: unknown) {
-		const request = asRecord(params)
+	async stop(request: AgentSessionRequest) {
 		const sessionId = stringValue(request.sessionId) || this.activeSessionId
 		if (!sessionId || !this.core) {
 			return this.status
@@ -185,9 +183,8 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		return this.status
 	}
 
-	async abort(params: unknown) {
+	async abort(request: AgentSessionRequest) {
 		const core = await this.getCore()
-		const request = asRecord(params)
 		const sessionId = stringValue(request.sessionId) || this.activeSessionId
 		if (!sessionId) {
 			return this.status
