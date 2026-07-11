@@ -41,6 +41,7 @@ import { TerminalActivityMonitor } from "./infrastructure/conversation/TerminalA
 import { TaskActivityMonitor } from "./features/runtime/TaskActivityMonitor"
 import { PartialStateScheduler } from "./features/runtime/PartialStateScheduler"
 import { SendLatencyMonitor } from "./features/runtime/SendLatencyMonitor"
+import { ChangeTrackingHandler } from "./infrastructure/workspace/ChangeTrackingHandler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -92,6 +93,7 @@ const server = new SidecarRpcServer(
 		backend.setTaskActivityMonitor(new TaskActivityMonitor(interactionLogger, () => backend.hasActiveTask(), () => backend.hasActivePartialText(), () => backend.handleTaskIdleLongRunning(), readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000), readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)))
 		backend.setPartialStateScheduler(new PartialStateScheduler(interactionLogger, () => backend.hasStateSubscribers(), () => backend.getActivePartialSnapshot(), () => backend.handlePartialIdle(), () => backend.requestStateBroadcast(), readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000), readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)))
 		backend.setSendLatencyMonitor(new SendLatencyMonitor(interactionLogger))
+		backend.setChangeTrackingHandler(new ChangeTrackingHandler(host.workspaceClient, (text) => backend.publishChangeTranscript(text)))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

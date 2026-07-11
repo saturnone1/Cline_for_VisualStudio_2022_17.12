@@ -62,6 +62,7 @@ import { ConversationProjectionState, type ToolActivityEntry } from "../../featu
 import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
 import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
 import type { SendLatencyMonitor } from "../../features/runtime/SendLatencyMonitor"
+import type { ChangeTrackingHandler } from "../workspace/ChangeTrackingHandler"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -180,7 +181,6 @@ import {
 	isGlobalSettingsItem,
 	settingsItemKey,
 	settingsItemToSkillInfo,
-	normalizeChangePath,
 	mapToolName,
 	toolActivityEntriesFromMessage,
 	toolTranscriptToActivityEntries,
@@ -230,15 +230,6 @@ import {
 	isOAuthBridgeProvider,
 } from "../auth/ProviderAuthSupport"
 
-type TrackedChangeSummary = {
-	filePath: string
-	beforePath: string
-	afterPath: string
-	action: string
-	additions: number
-	deletions: number
-}
-
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
@@ -269,9 +260,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private stateBroadcastQueued = false
 	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private stateHydrationRefreshInFlight = false
-	private readonly recentlyTrackedChangePaths = new Map<string, number>()
-	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
-	private changeSummaryTimer: NodeJS.Timeout | null = null
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
 	private sdkRunGeneration = 0
@@ -289,6 +277,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private taskActivity: TaskActivityMonitor | null = null
 	private partialStateScheduler: PartialStateScheduler | null = null
 	private sendLatency: SendLatencyMonitor | null = null
+	private changeTracking: ChangeTrackingHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -363,6 +352,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setTaskActivityMonitor(taskActivity: TaskActivityMonitor) { this.taskActivity = taskActivity }
 	setPartialStateScheduler(partialStateScheduler: PartialStateScheduler) { this.partialStateScheduler = partialStateScheduler }
 	setSendLatencyMonitor(sendLatency: SendLatencyMonitor) { this.sendLatency = sendLatency }
+	setChangeTrackingHandler(changeTracking: ChangeTrackingHandler) { this.changeTracking = changeTracking }
+	async publishChangeTranscript(text: string) { this.addMessage({ type: "say", say: "tool", text }); this.updateCurrentTaskItem(); await this.broadcastState() }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
@@ -377,10 +368,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearPartialStateBroadcastTimer()
 		this.clearTaskIdleWatchdog()
 		this.terminalActivity?.dispose()
-		if (this.changeSummaryTimer) {
-			clearTimeout(this.changeSummaryTimer)
-			this.changeSummaryTimer = null
-		}
+		this.changeTracking?.dispose()
 		this.stateStreamRequestIds.clear()
 		this.partialMessageStreamRequestIds.clear()
 		this.mcpServerStreamRequestIds.clear()
@@ -2531,14 +2519,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async describeCheckpointDiff(message: unknown) {
-		const trackedChanges = Array.from(this.pendingChangeSummaries.values()).map((change) => ({
-			filePath: change.filePath,
-			action: change.action,
-			additions: change.additions,
-			deletions: change.deletions,
-			beforePath: change.beforePath,
-			afterPath: change.afterPath,
-		}))
+		const trackedChanges = this.requireChangeTracking().pendingChanges()
 		const description = this.requireCheckpoints().describe(message, { taskItem: this.state.currentTaskItem, messages: this.state.clineMessages, trackedChanges })
 
 		if (description.success) this.addMessage({
@@ -3004,6 +2985,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.sendLatency
 	}
 
+	private requireChangeTracking() {
+		if (!this.changeTracking) throw new Error("Change tracking handler is not attached.")
+		return this.changeTracking
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -3402,166 +3388,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.conversationProjection.clearReasoningStatus()
 	}
 
-	private async handleFileChangedEvent(payload: Record<string, unknown>) {
-		const filePath = getString(payload, "filePath")
-		const beforePath = getString(payload, "beforePath")
-		const afterPath = getString(payload, "afterPath") || filePath
-		if (!filePath || !beforePath || !afterPath) {
-			return
-		}
+	private async handleFileChangedEvent(payload: Record<string, unknown>) { this.requireChangeTracking().track(payload) }
 
-		const additions = getNumber(payload, "additions") || 0
-		const deletions = getNumber(payload, "deletions") || 0
-		const action = getString(payload, "action") || "modified"
-		this.recentlyTrackedChangePaths.set(normalizeChangePath(filePath), Date.now())
-		this.pruneTrackedChangePaths()
 
-		this.queueChangeSummary({
-			filePath,
-			beforePath,
-			afterPath,
-			action,
-			additions,
-			deletions,
-		})
-	}
 
-	private queueChangeSummary(change: TrackedChangeSummary) {
-		const key = normalizeChangePath(change.filePath)
-		const existing = this.pendingChangeSummaries.get(key)
-		this.pendingChangeSummaries.set(key, {
-			...change,
-			beforePath: existing?.beforePath || change.beforePath,
-			additions: (existing?.additions || 0) + change.additions,
-			deletions: (existing?.deletions || 0) + change.deletions,
-		})
 
-		if (this.changeSummaryTimer) {
-			clearTimeout(this.changeSummaryTimer)
-		}
-		this.changeSummaryTimer = setTimeout(() => {
-			this.flushChangeSummary().catch((error) => console.error(error))
-		}, 250)
-	}
 
-	private async flushChangeSummary() {
-		this.changeSummaryTimer = null
-		const files = Array.from(this.pendingChangeSummaries.values())
-		this.pendingChangeSummaries.clear()
-		if (files.length === 0) {
-			return
-		}
+	private async revertVsClineChanges(message: unknown) { return this.requireChangeTracking().revert(message) }
 
-		const additions = files.reduce((sum, file) => sum + file.additions, 0)
-		const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
-		const changed = files.filter((file) => file.action !== "created" && file.action !== "deleted").length
-		const created = files.filter((file) => file.action === "created").length
-		const deleted = files.filter((file) => file.action === "deleted").length
-		const actionParts = [
-			changed ? `edited ${changed}` : "",
-			created ? `created ${created}` : "",
-			deleted ? `deleted ${deleted}` : "",
-		].filter(Boolean)
+	private wasRecentlyTracked(filePath: string) { return this.requireChangeTracking().wasRecentlyTracked(filePath) }
 
-		const text = JSON.stringify({
-			tool: "vsclineChangedFiles",
-			path: files[0]?.filePath || "",
-			content: `LIG VS ${actionParts.join(", ") || "changed"} file${files.length > 1 ? "s" : ""}.`,
-			files,
-			additions,
-			deletions,
-		})
-		this.addMessage({ type: "say", say: "tool", text })
-		this.updateCurrentTaskItem()
-		await this.broadcastState()
-	}
+	private hasRecentlyTrackedChange() { return this.requireChangeTracking().hasRecentlyTrackedChange() }
 
-	private async revertVsClineChanges(message: unknown) {
-		const request = asRecord(message)
-		const files = (Array.isArray(request.files) ? request.files : [])
-			.map(asRecord)
-			.filter((file) => getString(file, "filePath"))
-		const workspaceClient = this.host.workspaceClient
-		const reverted: string[] = []
-		const skipped: Array<{ filePath: string; reason: string }> = []
 
-		for (const file of files) {
-			const filePath = getString(file, "filePath")
-			const beforePath = getString(file, "beforePath")
-			const action = getString(file, "action") || "modified"
-			if (!filePath) {
-				continue
-			}
-
-			try {
-				if (action === "created") {
-					await workspaceClient.deleteFile({ path: filePath })
-					reverted.push(filePath)
-					continue
-				}
-
-				if (!beforePath) {
-					skipped.push({ filePath, reason: "missing before snapshot" })
-					continue
-				}
-
-				const before = asRecord(await workspaceClient.readTextFile({ path: beforePath }))
-				if (before.exists !== true) {
-					skipped.push({ filePath, reason: "before snapshot not found" })
-					continue
-				}
-
-				await workspaceClient.writeTextFile({ path: filePath, content: getString(before, "content") })
-				reverted.push(filePath)
-			} catch (error) {
-				skipped.push({ filePath, reason: stringify(error) })
-			}
-		}
-
-		const content =
-			skipped.length > 0
-				? `Reverted ${reverted.length} file${reverted.length === 1 ? "" : "s"}; skipped ${skipped.length}.`
-				: `Reverted ${reverted.length} file${reverted.length === 1 ? "" : "s"}.`
-		this.addMessage({
-			type: "say",
-			say: "tool",
-			text: JSON.stringify({
-				tool: "vsclineRevertedFiles",
-				path: reverted[0] || skipped[0]?.filePath || "",
-				content,
-				files: reverted,
-				skipped,
-			}),
-		})
-		this.updateCurrentTaskItem()
-		await this.broadcastState()
-
-		return {
-			success: skipped.length === 0,
-			reverted,
-			skipped,
-			message: content,
-		}
-	}
-
-	private wasRecentlyTracked(filePath: string) {
-		this.pruneTrackedChangePaths()
-		return this.recentlyTrackedChangePaths.has(normalizeChangePath(filePath))
-	}
-
-	private hasRecentlyTrackedChange() {
-		this.pruneTrackedChangePaths()
-		return this.recentlyTrackedChangePaths.size > 0
-	}
-
-	private pruneTrackedChangePaths() {
-		const cutoff = Date.now() - 15_000
-		for (const [filePath, ts] of this.recentlyTrackedChangePaths) {
-			if (ts < cutoff) {
-				this.recentlyTrackedChangePaths.delete(filePath)
-			}
-		}
-	}
 
 	private async buildSdkConfig(cwd: string, sessionId?: string) {
 		const apiConfig = asRecord(this.state.apiConfiguration)

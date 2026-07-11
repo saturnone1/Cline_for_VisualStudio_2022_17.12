@@ -203,6 +203,7 @@ for (const requiredFile of [
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",
 	"infrastructure/worktree/NodeWorktreeOperationsAdapter.ts",
+	"infrastructure/workspace/ChangeTrackingHandler.ts",
 	"infrastructure/webview/WebviewState.ts",
 	"infrastructure/transport/SidecarRpcServer.ts",
 	"features/chat/sendMessage/SendMessageCommand.ts",
