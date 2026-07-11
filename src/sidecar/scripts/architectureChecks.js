@@ -186,6 +186,7 @@ for (const requiredFile of [
 	"infrastructure/persistence/LocalScheduledAgentStore.ts",
 	"infrastructure/browser/BrowserDevToolsAdapter.ts",
 	"infrastructure/conversation/ConversationSupport.ts",
+	"infrastructure/conversation/TerminalActivityMonitor.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",

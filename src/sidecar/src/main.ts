@@ -37,6 +37,7 @@ import { LocalHookStore } from "./infrastructure/hooks/LocalHookStore"
 import { HookExecutionHandler } from "./features/hooks/HookExecutionHandler"
 import { ProcessHookExecutionAdapter } from "./infrastructure/hooks/ProcessHookExecutionAdapter"
 import { CheckpointHandler } from "./features/checkpoints/CheckpointHandler"
+import { TerminalActivityMonitor } from "./infrastructure/conversation/TerminalActivityMonitor"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -84,6 +85,7 @@ const server = new SidecarRpcServer(
 		backend.setHookSettingsHandler(hookSettings)
 		backend.setHookExecutionHandler(new HookExecutionHandler(hookSettings, new ProcessHookExecutionAdapter(), interactionLogger))
 		backend.setCheckpointHandler(new CheckpointHandler(runtime))
+		backend.setTerminalActivityMonitor(new TerminalActivityMonitor(host.workspaceClient, interactionLogger, (text) => backend.updateTerminalActivity(text), () => backend.getUiLanguage()))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

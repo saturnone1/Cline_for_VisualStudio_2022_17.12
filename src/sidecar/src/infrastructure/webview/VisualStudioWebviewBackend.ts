@@ -57,6 +57,7 @@ import {
 } from "../persistence/LocalAutomationStore"
 import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
 import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHandler"
+import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMonitor"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -182,7 +183,6 @@ import {
 	toolTranscriptToActivityEntries,
 	buildGroupedToolActivityText,
 	formatToolActivitySection,
-	buildTerminalActivityText,
 	formatCompletedCommandActivity,
 	normalizeTerminalOutputText,
 	toolActivityEntryKey,
@@ -288,9 +288,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private activeProgressPhase: ProgressPhase | null = null
 	private activeToolActivityTs: number | null = null
 	private activeToolActivityEntries: ToolActivityEntry[] = []
-	private terminalStateTimer: NodeJS.Timeout | null = null
-	private terminalStatePolling = false
-	private lastTerminalOutputSequence = 0
 	private partialIdleTimer: NodeJS.Timeout | null = null
 	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private stateBroadcastInFlight: Promise<void> | null = null
@@ -323,6 +320,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private hookSettings: HookSettingsHandler | null = null
 	private hookExecution: HookExecutionHandler | null = null
 	private checkpoints: CheckpointHandler | null = null
+	private terminalActivity: TerminalActivityMonitor | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -391,15 +389,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setHookSettingsHandler(hookSettings: HookSettingsHandler) { this.hookSettings = hookSettings }
 	setHookExecutionHandler(hookExecution: HookExecutionHandler) { this.hookExecution = hookExecution }
 	setCheckpointHandler(checkpoints: CheckpointHandler) { this.checkpoints = checkpoints }
+	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
+	updateTerminalActivity(text: string) { this.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
 		this.clearTaskIdleWatchdog()
-		if (this.terminalStateTimer) {
-			clearTimeout(this.terminalStateTimer)
-			this.terminalStateTimer = null
-		}
+		this.terminalActivity?.dispose()
 		if (this.changeSummaryTimer) {
 			clearTimeout(this.changeSummaryTimer)
 			this.changeSummaryTimer = null
@@ -1560,7 +1557,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			!!this.activeFoldedReasoningText ||
 			!!this.activeFoldedActivityText ||
 			!!this.activeTerminalActivityText ||
-			!!this.terminalStateTimer
+			this.terminalActivity?.isActive === true
 
 		this.clearTaskIdleWatchdog()
 		this.clearPartialIdleWatchdog()
@@ -3030,6 +3027,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.checkpoints
 	}
 
+	private requireTerminalActivity() {
+		if (!this.terminalActivity) throw new Error("Terminal activity monitor is not attached.")
+		return this.terminalActivity
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -3833,7 +3835,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.addMessage({ type: "say", say: "completion_result", text })
 	}
 
-	private getUiLanguage(): "en" | "ko" {
+	getUiLanguage(): "en" | "ko" {
 		return getString(this.state, "uiLanguage") === "en" ? "en" : "ko"
 	}
 
@@ -4150,54 +4152,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private startTerminalStatePolling() {
-		if (this.terminalStateTimer) {
-			return
-		}
-
-		this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStatePollFailed", { message: stringify(error) }))
-		this.terminalStateTimer = setInterval(() => {
-			this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStatePollFailed", { message: stringify(error) }))
-		}, readPositiveIntEnv("VSCLINE_TERMINAL_STATE_POLL_MS", 2500))
+		this.requireTerminalActivity().start()
 	}
 
 	private stopTerminalStatePolling() {
-		if (this.terminalStateTimer) {
-			clearInterval(this.terminalStateTimer)
-			this.terminalStateTimer = null
-		}
-		this.terminalStatePolling = false
+		this.terminalActivity?.stop()
 	}
 
 	private async pollTerminalState() {
-		if (this.terminalStatePolling) {
-			return
-		}
-		this.terminalStatePolling = true
-		try {
-			const workspace = this.host.workspaceClient
-			const state = asRecord(await workspace.getTerminalState({}))
-			const activeCommands = Array.isArray(state.activeCommands) ? state.activeCommands.map(asRecord) : []
-			const recentCommands = Array.isArray(state.recentCommands) ? state.recentCommands.map(asRecord) : []
-			const outputResult = asRecord(await workspace.getUnretrievedTerminalOutput({ afterSequence: this.lastTerminalOutputSequence }))
-			const lines = Array.isArray(outputResult.lines) ? outputResult.lines.map(asRecord) : []
-			for (const line of lines) {
-				const sequence = getNumber(line, "sequence") || 0
-				if (sequence > this.lastTerminalOutputSequence) {
-					this.lastTerminalOutputSequence = sequence
-				}
-			}
-
-			const text = buildTerminalActivityText(activeCommands, recentCommands, lines, state, this.getUiLanguage())
-			if (!text) {
-				return
-			}
-
-			this.activeTerminalActivityText = text
-			this.upsertFoldedProgressMessage()
-			this.updateCurrentTaskItem()
-		} finally {
-			this.terminalStatePolling = false
-		}
+		await this.requireTerminalActivity().poll()
 	}
 
 	private finishActiveToolActivity() {
