@@ -34,7 +34,7 @@ const server = new SidecarRpcServer(
 			(question, options) => webview.requestQuestion(question, options),
 			() => webview.isScheduledAgentsEnabled(),
 		)
-		backend.setClineSdk(runtime)
+		backend.setAgentEngine(runtime)
 		backend.setTaskSessionUseCase(new TaskSessionUseCase(runtime))
 		backend.setMcpUseCase(new McpUseCase(runtime))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }

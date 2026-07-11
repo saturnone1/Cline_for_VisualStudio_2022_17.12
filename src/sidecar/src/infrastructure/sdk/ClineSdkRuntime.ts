@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { ClineRuntimePort } from "../../application/ports/ClineRuntimePort"
+import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
@@ -23,7 +23,7 @@ export type ClineSdkStatus = {
 	lastError?: string
 }
 
-export class ClineSdkRuntime implements ClineRuntimePort {
+export class ClineSdkRuntime implements AgentEnginePort {
 	private core: ClineCoreInstance | null = null
 	private starting: Promise<ClineCoreInstance> | null = null
 	private mcpManager: McpManagerInstance | null = null

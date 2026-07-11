@@ -6,7 +6,7 @@ import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { promisify } from "node:util"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { ClineRuntimePort } from "../../application/ports/ClineRuntimePort"
+import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { WebviewTransportPort } from "../../application/ports/WebviewTransportPort"
@@ -316,7 +316,7 @@ type BrowserSessionRecord = {
 }
 
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
-	private clineSdk: ClineRuntimePort | null = null
+	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
 	private mcp: McpUseCase | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
@@ -410,8 +410,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 	}
 
-	setClineSdk(clineSdk: ClineRuntimePort) {
-		this.clineSdk = clineSdk
+	setAgentEngine(agentEngine: AgentEnginePort) {
+		this.agentEngine = agentEngine
+	}
+
+	// Transitional facade alias. Feature slices should receive AgentEnginePort
+	// directly as they are extracted from this legacy backend.
+	private get clineSdk() {
+		return this.agentEngine
 	}
 
 	setTaskSessionUseCase(taskSessions: TaskSessionUseCase) {

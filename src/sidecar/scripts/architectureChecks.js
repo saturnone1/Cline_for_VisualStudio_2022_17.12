@@ -44,7 +44,7 @@ for (const filePath of walk(sourceRoot)) {
 
 const routerPath = path.join(sourceRoot, "infrastructure", "webview", "VisualStudioWebviewBackend.ts")
 const router = fs.readFileSync(routerPath, "utf8")
-for (const marker of ["HostProviderPort", "ClineRuntimePort", "WebviewTransportPort", "InteractionLoggerPort"]) {
+for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPort", "InteractionLoggerPort"]) {
 	if (!router.includes(marker)) violations.push(`VisualStudioWebviewBackend is missing application port: ${marker}`)
 }
 if (router.includes("VisualStudioHostProvider") || router.includes("sendHostRequest(")) {
@@ -104,6 +104,7 @@ if (router.includes("function createProviderAuthInfo") || router.includes("funct
 
 for (const requiredFile of [
 	"domain/agent/AgentRuntimeEvent.ts",
+	"application/ports/AgentEnginePort.ts",
 	"application/useCases/McpUseCase.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",

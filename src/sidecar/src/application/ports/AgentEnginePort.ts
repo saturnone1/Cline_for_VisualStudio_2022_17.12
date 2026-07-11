@@ -1,11 +1,13 @@
-export type ClineRuntimeStatus = {
+export type AgentEngineStatus = {
 	activeSessionId: string | null
 	started?: boolean
 	lastError?: string
 }
 
-export interface ClineRuntimePort {
-	readonly status: ClineRuntimeStatus
+// Product features depend on this boundary. Cline SDK types must remain inside
+// the infrastructure adapter that implements it.
+export interface AgentEnginePort {
+	readonly status: AgentEngineStatus
 	markSessionInactive(sessionId?: string): void
 	activateSession(sessionId: string): Promise<unknown>
 	startSession(params: unknown): Promise<unknown>

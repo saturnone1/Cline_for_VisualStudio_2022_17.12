@@ -32,7 +32,7 @@ try {
         "WebApp/assets/lig-mark-black.png",
         "Sidecar/runtime/cline-sidecar.js",
         "Sidecar/runtime/node.exe",
-        "Sidecar/runtime/application/ports/ClineRuntimePort.js",
+        "Sidecar/runtime/application/ports/AgentEnginePort.js",
         "Sidecar/runtime/application/useCases/McpUseCase.js",
         "Sidecar/runtime/application/useCases/StatePersistenceUseCase.js",
         "Sidecar/runtime/application/useCases/TaskLifecycleUseCase.js",
