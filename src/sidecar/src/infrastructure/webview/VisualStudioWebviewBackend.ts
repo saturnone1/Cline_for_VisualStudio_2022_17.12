@@ -716,24 +716,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	async handle(envelope: WebviewEnvelope) {
-		this.logger.log("webview->sidecar", envelope.type || "webview.message", envelope)
+		this.logger.log("webview->sidecar", envelope.type === "unhandled" ? envelope.originalType || "webview.message" : envelope.type, envelope)
 
-		if (envelope.type === "grpc_request" && envelope.grpc_request) {
-			const handledGrpc = await this.handleGrpcRequest(envelope.grpc_request)
+		if (envelope.type === "grpc_request") {
+			const handledGrpc = await this.handleGrpcRequest(envelope.request)
 			if (handledGrpc) {
 				return handledGrpc
 			}
 		}
 
 		if (envelope.type === "grpc_request_cancel") {
-			const requestId = readRequestId(envelope.grpc_request_cancel)
-			if (!requestId) {
-				return {
-					handled: false,
-					reason: "missing_cancel_request_id",
-					webviewMessages: [],
-				}
-			}
+			const requestId = envelope.requestId
 			if (this.disposeStreamRequest(requestId)) {
 				this.logger.log("webview->sidecar", "grpc_request_cancel.streamDisposed", { requestId })
 				return {
@@ -752,23 +745,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		return {
 			handled: false,
-			type: envelope.type || "",
+			type: envelope.type === "unhandled" ? envelope.originalType : envelope.type,
 			webviewMessages: [],
 		}
 	}
 
 	private async handleGrpcRequest(request: GrpcRequest) {
-		this.logger.log("webview->sidecar", `${request.service || ""}.${request.method || ""}`, request)
+		this.logger.log("webview->sidecar", `${request.service}.${request.method}`, request)
 		const startedAt = Date.now()
-		const service = request.service || ""
-		const method = request.method || ""
-		const requestId = readRequestId(request)
-		const isStreaming = request.is_streaming === true || request.isStreaming === true
+		const service = request.service
+		const method = request.method
+		const requestId = request.requestId
+		const isStreaming = request.isStreaming
 		const key = `${service}.${method}`
-
-		if (!requestId) {
-			return null
-		}
 
 		if (isStreaming) {
 			const result = await this.handleStreamingRequest(key, requestId)

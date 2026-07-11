@@ -1,6 +1,6 @@
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { WebviewApplicationPort } from "../../application/ports/WebviewApplicationPort"
-import type { WebviewEnvelope } from "../../application/dto/WebviewRpc"
+import { parseWebviewEnvelope } from "../../application/dto/WebviewRpc"
 
 export class VisualStudioWebviewController {
 	constructor(private readonly application: WebviewApplicationPort) {}
@@ -13,7 +13,11 @@ export class VisualStudioWebviewController {
 	handle(params: unknown) {
 		try {
 			const rawJson = readRawJson(params)
-			return this.application.handle(JSON.parse(rawJson) as WebviewEnvelope)
+			const parsed = parseWebviewEnvelope(JSON.parse(rawJson))
+			if (!parsed.ok) {
+				return Promise.resolve({ handled: false, reason: parsed.reason })
+			}
+			return this.application.handle(parsed.value)
 		} catch {
 			return Promise.resolve({ handled: false, reason: "invalid_webview_json" })
 		}

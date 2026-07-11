@@ -28,7 +28,7 @@ function createBackend() {
 function grpcRequest(service, method, requestId, message = {}, streaming = false) {
 	return {
 		type: "grpc_request",
-		grpc_request: { service, method, request_id: requestId, message, is_streaming: streaming },
+		request: { service, method, requestId, message, isStreaming: streaming },
 	}
 }
 
@@ -47,7 +47,7 @@ test("webview backend registers and cancels state streams without stale response
 	const subscribed = await backend.handle(grpcRequest("StateService", "subscribeToState", "state-1", {}, true))
 	assert.equal(subscribed.webviewMessages[0].grpc_response.is_streaming, true)
 
-	const cancelled = await backend.handle({ type: "grpc_request_cancel", grpc_request_cancel: { request_id: "state-1" } })
+	const cancelled = await backend.handle({ type: "grpc_request_cancel", requestId: "state-1" })
 	assert.equal(cancelled.handled, true)
 	assert.deepEqual(cancelled.webviewMessages, [])
 	backend.dispose()
