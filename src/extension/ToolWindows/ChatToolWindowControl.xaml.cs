@@ -156,6 +156,8 @@ namespace VsClineAgent.ToolWindows
 				var message = JObject.Parse(webMessageAsJson);
 				if (!string.Equals((string?)message["type"], "ligvs_theme_changed", StringComparison.Ordinal))
 					return false;
+				if ((int?)message["protocolVersion"] != 1)
+					return false;
 
 				var theme = string.Equals((string?)message["theme"], LightTheme, StringComparison.OrdinalIgnoreCase)
 					? LightTheme

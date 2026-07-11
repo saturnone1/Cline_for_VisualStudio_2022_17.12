@@ -126,6 +126,15 @@ const webviewController = fs.readFileSync(controllerPath, "utf8")
 if (!webviewController.includes("parseHostSidecarWebviewRequest") || !webviewController.includes("createHostSidecarWebviewResponse")) {
 	violations.push("VisualStudioWebviewController must enforce the versioned host-sidecar WebView contract.")
 }
+const productSourceRoot = path.resolve(__dirname, "..", "..")
+const themeContractSource = fs.readFileSync(path.join(productSourceRoot, "webview", "src", "utils", "ligTheme.ts"), "utf8")
+const themeHostSource = fs.readFileSync(path.join(productSourceRoot, "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"), "utf8")
+if (!themeContractSource.includes("LigThemeChangedMessage") || !themeContractSource.includes("protocolVersion: 1")) {
+	violations.push("The direct WebView theme bridge must use a typed versioned message.")
+}
+if (!themeHostSource.includes('message["protocolVersion"]') || !themeHostSource.includes("!= 1")) {
+	violations.push("The Visual Studio theme bridge must reject unsupported message versions.")
+}
 const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
 	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")

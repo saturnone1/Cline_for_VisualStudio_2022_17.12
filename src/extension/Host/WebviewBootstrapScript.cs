@@ -35,6 +35,7 @@ namespace VsClineAgent.Host
                 }
                 try {
                     window.chrome && window.chrome.webview && window.chrome.webview.postMessage({
+                        protocolVersion: 1,
                         type: 'ligvs_theme_changed',
                         theme: mode
                     });
@@ -53,7 +54,7 @@ namespace VsClineAgent.Host
             themeStyle.textContent = `
 :root {
     color-scheme: dark;
-    --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+    --vscode-font-family: 'Noto Sans KR', 'Segoe UI', system-ui, sans-serif;
     --vscode-font-size: 13px;
     --vscode-editor-font-family: Consolas, 'Cascadia Mono', monospace;
     --vscode-editor-font-size: 13px;

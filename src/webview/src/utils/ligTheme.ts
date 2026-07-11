@@ -1,4 +1,5 @@
 export type LigTheme = "dark" | "light"
+export type LigThemeChangedMessage = Readonly<{ protocolVersion: 1; type: "ligvs_theme_changed"; theme: LigTheme }>
 
 export const LIG_THEME_STORAGE_KEY = "ligVsTheme"
 
@@ -35,7 +36,8 @@ export const applyLigTheme = (theme: LigTheme) => {
 		const hostWindow = window as Window & {
 			chrome?: { webview?: { postMessage: (message: unknown) => void } }
 		}
-		hostWindow.chrome?.webview?.postMessage({ type: "ligvs_theme_changed", theme: normalized })
+		const message: LigThemeChangedMessage = { protocolVersion: 1, type: "ligvs_theme_changed", theme: normalized }
+		hostWindow.chrome?.webview?.postMessage(message)
 	} catch {
 		// The browser development host does not expose the Visual Studio bridge.
 	}
