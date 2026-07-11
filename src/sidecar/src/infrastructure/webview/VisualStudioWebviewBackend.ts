@@ -86,6 +86,7 @@ import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEven
 import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEventProjector"
 import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
 import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
+import { TaskCompletionProjector } from "../conversation/TaskCompletionProjector"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
@@ -126,7 +127,6 @@ import {
 	tryParseJson,
 	getAskResponseText,
 	firstString,
-	findLastIndex,
 	shouldAutoApproveTool,
 	normalizeClineMessagePayload,
 	isMeaninglessToolMessage,
@@ -183,7 +183,6 @@ import {
 	toolInputToText,
 	toolResultToText,
 	stringifyPretty,
-	normalizeTranscriptText,
 	mapToolName,
 	toolActivityEntriesFromMessage,
 	toolTranscriptToActivityEntries,
@@ -270,6 +269,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentAuxiliaryEvents: AgentAuxiliaryEventProjector
 	private readonly agentSnapshotEvents: AgentSnapshotEventProjector
 	private readonly agentChunkEvents: AgentChunkEventProjector
+	private readonly taskCompletion: TaskCompletionProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
@@ -359,6 +359,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		})
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
+		this.taskCompletion = new TaskCompletionProjector({ messages: () => this.state.clineMessages, transition: (status, source) => { this.transitionTask(status, source) }, clearFinishStatus: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus() }, finishProgress: () => { this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, prepareAssistant: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, activeText: () => this.getActivePartialText(), addMessage: (message) => { this.addMessage(message) }, markAssistantLatency: (length) => this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), length), finalizeOpenPartial: () => this.finalizeOpenPartialMessages(), lastActivityReason: () => this.taskActivity?.reason || "", runCompleteHook: (context) => { void this.runLifecycleHooks("TaskComplete", context) }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), language: () => this.getUiLanguage(), recentToolSummaries: () => this.conversationProjection.recentToolSummaries(5), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
@@ -2115,134 +2116,27 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private addAssistantTextResult(text: string) {
-		this.clearTaskIdleWatchdog()
-		this.clearPartialIdleWatchdog()
-		this.finalizeActivePartialText()
-		this.finishActiveToolActivity()
-		this.finishFoldedReasoningText()
-		const normalizedText = normalizeAssistantTranscriptText(text || "")
-		if (!normalizedText) {
-			return
-		}
-		this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), normalizedText.length)
-
-		const lastText = [...this.state.clineMessages]
-			.reverse()
-			.find((message) => message.say === "text" && message.partial !== true)
-		if (normalizeTranscriptText(getString(lastText, "text")) === normalizeTranscriptText(normalizedText)) {
-			return
-		}
-
-		this.addMessage({ type: "say", say: "text", text: normalizedText })
+		this.taskCompletion.addAssistantText(text)
 	}
 
 	private hasCompletionResult() {
-		return this.state.clineMessages.some((message) => message.say === "completion_result" || message.ask === "completion_result")
-	}
-
-	private getLastUserMessageIndex() {
-		return findLastIndex(
-			this.state.clineMessages,
-			(message) => getString(message, "say") === "user_feedback" || getString(message, "say") === "task",
-		)
+		return this.taskCompletion.hasCompletion()
 	}
 
 	private hasCompletionResultAfterLastUserMessage() {
-		const lastUserIndex = this.getLastUserMessageIndex()
-		return this.state.clineMessages
-			.slice(lastUserIndex + 1)
-			.some((message) => getString(message, "say") === "completion_result" || getString(message, "ask") === "completion_result")
-	}
-
-	private getLastUserOrProgressMessageIndex() {
-		return findLastIndex(this.state.clineMessages, (message) => {
-			const say = getString(message, "say")
-			const ask = getString(message, "ask")
-			if (say === "user_feedback" || say === "task") {
-				return true
-			}
-			if (ask === "command" || ask === "tool") {
-				return true
-			}
-			if (say === "tool" || say === "command_output" || say === "browser_action") {
-				return true
-			}
-			if (say === "reasoning") {
-				const text = getString(message, "text")
-				return text.includes("기록") || text.includes("history") || text.includes("진행") || text.includes("Running")
-			}
-			return false
-		})
-	}
-
-	private hasAssistantTextAfterLastUserOrProgressMessage() {
-		const lastBoundaryIndex = this.getLastUserOrProgressMessageIndex()
-		return this.state.clineMessages
-			.slice(lastBoundaryIndex + 1)
-			.some((message) => getString(message, "say") === "text" && getString(message, "text").trim().length > 0 && message.partial !== true)
+		return this.taskCompletion.hasCompletionAfterLastUser()
 	}
 
 	private finishSdkTask(sessionId: string, status: string, text = "") {
-		this.transitionTask(isFailedTaskStatus(status) ? "failed" : "completed", `finish:${status || "completed"}`)
-		this.clearTaskIdleWatchdog()
-		this.clearPartialIdleWatchdog()
-		this.clearReasoningStatus()
-		const activeText = text || this.getActivePartialText()
-		this.finalizeActivePartialText()
-		this.finishActiveToolActivity()
-		this.finishFoldedReasoningText()
-
-		const hasAssistantTextSinceUser = this.hasAssistantTextAfterLastUserMessage()
-		const hasFinalAssistantText = this.hasAssistantTextAfterLastUserOrProgressMessage()
-		if (activeText) {
-			this.addAssistantTextResult(activeText)
-		} else if (!hasAssistantTextSinceUser) {
-			this.logger.log("sidecar", "emptyDoneNoFinalAssistantText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
-			const normalizedStatus = String(status || "").toLowerCase()
-			if (normalizedStatus === "completed" || normalizedStatus === "idle" || normalizedStatus === "ended") {
-				this.finalizeOpenPartialMessages()
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				return
-			}
-		} else if (!hasFinalAssistantText) {
-			this.logger.log("sidecar", "doneWithPreviousAssistantTextNoFinalText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
-		} else {
-			this.logger.log("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
-		}
-		this.finalizeOpenPartialMessages()
-		this.addCompletionResultMarker(status)
-		void this.runLifecycleHooks("TaskComplete", { sessionId, status, text: activeText })
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
+		this.taskCompletion.finish(sessionId, status, text)
 	}
 
 	private failSdkTaskWithMessage(sessionId: string, text: string) {
-		this.transitionTask("failed", "finish:empty-model-response")
-		this.clearTaskIdleWatchdog()
-		this.clearPartialIdleWatchdog()
-		this.clearReasoningStatus()
-		this.finalizeActivePartialText()
-		this.finishActiveToolActivity()
-		this.finishFoldedReasoningText()
-		this.finalizeOpenPartialMessages()
-		this.addMessage({ type: "say", say: "error", text })
-		void this.runLifecycleHooks("TaskComplete", { sessionId, status: "failed", text })
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
+		this.taskCompletion.fail(sessionId, text)
 	}
 
 	private addCompletionResultMarker(status: string) {
-		if (this.hasCompletionResultAfterLastUserMessage()) {
-			return
-		}
-
-		const normalizedStatus = String(status || "").toLowerCase()
-		const uiLanguage = this.getUiLanguage()
-		const text =
-			normalizedStatus === "cancelled" || normalizedStatus === "stopped" || normalizedStatus === "aborted"
-				? uiLanguage === "ko" ? "요청을 취소했습니다." : "Request cancelled."
-				: normalizedStatus === "failed" || normalizedStatus === "error"
-					? uiLanguage === "ko" ? "작업이 오류 상태로 종료되었습니다." : "Task ended with an error."
-					: uiLanguage === "ko" ? "완료" : "Done."
-		this.addMessage({ type: "say", say: "completion_result", text })
+		this.taskCompletion.addMarker(status)
 	}
 
 	getUiLanguage(): "en" | "ko" {
@@ -2250,26 +2144,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private hasAssistantTextAfterLastUserMessage() {
-		const lastUserIndex = this.getLastUserMessageIndex()
-		return this.state.clineMessages
-			.slice(lastUserIndex + 1)
-			.some((message) => getString(message, "say") === "text" && getString(message, "text").trim().length > 0 && message.partial !== true)
+		return this.taskCompletion.hasAssistantAfterLastUser()
 	}
 
 	private buildTerminalCompletionFallback(status: string) {
-		const toolSummary = this.conversationProjection.recentToolSummaries(5).join("\n")
-		if (status === "failed" || status === "error") {
-			return toolSummary ? `작업이 오류 상태로 종료되었습니다.\n\n${toolSummary}` : "작업이 오류 상태로 종료되었습니다."
-		}
-		if (status === "stalled" || status === "idle-timeout") {
-			return toolSummary
-				? `LIG VS SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다.\n\n마지막으로 확인된 작업:\n${toolSummary}`
-				: "LIG VS SDK가 일정 시간 새 진행 이벤트를 보내지 않아 작업을 중단했습니다."
-		}
-		if (status === "cancelled" || status === "stopped" || status === "aborted") {
-			return toolSummary ? `작업이 중단되었습니다.\n\n${toolSummary}` : "작업이 중단되었습니다."
-		}
-		return toolSummary ? `작업이 완료되었습니다.\n\n${toolSummary}` : "작업이 완료되었습니다."
+		return this.taskCompletion.terminalFallback(status)
 	}
 
 	private rememberToolSummary(tool: string, text: string) {
@@ -2834,11 +2713,6 @@ function getBoolean(message: unknown, key: string): boolean | undefined {
 	const record = asRecord(message)
 	const value = record[key]
 	return typeof value === "boolean" ? value : undefined
-}
-
-function isFailedTaskStatus(status: string) {
-	const normalized = status.trim().toLowerCase()
-	return normalized === "failed" || normalized === "error"
 }
 
 function normalizePromptDelivery(value: string): "queue" | "steer" | undefined {
