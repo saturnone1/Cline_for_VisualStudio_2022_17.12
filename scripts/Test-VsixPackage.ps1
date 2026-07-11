@@ -54,6 +54,7 @@ try {
 		"Sidecar/runtime/features/providers/ProviderSelection.js",
 		"Sidecar/runtime/features/settings/PlanActMode.js",
 		"Sidecar/runtime/features/worktrees/WorktreePolicy.js",
+		"Sidecar/runtime/features/browser/BrowserPolicy.js",
         "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
 		"Sidecar/runtime/infrastructure/persistence/LocalAutomationStore.js",
 		"Sidecar/runtime/infrastructure/auth/ProviderAuthSupport.js",

@@ -140,6 +140,7 @@ for (const requiredFile of [
 	"features/providers/ProviderSelection.ts",
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
+	"features/browser/BrowserPolicy.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)

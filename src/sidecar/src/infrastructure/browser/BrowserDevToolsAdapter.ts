@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { normalizeBrowserActionName, normalizeBrowserDebugHost, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
 
 export function resolveBrowserExecutablePath(configuredPath = "") {
 	const candidates = [
@@ -15,16 +16,6 @@ export function resolveBrowserExecutablePath(configuredPath = "") {
 	]
 
 	return candidates.find((candidate) => candidate.trim() && fs.existsSync(candidate)) || ""
-}
-
-export function normalizeBrowserDebugHost(host: string) {
-	const trimmed = host.trim()
-	if (!trimmed) {
-		return ""
-	}
-
-	const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
-	return withProtocol.replace(/\/+$/, "")
 }
 
 export async function canReachBrowserDebugHost(host: string) {
@@ -71,7 +62,6 @@ export async function fetchBrowserDebugInfo(host: string) {
 	}
 }
 
-type BrowserViewport = { width: number; height: number }
 type DevToolsTab = {
 	id: string
 	type: string
@@ -79,52 +69,6 @@ type DevToolsTab = {
 	title: string
 	webSocketDebuggerUrl: string
 }
-export type BrowserAdapterAction = {
-	action: string
-	url?: string
-	tabId?: string
-	browserSessionId?: string
-	browserActionId?: string
-	coordinate?: string
-	text?: string
-	viewport: BrowserViewport
-	onPhase?: (phase: Record<string, unknown>) => void
-}
-
-export function normalizeBrowserViewport(value: unknown): BrowserViewport {
-	const record = asRecord(value)
-	return {
-		width: Math.max(320, Math.min(numberValue(record.width) || 900, 4096)),
-		height: Math.max(240, Math.min(numberValue(record.height) || 600, 4096)),
-	}
-}
-
-export function normalizeBrowserActionName(value: string) {
-	const normalized = value.trim().toLowerCase().replace(/[-\s]/g, "_")
-	switch (normalized) {
-		case "browser_action_launch":
-		case "launch_browser":
-		case "launch":
-			return "launch"
-		case "open":
-		case "goto":
-		case "go_to":
-		case "navigate":
-			return "navigate"
-		case "screenshot":
-		case "capture_screenshot":
-			return "screenshot"
-		case "scroll_down":
-		case "scroll_up":
-		case "click":
-		case "type":
-		case "close":
-			return normalized
-		default:
-			return normalized || "navigate"
-	}
-}
-
 export async function listDevToolsTabs(host: string) {
 	const normalized = normalizeBrowserDebugHost(host)
 	if (!normalized) {
@@ -158,7 +102,7 @@ export async function listDevToolsTabs(host: string) {
 	}
 }
 
-export async function runBrowserActionViaDevTools(host: string, request: BrowserAdapterAction) {
+export async function runBrowserActionViaDevTools(host: string, request: BrowserAction) {
 	const normalized = normalizeBrowserDebugHost(host)
 	if (!normalized) {
 		return { success: false, status: "error", error: "Browser debug host is not configured." }
@@ -202,7 +146,7 @@ export async function runBrowserActionViaDevTools(host: string, request: Browser
 	}
 }
 
-async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab, request: BrowserAdapterAction) {
+async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab, request: BrowserAction) {
 	const client = await connectDevTools(tab.webSocketDebuggerUrl)
 	try {
 		request.onPhase?.({ phase: "preparing", action: normalizeBrowserActionName(request.action), tabId: tab.id })
@@ -277,7 +221,7 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 	}
 }
 
-async function resolveDevToolsTab(host: string, request: BrowserAdapterAction): Promise<DevToolsTab> {
+async function resolveDevToolsTab(host: string, request: BrowserAction): Promise<DevToolsTab> {
 	const action = normalizeBrowserActionName(request.action)
 	if ((action === "launch" || action === "navigate") && request.url && !request.tabId) {
 		const created = await createDevToolsTab(host, request.url).catch(() => undefined)
@@ -457,42 +401,6 @@ function normalizeBrowserNavigationUrl(value: string) {
 		return trimmed
 	}
 	return `https://${trimmed}`
-}
-
-export function browserActionResultForTranscript(result: Record<string, unknown>) {
-	return {
-		screenshot: getString(result, "screenshot"),
-		screenshotBytes: numberValue(result.screenshotBytes) || screenshotByteLength(getString(result, "screenshot")),
-		currentUrl: getString(result, "currentUrl") || getString(result, "url"),
-		logs: getString(result, "error") || (result.success === false ? "Browser action failed." : ""),
-		currentMousePosition: getString(result, "currentMousePosition"),
-		browserSessionId: getString(result, "browserSessionId"),
-		tabId: getString(result, "tabId"),
-		url: getString(result, "url"),
-		title: getString(result, "title"),
-		action: getString(result, "action"),
-		status: getString(result, "status"),
-		error: getString(result, "error"),
-	}
-}
-
-export function screenshotByteLength(value: string) {
-	const marker = "base64,"
-	const index = value.indexOf(marker)
-	if (index < 0) {
-		return 0
-	}
-	const base64 = value.slice(index + marker.length)
-	return Math.floor((base64.length * 3) / 4)
-}
-
-export function isBrowserToolName(toolName: string) {
-	const normalized = toolName.trim().toLowerCase()
-	return normalized === "browser" ||
-		normalized === "browser_action" ||
-		normalized === "browseraction" ||
-		normalized === "browser_action_launch" ||
-		normalized === "browser_action_result"
 }
 
 function isRetryableDevToolsError(error: unknown) {

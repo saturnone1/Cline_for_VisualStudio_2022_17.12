@@ -43,21 +43,15 @@ import {
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
 import {
-	type BrowserAdapterAction,
-	browserActionResultForTranscript,
 	canReachBrowserDebugHost,
 	checkIsImageUrl,
 	fetchBrowserDebugInfo,
 	fetchOpenGraphData,
-	isBrowserToolName,
 	listDevToolsTabs,
-	normalizeBrowserActionName,
-	normalizeBrowserDebugHost,
-	normalizeBrowserViewport,
 	resolveBrowserExecutablePath,
 	runBrowserActionViaDevTools,
-	screenshotByteLength,
 } from "../browser/BrowserDevToolsAdapter"
+import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName, normalizeBrowserDebugHost, normalizeBrowserViewport, screenshotByteLength, type BrowserAction } from "../../features/browser/BrowserPolicy"
 import {
 	findSolutions,
 	isPathInside,
@@ -4613,7 +4607,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		})
 	}
 
-	private async runBrowserActionWithSession(host: string, request: BrowserAdapterAction) {
+	private async runBrowserActionWithSession(host: string, request: BrowserAction) {
 		this.pruneBrowserSessions()
 		const normalizedHost = normalizeBrowserDebugHost(host)
 		const requestedSessionId = getString(request as unknown as Record<string, unknown>, "browserSessionId")

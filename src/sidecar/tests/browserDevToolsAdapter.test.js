@@ -5,7 +5,7 @@ const {
 	normalizeBrowserActionName,
 	normalizeBrowserDebugHost,
 	normalizeBrowserViewport,
-} = require("../dist/infrastructure/browser/BrowserDevToolsAdapter")
+} = require("../dist/features/browser/BrowserPolicy")
 
 test("browser adapter normalizes host, actions, and bounded viewport values", () => {
 	assert.equal(normalizeBrowserDebugHost("localhost:9222/"), "http://localhost:9222")
