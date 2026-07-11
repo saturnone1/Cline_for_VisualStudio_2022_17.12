@@ -43,6 +43,36 @@ interface SlashServiceContract {
 	reportBug: UnaryOperation<RpcRequest>
 }
 
+interface BrowserConnectionInfoResponse extends RpcRequest {
+	isConnected: boolean
+	isRemote: boolean
+	host?: string
+	path?: string
+	browser?: string
+	protocolVersion?: string
+	tabCount?: number
+	activeTabTitle?: string
+	activeTabUrl?: string
+	error?: string
+}
+
+interface BrowserProbeResponse extends RpcRequest {
+	success: boolean
+	message?: string
+	host?: string
+	browser?: string
+	tabCount?: number
+	activeTabTitle?: string
+}
+
+interface BrowserServiceContract {
+	getBrowserConnectionInfo: UnaryOperation<RpcRequest, BrowserConnectionInfoResponse>
+	getDetectedChromePath: UnaryOperation<RpcRequest, RpcRequest & { path?: string; isBundled?: boolean }>
+	testBrowserConnection: UnaryOperation<RpcRequest, BrowserProbeResponse>
+	discoverBrowser: UnaryOperation<RpcRequest, BrowserProbeResponse>
+	relaunchChromeDebugMode: UnaryOperation<RpcRequest, RpcRequest & { value: string }>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -71,7 +101,7 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 }
 
 export const AccountServiceClient: any = createServiceClient("AccountService")
-export const BrowserServiceClient: any = createServiceClient("BrowserService")
+export const BrowserServiceClient = createServiceClient<BrowserServiceContract>("BrowserService")
 export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
 export const FileServiceClient: any = createServiceClient("FileService")
 export const McpServiceClient: any = createServiceClient("McpService")

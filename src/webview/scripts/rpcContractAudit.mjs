@@ -9,7 +9,7 @@ const violations = []
 if (!source.includes("interface UiServiceContract")) {
 	violations.push("UiServiceClient must expose an operation-specific contract.")
 }
-for (const service of ["UiServiceClient", "CheckpointsServiceClient", "SlashServiceClient"]) {
+for (const service of ["UiServiceClient", "CheckpointsServiceClient", "SlashServiceClient", "BrowserServiceClient"]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
 	}
@@ -31,6 +31,18 @@ for (const operation of [
 for (const operation of ["checkpointRestore", "checkpointDiff", "condense", "reportBug"]) {
 	if (!new RegExp(`\\b${operation}:`).test(source)) {
 		violations.push(`Typed RPC contracts are missing ${operation}.`)
+	}
+}
+
+for (const operation of [
+	"getBrowserConnectionInfo",
+	"getDetectedChromePath",
+	"testBrowserConnection",
+	"discoverBrowser",
+	"relaunchChromeDebugMode",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`BrowserServiceContract is missing ${operation}.`)
 	}
 }
 
