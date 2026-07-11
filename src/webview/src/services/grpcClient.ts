@@ -4,17 +4,46 @@ import { ProtoBusClient } from "./grpcClientBase"
 const encodeMessage = <TRequest>(request: TRequest) => request
 const decodeMessage = <TResponse>(response: TResponse) => response
 
+type RpcRequest = Record<string, unknown>
+type EmptyResponse = Record<string, never>
+type PartialMessageEvent = RpcRequest & { ts?: number }
+type ShowWebviewEvent = RpcRequest & { preserveEditorFocus?: boolean }
+type AddToInputEvent = RpcRequest & { value?: string }
+type UnaryOperation<TRequest extends RpcRequest = RpcRequest, TResponse = EmptyResponse> = (request: TRequest) => Promise<TResponse>
+type StreamingOperation<TResponse, TRequest extends RpcRequest = RpcRequest> = (
+	request: TRequest,
+	callbacks: Callbacks<TResponse>,
+) => () => void
+
+interface UiServiceContract {
+	initializeWebview: UnaryOperation
+	onDidShowAnnouncement: UnaryOperation
+	openUrl: UnaryOperation<RpcRequest>
+	openWalkthrough: UnaryOperation
+	setTerminalExecutionMode: UnaryOperation<RpcRequest>
+	subscribeToMcpButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToHistoryButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToChatButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToSettingsButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToWorktreesButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToAccountButtonClicked: StreamingOperation<EmptyResponse>
+	subscribeToRelinquishControl: StreamingOperation<EmptyResponse>
+	subscribeToPartialMessage: StreamingOperation<PartialMessageEvent>
+	subscribeToShowWebview: StreamingOperation<ShowWebviewEvent>
+	subscribeToAddToInput: StreamingOperation<AddToInputEvent>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
 	("onResponse" in value || "onError" in value || "onComplete" in value)
 
-const createServiceClient = (serviceName: string) => {
+const createServiceClient = <TContract>(serviceName: string): TContract => {
 	class DynamicProtoBusClient extends ProtoBusClient {
 		static serviceName = serviceName
 	}
 
-	return new Proxy(DynamicProtoBusClient as any, {
+	return new Proxy(DynamicProtoBusClient, {
 		get(target, property, receiver) {
 			if (typeof property !== "string" || property in target) {
 				return Reflect.get(target, property, receiver)
@@ -28,7 +57,7 @@ const createServiceClient = (serviceName: string) => {
 				return target.makeUnaryRequest(property, request, encodeMessage, decodeMessage)
 			}
 		},
-	})
+	}) as unknown as TContract
 }
 
 export const AccountServiceClient: any = createServiceClient("AccountService")
@@ -41,6 +70,6 @@ export const OcaAccountServiceClient: any = createServiceClient("OcaAccountServi
 export const SlashServiceClient: any = createServiceClient("SlashService")
 export const StateServiceClient: any = createServiceClient("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
-export const UiServiceClient: any = createServiceClient("UiService")
+export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
 export const WebServiceClient: any = createServiceClient("WebService")
 export const WorktreeServiceClient: any = createServiceClient("WorktreeService")
