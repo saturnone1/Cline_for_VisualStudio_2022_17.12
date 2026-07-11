@@ -18,9 +18,31 @@ for (const service of [
 	"OcaAccountServiceClient",
 	"WorktreeServiceClient",
 	"McpServiceClient",
+	"AccountServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"accountLoginClicked",
+	"accountLogoutClicked",
+	"getUserOrganizations",
+	"subscribeToAuthStatusUpdate",
+	"getUserCredits",
+	"getOrganizationCredits",
+	"setUserOrganization",
+	"getRedirectUrl",
+	"submitLimitIncreaseRequest",
+	"hicapAuthClicked",
+	"openrouterAuthClicked",
+	"requestyAuthClicked",
+	"openAiCodexSignIn",
+	"openAiCodexSignOut",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`AccountServiceContract is missing ${operation}.`)
 	}
 }
 

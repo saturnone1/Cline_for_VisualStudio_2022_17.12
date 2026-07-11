@@ -1,5 +1,6 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
+import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
@@ -99,6 +100,51 @@ interface OcaAccountServiceContract {
 	ocaSubscribeToAuthStatusUpdate: StreamingOperation<OcaAuthStateEvent>
 }
 
+interface AccountUser extends RpcRequest {
+	uid: string
+	email?: string
+	displayName?: string
+	photoUrl?: string
+	appBaseUrl?: string
+}
+
+interface AccountOrganization extends RpcRequest {
+	active: boolean
+	organizationId: string
+	name?: string
+	memberId?: string
+	roles: string[]
+}
+
+interface AccountAuthStateEvent extends RpcRequest {
+	user?: AccountUser
+}
+
+interface AccountCreditsResponse extends RpcRequest {
+	balance?: RpcRequest & { currentBalance?: number }
+	usageTransactions: UsageTransaction[]
+	paymentTransactions: PaymentTransaction[]
+}
+
+type AccountAuthActionResponse = RpcRequest & { message?: string }
+
+interface AccountServiceContract {
+	accountLoginClicked: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	accountLogoutClicked: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	getUserOrganizations: UnaryOperation<RpcRequest, RpcRequest & { organizations: AccountOrganization[] }>
+	subscribeToAuthStatusUpdate: StreamingOperation<AccountAuthStateEvent>
+	getUserCredits: UnaryOperation<RpcRequest, AccountCreditsResponse>
+	getOrganizationCredits: UnaryOperation<RpcRequest & { organizationId: string }, AccountCreditsResponse>
+	setUserOrganization: UnaryOperation<RpcRequest & { organizationId?: string }, AccountAuthActionResponse>
+	getRedirectUrl: UnaryOperation<RpcRequest, RpcRequest & { value: string }>
+	submitLimitIncreaseRequest: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	hicapAuthClicked: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	openrouterAuthClicked: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	requestyAuthClicked: UnaryOperation<RpcRequest & { value?: string }, AccountAuthActionResponse>
+	openAiCodexSignIn: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+	openAiCodexSignOut: UnaryOperation<RpcRequest, AccountAuthActionResponse>
+}
+
 interface WorktreeInfo extends RpcRequest {
 	path: string
 	branch?: string
@@ -195,7 +241,7 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 	}) as unknown as TContract
 }
 
-export const AccountServiceClient: any = createServiceClient("AccountService")
+export const AccountServiceClient = createServiceClient<AccountServiceContract>("AccountService")
 export const BrowserServiceClient = createServiceClient<BrowserServiceContract>("BrowserService")
 export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
 export const FileServiceClient: any = createServiceClient("FileService")
