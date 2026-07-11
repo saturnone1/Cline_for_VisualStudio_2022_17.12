@@ -97,6 +97,8 @@ import { BrowserRpcHandler } from "../../features/browser/BrowserRpcHandler"
 import { decodeBrowserRpcCommand } from "./BrowserRpcDecoder"
 import { TerminalRpcHandler } from "../../features/terminal/TerminalRpcHandler"
 import { decodeTerminalRpcCommand } from "./TerminalRpcDecoder"
+import { TaskRpcHandler, type TaskPromptRequest } from "../../features/chat/TaskRpcHandler"
+import { decodeTaskRpcCommand } from "./TaskRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -131,7 +133,6 @@ import {
 	sanitizeConsoleOutput,
 	stripCommandSentinel,
 	tryParseJson,
-	getAskResponseText,
 	firstString,
 	shouldAutoApproveTool,
 	isJsonObjectString,
@@ -272,6 +273,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly accountRpc: AccountRpcHandler
 	private readonly browserRpc: BrowserRpcHandler
 	private readonly terminalRpc: TerminalRpcHandler
+	private readonly taskRpc: TaskRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -343,6 +345,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.taskRpc = new TaskRpcHandler({ hasPendingQuestion: () => Boolean(this.pendingQuestion), hasCurrentTask: () => Boolean(this.state.currentTaskItem), start: (request, requestId) => this.startNewTask(request, { broadcast: true, requestId }), respond: (request, requestId) => this.sendAskResponse(request, requestId), compact: (requestId) => this.compactCurrentSession(requestId), cancel: () => this.cancelTask(), clear: () => this.clearTask(), refreshHistory: (source) => this.taskHistorySync.refreshInBackground(source), history: () => this.state.taskHistory, show: (taskId) => this.showTaskWithId(taskId), delete: (taskIds) => this.taskHistoryCommands.delete(taskIds), deleteAll: () => this.taskHistoryCommands.deleteAll(), toggleFavorite: (taskId, isFavorited) => this.taskHistoryCommands.toggleFavorite(taskId, isFavorited), broadcast: () => this.broadcastState() })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -841,6 +844,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(terminalResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const taskCommand = decodeTaskRpcCommand(key, message)
+		if (taskCommand) {
+			const taskResult = await this.taskRpc.handle(taskCommand, requestId)
+			return grpcHandled(
+				grpcResponse(requestId, taskResult.payload, false),
+				...(taskResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -871,56 +882,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				this.stateStore.clear()
 				Object.assign(this.state, createInitialState())
 				await this.clearTask()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.clearTask":
-				await this.clearTask()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.newTask":
-				if (this.pendingQuestion) {
-					await this.sendAskResponse(message, requestId)
-					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
-				}
-				if (this.state.currentTaskItem && getString(message, "text").trim()) {
-					await this.sendAskResponse(message, requestId)
-					return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
-				}
-				await this.startNewTask(message, { broadcast: true, requestId })
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.askResponse":
-				await this.sendAskResponse(message, requestId)
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "SlashService.condense":
-				await this.compactCurrentSession(requestId)
-				return grpcHandled(grpcResponse(requestId, {}, false), ...this.buildStateMessages())
-
-			case "TaskService.cancelTask":
-				await this.cancelTask()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.getTaskHistory":
-				this.taskHistorySync.refreshInBackground("getTaskHistory")
-				return grpcHandled(grpcResponse(requestId, { tasks: this.state.taskHistory }, false))
-
-			case "TaskService.getTotalTasksSize":
-				this.taskHistorySync.refreshInBackground("getTotalTasksSize")
-				return grpcHandled(grpcResponse(requestId, { value: this.state.taskHistory.length }, false))
-
-			case "TaskService.showTaskWithId":
-				await this.showTaskWithId(getString(message, "value") || getString(message, "taskId"))
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.deleteTasksWithIds":
-				await this.taskHistoryCommands.delete(getStringArray(message, "value"))
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "TaskService.deleteAllTaskHistory":
-				await this.taskHistoryCommands.deleteAll()
-				await this.broadcastState()
 				return grpcHandled(grpcResponse(requestId, {}, false))
 
 			case "CheckpointsService.checkpointRestore":
@@ -1208,11 +1169,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 					),
 				)
 
-			case "TaskService.toggleTaskFavorite":
-				this.taskHistoryCommands.toggleFavorite(getString(message, "taskId"), asRecord(message).isFavorited === true)
-				await this.broadcastState()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
 			default:
 				return null
 		}
@@ -1327,11 +1283,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 	}
 
-	private async startNewTask(message: unknown, options: { broadcast?: boolean; requestId?: string } = {}) {
-		const text = getString(message, "text")
-		const images = getStringArray(message, "images")
-		const files = getStringArray(message, "files")
-		const requestedWorkspacePath = getString(message, "workspacePath") || getString(message, "cwd") || getString(message, "worktreePath")
+	private async startNewTask(request: { text: string; images?: string[]; files?: string[]; workspacePath?: string }, options: { broadcast?: boolean; requestId?: string } = {}) {
+		const { text, images = [], files = [], workspacePath: requestedWorkspacePath = "" } = request
 		const initialCwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
 			? path.resolve(requestedWorkspacePath)
 			: process.cwd()
@@ -1365,14 +1318,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		await this.launchAgentSession.execute(params, cwd, sessionId, source)
 	}
 
-	private async sendAskResponse(message: unknown, requestId = createId()) {
+	private async sendAskResponse(request: TaskPromptRequest, requestId = createId()) {
 		if (!this.clineSdk) {
 			throw new Error("LIG VS SDK runtime is not attached.")
 		}
 
-		const responseType = getString(message, "responseType")
-		const images = getStringArray(message, "images"), files = getStringArray(message, "files")
-		const text = buildTaskInputWithAttachments(getString(message, "text"), images, files)
+		const { responseType, images, files } = request
+		const text = buildTaskInputWithAttachments(request.text, images, files)
 		const activeSessionId = this.clineSdk.status.activeSessionId
 		const selectedSessionId = String(this.state.currentTaskItem?.id || "")
 		this.logger.log("sidecar", "sendAskResponse.received", {
@@ -1384,10 +1336,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			selectedSessionId,
 		})
 
-		const answerText = buildTaskInputWithAttachments(getAskResponseText(message), images, files)
+		const answerText = buildTaskInputWithAttachments(request.answerText, images, files)
 		if (await this.askResponseInteractions.handle({ responseType, text, answerText, images, files, activeSessionId: activeSessionId || "" })) return
 
-		await this.sendUserMessage.execute({ requestId, prompt: getString(message, "text"), transcriptText: text, images, files, delivery: normalizePromptDelivery(getString(message, "delivery")), mode: this.state.mode === "plan" ? "plan" : "act", activeSessionId: activeSessionId || "", selectedSessionId })
+		await this.sendUserMessage.execute({ requestId, prompt: request.text, transcriptText: text, images, files, delivery: normalizePromptDelivery(request.delivery), mode: this.state.mode === "plan" ? "plan" : "act", activeSessionId: activeSessionId || "", selectedSessionId })
 	}
 
 	private async compactCurrentSession(requestId = createId()) {
@@ -2331,12 +2283,6 @@ function getString(message: unknown, key: string): string {
 
 	const value = (message as Record<string, unknown>)[key]
 	return typeof value === "string" ? value : ""
-}
-
-function getStringArray(message: unknown, key: string): string[] {
-	const record = asRecord(message)
-	const value = record[key]
-	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
 }
 
 function getBoolean(message: unknown, key: string): boolean | undefined {
