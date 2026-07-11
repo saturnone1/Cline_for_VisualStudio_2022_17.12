@@ -23,10 +23,15 @@ export type AgentEvent =
 
 export type ApprovalRequestedEvent = Extract<AgentEvent, { type: "ApprovalRequested" }>
 
+export type AgentChunkRuntimeEvent = { type: "chunk"; sessionId: string; stream: string; chunk: unknown; payload: AgentEventPayload }
+export type SessionSnapshotRuntimeEvent = { type: "session_snapshot"; sessionId: string; status: string; modelId: string; usage: AgentEventPayload; payload: AgentEventPayload }
+
 export type AgentRuntimeEvent =
 	| { type: "agent_event"; sessionId: string; event: AgentEvent; payload: AgentEventPayload }
 	| { type: "vscline_file_changed"; payload: AgentEventPayload }
-	| { type: "chunk" | "session_snapshot" | "team_progress" | "hook" | "pending_prompts" | "pending_prompt_submitted"; sessionId: string; payload: AgentEventPayload }
+	| AgentChunkRuntimeEvent
+	| SessionSnapshotRuntimeEvent
+	| { type: "team_progress" | "hook" | "pending_prompts" | "pending_prompt_submitted"; sessionId: string; payload: AgentEventPayload }
 	| { type: "status"; sessionId: string; status: string; lifecycle: AgentEvent; payload: AgentEventPayload }
 	| { type: "ended"; sessionId: string; reason: string; lifecycle: AgentEvent; payload: AgentEventPayload }
 	| { type: "unknown"; originalType: string; payload: AgentEventPayload }

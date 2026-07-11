@@ -171,6 +171,9 @@ if (router.includes("handleAgentEvent(event.event.raw")) {
 if (router.includes("const event = semanticEvent.raw")) {
 	violations.push("Known semantic AgentEvent variants must project from typed fields; raw payload access is reserved for AgentEventUnknown.")
 }
+if (router.includes("handleSessionChunk(payload)") || router.includes("handleSessionSnapshot(payload)")) {
+	violations.push("Chunk and session snapshot projection must consume normalized AgentRuntimeEvent fields.")
+}
 const sdkEventTranslator = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventTranslator.ts"), "utf8")
 for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ToolCallUpdated", "IterationCompleted", "NoticeReceived", "ToolFinished", "AssistantMessageReceived", "RunFinished", "RunFailed", "UsageUpdated", "AgentDone", "AgentError", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
 	if (!sdkEventTranslator.includes(`\"${eventName}\"`)) {

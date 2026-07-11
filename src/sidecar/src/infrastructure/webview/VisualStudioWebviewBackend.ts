@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentEvent, AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, SessionSnapshotRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -574,7 +574,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 			this.markSendLatencyFirstSdkEvent(sessionId, type)
-			this.handleSessionChunk(payload)
+			this.handleSessionChunk(event)
 			return
 		}
 
@@ -584,7 +584,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 			this.markSendLatencyFirstSdkEvent(sessionId, type)
-			this.handleSessionSnapshot(payload)
+			this.handleSessionSnapshot(event)
 			return
 		}
 
@@ -2375,17 +2375,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 	}
 
-	private handleSessionChunk(payload: Record<string, unknown>) {
-		const stream = getString(payload, "stream")
-		const chunk = getString(payload, "chunk")
-		const chunkRecord = asRecord(payload.chunk)
+	private handleSessionChunk(event: AgentChunkRuntimeEvent) {
+		const { stream } = event
+		const chunk = typeof event.chunk === "string" ? event.chunk : ""
+		const chunkRecord = asRecord(event.chunk)
 		if (!chunk && Object.keys(chunkRecord).length === 0) {
 			return
 		}
 
 		if (stream === "agent") {
 			this.noteQuietTaskActivity("chunk:agent")
-			this.addAgentTranscriptChunk(payload.chunk)
+			this.addAgentTranscriptChunk(event.chunk)
 			return
 		}
 
@@ -2452,24 +2452,20 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.state.clineMessages.slice(-3).some((message) => normalizeTranscriptText(getString(message, "text")) === normalized)
 	}
 
-	private handleSessionSnapshot(payload: Record<string, unknown>) {
-		const sessionId = getString(payload, "sessionId")
+	private handleSessionSnapshot(event: SessionSnapshotRuntimeEvent) {
+		const { sessionId, status, modelId } = event
 		if (sessionId) {
 			this.bindCurrentTaskToSession(sessionId)
 		}
 
-		const snapshot = asRecord(payload.snapshot)
-		const status = getString(snapshot, "status")
-		const model = asRecord(snapshot.model)
-		const aggregateUsage = asRecord(snapshot.aggregateUsage)
-		const usage = normalizeUsageSnapshot(Object.keys(aggregateUsage).length > 0 ? aggregateUsage : asRecord(snapshot.usage))
+		const usage = normalizeUsageSnapshot(event.usage)
 		if (status === "idle") {
 			this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
 		} else {
 			this.noteTaskActivity(`session_snapshot:${status || "unknown"}`)
 		}
 		this.updateCurrentTaskItem({
-			modelId: getString(model, "modelId") || undefined,
+			modelId: modelId || undefined,
 			tokensIn: usage.reliable ? usage.inputTokens : undefined,
 			tokensOut: usage.reliable ? usage.outputTokens : undefined,
 			cacheReads: usage.reliable ? usage.cacheReadTokens : undefined,

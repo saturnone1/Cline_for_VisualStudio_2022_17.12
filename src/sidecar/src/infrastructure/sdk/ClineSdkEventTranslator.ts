@@ -12,7 +12,12 @@ export function normalizeAgentRuntimeEvent(value: unknown): AgentRuntimeEvent {
 		case "vscline_file_changed":
 			return { type: originalType, payload }
 		case "chunk":
-		case "session_snapshot":
+			return { type: originalType, sessionId, stream: readString(payload.stream), chunk: payload.chunk, payload }
+		case "session_snapshot": {
+			const snapshot = asRecord(payload.snapshot)
+			const aggregateUsage = asRecord(snapshot.aggregateUsage)
+			return { type: originalType, sessionId, status: readString(snapshot.status), modelId: readString(asRecord(snapshot.model).modelId), usage: Object.keys(aggregateUsage).length ? aggregateUsage : asRecord(snapshot.usage), payload }
+		}
 		case "team_progress":
 		case "hook":
 		case "pending_prompts":
