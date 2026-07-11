@@ -1,7 +1,6 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { randomUUID } from "node:crypto"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
@@ -33,7 +32,7 @@ import type { BrowserHandler, BrowserSettings } from "../../features/browser/Bro
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
 import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
 import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCallbackCoordinator"
-import type { OAuthCallbackListenerPort } from "../../application/ports/OAuthCallbackListenerPort"
+import type { OAuthAuthorizationHandler } from "../../features/providers/OAuthAuthorizationHandler"
 import type { OAuthTokenHandler } from "../../features/providers/OAuthTokenHandler"
 import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
 import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
@@ -246,7 +245,6 @@ import {
 	createUnauthenticatedAccountState,
 	createVisualStudioAuthUnsupportedResponse,
 	isOAuthBridgeProvider,
-	createOAuthAuthorizationRequest,
 	parseUrlFragmentParams,
 } from "../auth/ProviderAuthSupport"
 
@@ -338,9 +336,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
 	private activeSessionRuntimeSettingsRevision = 0
-	private oauthCallbackPort = 0
 	private oauthCallbacks: OAuthCallbackCoordinator | null = null
-	private oauthCallbackListener: OAuthCallbackListenerPort | null = null
+	private oauthAuthorization: OAuthAuthorizationHandler | null = null
 	private oauthTokens: OAuthTokenHandler | null = null
 	private providerCredentials: ProviderCredentialHandler | null = null
 	private providerAuthActions: ProviderAuthActionHandler | null = null
@@ -405,7 +402,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
 	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
 	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
-	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, listener: OAuthCallbackListenerPort) { this.oauthCallbacks = oauthCallbacks; this.oauthCallbackListener = listener }
+	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, oauthAuthorization: OAuthAuthorizationHandler) { this.oauthCallbacks = oauthCallbacks; this.oauthAuthorization = oauthAuthorization }
 	setOAuthTokenHandler(oauthTokens: OAuthTokenHandler) { this.oauthTokens = oauthTokens }
 	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
 	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
@@ -431,7 +428,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.flushPersistedStateSave()
-		this.oauthCallbackListener?.dispose()
+		this.oauthAuthorization?.dispose()
 	}
 
 	isScheduledAgentsEnabled() {
@@ -1422,7 +1419,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return this.saveProviderCredential({ ...request, provider, value: credential, source: "auth_action" })
 		}
 
-		const bridge = isOAuthBridgeProvider(provider) ? await this.ensureOAuthCallbackBridge(provider, request) : null
+		const bridge = isOAuthBridgeProvider(provider) ? await this.requireOAuthAuthorization().ensure(provider, request, (url) => this.handleOAuthCallbackUrl(url)) : null
 		const response = await this.requireProviderAuthActions().execute(provider, message, bridge)
 		if (provider === "openAiCodex") {
 			this.state.openAiCodexIsAuthenticated = false
@@ -1434,56 +1431,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private async createOAuthCallbackBridgeResponse(message: unknown, fallbackProvider: string) {
 		const request = asRecord(message)
 		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || fallbackProvider)
-		const bridge = await this.ensureOAuthCallbackBridge(provider || fallbackProvider, request)
-		return {
-			success: true,
-			supported: true,
-			provider: bridge.provider,
-			value: bridge.authorizationUrl || bridge.callbackUrl,
-			url: bridge.authorizationUrl || undefined,
-			authorizationUrl: bridge.authorizationUrl || undefined,
-			redirectUrl: bridge.callbackUrl,
-			callbackUrl: bridge.callbackUrl,
-			state: bridge.state,
-			authStatus: "pending",
-			tokenExchangeSupported: bridge.tokenExchangeSupported === true,
-			message: bridge.authorizationUrl
-				? `${providerAuthLabel(bridge.provider)} OAuth authorization URL is ready. Complete sign-in in the browser and return to LIG VS through the localhost callback.`
-				: `${providerAuthLabel(bridge.provider)} OAuth callback bridge is ready. Configure a provider authorization URL to open sign-in automatically.`,
-		}
-	}
-
-	private async ensureOAuthCallbackBridge(provider: string, request: Record<string, unknown> = {}): Promise<OAuthCallbackSession> {
-		this.requireOAuthCallbacks().prune()
-		if (!this.oauthCallbackPort) {
-			this.oauthCallbackPort = await this.requireOAuthCallbackListener().start((url) => this.handleOAuthCallbackUrl(url))
-			this.logger.log("sidecar", "oauthCallbackServerListening", { port: this.oauthCallbackPort })
-		}
-
-		const normalizedProvider = normalizeProviderValue(provider) || "account"
-		const state = randomUUID()
-		const callbackUrl = `http://127.0.0.1:${this.oauthCallbackPort}/oauth/callback?provider=${encodeURIComponent(normalizedProvider)}&state=${encodeURIComponent(state)}`
-		const authorization = createOAuthAuthorizationRequest(normalizedProvider, callbackUrl, state, request)
-		const session: OAuthCallbackSession = {
-			provider: normalizedProvider,
-			state,
-			callbackUrl,
-			authorizationUrl: authorization.url || undefined,
-			createdAt: Date.now(),
-			status: "pending",
-			tokenExchangeSupported: authorization.tokenExchangeSupported,
-			tokenExchange: authorization.tokenExchange || undefined,
-			message: authorization.url ? "Waiting for OAuth provider authorization and redirect." : "Waiting for OAuth provider redirect.",
-		}
-		this.requireOAuthCallbacks().register(session)
-		this.logger.log("sidecar", "oauthCallbackBridgeReady", {
-			provider: normalizedProvider,
-			state,
-			port: this.oauthCallbackPort,
-			hasAuthorizationUrl: Boolean(authorization.url),
-			tokenExchangeSupported: authorization.tokenExchangeSupported,
-		})
-		return session
+		const bridge = await this.requireOAuthAuthorization().ensure(provider || fallbackProvider, request, (url) => this.handleOAuthCallbackUrl(url))
+		return this.requireOAuthAuthorization().response(bridge)
 	}
 
 	private async handleOAuthCallbackUrl(url: string) {
@@ -3369,9 +3318,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.oauthCallbacks
 	}
 
-	private requireOAuthCallbackListener() {
-		if (!this.oauthCallbackListener) throw new Error("OAuth callback listener is not attached.")
-		return this.oauthCallbackListener
+	private requireOAuthAuthorization() {
+		if (!this.oauthAuthorization) throw new Error("OAuth authorization handler is not attached.")
+		return this.oauthAuthorization
 	}
 
 	private requireOAuthTokens() {

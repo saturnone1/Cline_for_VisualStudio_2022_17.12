@@ -7,6 +7,7 @@ import { OAuthCallbackCoordinator } from "./features/providers/OAuthCallbackCoor
 import { OAuthTokenHandler } from "./features/providers/OAuthTokenHandler"
 import { ProviderCredentialHandler } from "./features/providers/ProviderCredentialHandler"
 import { ProviderAuthActionHandler } from "./features/providers/ProviderAuthActionHandler"
+import { OAuthAuthorizationHandler } from "./features/providers/OAuthAuthorizationHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -27,6 +28,7 @@ import { NodeOAuthCallbackListener } from "./infrastructure/auth/NodeOAuthCallba
 import { FetchOAuthTokenExchangeAdapter } from "./infrastructure/auth/FetchOAuthTokenExchangeAdapter"
 import { ProviderCredentialEnvironmentAdapter } from "./infrastructure/auth/ProviderCredentialEnvironmentAdapter"
 import { VisualStudioProviderAuthUiAdapter } from "./infrastructure/auth/VisualStudioProviderAuthUiAdapter"
+import { ProviderOAuthAuthorizationAdapter } from "./infrastructure/auth/ProviderOAuthAuthorizationAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -62,7 +64,8 @@ const server = new SidecarRpcServer(
 		const worktreeQueries = new WorktreeQueryHandler(worktreeOperations, interactionLogger)
 		backend.setWorktreeQueryHandler(worktreeQueries)
 		backend.setWorktreeMutationHandler(new WorktreeMutationHandler(worktreeOperations, worktreeQueries, interactionLogger))
-		backend.setOAuthCallbackServices(new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000)), new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)))
+		const oauthCallbacks = new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000))
+		backend.setOAuthCallbackServices(oauthCallbacks, new OAuthAuthorizationHandler(oauthCallbacks, new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)), new ProviderOAuthAuthorizationAdapter(), interactionLogger, randomUUID))
 		const oauthTokens = new FetchOAuthTokenExchangeAdapter()
 		backend.setOAuthTokenHandler(new OAuthTokenHandler(oauthTokens, interactionLogger))
 		backend.setProviderCredentialHandler(new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens, runtime))
