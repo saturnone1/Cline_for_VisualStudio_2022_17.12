@@ -60,6 +60,7 @@ import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHan
 import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMonitor"
 import { ConversationProjectionState, type ProgressPhase, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
 import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
+import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -274,12 +275,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		| null = null
 	private messageSequence = 0
 	private readonly conversationProjection = new ConversationProjectionState()
-	private partialIdleTimer: NodeJS.Timeout | null = null
-	private partialStateBroadcastTimer: NodeJS.Timeout | null = null
 	private stateBroadcastInFlight: Promise<void> | null = null
 	private stateBroadcastQueued = false
 	private readonly lastPartialMessageKeys = new Map<string, string>()
-	private lastPartialStateBroadcastAt = 0
 	private stateHydrationRefreshInFlight = false
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
@@ -300,6 +298,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private checkpoints: CheckpointHandler | null = null
 	private terminalActivity: TerminalActivityMonitor | null = null
 	private taskActivity: TaskActivityMonitor | null = null
+	private partialStateScheduler: PartialStateScheduler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -370,10 +369,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setCheckpointHandler(checkpoints: CheckpointHandler) { this.checkpoints = checkpoints }
 	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
 	setTaskActivityMonitor(taskActivity: TaskActivityMonitor) { this.taskActivity = taskActivity }
+	setPartialStateScheduler(partialStateScheduler: PartialStateScheduler) { this.partialStateScheduler = partialStateScheduler }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
 	handleTaskIdleLongRunning() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
+	hasStateSubscribers() { return this.stateStreamRequestIds.size > 0 }
+	getActivePartialSnapshot() { const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs); const text = getString(message, "text"); return this.conversationProjection.activePartialTextTs && text.trim() ? { textLength: text.length } : null }
+	handlePartialIdle() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
+	requestStateBroadcast() { this.broadcastState().catch((error) => console.error(error)) }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2997,6 +3001,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.taskActivity
 	}
 
+	private requirePartialStateScheduler() {
+		if (!this.partialStateScheduler) throw new Error("Partial state scheduler is not attached.")
+		return this.partialStateScheduler
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -4534,63 +4543,23 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private schedulePartialIdleWatchdog() {
-		this.clearPartialIdleWatchdog()
-		const timeoutMs = readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000)
-		this.partialIdleTimer = setTimeout(() => {
-			const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs)
-			const text = getString(message, "text")
-			if (!this.conversationProjection.activePartialTextTs || !text.trim()) {
-				return
-			}
-
-			this.logger.log("sidecar", "partialIdleNotice", { timeoutMs, textLength: text.length })
-			this.updateCurrentTaskItem()
-			this.broadcastState().catch((error) => console.error(error))
-		}, timeoutMs)
+		this.requirePartialStateScheduler().scheduleIdle()
 	}
 
 	private clearPartialIdleWatchdog() {
-		if (this.partialIdleTimer) {
-			clearTimeout(this.partialIdleTimer)
-			this.partialIdleTimer = null
-		}
+		this.partialStateScheduler?.clearIdle()
 	}
 
 	private clearPartialStateBroadcastTimer() {
-		if (this.partialStateBroadcastTimer) {
-			clearTimeout(this.partialStateBroadcastTimer)
-			this.partialStateBroadcastTimer = null
-		}
+		this.partialStateScheduler?.clearBroadcast()
 	}
 
 	private broadcastPartialStateNow() {
-		if (this.stateStreamRequestIds.size === 0) {
-			return
-		}
-		this.clearPartialStateBroadcastTimer()
-		this.lastPartialStateBroadcastAt = Date.now()
-		this.broadcastState().catch((error) => console.error(error))
+		this.requirePartialStateScheduler().broadcastNow()
 	}
 
 	private schedulePartialStateBroadcast() {
-		if (this.stateStreamRequestIds.size === 0 || this.partialStateBroadcastTimer) {
-			return
-		}
-
-		const intervalMs = readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)
-		const now = Date.now()
-		const elapsed = now - this.lastPartialStateBroadcastAt
-		if (elapsed >= intervalMs) {
-			this.lastPartialStateBroadcastAt = now
-			this.broadcastState().catch((error) => console.error(error))
-			return
-		}
-
-		this.partialStateBroadcastTimer = setTimeout(() => {
-			this.partialStateBroadcastTimer = null
-			this.lastPartialStateBroadcastAt = Date.now()
-			this.broadcastState().catch((error) => console.error(error))
-		}, intervalMs - elapsed)
+		this.requirePartialStateScheduler().scheduleBroadcast()
 	}
 
 	private noteTaskActivity(reason: string) {

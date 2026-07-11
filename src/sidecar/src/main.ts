@@ -39,6 +39,7 @@ import { ProcessHookExecutionAdapter } from "./infrastructure/hooks/ProcessHookE
 import { CheckpointHandler } from "./features/checkpoints/CheckpointHandler"
 import { TerminalActivityMonitor } from "./infrastructure/conversation/TerminalActivityMonitor"
 import { TaskActivityMonitor } from "./features/runtime/TaskActivityMonitor"
+import { PartialStateScheduler } from "./features/runtime/PartialStateScheduler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -88,6 +89,7 @@ const server = new SidecarRpcServer(
 		backend.setCheckpointHandler(new CheckpointHandler(runtime))
 		backend.setTerminalActivityMonitor(new TerminalActivityMonitor(host.workspaceClient, interactionLogger, (text) => backend.updateTerminalActivity(text), () => backend.getUiLanguage()))
 		backend.setTaskActivityMonitor(new TaskActivityMonitor(interactionLogger, () => backend.hasActiveTask(), () => backend.hasActivePartialText(), () => backend.handleTaskIdleLongRunning(), readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000), readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)))
+		backend.setPartialStateScheduler(new PartialStateScheduler(interactionLogger, () => backend.hasStateSubscribers(), () => backend.getActivePartialSnapshot(), () => backend.handlePartialIdle(), () => backend.requestStateBroadcast(), readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000), readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,
