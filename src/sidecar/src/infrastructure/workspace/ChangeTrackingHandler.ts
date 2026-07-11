@@ -1,5 +1,6 @@
 import path from "node:path"
 import type { WorkspacePort } from "../../application/ports/HostProviderPort"
+import type { WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
 
 export type TrackedChangeSummary = { filePath: string; beforePath: string; afterPath: string; action: string; additions: number; deletions: number }
 
@@ -10,12 +11,12 @@ export class ChangeTrackingHandler {
 
 	constructor(private readonly workspace: WorkspacePort, private readonly publishTranscript: (text: string) => Promise<void>, private readonly debounceMs = 250, private readonly recentTtlMs = 15_000) {}
 
-	track(payload: Record<string, unknown>) {
-		const filePath = readString(payload.filePath), beforePath = readString(payload.beforePath), afterPath = readString(payload.afterPath) || filePath
+	track(change: WorkspaceChange) {
+		const { filePath, beforePath, afterPath } = change
 		if (!filePath || !beforePath || !afterPath) return
 		this.recentPaths.set(normalize(filePath), Date.now())
 		this.prune()
-		this.queue({ filePath, beforePath, afterPath, action: readString(payload.action) || "modified", additions: readNumber(payload.additions) || 0, deletions: readNumber(payload.deletions) || 0 })
+		this.queue({ ...change })
 	}
 
 	pendingChanges() { return Array.from(this.pending.values()).map((change) => ({ ...change })) }

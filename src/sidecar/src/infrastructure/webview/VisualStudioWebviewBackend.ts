@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, HookRuntimeEvent, PendingPromptSubmittedRuntimeEvent, PendingPromptsRuntimeEvent, SessionSnapshotRuntimeEvent, TeamProgressRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, HookRuntimeEvent, PendingPromptSubmittedRuntimeEvent, PendingPromptsRuntimeEvent, SessionSnapshotRuntimeEvent, TeamProgressRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -564,7 +564,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		if (event.type === "vscline_file_changed") {
-			this.handleFileChangedEvent(payload).catch((error) => console.error(error))
+			this.handleFileChangedEvent(event.change).catch((error) => console.error(error))
 			return
 		}
 
@@ -2787,7 +2787,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.conversationProjection.clearReasoningStatus()
 	}
 
-	private async handleFileChangedEvent(payload: Record<string, unknown>) { this.requireChangeTracking().track(payload) }
+	private async handleFileChangedEvent(change: WorkspaceChange) { this.requireChangeTracking().track(change) }
 
 
 
