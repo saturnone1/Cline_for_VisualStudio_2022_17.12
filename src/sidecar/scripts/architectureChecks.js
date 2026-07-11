@@ -198,6 +198,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/AgentTextEventProjector.ts",
 	"infrastructure/conversation/AgentToolEventProjector.ts",
 	"infrastructure/conversation/AgentLifecycleEventProjector.ts",
+	"features/taskHistory/TaskHistorySync.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
