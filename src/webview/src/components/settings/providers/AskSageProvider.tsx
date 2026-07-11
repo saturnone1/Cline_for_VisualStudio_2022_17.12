@@ -2,6 +2,7 @@ import { askSageDefaultURL, askSageModels, ModelInfo } from "@shared/api"
 import { Mode } from "@shared/storage/types"
 import { useEffect, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { ModelsServiceClient } from "@/services/grpcClient"
 import { ApiKeyField } from "../common/ApiKeyField"
 import { DebouncedTextField } from "../common/DebouncedTextField"
 import { ModelInfoView } from "../common/ModelInfoView"
@@ -33,16 +34,15 @@ export const AskSageProvider = ({ showModelOptions, isPopup, currentMode }: AskS
 		const fetchModels = async () => {
 			try {
 				const apiUrl = apiConfiguration?.asksageApiUrl || askSageDefaultURL
-				const response = await fetch(`${apiUrl}/get-models`)
+				const response = await ModelsServiceClient.getAskSageModels({ baseUrl: apiUrl })
 
-				if (!response.ok) {
+				if (response.error) {
 					console.error("Failed to fetch AskSage models, falling back to default list.")
 					setAvailableModels(askSageModels)
 					return
 				}
 
-				const data = await response.json()
-				const modelIds = data.response as string[]
+				const modelIds = response.values
 
 				if (Array.isArray(modelIds) && modelIds.length > 0) {
 					const filteredModels = Object.entries(askSageModels)

@@ -1,41 +1,22 @@
 import { useEffect, useState } from "react"
+import { ModelsServiceClient, type OpenRouterKeyInfo } from "@/services/grpcClient"
 
 const CACHE_DURATION_MS = 30 * 1000 // 30 seconds
-const OpenRouterBaseURL = "https://openrouter.ai/api/v1"
-
-export type OpenRouterKeyInfo = any
-
 // Module-level cache variables
 let moduleCachedData: OpenRouterKeyInfo | null = null
 let moduleLastFetchTime: number | null = null
 
 async function getOpenRouterKeyInfo(apiKey: string, signal: AbortSignal): Promise<OpenRouterKeyInfo | null> {
 	try {
-		const keyEndpoint = `${OpenRouterBaseURL}/key`
-		const response = await fetch(keyEndpoint, {
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-			},
-			signal,
-		})
-
-		if (!response.ok) {
-			if (response.status === 401) {
-				console.warn("OpenRouter API key is invalid or unauthorized.")
-			} else {
-				console.error(`Error fetching OpenRouter key info: HTTP ${response.status}`)
-			}
+		const response = await ModelsServiceClient.getOpenRouterKeyInfo({ apiKey })
+		if (signal.aborted) return null
+		if (response.error || !response.data) {
+			console.warn(response.error || "OpenRouter API key info is unavailable.")
 			return null
 		}
-
-		const responseData = await response.json()
-		if (!responseData || typeof responseData !== "object" || !("data" in responseData)) {
-			console.error("OpenRouter API key info validation failed: missing data payload")
-			return null
-		}
-		return (responseData as { data: OpenRouterKeyInfo }).data
-	} catch (error: any) {
-		if (error.name !== "AbortError") {
+		return response.data
+	} catch (error: unknown) {
+		if (!(error instanceof DOMException && error.name === "AbortError")) {
 			console.error("Error fetching OpenRouter key info:", error)
 		}
 		return null

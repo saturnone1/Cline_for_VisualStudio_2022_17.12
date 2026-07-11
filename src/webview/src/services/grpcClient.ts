@@ -239,6 +239,8 @@ interface FileServiceContract {
 type ProviderModelsResponse = RpcRequest & { models: Record<string, OpenRouterModelInfo>; error?: string }
 type OcaModelsResponse = RpcRequest & { models: Record<string, OcaModelInfo>; error?: string }
 type StringModelsResponse = RpcRequest & { values: string[] }
+export type OpenRouterKeyInfo = { limit: number | null; usage: number; limitRemaining: number | null; isFreeTier: boolean }
+type OpenRouterKeyInfoResponse = RpcRequest & { data: OpenRouterKeyInfo | null; error?: string }
 
 interface ModelsServiceContract {
 	refreshClineRecommendedModelsRpc: UnaryOperation<RpcRequest, RpcRequest & {
@@ -247,6 +249,8 @@ interface ModelsServiceContract {
 	}>
 	getOllamaModels: UnaryOperation<RpcRequest, StringModelsResponse>
 	getLmStudioModels: UnaryOperation<RpcRequest, StringModelsResponse>
+	getAskSageModels: UnaryOperation<RpcRequest & { baseUrl: string }, StringModelsResponse & { error?: string }>
+	getOpenRouterKeyInfo: UnaryOperation<RpcRequest & { apiKey: string }, OpenRouterKeyInfoResponse>
 	getAihubmixModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
 	getVsCodeLmModels: UnaryOperation<RpcRequest, RpcRequest & { models: RpcRequest[] }>
 	getSapAiCoreModels: UnaryOperation<RpcRequest, RpcRequest & {

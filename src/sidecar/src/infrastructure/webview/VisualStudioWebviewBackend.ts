@@ -1236,6 +1236,12 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "ModelsService.getLmStudioModels":
 				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("lmstudio", asRecord(message)), false))
 
+			case "ModelsService.getAskSageModels":
+				return grpcHandled(grpcResponse(requestId, await this.requireProviderModelCatalogs().askSageModels(getString(message, "baseUrl")), false))
+
+			case "ModelsService.getOpenRouterKeyInfo":
+				return grpcHandled(grpcResponse(requestId, await this.requireProviderModelCatalogs().openRouterKeyInfo(getString(message, "apiKey")), false))
+
 			case "ModelsService.refreshOpenAiModels":
 				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("openai-compatible", asRecord(message)), false))
 

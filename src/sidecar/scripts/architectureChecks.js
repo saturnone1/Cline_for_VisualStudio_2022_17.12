@@ -135,6 +135,14 @@ if (!themeContractSource.includes("LigThemeChangedMessage") || !themeContractSou
 if (!themeHostSource.includes('message["protocolVersion"]') || !themeHostSource.includes("!= 1")) {
 	violations.push("The Visual Studio theme bridge must reject unsupported message versions.")
 }
+const webviewSourceRoot = path.join(productSourceRoot, "webview", "src")
+for (const filePath of walk(webviewSourceRoot)) {
+	if (!/\.(ts|tsx)$/.test(filePath) || /\.(test|spec|stories)\.(ts|tsx)$/.test(filePath)) continue
+	const source = fs.readFileSync(filePath, "utf8")
+	const relative = normalize(path.relative(webviewSourceRoot, filePath))
+	if (/\bfetch\s*\(/.test(source)) violations.push(`${relative} performs HTTP directly; passive WebView code must use a typed sidecar RPC.`)
+	if (/from\s+["']@cline\/sdk(?:[\/"'])/.test(source)) violations.push(`${relative} imports the Cline SDK; SDK access belongs to the sidecar adapter.`)
+}
 const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
 	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")

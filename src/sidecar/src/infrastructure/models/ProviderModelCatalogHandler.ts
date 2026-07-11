@@ -33,6 +33,29 @@ export class ProviderModelCatalogHandler {
 		return createModelCatalog(result.ids, { providerId: provider, selectedId: selectedId || result.ids[0], source: `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`, supported: true, reduced: result.ids.length === 0, message: result.error || (result.ids.length ? "" : "The model endpoint returned no models."), error: result.error, modelInfoById: result.modelInfoById, diagnostics: createCatalogDiagnostics(provider, "openai-compatible:/models", { baseUrl: normalizeOpenAiCompatibleBaseUrl(baseUrl), authenticated: Boolean(apiKey), oauthRefreshStatus: oauthState.refreshStatus, modelCount: result.ids.length, error: result.error }) })
 	}
 
+	async askSageModels(baseUrl: string) {
+		try {
+			const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/get-models`)
+			if (!response.ok) return { values: [], error: `AskSage model endpoint returned HTTP ${response.status}.` }
+			const payload = asRecord(await response.json())
+			return { values: Array.isArray(payload.response) ? payload.response.filter((value): value is string => typeof value === "string") : [] }
+		} catch (error) {
+			return { values: [], error: stringify(error) }
+		}
+	}
+
+	async openRouterKeyInfo(apiKey: string) {
+		if (!apiKey) return { data: null, error: "OpenRouter API key is required." }
+		try {
+			const response = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${apiKey}` } })
+			if (!response.ok) return { data: null, error: `OpenRouter key endpoint returned HTTP ${response.status}.` }
+			const data = asRecord(asRecord(await response.json()).data)
+			return { data: { limit: readNullableNumber(data.limit), usage: readNumber(data.usage), limitRemaining: readNullableNumber(data.limit_remaining), isFreeTier: data.is_free_tier === true } }
+		} catch (error) {
+			return { data: null, error: stringify(error) }
+		}
+	}
+
 	unsupported(key: string) {
 		const providerId = key.replace(/^ModelsService\./, "").replace(/Rpc$/, "")
 		return createModelCatalog([], { providerId, supported: false, reduced: true, message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`, diagnostics: createCatalogDiagnostics(providerId, "unsupported", { authenticated: false, reason: "air_gap_provider_catalog_not_implemented" }) })
@@ -40,3 +63,7 @@ export class ProviderModelCatalogHandler {
 }
 
 function readString(value: unknown) { return typeof value === "string" ? value : "" }
+function readNumber(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : 0 }
+function readNullableNumber(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : null }
+function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
+function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }
