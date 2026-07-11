@@ -20,7 +20,7 @@ namespace VsClineAgent.Host
     {
         private const int WebviewProtocolVersion = 1;
         private readonly string _assemblyDirectory;
-        private readonly IHostRpcAdapter[] _hostRpcAdapters;
+        private readonly HostRpcRouter _hostRpcRouter;
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
         private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
@@ -35,8 +35,9 @@ namespace VsClineAgent.Host
             VsCommandExecutionService commandExecutionService)
         {
             _assemblyDirectory = assemblyDirectory;
-            _hostRpcAdapters = new IHostRpcAdapter[]
+            _hostRpcRouter = new HostRpcRouter(new IHostRpcAdapter[]
             {
+                new HealthHostRpcAdapter(),
                 new EnvironmentHostRpcAdapter(CaptureSidecarLine),
                 new EditorHostRpcAdapter(editorService),
                 new FileSystemHostRpcAdapter(),
@@ -44,7 +45,7 @@ namespace VsClineAgent.Host
                 new DiffHostRpcAdapter(editorService),
                 new WorkspaceHostRpcAdapter(editorService),
                 new WebviewHostRpcAdapter(() => _postToWebviewAsync)
-            };
+            });
         }
 
         public bool IsRunning => _process != null && !_process.HasExited && _client != null && _client.IsConnected;
@@ -222,25 +223,7 @@ namespace VsClineAgent.Host
 
         private async Task<JToken?> HandleSidecarRequestAsync(string method, JToken? parameters)
         {
-            InteractionLog.Write("sidecar->host", method, parameters);
-            foreach (var adapter in _hostRpcAdapters)
-            {
-                if (adapter.CanHandle(method))
-                    return await adapter.HandleAsync(method, parameters).ConfigureAwait(false);
-            }
-
-            switch (method)
-            {
-                case "host.health":
-                    return new JObject
-                    {
-                        ["status"] = "ok",
-                        ["host"] = "visualstudio-vsix",
-                        ["received"] = parameters == null ? null : parameters.DeepClone()
-                    };
-                default:
-                    throw new InvalidOperationException("Unsupported host method: " + method);
-            }
+            return await _hostRpcRouter.HandleAsync(method, parameters).ConfigureAwait(false);
         }
 
         public void Dispose()

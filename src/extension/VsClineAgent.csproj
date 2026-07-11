@@ -97,7 +97,9 @@
     <Compile Include="Guids.cs" />
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="Host\InteractionLog.cs" />
+    <Compile Include="Host\HostRpcRouter.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EditorHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\FileSystemHostRpcAdapter.cs" />
