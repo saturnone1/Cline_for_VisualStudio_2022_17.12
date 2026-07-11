@@ -1,8 +1,9 @@
 import type { OAuthTokenExchangePort } from "../../application/ports/OAuthTokenExchangePort"
 import type { ProviderCredentialEnvironmentPort } from "../../application/ports/ProviderCredentialEnvironmentPort"
+import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import { isOAuthTokenBlobProvider, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField, providerAuthLabel } from "../../application/services/ProviderIdentity"
 import type { OAuthCallbackSession } from "./OAuthCallbackCoordinator"
-import { describeOAuthCredentialState, extractProviderCredentialValue, providerBaseUrlField, providerCredentialField, resolveOAuthCredentials } from "./ProviderCredentialPolicy"
+import { createFallbackProviderConfigFields, describeOAuthCredentialState, extractProviderCredentialValue, isOAuthBridgeProvider, providerBaseUrlField, providerCredentialField, resolveOAuthCredentials } from "./ProviderCredentialPolicy"
 
 export type ProviderCredentialMutation = Readonly<{
 	updates?: Readonly<Record<string, unknown>>
@@ -13,7 +14,7 @@ export type ProviderCredentialMutation = Readonly<{
 }>
 
 export class ProviderCredentialHandler {
-	constructor(private readonly environment: ProviderCredentialEnvironmentPort, private readonly tokens: OAuthTokenExchangePort) {}
+	constructor(private readonly environment: ProviderCredentialEnvironmentPort, private readonly tokens: OAuthTokenExchangePort, private readonly agentEngine: AgentEnginePort) {}
 
 	save(message: unknown): ProviderCredentialMutation {
 		const request = asRecord(message), provider = providerFrom(request)
@@ -39,6 +40,19 @@ export class ProviderCredentialHandler {
 		const baseUrl = (baseUrlField ? readString(configuration[baseUrlField]) : "") || this.environment.resolveBaseUrl(provider)
 		const tokenExchange = this.environment.createTokenExchangeConfig(provider, {})
 		return { success: true, provider, supported: Boolean(field) || isOAuthTokenBlobProvider(provider), authStatus: credential || hasOAuthCredential ? "configured" : envCredential ? "environment" : field || isOAuthTokenBlobProvider(provider) ? "unauthenticated" : "unsupported", isAuthenticated: Boolean(credential || hasOAuthCredential || envCredential), hasCredential: Boolean(credential || hasOAuthCredential), hasOAuthCredential, oauthExpiresAt: oauthState.expiresAt, oauthRefreshStatus: oauthState.refreshStatus, oauthRefreshSupported: oauthState.refreshSupported && Boolean(tokenExchange), oauthRefreshRequired: oauthState.refreshStatus === "expired", hasEnvironmentCredential: Boolean(envCredential), field: field || (isOAuthTokenBlobProvider(provider) ? oauthCredentialsField(provider) : undefined), baseUrl: baseUrl || undefined, baseUrlField: baseUrlField || undefined, sdkProviderId: normalizeSdkProviderId(provider) }
+	}
+
+	async getConfigFields(message: unknown, configuration: Readonly<Record<string, unknown>>) {
+		const request = asRecord(message), provider = providerFrom(request)
+		if (!provider) return { success: false, message: "Provider is required.", authStatus: "unknown" }
+		const sdkProviderId = normalizeSdkProviderId(provider), credentialStatus = this.status({ provider }, configuration)
+		try {
+			const fields = asRecord((await this.agentEngine.getProviderConfigFields(sdkProviderId)) ?? createFallbackProviderConfigFields(provider))
+			return { ...credentialStatus, ...configFieldsResponse(provider, sdkProviderId, fields, this.environment) }
+		} catch (error) {
+			const fallback = createFallbackProviderConfigFields(provider)
+			return { ...credentialStatus, success: true, provider, sdkProviderId, supported: Boolean(providerCredentialField(provider)), authMethod: fallback.authMethod, fields: fallback.fields, message: `Using fallback provider auth metadata for ${providerAuthLabel(provider)} because SDK provider metadata could not be loaded.`, error: error instanceof Error ? error.message : String(error) }
+		}
 	}
 
 	async refresh(message: unknown, configuration: Readonly<Record<string, unknown>>): Promise<ProviderCredentialMutation> {
@@ -82,3 +96,11 @@ function responseOnly(response: Readonly<Record<string, unknown>>): ProviderCred
 function providerFrom(request: Record<string, unknown>) { return normalizeProviderValue(readString(request.provider) || readString(request.providerId) || readString(request.apiProvider)) }
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }
+function configFieldsResponse(provider: string, sdkProviderId: string, fields: Record<string, unknown>, environment: ProviderCredentialEnvironmentPort) {
+	const authMethod = readString(fields.authMethod) || "api-key"
+	const supportsLocal = Boolean(providerCredentialField(provider))
+	const supported = authMethod === "oauth" ? isOAuthBridgeProvider(provider) : authMethod === "api-key" ? supportsLocal : true
+	const tokenExchangeSupported = Boolean(environment.createTokenExchangeConfig(provider, {}))
+	const message = authMethod === "oauth" ? tokenExchangeSupported ? `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can open configured authorization URLs, receive localhost callback redirects, exchange authorization codes at the configured token endpoint, and store local OAuth credentials.` : `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can receive localhost callback redirects; set provider OAuth token endpoint and client metadata to enable local token exchange.` : authMethod === "local" ? `${providerAuthLabel(provider)} is a local/provider-managed auth flow. LIG VS will report readiness but does not fake sign-in.` : `${providerAuthLabel(provider)} can be configured with local credentials in LIG VS settings.`
+	return { success: true, provider, sdkProviderId, supported, authMethod, fields: asRecord(fields.fields), description: readString(fields.description) || undefined, callbackSupported: authMethod === "oauth" ? isOAuthBridgeProvider(provider) : undefined, authorizationUrlSupported: authMethod === "oauth" ? environment.hasAuthorizationUrl(provider) : undefined, tokenExchangeSupported: authMethod === "oauth" ? tokenExchangeSupported : undefined, message }
+}

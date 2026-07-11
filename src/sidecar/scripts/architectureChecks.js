@@ -66,6 +66,9 @@ if (router.includes("http.createServer") || router.includes("oauthCallbackSessio
 if (router.includes("Token endpoint returned HTTP") || router.includes("Buffer.from(`${exchange.clientId}")) {
 	violations.push("VisualStudioWebviewBackend must delegate OAuth token endpoint transport to OAuthTokenHandler.")
 }
+if (router.includes("SDK provider metadata could not be loaded")) {
+	violations.push("VisualStudioWebviewBackend must delegate provider config metadata projection to ProviderCredentialHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }

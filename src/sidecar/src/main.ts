@@ -63,7 +63,7 @@ const server = new SidecarRpcServer(
 		backend.setOAuthCallbackServices(new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000)), new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)))
 		const oauthTokens = new FetchOAuthTokenExchangeAdapter()
 		backend.setOAuthTokenHandler(new OAuthTokenHandler(oauthTokens, interactionLogger))
-		backend.setProviderCredentialHandler(new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens))
+		backend.setProviderCredentialHandler(new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens, runtime))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

@@ -244,14 +244,10 @@ import {
 	type OAuthCallbackSession,
 	createUnauthenticatedAccountState,
 	createVisualStudioAuthUnsupportedResponse,
-	createFallbackProviderConfigFields,
 	createProviderAuthInfo,
 	isOAuthBridgeProvider,
 	createOAuthAuthorizationRequest,
-	createOAuthTokenExchangeConfig,
 	parseUrlFragmentParams,
-	hasConfiguredOAuthAuthorizationUrl,
-	hasConfiguredOAuthTokenExchange,
 } from "../auth/ProviderAuthSupport"
 
 type TrackedChangeSummary = {
@@ -1600,58 +1596,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async getProviderConfigFields(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
-		if (!provider) {
-			return { success: false, message: "Provider is required.", authStatus: "unknown" }
-		}
-
-		const sdkProviderId = normalizeSdkProviderId(provider)
-		const credentialStatus = this.getProviderCredentialStatus({ provider })
-		try {
-			const sdkFields = await this.requireClineSdk().getProviderConfigFields(sdkProviderId)
-			const fields = sdkFields ?? createFallbackProviderConfigFields(provider)
-			const fieldsRecord = asRecord(fields)
-			const authMethod = getString(fieldsRecord, "authMethod") || "api-key"
-			const supportsLocalCredential = Boolean(providerCredentialField(provider))
-			const supported = authMethod === "oauth" ? isOAuthBridgeProvider(provider) : authMethod === "api-key" ? supportsLocalCredential : true
-			const message =
-				authMethod === "oauth"
-					? hasConfiguredOAuthTokenExchange(provider)
-						? `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can open configured authorization URLs, receive localhost callback redirects, exchange authorization codes at the configured token endpoint, and store local OAuth credentials.`
-						: `${providerAuthLabel(provider)} uses OAuth in the upstream SDK. LIG VS can receive localhost callback redirects; set provider OAuth token endpoint and client metadata to enable local token exchange.`
-					: authMethod === "local"
-						? `${providerAuthLabel(provider)} is a local/provider-managed auth flow. LIG VS will report readiness but does not fake sign-in.`
-						: `${providerAuthLabel(provider)} can be configured with local credentials in LIG VS settings.`
-
-			return {
-				...credentialStatus,
-				success: true,
-				provider,
-				sdkProviderId,
-				supported,
-				authMethod,
-				fields: fieldsRecord.fields || {},
-				description: getString(fieldsRecord, "description"),
-				callbackSupported: authMethod === "oauth" ? isOAuthBridgeProvider(provider) : undefined,
-				authorizationUrlSupported: authMethod === "oauth" ? hasConfiguredOAuthAuthorizationUrl(provider) : undefined,
-				tokenExchangeSupported: authMethod === "oauth" ? hasConfiguredOAuthTokenExchange(provider) : undefined,
-				message,
-			}
-		} catch (error) {
-			const fallback = createFallbackProviderConfigFields(provider)
-			return {
-				...credentialStatus,
-				success: true,
-				provider,
-				sdkProviderId,
-				supported: Boolean(providerCredentialField(provider)),
-				authMethod: fallback.authMethod,
-				fields: fallback.fields,
-				message: `Using fallback provider auth metadata for ${providerAuthLabel(provider)} because SDK provider metadata could not be loaded.`,
-				error: error instanceof Error ? error.message : String(error),
-			}
-		}
+		return this.requireProviderCredentials().getConfigFields(message, asRecord(this.state.apiConfiguration))
 	}
 
 	private async clearProviderCredential(message: unknown) {

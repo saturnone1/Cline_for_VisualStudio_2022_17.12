@@ -5,4 +5,5 @@ export interface ProviderCredentialEnvironmentPort {
 	resolveApiKey(provider: string): string
 	resolveBaseUrl(provider: string): string
 	createTokenExchangeConfig(provider: string, request: Readonly<Record<string, unknown>>): OAuthTokenExchangeConfig | null
+	hasAuthorizationUrl(provider: string, request?: Readonly<Record<string, unknown>>): boolean
 }

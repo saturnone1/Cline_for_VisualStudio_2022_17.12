@@ -1,21 +1,19 @@
 import { createId } from "../conversation/ConversationSupport"
 import {
 	type OAuthTokenExchangeConfig,
-	providerBaseUrlField,
-	providerCredentialField,
-	providerCredentialFields,
 	resolveProviderEnvApiKey,
 	resolveProviderEnvBaseUrl,
 } from "../configuration/ProviderConfiguration"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderValue,
-	normalizeSdkProviderId,
 	oauthCredentialsField,
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
 import type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
 export type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
+import { createFallbackProviderConfigFields, isOAuthBridgeProvider } from "../../features/providers/ProviderCredentialPolicy"
+export { createFallbackProviderConfigFields, isOAuthBridgeProvider } from "../../features/providers/ProviderCredentialPolicy"
 
 export function createUnauthenticatedAccountState() {
 	return {
@@ -43,42 +41,6 @@ export function createVisualStudioAuthUnsupportedResponse(provider: string, url 
 		message,
 		reason: "visual_studio_oauth_callback_not_implemented",
 		...createUnauthenticatedAccountState(),
-	}
-}
-
-export function createFallbackProviderConfigFields(provider: string) {
-	const providerId = normalizeSdkProviderId(provider)
-	if (provider === "oca" || provider === "openAiCodex" || provider === "openai-codex" || provider === "account") {
-		return {
-			providerId,
-			authMethod: "oauth",
-			fields: {},
-			description: `${providerAuthLabel(provider)} requires a Visual Studio-compatible OAuth callback/token exchange bridge.`,
-		}
-	}
-
-	const fields: Record<string, Record<string, unknown>> = providerCredentialField(provider)
-		? {
-				apiKey: {
-					label: `${providerAuthLabel(provider)} API Key`,
-					placeholder: "Enter API Key...",
-				},
-			}
-		: {}
-	const baseUrlField = providerBaseUrlField(provider)
-	if (baseUrlField) {
-		fields.baseUrl = {
-			label: "Base URL",
-			placeholder: "https://...",
-			optional: true,
-		}
-	}
-
-	return {
-		providerId,
-		authMethod: Object.keys(fields).length > 0 ? "api-key" : "local",
-		fields,
-		description: `${providerAuthLabel(provider)} provider metadata is using the LIG VS fallback map.`,
 	}
 }
 
@@ -151,12 +113,6 @@ export function createProviderAuthInfo(provider: string, message: unknown, bridg
 	}
 
 	return createVisualStudioAuthUnsupportedResponse(provider)
-}
-
-export function isOAuthBridgeProvider(provider: string) {
-	const normalized = normalizeProviderValue(provider)
-	const compact = String(provider || "").replace(/[_\s-]/g, "").toLowerCase()
-	return normalized === "oca" || normalized === "openai-codex" || normalized === "account" || compact === "openaicodex"
 }
 
 export function createOAuthAuthorizationRequest(provider: string, callbackUrl: string, state: string, request: Record<string, unknown>) {
