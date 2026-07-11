@@ -57,6 +57,9 @@ if (router.includes("VisualStudioHostProvider") || router.includes("sendHostRequ
 if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSessions")) {
 	violations.push("VisualStudioWebviewBackend must delegate browser execution and session ownership to BrowserHandler.")
 }
+if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
+	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
+}
 
 const controllerPath = path.join(sourceRoot, "presentation", "webview", "VisualStudioWebviewController.ts")
 const controller = fs.readFileSync(controllerPath, "utf8")
@@ -131,6 +134,7 @@ for (const requiredFile of [
 	"infrastructure/sdk/ClineSdkEventTranslator.ts",
 	"application/ports/AgentEnginePort.ts",
 	"application/ports/BrowserAutomationPort.ts",
+	"application/ports/WorktreeOperationsPort.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
@@ -144,6 +148,7 @@ for (const requiredFile of [
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",
+	"infrastructure/worktree/NodeWorktreeOperationsAdapter.ts",
 	"infrastructure/webview/WebviewState.ts",
 	"infrastructure/transport/SidecarRpcServer.ts",
 	"features/chat/sendMessage/SendMessageCommand.ts",
@@ -157,6 +162,7 @@ for (const requiredFile of [
 	"features/providers/ProviderSelection.ts",
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
+	"features/worktrees/WorktreeQueryHandler.ts",
 	"features/browser/BrowserPolicy.ts",
 	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",

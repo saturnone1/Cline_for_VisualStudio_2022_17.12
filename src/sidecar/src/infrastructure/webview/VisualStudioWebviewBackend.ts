@@ -1,10 +1,8 @@
 import fs from "node:fs"
-import childProcess from "node:child_process"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
-import { promisify } from "node:util"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
@@ -33,6 +31,7 @@ import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCo
 import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
+import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -54,7 +53,7 @@ import {
 	pathExists,
 	samePath,
 } from "../worktree/WorktreeSupport"
-import { classifyWorktreeGitError, normalizeMergeRecoveryAction, parseGitWorktreePorcelain, uniqueSortedLines } from "../../features/worktrees/WorktreePolicy"
+import { classifyWorktreeGitError, normalizeMergeRecoveryAction } from "../../features/worktrees/WorktreePolicy"
 import {
 	appendScheduledAgentRun,
 	deleteScheduledAgentSpecFile,
@@ -263,8 +262,6 @@ import {
 	normalizeHttpUrl,
 } from "../auth/ProviderAuthSupport"
 
-const execFile = promisify(childProcess.execFile)
-
 type TrackedChangeSummary = {
 	filePath: string
 	beforePath: string
@@ -302,6 +299,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private startTaskHandler: StartTaskHandler | null = null
 	private cancelTaskHandler: CancelTaskHandler | null = null
 	private browserHandler: BrowserHandler | null = null
+	private worktreeQueries: WorktreeQueryHandler | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
@@ -413,6 +411,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setStartTaskHandler(startTaskHandler: StartTaskHandler) { this.startTaskHandler = startTaskHandler }
 	setCancelTaskHandler(cancelTaskHandler: CancelTaskHandler) { this.cancelTaskHandler = cancelTaskHandler }
 	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
+	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2097,150 +2096,21 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async runGit(args: string[], cwd: string) {
-		try {
-			const result = await execFile("git", args, {
-				cwd,
-				windowsHide: true,
-				timeout: 60_000,
-				maxBuffer: 1024 * 1024 * 8,
-			})
-			return { success: true, stdout: result.stdout || "", stderr: result.stderr || "", exitCode: 0 }
-		} catch (error) {
-			const record = asRecord(error)
-			return {
-				success: false,
-				stdout: getString(record, "stdout"),
-				stderr: getString(record, "stderr") || getString(record, "message"),
-				exitCode: getNumber(record, "code") ?? 1,
-			}
-		}
-	}
-
-	private async isGitAvailable() {
-		const result = await this.runGit(["--version"], process.cwd())
-		return result.success
+		return this.requireWorktreeQueries().runGit(args, cwd)
 	}
 
 	private async getGitRoot(workspaceRoot = "") {
-		const root = workspaceRoot || (await this.getPrimaryWorkspaceRoot())
-		if (!root || !fs.existsSync(root)) {
-			return { workspaceRoot: root, gitRoot: "", error: "No workspace root is available.", errorKind: "workspace_missing" }
-		}
-
-		if (!(await this.isGitAvailable())) {
-			return { workspaceRoot: root, gitRoot: "", error: "Git is not available on PATH.", errorKind: "git_missing" }
-		}
-
-		const result = await this.runGit(["rev-parse", "--show-toplevel"], root)
-		if (!result.success) {
-			return { workspaceRoot: root, gitRoot: "", error: result.stderr || "Workspace is not a git repository.", errorKind: "repo_missing" }
-		}
-
-		return { workspaceRoot: root, gitRoot: result.stdout.trim(), error: "", errorKind: "" }
+		return this.requireWorktreeQueries().resolveGitRoot(workspaceRoot || await this.getPrimaryWorkspaceRoot())
 	}
 
 	private async listWorktrees() {
-		const { workspaceRoot, gitRoot, error, errorKind } = await this.getGitRoot()
-		if (!gitRoot) {
-			this.setWorktreesFeatureFlag(false)
-			this.logger.log("sidecar", "worktreeListFailed", { errorKind, error })
-			return {
-				worktrees: [],
-				items: [],
-				isGitRepo: false,
-				isMultiRoot: false,
-				isSubfolder: false,
-				gitRootPath: "",
-				error,
-				errorKind,
-			}
-		}
-
-		const result = await this.runGit(["worktree", "list", "--porcelain"], gitRoot)
-		if (!result.success) {
-			this.setWorktreesFeatureFlag(false)
-			this.logger.log("sidecar", "worktreeListFailed", {
-				errorKind: "worktree_list_failed",
-				gitRoot,
-				stderr: truncateText(result.stderr, 1000),
-			})
-			return {
-				worktrees: [],
-				items: [],
-				isGitRepo: true,
-				isMultiRoot: false,
-				isSubfolder: !samePath(gitRoot, workspaceRoot),
-				gitRootPath: gitRoot,
-				error: result.stderr || "Failed to list git worktrees.",
-				errorKind: "worktree_list_failed",
-			}
-		}
-
-		const currentRoot = await this.getCurrentGitRoot(gitRoot)
-		const worktrees = await Promise.all(
-			parseGitWorktreePorcelain(result.stdout).map(async (worktree) => this.enrichWorktree(worktree, currentRoot || gitRoot)),
-		)
-		this.setWorktreesFeatureFlag(true)
-		this.logger.log("sidecar", "worktreeListSucceeded", { gitRoot, count: worktrees.length })
-		return {
-			worktrees,
-			items: worktrees,
-			isGitRepo: true,
-			isMultiRoot: false,
-			isSubfolder: !samePath(gitRoot, workspaceRoot),
-			gitRootPath: gitRoot,
-			error: "",
-			errorKind: "",
-		}
-	}
-
-	private async enrichWorktree(worktree: Record<string, unknown>, currentRoot: string) {
-		const worktreePath = getString(worktree, "path")
-		const status = worktreePath ? await this.getWorktreeStatus(worktreePath) : { dirty: false, statusSummary: "" }
-		return {
-			...worktree,
-			...status,
-			isCurrent: samePath(worktreePath, currentRoot),
-		}
+		const result = await this.requireWorktreeQueries().listWorktrees(await this.getPrimaryWorkspaceRoot())
+		this.setWorktreesFeatureFlag(result.isGitRepo && !result.error)
+		return result
 	}
 
 	private async getWorktreeStatus(worktreePath: string) {
-		if (!worktreePath || !fs.existsSync(worktreePath)) {
-			return { dirty: false, statusSummary: "missing", statusEntries: [], conflictCount: 0 }
-		}
-
-		const status = await this.runGit(["status", "--porcelain"], worktreePath)
-		if (!status.success) {
-			return { dirty: false, statusSummary: status.stderr || "status unavailable", statusEntries: [], conflictCount: 0 }
-		}
-
-		const lines = status.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-		if (lines.length === 0) {
-			return { dirty: false, statusSummary: "clean", statusEntries: [], conflictCount: 0 }
-		}
-
-		const staged = lines.filter((line) => line[0] && line[0] !== "?" && line[0] !== " ").length
-		const unstaged = lines.filter((line) => line[1] && line[1] !== " ").length
-		const untracked = lines.filter((line) => line.startsWith("??")).length
-		const conflicted = lines.filter((line) => /^([ADU]{2}|DD|AA|DU|UD|UA|AU)$/.test(line.slice(0, 2))).length
-		const statusEntries = lines.slice(0, 50).map((line) => ({
-			code: line.slice(0, 2),
-			path: line.slice(3).trim() || line,
-		}))
-		const parts = [
-			`${lines.length} change${lines.length === 1 ? "" : "s"}`,
-			staged ? `${staged} staged` : "",
-			unstaged ? `${unstaged} unstaged` : "",
-			untracked ? `${untracked} untracked` : "",
-			conflicted ? `${conflicted} conflict${conflicted === 1 ? "" : "s"}` : "",
-		].filter(Boolean)
-		return { dirty: true, statusSummary: parts.join(", "), statusEntries, conflictCount: conflicted }
-	}
-
-	private async getCurrentGitRoot(fallbackRoot: string) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const current = await this.getGitRoot(workspaceRoot)
-		return current.gitRoot || fallbackRoot
+		return this.requireWorktreeQueries().getStatus(worktreePath)
 	}
 
 	private setWorktreesFeatureFlag(enabled: boolean) {
@@ -2253,68 +2123,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async getWorktreeDefaults() {
-		const { workspaceRoot, gitRoot } = await this.getGitRoot()
-		const root = gitRoot || workspaceRoot || process.cwd()
-		const branchResult = await this.runGit(["branch", "--show-current"], root)
-		const baseBranch = branchResult.success ? branchResult.stdout.trim() : ""
-		const branches = await this.getLocalBranchCandidates(root)
-		const baseBranches = await this.getBaseBranchCandidates(root)
-		const rootName = path.basename(root.replace(/[\\/]+$/, "")) || "worktree"
-		const parent = path.dirname(root)
-		return {
-			branch: "",
-			baseBranch,
-			currentBranch: baseBranch,
-			branches,
-			baseBranches,
-			cwd: root,
-			suggestedBranch: `feature/${rootName}-task`,
-			suggestedPath: path.join(parent, `${rootName}-worktree`),
-			recommendedPath: path.join(parent, `${rootName}-worktree`),
-		}
-	}
-
-	private async getLocalBranchCandidates(root: string) {
-		const result = await this.runGit(["branch", "--format=%(refname:short)"], root)
-		if (!result.success) {
-			return []
-		}
-		return uniqueSortedLines(result.stdout)
-	}
-
-	private async getBaseBranchCandidates(root: string) {
-		const result = await this.runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes"], root)
-		if (!result.success) {
-			return this.getLocalBranchCandidates(root)
-		}
-		return uniqueSortedLines(result.stdout).filter((branch) => !/\/HEAD$/.test(branch))
+		return this.requireWorktreeQueries().getDefaults(await this.getPrimaryWorkspaceRoot())
 	}
 
 	private async getWorktreeIncludeStatus() {
-		const { workspaceRoot, gitRoot } = await this.getGitRoot()
-		const root = gitRoot || workspaceRoot
-		const worktreeIncludePath = root ? path.join(root, ".worktreeinclude") : ""
-		const gitignorePath = root ? path.join(root, ".gitignore") : ""
-		const [included, hasGitignore] = await Promise.all([pathExists(worktreeIncludePath), pathExists(gitignorePath)])
-		return {
-			enabled: !!root,
-			included,
-			exists: included,
-			hasGitignore,
-			gitignoreContent: hasGitignore ? await fs.promises.readFile(gitignorePath, "utf8") : "",
-		}
+		return this.requireWorktreeQueries().getIncludeStatus(await this.getPrimaryWorkspaceRoot())
 	}
 
 	private async createWorktreeInclude(message: unknown) {
-		const { workspaceRoot, gitRoot } = await this.getGitRoot()
-		const root = gitRoot || workspaceRoot
-		if (!root) {
-			return { success: false, message: "No workspace root is available to create .worktreeinclude." }
-		}
-
-		const targetPath = path.join(root, ".worktreeinclude")
-		await fs.promises.writeFile(targetPath, getString(message, "content"), "utf8")
-		return { success: true, message: ".worktreeinclude created successfully.", path: targetPath }
+		return this.requireWorktreeQueries().createInclude(getString(message, "content"), await this.getPrimaryWorkspaceRoot())
 	}
 
 	private async createWorktree(message: unknown) {
@@ -4443,6 +4260,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireBrowserHandler() {
 		if (!this.browserHandler) throw new Error("Browser feature handler is not attached.")
 		return this.browserHandler
+	}
+
+	private requireWorktreeQueries() {
+		if (!this.worktreeQueries) throw new Error("Worktree query handler is not attached.")
+		return this.worktreeQueries
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { McpHandler } from "./features/mcp/McpHandler"
 import { BrowserHandler } from "./features/browser/BrowserHandler"
+import { WorktreeQueryHandler } from "./features/worktrees/WorktreeQueryHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -16,6 +17,7 @@ import { SendMessageHandler } from "./features/chat/sendMessage/SendMessageHandl
 import { StartTaskHandler } from "./features/chat/startTask/StartTaskHandler"
 import { CancelTaskHandler } from "./features/chat/cancelTask/CancelTaskHandler"
 import { BrowserDevToolsAdapter } from "./infrastructure/browser/BrowserDevToolsAdapter"
+import { NodeWorktreeOperationsAdapter } from "./infrastructure/worktree/NodeWorktreeOperationsAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -47,6 +49,7 @@ const server = new SidecarRpcServer(
 		backend.setStartTaskHandler(new StartTaskHandler(runtime))
 		backend.setCancelTaskHandler(new CancelTaskHandler(runtime))
 		backend.setBrowserHandler(new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)))
+		backend.setWorktreeQueryHandler(new WorktreeQueryHandler(new NodeWorktreeOperationsAdapter(host), interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,
