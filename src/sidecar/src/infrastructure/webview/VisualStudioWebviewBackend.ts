@@ -61,6 +61,7 @@ import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMo
 import { ConversationProjectionState, type ProgressPhase, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
 import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
 import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
+import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -275,6 +276,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		| null = null
 	private messageSequence = 0
 	private readonly conversationProjection = new ConversationProjectionState()
+	private readonly partialTextProjector: PartialTextProjector
 	private stateBroadcastInFlight: Promise<void> | null = null
 	private stateBroadcastQueued = false
 	private readonly lastPartialMessageKeys = new Map<string, string>()
@@ -323,6 +325,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		private readonly taskLifecycle: TaskLifecycleUseCase,
 	) {
 		this.state = loadInitialState(this.stateStore.load())
+		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 		for (const [taskId, snapshot] of Object.entries(this.state.taskSnapshots)) {
@@ -4137,49 +4140,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private finalizeActivePartialText() {
-		this.clearPartialIdleWatchdog()
-		this.clearPartialStateBroadcastTimer()
-		if (!this.conversationProjection.activePartialTextTs) {
-			return
-		}
-		const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs)
-		if (message) {
-			message.partial = false
-			this.sendPartialMessage(message)
-		}
-		this.conversationProjection.activePartialTextTs = null
+		this.partialTextProjector.finalize()
 	}
 
 	private getActivePartialText() {
-		if (!this.conversationProjection.activePartialTextTs) {
-			return ""
-		}
-		return getString(this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs), "text")
+		return this.partialTextProjector.activeText()
 	}
 
 	private upsertPartialText(text: string) {
-		let created = false
-		if (!this.conversationProjection.activePartialTextTs) {
-			created = true
-			this.conversationProjection.activePartialTextTs = Date.now() + this.messageSequence++
-			this.state.clineMessages.push({
-				ts: this.conversationProjection.activePartialTextTs,
-				type: "say",
-				say: "text",
-				text,
-				partial: true,
-			})
-		} else {
-			this.upsertMessage(this.conversationProjection.activePartialTextTs, { type: "say", say: "text", text, partial: true })
-		}
-
-		this.schedulePartialIdleWatchdog()
-		if (created) {
-			this.broadcastPartialStateNow()
-		} else {
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activePartialTextTs))
-			this.schedulePartialStateBroadcast()
-		}
+		this.partialTextProjector.upsert(text)
 	}
 
 	private upsertAssistantTextFromEvent(accumulated: string, delta: string) {
