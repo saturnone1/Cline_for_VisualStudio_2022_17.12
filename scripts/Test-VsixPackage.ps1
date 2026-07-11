@@ -51,6 +51,8 @@ try {
 		"Sidecar/runtime/features/chat/cancelTask/CancelTaskHandler.js",
 		"Sidecar/runtime/features/approvals/ApprovalCoordinator.js",
 		"Sidecar/runtime/features/taskHistory/TaskHistoryCollection.js",
+		"Sidecar/runtime/features/providers/ProviderSelection.js",
+		"Sidecar/runtime/features/settings/PlanActMode.js",
         "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
 		"Sidecar/runtime/infrastructure/persistence/LocalAutomationStore.js",
 		"Sidecar/runtime/infrastructure/auth/ProviderAuthSupport.js",

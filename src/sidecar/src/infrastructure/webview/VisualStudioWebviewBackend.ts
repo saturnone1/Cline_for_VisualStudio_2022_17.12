@@ -233,7 +233,6 @@ import {
 import {
 	type OAuthTokenExchangeConfig,
 	compactApiConfiguration,
-	resolveModelId,
 	resolveConfiguredContextWindow,
 	positiveIntegerValue,
 	resolveApiKey,
@@ -256,11 +255,12 @@ import {
 	isAutoApprovalSettingsLike,
 	createToolPolicies,
 	isPlanModeBlockedTool,
-	resolveRequestedPlanActMode,
 	isWebFetchEnabled,
 	webFetchDisabledReason,
 	isRuntimeSettingsKey,
 } from "../configuration/ProviderConfiguration"
+import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
+import { resolveRequestedPlanActMode } from "../../features/settings/PlanActMode"
 import {
 	type OAuthCallbackSession,
 	createUnauthenticatedAccountState,
@@ -5250,8 +5250,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async buildSdkConfig(cwd: string, sessionId?: string) {
 		const apiConfig = asRecord(this.state.apiConfiguration)
-		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
-		const providerId = normalizeProviderId(getString(apiConfig, `${modePrefix}ApiProvider`) || process.env.CLINE_PROVIDER_ID || "anthropic")
+		const { modePrefix, providerId } = selectProvider(apiConfig, this.state.mode, process.env.CLINE_PROVIDER_ID || "anthropic")
 		const sdkProviderId = normalizeSdkProviderId(providerId)
 		const configuredBaseUrl = resolveBaseUrl(apiConfig, providerId)
 		const modelLookupBaseUrl = providerId === "ollama" ? normalizeOllamaRootBaseUrl(configuredBaseUrl) : configuredBaseUrl
@@ -6549,8 +6548,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private getModelId() {
 		const apiConfig = asRecord(this.state.apiConfiguration)
-		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
-		const providerId = normalizeProviderId(getString(apiConfig, `${modePrefix}ApiProvider`) || "anthropic")
+		const { modePrefix, providerId } = selectProvider(apiConfig, this.state.mode)
 		if (providerId === "ollama") {
 			return resolveModelId(apiConfig, providerId, modePrefix) || process.env.OLLAMA_MODEL || process.env.CLINE_MODEL_ID || "ollama"
 		}

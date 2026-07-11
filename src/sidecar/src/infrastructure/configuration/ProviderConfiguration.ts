@@ -23,40 +23,6 @@ export function compactApiConfiguration(apiConfig: Record<string, unknown>) {
 	return compact
 }
 
-export function resolveModelId(apiConfig: Record<string, unknown>, providerId: string, modePrefix: string) {
-	const providerModelFields: Record<string, string> = {
-		anthropic: `${modePrefix}ApiModelId`,
-		openrouter: `${modePrefix}OpenRouterModelId`,
-		openai: `${modePrefix}OpenAiModelId`,
-		"openai-compatible": `${modePrefix}OpenAiModelId`,
-		gemini: `${modePrefix}GeminiModelId`,
-		ollama: `${modePrefix}OllamaModelId`,
-		lmstudio: `${modePrefix}LmStudioModelId`,
-		litellm: `${modePrefix}LiteLlmModelId`,
-		requesty: `${modePrefix}RequestyModelId`,
-		together: `${modePrefix}TogetherModelId`,
-		fireworks: `${modePrefix}FireworksModelId`,
-		groq: `${modePrefix}GroqModelId`,
-		baseten: `${modePrefix}BasetenModelId`,
-		huggingface: `${modePrefix}HuggingFaceModelId`,
-		"vercel-ai-gateway": `${modePrefix}VercelAiGatewayModelId`,
-		aihubmix: `${modePrefix}AihubmixModelId`,
-		hicap: `${modePrefix}HicapModelId`,
-		oca: `${modePrefix}OcaModelId`,
-	}
-
-	const providerSpecific = getString(apiConfig, providerModelFields[providerId])
-	if (providerSpecific) {
-		return providerSpecific
-	}
-
-	if (providerId === "ollama") {
-		return ""
-	}
-
-	return getString(apiConfig, `${modePrefix}ApiModelId`) || getString(apiConfig, `${modePrefix}OpenAiModelId`)
-}
-
 export function resolveConfiguredContextWindow(
 	apiConfig: Record<string, unknown>,
 	providerId: string,
@@ -580,18 +546,6 @@ export function isPlanModeBlockedTool(toolName: string) {
 		mapped === "browser_action_launch" ||
 		mapped === "browser" ||
 		mapped === "skills"
-}
-
-export function resolveRequestedPlanActMode(message: unknown, currentMode: string) {
-	const record = asRecord(message)
-	const raw = String(record.mode ?? record.value ?? "").toLowerCase()
-	if (raw === "plan" || raw === "planactmode.plan" || raw === "0") {
-		return "plan"
-	}
-	if (raw === "act" || raw === "planactmode.act" || raw === "1") {
-		return "act"
-	}
-	return currentMode === "plan" ? "act" : "plan"
 }
 
 export function isWebFetchEnabled(browserSettings: unknown) {
