@@ -18,11 +18,18 @@ export function normalizeAgentRuntimeEvent(value: unknown): AgentRuntimeEvent {
 			const aggregateUsage = asRecord(snapshot.aggregateUsage)
 			return { type: originalType, sessionId, status: readString(snapshot.status), modelId: readString(asRecord(snapshot.model).modelId), usage: Object.keys(aggregateUsage).length ? aggregateUsage : asRecord(snapshot.usage), payload }
 		}
-		case "team_progress":
+		case "team_progress": {
+			const summary = asRecord(payload.summary), lifecycle = asRecord(payload.lifecycle)
+			const agents = records(payload.agents || payload.subagents || payload.members).map((agent) => ({ id: readString(agent.id) || readString(agent.agentId), name: readString(agent.name) || readString(agent.role), status: readString(agent.status) || readString(agent.phase), progress: readNumber(agent.progress) }))
+			const results = records(payload.results || payload.outputs).map((result) => ({ id: readString(result.id) || readString(result.agentId), status: readString(result.status), summary: readString(result.summary) || readString(result.text) }))
+			return { type: originalType, sessionId, message: readString(summary.message) || readString(summary.status) || readString(lifecycle.phase) || readString(payload.teamName) || "Team progress updated.", teamId: readString(payload.teamId) || readString(payload.id), teamName: readString(payload.teamName), phase: readString(lifecycle.phase) || readString(payload.phase), status: readString(summary.status) || readString(payload.status), agents, results, payload }
+		}
 		case "hook":
+			return { type: originalType, sessionId, hookEventName: readString(payload.hookEventName), toolName: readString(payload.toolName), agentId: readString(payload.agentId), conversationId: readString(payload.conversationId), iteration: readNumber(payload.iteration), payload }
 		case "pending_prompts":
+			return { type: originalType, sessionId, count: Array.isArray(payload.prompts) ? payload.prompts.length : 0, payload }
 		case "pending_prompt_submitted":
-			return { type: originalType, sessionId, payload }
+			return { type: originalType, sessionId, prompt: readString(payload.prompt), payload }
 		case "status": {
 			const status = readString(payload.status)
 			return { type: originalType, sessionId, status, lifecycle: lifecycleEvent(sessionId, status, payload), payload }
@@ -140,5 +147,7 @@ function readString(value: unknown) {
 function readNumber(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
+
+function records(value: unknown): AgentEventPayload[] { return Array.isArray(value) ? value.map(asRecord) : [] }
 
 function completionFields(raw: AgentEventPayload) { return Object.fromEntries(["outputText", "finalText", "finalResponse", "response", "answer", "text", "message", "content", "output", "result"].filter((key) => raw[key] !== undefined).map((key) => [key, raw[key]])) }

@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, SessionSnapshotRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, HookRuntimeEvent, PendingPromptSubmittedRuntimeEvent, PendingPromptsRuntimeEvent, SessionSnapshotRuntimeEvent, TeamProgressRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -593,7 +593,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handleTeamProgress(payload)
+			this.handleTeamProgress(event)
 			return
 		}
 
@@ -602,7 +602,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handleHookEvent(payload)
+			this.handleHookEvent(event)
 			return
 		}
 
@@ -611,7 +611,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handlePendingPrompts(payload)
+			this.handlePendingPrompts(event)
 			return
 		}
 
@@ -620,7 +620,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handlePendingPromptSubmitted(payload)
+			this.handlePendingPromptSubmitted(event)
 			return
 		}
 
@@ -2479,37 +2479,24 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
-	private handleTeamProgress(payload: Record<string, unknown>) {
-		const summary = asRecord(payload.summary)
-		const lifecycle = asRecord(payload.lifecycle)
-		const agents = arrayOfRecords(payload.agents || payload.subagents || payload.members)
-		const results = arrayOfRecords(payload.results || payload.outputs)
-		const message =
-			getString(summary, "message") ||
-			getString(summary, "status") ||
-			getString(lifecycle, "phase") ||
-			getString(payload, "teamName") ||
-			"Team progress updated."
+	private handleTeamProgress(event: TeamProgressRuntimeEvent) {
+		const { message, agents, results } = event
 		this.noteTaskActivity("team_progress")
 		this.addMessage({
 			type: "say",
 			say: "use_subagents",
 			text: JSON.stringify({
 				message,
-				teamId: getString(payload, "teamId") || getString(payload, "id") || undefined,
-				teamName: getString(payload, "teamName") || undefined,
-				phase: getString(lifecycle, "phase") || getString(payload, "phase") || undefined,
-				status: getString(summary, "status") || getString(payload, "status") || undefined,
+				teamId: event.teamId || undefined,
+				teamName: event.teamName || undefined,
+				phase: event.phase || undefined,
+				status: event.status || undefined,
 				agents: agents.map((agent) => ({
-					id: getString(agent, "id") || getString(agent, "agentId"),
-					name: getString(agent, "name") || getString(agent, "role"),
-					status: getString(agent, "status") || getString(agent, "phase"),
-					progress: getNumber(agent, "progress"),
+					...agent,
 				})),
 				results: results.map((result) => ({
-					id: getString(result, "id") || getString(result, "agentId"),
-					status: getString(result, "status"),
-					summary: truncateText(getString(result, "summary") || getString(result, "text"), 500),
+					...result,
+					summary: truncateText(result.summary, 500),
 				})),
 			}),
 			isCollapsed: true,
@@ -2520,15 +2507,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
-	private handleHookEvent(payload: Record<string, unknown>) {
-		const hookEventName = getString(payload, "hookEventName")
-		const toolName = getString(payload, "toolName")
+	private handleHookEvent(event: HookRuntimeEvent) {
+		const { hookEventName, toolName } = event
 		const text = JSON.stringify({
 			hookEventName,
 			toolName,
-			agentId: getString(payload, "agentId") || undefined,
-			conversationId: getString(payload, "conversationId") || undefined,
-			iteration: getNumber(payload, "iteration"),
+			agentId: event.agentId || undefined,
+			conversationId: event.conversationId || undefined,
+			iteration: event.iteration,
 		})
 		this.noteTaskActivity(`hook:${hookEventName || "unknown"}`)
 		this.addMessage({ type: "say", say: "hook_status", text })
@@ -2567,18 +2553,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 	}
 
-	private handlePendingPrompts(payload: Record<string, unknown>) {
-		const prompts = Array.isArray(payload.prompts) ? payload.prompts : []
+	private handlePendingPrompts(event: PendingPromptsRuntimeEvent) {
 		this.noteTaskActivity("pending_prompts")
-		if (prompts.length > 0) {
-			this.logger.log("sidecar", "pendingPrompts", { count: prompts.length })
+		if (event.count > 0) {
+			this.logger.log("sidecar", "pendingPrompts", { count: event.count })
 		}
 		this.updateCurrentTaskItem()
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
-	private handlePendingPromptSubmitted(payload: Record<string, unknown>) {
-		const prompt = getString(payload, "prompt")
+	private handlePendingPromptSubmitted(event: PendingPromptSubmittedRuntimeEvent) {
+		const { prompt } = event
 		this.noteTaskActivity("pending_prompt_submitted")
 		if (prompt) {
 			this.logger.log("sidecar", "pendingPromptSubmitted", { prompt: truncateText(prompt, 160) })

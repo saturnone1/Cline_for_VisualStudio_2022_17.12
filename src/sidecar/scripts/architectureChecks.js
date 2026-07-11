@@ -174,6 +174,9 @@ if (router.includes("const event = semanticEvent.raw")) {
 if (router.includes("handleSessionChunk(payload)") || router.includes("handleSessionSnapshot(payload)")) {
 	violations.push("Chunk and session snapshot projection must consume normalized AgentRuntimeEvent fields.")
 }
+for (const legacyCall of ["handleTeamProgress(payload)", "handleHookEvent(payload)", "handlePendingPrompts(payload)", "handlePendingPromptSubmitted(payload)"]) {
+	if (router.includes(legacyCall)) violations.push(`Runtime projection must consume normalized fields instead of raw payload: ${legacyCall}`)
+}
 const sdkEventTranslator = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventTranslator.ts"), "utf8")
 for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ToolCallUpdated", "IterationCompleted", "NoticeReceived", "ToolFinished", "AssistantMessageReceived", "RunFinished", "RunFailed", "UsageUpdated", "AgentDone", "AgentError", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
 	if (!sdkEventTranslator.includes(`\"${eventName}\"`)) {
