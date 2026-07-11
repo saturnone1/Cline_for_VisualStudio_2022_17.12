@@ -101,6 +101,7 @@
     <Compile Include="Host\WebviewGrpcFallback.cs" />
     <Compile Include="Host\WebviewBootstrapScript.cs" />
     <Compile Include="Host\WebviewMessageQueue.cs" />
+    <Compile Include="Host\WebView2RuntimeResolver.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
