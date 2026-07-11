@@ -58,10 +58,11 @@ import {
 import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
 import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHandler"
 import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMonitor"
-import { ConversationProjectionState, type ProgressPhase, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
+import { ConversationProjectionState, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
 import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
 import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
+import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -162,9 +163,6 @@ import {
 	shouldFoldTextContentAsReasoning,
 	shouldDelayAssistantTextUntilClassified,
 	stripRawToolCallMarkup,
-	normalizeReasoningTranscriptText,
-	normalizeProgressTranscriptText,
-	sanitizeProgressTranscriptForDisplay,
 	normalizeAssistantTranscriptText,
 	buildResumedConversationMessages,
 	clineMessageToResumedTranscriptEntry,
@@ -277,6 +275,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private messageSequence = 0
 	private readonly conversationProjection = new ConversationProjectionState()
 	private readonly partialTextProjector: PartialTextProjector
+	private readonly foldedProgressProjector: FoldedProgressProjector
 	private stateBroadcastInFlight: Promise<void> | null = null
 	private stateBroadcastQueued = false
 	private readonly lastPartialMessageKeys = new Map<string, string>()
@@ -326,6 +325,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	) {
 		this.state = loadInitialState(this.stateStore.load())
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
+		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 		for (const [taskId, snapshot] of Object.entries(this.state.taskSnapshots)) {
@@ -373,7 +373,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
 	setTaskActivityMonitor(taskActivity: TaskActivityMonitor) { this.taskActivity = taskActivity }
 	setPartialStateScheduler(partialStateScheduler: PartialStateScheduler) { this.partialStateScheduler = partialStateScheduler }
-	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
+	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
 	handleTaskIdleLongRunning() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
@@ -1788,7 +1788,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		this.removeTerminalAskMessages()
 		const userMessage = this.addMessage({ type: "say", say: "user_feedback", text })
-		this.beginProgressPhase("reasoning")
+		this.foldedProgressProjector.beginReasoning()
 		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
 		this.schedulePersistedStateSave()
 		this.sendPartialMessage(userMessage)
@@ -1851,7 +1851,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				: "내부 유지보수 요청: 이후 대화를 위해 현재 대화 컨텍스트를 압축해 주세요. 사용자의 목표, 중요한 결정, 파일 경로, 오류, 남은 작업, 현재 상태를 보존하세요. 이것을 사용자의 일반 기능 요청으로 처리하지 마세요."
 
 		this.startSendLatencyTrace(requestId, "askResponse", sessionId, prompt.length)
-		this.beginProgressPhase("reasoning")
+		this.foldedProgressProjector.beginReasoning()
 		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
 		this.schedulePersistedStateSave()
 		await this.broadcastState()
@@ -3220,7 +3220,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.rememberToolSummary(mappedToolName, text)
 			if (isCommand) {
 				this.appendTerminalActivityText(formatCompletedCommandActivity(text, this.getUiLanguage()))
-				this.moveActiveReasoningToEnd()
+				this.foldedProgressProjector.moveActiveToEnd()
 			} else {
 				this.recordToolActivity(mappedToolName, text)
 			}
@@ -4125,19 +4125,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.upsertFoldedActivityText(groupedText)
 	}
 
-	private moveActiveReasoningToEnd() {
-		if (!this.conversationProjection.activeReasoningTextTs) {
-			return
-		}
 
-		const index = this.state.clineMessages.findIndex((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
-		if (index < 0 || index === this.state.clineMessages.length - 1) {
-			return
-		}
-
-		const [message] = this.state.clineMessages.splice(index, 1)
-		this.state.clineMessages.push(message)
-	}
 
 	private finalizeActivePartialText() {
 		this.partialTextProjector.finalize()
@@ -4174,174 +4162,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.upsertPartialText(normalized)
 	}
 
-	private upsertFoldedReasoningText(text: string) {
-		const normalized = normalizeReasoningTranscriptText(text)
-		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
-			return
-		}
+	private upsertFoldedReasoningText(text: string) { this.foldedProgressProjector.upsertReasoning(text) }
 
-		this.beginProgressPhase("reasoning")
-		const capped = truncateText(normalized, readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000))
-		const previous = this.conversationProjection.activeFoldedReasoningText
-		const previousNormalized = normalizeTranscriptText(previous)
-		const cappedNormalized = normalizeTranscriptText(capped)
-		if (previousNormalized.includes(cappedNormalized)) {
-			return
-		}
-		if (!this.conversationProjection.activeReasoningTextTs && this.hasRecentFoldedReasoning(capped)) {
-			return
-		}
 
-		this.conversationProjection.activeFoldedReasoningText = truncateText(
-			cappedNormalized.includes(previousNormalized) ? capped : [previous, capped].filter(Boolean).join("\n"),
-			readPositiveIntEnv("VSCLINE_REASONING_TRANSCRIPT_CHARS", 12000),
-		)
-		this.upsertFoldedProgressMessage()
-	}
 
-	private hasRecentFoldedReasoning(text: string) {
-		const normalized = normalizeTranscriptText(text)
-		if (!normalized) {
-			return true
-		}
+	private upsertFoldedActivityText(text: string) { this.foldedProgressProjector.upsertActivity(text) }
 
-		return this.state.clineMessages.slice(-6).some((message) => {
-			if (getString(message, "say") !== "reasoning") {
-				return false
-			}
-			const existing = normalizeTranscriptText(getString(message, "reasoning"))
-			return existing === normalized || existing.includes(normalized) || normalized.includes(existing)
-		})
-	}
+	private appendTerminalActivityText(text: string) { this.foldedProgressProjector.appendTerminal(text) }
 
-	private upsertFoldedActivityText(text: string) {
-		const normalized = normalizeProgressTranscriptText(text)
-		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
-			return
-		}
 
-		this.beginProgressPhase("activity")
-		this.conversationProjection.activeFoldedActivityText = truncateText(normalized, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
-		this.upsertFoldedProgressMessage()
-	}
 
-	private appendTerminalActivityText(text: string) {
-		const normalized = normalizeProgressTranscriptText(text)
-		if (!normalized || isEmptyTranscriptPlaceholder(normalized)) {
-			return
-		}
+	private finishFoldedReasoningText(stopTerminalPolling = true) { this.foldedProgressProjector.finish(stopTerminalPolling) }
 
-		this.beginProgressPhase("terminal")
-		const previous = this.conversationProjection.activeTerminalActivityText
-		const previousNormalized = normalizeTranscriptText(previous)
-		const nextNormalized = normalizeTranscriptText(normalized)
-		if (previousNormalized.includes(nextNormalized)) {
-			return
-		}
 
-		this.conversationProjection.activeTerminalActivityText = truncateText(
-			[nextNormalized.includes(previousNormalized) ? "" : previous, normalized].filter(Boolean).join("\n\n"),
-			readPositiveIntEnv("VSCLINE_TERMINAL_ACTIVITY_CHARS", 2000),
-		)
-		this.upsertFoldedProgressMessage()
-	}
-
-	private beginProgressPhase(phase: ProgressPhase) {
-		const previous = this.conversationProjection.activeProgressPhase
-		if (previous && previous !== phase) this.finishFoldedReasoningText(false)
-		this.conversationProjection.beginProgressPhase(phase)
-	}
-
-	private upsertFoldedProgressMessage() {
-		const foldedText = this.conversationProjection.foldedProgressText
-		if (!foldedText.trim() || isEmptyTranscriptPlaceholder(foldedText)) {
-			return
-		}
-
-		let created = false
-		if (!this.conversationProjection.activeReasoningTextTs) {
-			created = true
-			this.conversationProjection.activeReasoningTextTs = Date.now() + this.messageSequence++
-			this.state.clineMessages.push({
-				ts: this.conversationProjection.activeReasoningTextTs,
-				type: "say",
-				say: "reasoning",
-				text: this.getProgressPhaseTitle(),
-				reasoning: foldedText,
-				partial: true,
-				isCollapsed: true,
-				isExpanded: false,
-			})
-		} else {
-			this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
-				type: "say",
-				say: "reasoning",
-				text: this.getProgressPhaseTitle(),
-				reasoning: foldedText,
-				partial: true,
-				isCollapsed: true,
-				isExpanded: false,
-			})
-		}
-
-		this.moveActiveReasoningToEnd()
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
-		if (created) {
-			this.broadcastPartialStateNow()
-		} else {
-			this.sendPartialMessage(progressMessage)
-			this.schedulePartialStateBroadcast()
-		}
-	}
-
-	private finishFoldedReasoningText(stopTerminalPolling = true) {
-		if (stopTerminalPolling) {
-			this.stopTerminalStatePolling()
-		}
-		if (!this.conversationProjection.activeReasoningTextTs) {
-			return
-		}
-
-		const progressMessage = this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)
-		if (isEmptyTranscriptPlaceholder(getString(progressMessage, "reasoning") || getString(progressMessage, "text"))) {
-			this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
-				text: "",
-				reasoning: "",
-				partial: false,
-				isCollapsed: true,
-				isExpanded: false,
-			})
-			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
-			this.conversationProjection.finishProgressMessage()
-			return
-		}
-
-		this.upsertMessage(this.conversationProjection.activeReasoningTextTs, {
-			text: this.getProgressPhaseTitle(true),
-			reasoning: sanitizeProgressTranscriptForDisplay(getString(progressMessage, "reasoning")),
-			partial: false,
-			isCollapsed: true,
-			isExpanded: false,
-		})
-		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
-		this.conversationProjection.finishProgressMessage()
-	}
-
-	private getProgressPhaseTitle(completed = false) {
-		const language = this.state.uiLanguage === "en" ? "en" : "ko"
-		const suffix = completed
-			? language === "ko" ? " 기록" : " history"
-			: language === "ko" ? " 중" : "..."
-		switch (this.conversationProjection.activeProgressPhase) {
-			case "terminal":
-				return language === "ko" ? `터미널 실행${suffix}` : `Running terminal${suffix}`
-			case "activity":
-				return language === "ko" ? `파일/도구 처리${suffix}` : `Reading files and using tools${suffix}`
-			case "reasoning":
-			default:
-				return language === "ko" ? `응답 준비${suffix}` : `Preparing response${suffix}`
-		}
-	}
 
 	private startSendLatencyTrace(requestId: string, kind: "newTask" | "askResponse", sessionId: string, textLength: number) {
 		if (!sessionId) {
