@@ -1,5 +1,6 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
+import type { McpMarketplaceCatalog } from "@shared/mcp"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
 const decodeMessage = <TResponse>(response: TResponse) => response
@@ -151,6 +152,22 @@ interface WorktreeServiceContract {
 	trackWorktreeViewOpened: UnaryOperation<RpcRequest>
 }
 
+type McpServersResponse = RpcRequest & { mcpServers: RpcRequest[] }
+
+interface McpServiceContract {
+	refreshMcpMarketplace: UnaryOperation<RpcRequest, McpMarketplaceCatalog>
+	getLatestMcpServers: UnaryOperation<RpcRequest, McpServersResponse>
+	addRemoteMcpServer: UnaryOperation<RpcRequest, McpServersResponse>
+	downloadMcp: UnaryOperation<RpcRequest, RpcRequest & { error?: string }>
+	openMcpSettings: UnaryOperation
+	updateMcpTimeout: UnaryOperation<RpcRequest>
+	restartMcpServer: UnaryOperation<RpcRequest>
+	deleteMcpServer: UnaryOperation<RpcRequest>
+	toggleToolAutoApprove: UnaryOperation<RpcRequest>
+	toggleMcpServer: UnaryOperation<RpcRequest>
+	authenticateMcpServer: UnaryOperation<RpcRequest>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -182,7 +199,7 @@ export const AccountServiceClient: any = createServiceClient("AccountService")
 export const BrowserServiceClient = createServiceClient<BrowserServiceContract>("BrowserService")
 export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
 export const FileServiceClient: any = createServiceClient("FileService")
-export const McpServiceClient: any = createServiceClient("McpService")
+export const McpServiceClient = createServiceClient<McpServiceContract>("McpService")
 export const ModelsServiceClient: any = createServiceClient("ModelsService")
 export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
 export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")

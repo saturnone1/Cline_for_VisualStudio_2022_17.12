@@ -17,9 +17,28 @@ for (const service of [
 	"WebServiceClient",
 	"OcaAccountServiceClient",
 	"WorktreeServiceClient",
+	"McpServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"refreshMcpMarketplace",
+	"getLatestMcpServers",
+	"addRemoteMcpServer",
+	"downloadMcp",
+	"openMcpSettings",
+	"updateMcpTimeout",
+	"restartMcpServer",
+	"deleteMcpServer",
+	"toggleToolAutoApprove",
+	"toggleMcpServer",
+	"authenticateMcpServer",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`McpServiceContract is missing ${operation}.`)
 	}
 }
 
