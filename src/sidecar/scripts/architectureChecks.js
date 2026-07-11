@@ -259,6 +259,7 @@ for (const requiredFile of [
 	"features/chat/cancelTask/CancelTaskFlow.ts",
 	"features/chat/runtime/AgentRunRecoveryFlow.ts",
 	"features/chat/runtime/AgentRunCompletionFlow.ts",
+	"features/chat/runtime/SendOrResumeSessionFlow.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/configuration/SettingsMutationHandler.ts",

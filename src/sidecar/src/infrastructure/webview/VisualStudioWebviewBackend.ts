@@ -30,6 +30,7 @@ import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTas
 import { CancelTaskFlow } from "../../features/chat/cancelTask/CancelTaskFlow"
 import { AgentRunRecoveryFlow } from "../../features/chat/runtime/AgentRunRecoveryFlow"
 import { AgentRunCompletionFlow } from "../../features/chat/runtime/AgentRunCompletionFlow"
+import { SendOrResumeSessionFlow } from "../../features/chat/runtime/SendOrResumeSessionFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -229,6 +230,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly cancelTaskFlow: CancelTaskFlow
 	private readonly agentRunRecovery: AgentRunRecoveryFlow
 	private readonly agentRunCompletion: AgentRunCompletionFlow
+	private readonly sendOrResumeSession: SendOrResumeSessionFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -307,6 +309,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.cancelTaskFlow = new CancelTaskFlow({ beginCancel: () => Boolean(this.transitionTask("cancelling", "cancel-request")), currentStatus: () => this.taskLifecycle.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", cancelRemote: async (sessionId) => { if (this.cancelTaskHandler) await this.cancelTaskHandler.execute({ sessionId }) }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText(); this.finalizeOpenPartialMessages(); this.removeTerminalAskMessages() }, addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, updateTask: () => this.updateCurrentTaskItem(), runHook: (sessionId) => this.runLifecycleHooks("TaskCancel", { sessionId }), completeCancel: () => { this.transitionTask("idle", "cancel-complete") }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunRecovery = new AgentRunRecoveryFlow({ currentGeneration: () => this.sdkRunGeneration, activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), projectFailure: (source, error) => { this.clearTaskIdleWatchdog(); this.transitionTask("failed", `sdk-error:${source}`); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.addMessage({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) }) }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), isCurrentSession: (sessionId) => this.isCurrentSdkResultSession(sessionId), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), failEmpty: (sessionId) => this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.finalizeOpenPartialMessages(), addCompletionMarker: (status) => this.addCompletionResultMarker(status), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.sendOrResumeSession = new SendOrResumeSessionFlow(() => this.clineSdk, { activeSettingsRevision: () => this.activeSessionRuntimeSettingsRevision, settingsRevision: () => this.runtimeSettingsRevision, markClosing: (sessionId, closing) => { if (closing) this.closingSessionIds.add(sessionId); else this.closingSessionIds.delete(sessionId) }, send: (command) => { if (!this.sendMessage) return Promise.reject(new Error("SendMessageHandler is not attached.")); return this.sendMessage.execute(command) }, resume: (sessionId, command, textLength) => this.resumeSdkSessionForSend(sessionId, command, textLength), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), markError: (sessionId, error) => this.markSendLatencyError(sessionId, error), isSessionNotFound: (error) => isSessionNotFoundError(error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1896,65 +1899,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		sendParams: SendMessageCommand,
 		textLength: number,
 	): Promise<unknown> {
-		if (!this.clineSdk) {
-			throw new Error("LIG VS SDK runtime is not attached.")
-		}
-
-		let activateMissing = false
-		if (this.clineSdk.status.activeSessionId !== sessionId) {
-			this.logger.log("sidecar", "sendAskResponse.activateSession", {
-				from: this.clineSdk.status.activeSessionId,
-				to: sessionId,
-			})
-			await this.clineSdk.activateSession(sessionId).catch((error) => {
-				if (!isSessionNotFoundError(error)) {
-					throw error
-				}
-				activateMissing = true
-				this.logger.log("sidecar", "sendAskResponse.activateSessionMissing", {
-					sessionId,
-					error: error instanceof Error ? error.message : String(error),
-				})
-			})
-		}
-
-		try {
-			if (activateMissing) {
-				return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
-			}
-			if (this.activeSessionRuntimeSettingsRevision !== this.runtimeSettingsRevision) {
-				this.logger.log("sidecar", "sendAskResponse.restartForSettingsChange", {
-					sessionId,
-					activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision,
-					runtimeSettingsRevision: this.runtimeSettingsRevision,
-				})
-				this.closingSessionIds.add(sessionId)
-				await this.clineSdk.stop({ sessionId }).catch((error) => {
-					this.logger.log("sidecar", "sendAskResponse.stopForSettingsChangeFailed", {
-						sessionId,
-						error: error instanceof Error ? error.message : String(error),
-					})
-				})
-				this.closingSessionIds.delete(sessionId)
-				return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
-			}
-			this.markSendLatencySdkSend(sessionId)
-			this.logger.log("sidecar", "sendAskResponse.sdkSend", { sessionId, textLength })
-			if (!this.sendMessage) {
-				throw new Error("SendMessageHandler is not attached.")
-			}
-			return await this.sendMessage.execute(sendParams)
-		} catch (error) {
-			this.markSendLatencyError(sessionId, error)
-			if (!isSessionNotFoundError(error)) {
-				throw error
-			}
-			this.logger.log("sidecar", "sendAskResponse.sdkSendMissingSession", {
-				sessionId,
-				error: error instanceof Error ? error.message : String(error),
-			})
-			return await this.resumeSdkSessionForSend(sessionId, sendParams, textLength)
-		}
+		return this.sendOrResumeSession.execute(sessionId, sendParams, textLength)
 	}
 
 	private async resumeSdkSessionForSend(
