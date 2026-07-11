@@ -1,4 +1,4 @@
-import type { ScheduledAgentStorePort } from "../../application/ports/ScheduledAgentStorePort"
+import type { ScheduledAgentSpecInput, ScheduledAgentStorePort } from "../../application/ports/ScheduledAgentStorePort"
 import { getScheduledSpecId } from "./ScheduledAgentPolicy"
 
 type LaunchScheduledTask = (request: Readonly<{ text: string; workspacePath: string; taskSessionId: string }>) => Promise<void>
@@ -22,22 +22,21 @@ export class ScheduledAgentHandler {
 		}
 	}
 
-	save(message: unknown, workspaceRoot: string) {
+	save(request: ScheduledAgentSpecInput, workspaceRoot: string) {
 		this.requireWorkspace(workspaceRoot)
-		const spec = this.store.saveSpec(workspaceRoot, asRecord(message))
+		const spec = this.store.saveSpec(workspaceRoot, request)
 		return { ...this.list(workspaceRoot), success: true, supported: true, spec }
 	}
 
-	delete(message: unknown, workspaceRoot: string) {
+	delete(request: ScheduledAgentSpecInput, workspaceRoot: string) {
 		this.requireWorkspace(workspaceRoot)
-		const specId = getScheduledSpecId(asRecord(message))
+		const specId = getScheduledSpecId(request)
 		const deleted = this.store.deleteSpec(workspaceRoot, specId)
 		return { ...this.list(workspaceRoot), success: deleted, supported: true, deleted, specId }
 	}
 
-	async run(message: unknown, workspaceRoot: string, launch: LaunchScheduledTask) {
+	async run(request: ScheduledAgentSpecInput, workspaceRoot: string, launch: LaunchScheduledTask) {
 		this.requireWorkspace(workspaceRoot)
-		const request = asRecord(message)
 		const specId = getScheduledSpecId(request)
 		const spec = this.store.listSpecs(workspaceRoot).find((item) => matchesSpec(item, specId)) || this.store.saveSpec(workspaceRoot, request)
 		const prompt = readString(request.prompt) || readString(spec.prompt) || readString(spec.task) || readString(spec.text)
@@ -53,5 +52,4 @@ export class ScheduledAgentHandler {
 }
 
 function matchesSpec(item: Record<string, unknown>, specId: string) { return [item.id, item.name, item.fileName].some((value) => readString(value) === specId) }
-function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }

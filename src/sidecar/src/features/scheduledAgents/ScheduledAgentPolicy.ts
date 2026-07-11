@@ -1,8 +1,10 @@
-export function getScheduledSpecId(request: Record<string, unknown>) {
+import type { ScheduledAgentSpecInput } from "../../application/ports/ScheduledAgentStorePort"
+
+export function getScheduledSpecId(request: ScheduledAgentSpecInput) {
 	return safeFileStem(readString(request.id) || readString(request.specId) || readString(request.name) || readString(request.fileName))
 }
 
-export function buildScheduledAgentSpec(existing: Record<string, unknown>, request: Record<string, unknown>, specId: string, updatedAt: string) {
+export function buildScheduledAgentSpec(existing: Record<string, unknown>, request: ScheduledAgentSpecInput, specId: string, updatedAt: string) {
 	return {
 		...existing,
 		id: safeFileStem(specId || "scheduled-agent"),

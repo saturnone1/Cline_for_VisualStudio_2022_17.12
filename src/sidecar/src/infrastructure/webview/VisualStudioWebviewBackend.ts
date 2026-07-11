@@ -103,6 +103,8 @@ import { CheckpointRpcHandler } from "../../features/checkpoints/CheckpointRpcHa
 import { decodeCheckpointRpcCommand } from "./CheckpointRpcDecoder"
 import { HookRpcHandler } from "../../features/hooks/HookRpcHandler"
 import { decodeHookRpcCommand } from "./HookRpcDecoder"
+import { ScheduledAgentRpcHandler } from "../../features/scheduledAgents/ScheduledAgentRpcHandler"
+import { decodeScheduledAgentRpcCommand } from "./ScheduledAgentRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -280,6 +282,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly taskRpc: TaskRpcHandler
 	private readonly checkpointRpc: CheckpointRpcHandler
 	private readonly hookRpc: HookRpcHandler
+	private readonly scheduledAgentRpc: ScheduledAgentRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -354,6 +357,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskRpc = new TaskRpcHandler({ hasPendingQuestion: () => Boolean(this.pendingQuestion), hasCurrentTask: () => Boolean(this.state.currentTaskItem), start: (request, requestId) => this.startNewTask(request, { broadcast: true, requestId }), respond: (request, requestId) => this.sendAskResponse(request, requestId), compact: (requestId) => this.compactCurrentSession(requestId), cancel: () => this.cancelTask(), clear: () => this.clearTask(), refreshHistory: (source) => this.taskHistorySync.refreshInBackground(source), history: () => this.state.taskHistory, show: (taskId) => this.showTaskWithId(taskId), delete: (taskIds) => this.taskHistoryCommands.delete(taskIds), deleteAll: () => this.taskHistoryCommands.deleteAll(), toggleFavorite: (taskId, isFavorited) => this.taskHistoryCommands.toggleFavorite(taskId, isFavorited), broadcast: () => this.broadcastState() })
 		this.checkpointRpc = new CheckpointRpcHandler({ available: () => Boolean(this.clineSdk), checkpoints: () => this.requireCheckpoints(), currentTask: () => this.state.currentTaskItem, messages: () => this.state.clineMessages, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), showTask: (taskId) => this.showTaskWithId(taskId), addInfo: (text, checkpointRunCount) => { this.addMessage({ type: "say", say: "info", text, checkpointRunCount }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), trackedChanges: () => this.requireChangeTracking().pendingChanges() })
 		this.hookRpc = new HookRpcHandler({ hooks: () => this.requireHookSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enableHooks: () => { this.state.hooksEnabled = true } })
+		this.scheduledAgentRpc = new ScheduledAgentRpcHandler({ agents: () => this.requireScheduledAgents(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), launch: async (request) => { await this.startNewTask(request, { broadcast: false }) } })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -870,6 +874,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 		const hookCommand = decodeHookRpcCommand(key, message)
 		if (hookCommand) return grpcHandled(grpcResponse(requestId, await this.hookRpc.handle(hookCommand), false))
+		const scheduledAgentCommand = decodeScheduledAgentRpcCommand(key, message)
+		if (scheduledAgentCommand) {
+			const scheduledAgentResult = await this.scheduledAgentRpc.handle(scheduledAgentCommand)
+			return grpcHandled(
+				grpcResponse(requestId, scheduledAgentResult.payload, false),
+				...(scheduledAgentResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -924,27 +936,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "FileService.toggleSkill":
 				await this.toggleSdkSetting("skills", message)
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
-
-			case "ScheduledAgentsService.listSpecs":
-			case "ScheduledAgentsService.listScheduledAgents":
-			case "AutomationService.listScheduledAgents":
-				return grpcHandled(grpcResponse(requestId, await this.listScheduledAgentSpecs(), false))
-
-			case "ScheduledAgentsService.createSpec":
-			case "ScheduledAgentsService.updateSpec":
-			case "ScheduledAgentsService.saveSpec":
-			case "AutomationService.saveScheduledAgent":
-				return grpcHandled(grpcResponse(requestId, await this.saveScheduledAgentSpec(message), false))
-
-			case "ScheduledAgentsService.deleteSpec":
-			case "ScheduledAgentsService.deleteScheduledAgent":
-			case "AutomationService.deleteScheduledAgent":
-				return grpcHandled(grpcResponse(requestId, await this.deleteScheduledAgentSpec(message), false))
-
-			case "ScheduledAgentsService.runSpec":
-			case "ScheduledAgentsService.runScheduledAgent":
-			case "AutomationService.runScheduledAgent":
-				return grpcHandled(grpcResponse(requestId, await this.runScheduledAgentSpec(message), false), ...this.buildStateMessages())
 
 			case "PluginService.listPlugins":
 			case "PluginService.getPluginConfigStatus":
@@ -1407,25 +1398,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			globalWorkflowToggles: { toggles: globalWorkflowToggles },
 			localWorkflowToggles: { toggles: localWorkflowToggles },
 		}
-	}
-
-	private async listScheduledAgentSpecs() {
-		return this.requireScheduledAgents().list(await this.getPrimaryWorkspaceRoot())
-	}
-
-	private async saveScheduledAgentSpec(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireScheduledAgents().save(message, workspaceRoot)
-	}
-
-	private async deleteScheduledAgentSpec(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireScheduledAgents().delete(message, workspaceRoot)
-	}
-
-	private async runScheduledAgentSpec(message: unknown) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		return this.requireScheduledAgents().run(message, workspaceRoot, async (request) => { await this.startNewTask(request, { broadcast: false }) })
 	}
 
 	private async getLocalPluginConfigStatus() {

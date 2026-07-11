@@ -2,6 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { buildScheduledAgentSpec, getScheduledSpecId, markdownBodyAfterFrontMatter, parseLooseKeyValueSpec, prependScheduledRun, safeFileStem } from "../../features/scheduledAgents/ScheduledAgentPolicy"
+import type { ScheduledAgentSpecInput } from "../../application/ports/ScheduledAgentStorePort"
 
 export function getSettingsPath() {
 	return path.join(getSettingsRoot(), "settings.json")
@@ -104,7 +105,7 @@ export function scheduledSpecFromFile(filePath: string, workspaceRoot: string) {
 	}
 }
 
-export function writeScheduledAgentSpec(workspaceRoot: string, request: Record<string, unknown>) {
+export function writeScheduledAgentSpec(workspaceRoot: string, request: ScheduledAgentSpecInput) {
 	const directory = getScheduledAgentsDirectory(workspaceRoot)
 	fs.mkdirSync(directory, { recursive: true })
 	const specId = safeFileStem(getScheduledSpecId(request) || "scheduled-agent")
