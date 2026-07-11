@@ -2,11 +2,11 @@ import childProcess from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { getSettingsPath } from "../persistence/LocalAutomationStore"
+import { hookDecisionFromResponse } from "../../features/hooks/HookPolicy"
 
 export type HookLifecycleName = "TaskStart" | "TaskResume" | "TaskCancel" | "TaskComplete" | "PreToolUse" | "PostToolUse" | "UserPromptSubmit"
 export type HookScript = { name: HookLifecycleName; source: "global" | "workspace"; path: string; enabled: boolean }
 export type HookExecutionResult = { hook: HookScript; exitCode: number; stdout: string; stderr: string; error?: string; jsonResponse?: Record<string, unknown> }
-export type PreToolUseDecision = { blocked: boolean; reason: string; inputPatch?: Record<string, unknown>; replaceInput?: boolean; validationMessage?: string; contextPatch?: Record<string, unknown>; structuredDecision?: Record<string, unknown> }
 
 export const SUPPORTED_HOOK_NAMES: HookLifecycleName[] = [
 	"TaskStart",
@@ -144,162 +144,6 @@ export function createHookMetadata(
 						scriptPath: hook.path,
 					}
 				: undefined,
-	}
-}
-
-export function extractHookJsonResponse(stdout: string): Record<string, unknown> | undefined {
-	const text = String(stdout || "").trim()
-	if (!text) {
-		return undefined
-	}
-
-	const parsedWhole = tryParseJson(text)
-	const wholeRecord = nonEmptyRecord(parsedWhole)
-	if (wholeRecord) {
-		return wholeRecord
-	}
-	if (Array.isArray(parsedWhole)) {
-		for (let index = parsedWhole.length - 1; index >= 0; index--) {
-			const record = nonEmptyRecord(parsedWhole[index])
-			if (record) {
-				return record
-			}
-		}
-	}
-
-	const lines = text
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter(Boolean)
-	for (let index = lines.length - 1; index >= 0; index--) {
-		const record = nonEmptyRecord(tryParseJson(lines[index]))
-		if (record) {
-			return record
-		}
-	}
-
-	return undefined
-}
-
-export function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
-	const record = asRecord(value)
-	return Object.keys(record).length > 0 ? record : undefined
-}
-
-export function hookDecisionFromResponse(response?: Record<string, unknown>): PreToolUseDecision {
-	if (!response || Object.keys(response).length === 0) {
-		return { blocked: false, reason: "" }
-	}
-
-	const action = (
-		getString(response, "decision") ||
-		getString(response, "action") ||
-		getString(response, "permission") ||
-		getString(response, "result") ||
-		""
-	).toLowerCase()
-	const approved = response.approved
-	const blocked =
-		response.block === true ||
-		response.blocked === true ||
-		response.deny === true ||
-		response.denied === true ||
-		response.cancel === true ||
-		response.cancelled === true ||
-		approved === false ||
-		["block", "blocked", "deny", "denied", "reject", "rejected", "cancel", "cancelled", "abort", "aborted", "disallow", "disallowed"].includes(
-			action,
-		)
-	const reason =
-		getString(response, "reason") ||
-		getString(response, "message") ||
-		getString(response, "error") ||
-		(blocked ? "Blocked by PreToolUse hook." : "")
-	const inputPatch = blocked ? undefined : getPreToolUseInputPatch(response)
-	const replaceInput = inputPatch
-		? response.replaceInput === true || response.replace_input === true || getString(response, "mode").toLowerCase() === "replace"
-		: false
-	const validationMessage =
-		getString(response, "validationMessage") ||
-		getString(response, "validation_message") ||
-		getString(asRecord(response.validation), "message") ||
-		""
-	const contextPatch = blocked ? undefined : getPreToolUseContextPatch(response)
-	const structuredDecision = getPreToolUseStructuredDecision(response, action)
-	return { blocked, reason, inputPatch, replaceInput, validationMessage, contextPatch, structuredDecision }
-}
-
-export function getPreToolUseInputPatch(response: Record<string, unknown>) {
-	for (const key of ["inputPatch", "toolInputPatch", "argumentsPatch", "paramsPatch", "input", "toolInput", "arguments", "params"]) {
-		const patch = asRecord(response[key])
-		if (Object.keys(patch).length > 0) {
-			return patch
-		}
-	}
-	return undefined
-}
-
-export function getPreToolUseContextPatch(response: Record<string, unknown>) {
-	for (const key of ["contextPatch", "context", "contextInjection", "injectContext"]) {
-		const patch = asRecord(response[key])
-		if (Object.keys(patch).length > 0) {
-			return patch
-		}
-	}
-	return undefined
-}
-
-export function getPreToolUseStructuredDecision(response: Record<string, unknown>, action: string) {
-	const structured = asRecord(response.structuredDecision || response.toolDecision || response.metadata)
-	const result = {
-		...structured,
-		action: action || undefined,
-		severity: getString(response, "severity") || getString(structured, "severity") || undefined,
-		category: getString(response, "category") || getString(structured, "category") || undefined,
-	}
-	return Object.keys(result).some((key) => result[key as keyof typeof result] !== undefined && result[key as keyof typeof result] !== "")
-		? result
-		: undefined
-}
-
-export function mergeOptionalRecords(left?: Record<string, unknown>, right?: Record<string, unknown>) {
-	if (!left || Object.keys(left).length === 0) {
-		return right
-	}
-	if (!right || Object.keys(right).length === 0) {
-		return left
-	}
-	return { ...left, ...right }
-}
-
-export function applyPreToolUseInputPatch(input: Record<string, unknown>, approvalRequest: Record<string, unknown>, decision: PreToolUseDecision) {
-	const patch = decision.inputPatch
-	if (!patch || Object.keys(patch).length === 0) {
-		return
-	}
-
-	if (decision.replaceInput === true) {
-		for (const key of Object.keys(input)) {
-			delete input[key]
-		}
-	}
-	Object.assign(input, patch)
-
-	let patchedExistingRequestInput = false
-	for (const key of ["input", "params", "arguments"]) {
-		if (approvalRequest[key] && typeof approvalRequest[key] === "object" && !Array.isArray(approvalRequest[key])) {
-			if (decision.replaceInput === true) {
-				const target = approvalRequest[key] as Record<string, unknown>
-				for (const existingKey of Object.keys(target)) {
-					delete target[existingKey]
-				}
-			}
-			Object.assign(approvalRequest[key] as Record<string, unknown>, input)
-			patchedExistingRequestInput = true
-		}
-	}
-	if (!patchedExistingRequestInput) {
-		approvalRequest.input = input
 	}
 }
 
