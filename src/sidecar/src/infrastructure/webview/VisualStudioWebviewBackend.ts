@@ -81,6 +81,7 @@ import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProject
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
+import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -308,7 +309,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), isCurrentSession: (sessionId) => this.isCurrentSdkResultSession(sessionId), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), failEmpty: (sessionId) => this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.finalizeOpenPartialMessages(), addCompletionMarker: (status) => this.addCompletionResultMarker(status), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
-		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => this.resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
@@ -2618,38 +2619,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const content = getString(parsed, "content")
 		const summary = [tool, pathValue, content].filter(Boolean).join(": ")
 		this.conversationProjection.rememberToolSummary(truncateText(summary || text, 2000))
-	}
-
-	private async resolveEffectiveModelId(
-		apiConfig: Record<string, unknown>,
-		providerId: string,
-		modePrefix: string,
-		baseUrl: string,
-	) {
-		let modelId = resolveModelId(apiConfig, providerId, modePrefix)
-		if (providerId !== "ollama") {
-			return modelId || process.env.CLINE_MODEL_ID || "claude-sonnet-4-6"
-		}
-
-		if (!modelId || modelId === "claude-sonnet-4-6") {
-			modelId = process.env.OLLAMA_MODEL || process.env.CLINE_MODEL_ID || ""
-		}
-
-		if (!modelId || modelId === "claude-sonnet-4-6") {
-			const models = await getOllamaModels(baseUrl)
-			modelId = models[0] || ""
-			if (modelId) {
-				this.applyDefaultOllamaModel(modelId)
-			}
-		}
-
-		if (!modelId || modelId === "claude-sonnet-4-6") {
-			throw new Error(
-				`No local Ollama model is configured. Start Ollama and pull a model, for example: ollama pull llama3.1. Base URL: ${baseUrl || "http://localhost:11434"}`,
-			)
-		}
-
-		return modelId
 	}
 
 	private applySettings(message: unknown) {
