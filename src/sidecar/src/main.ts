@@ -34,6 +34,8 @@ import { ScheduledAgentHandler } from "./features/scheduledAgents/ScheduledAgent
 import { LocalScheduledAgentStore } from "./infrastructure/persistence/LocalScheduledAgentStore"
 import { HookSettingsHandler } from "./features/hooks/HookSettingsHandler"
 import { LocalHookStore } from "./infrastructure/hooks/LocalHookStore"
+import { HookExecutionHandler } from "./features/hooks/HookExecutionHandler"
+import { ProcessHookExecutionAdapter } from "./infrastructure/hooks/ProcessHookExecutionAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -77,7 +79,9 @@ const server = new SidecarRpcServer(
 		backend.setProviderCredentialHandler(providerCredentials)
 		backend.setProviderAuthActionHandler(new ProviderAuthActionHandler(new VisualStudioProviderAuthUiAdapter(host), interactionLogger))
 		backend.setScheduledAgentHandler(new ScheduledAgentHandler(new LocalScheduledAgentStore(), () => backend.isScheduledAgentsEnabled()))
-		backend.setHookSettingsHandler(new HookSettingsHandler(new LocalHookStore()))
+		const hookSettings = new HookSettingsHandler(new LocalHookStore())
+		backend.setHookSettingsHandler(hookSettings)
+		backend.setHookExecutionHandler(new HookExecutionHandler(hookSettings, new ProcessHookExecutionAdapter(), interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

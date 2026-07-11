@@ -58,14 +58,12 @@ import {
 import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
 import { createCheckpointDiffDescription, resolveCheckpointRestoreScope } from "../../features/checkpoints/CheckpointPolicy"
 import {
-	type HookExecutionResult,
 	type HookLifecycleName,
-	type HookScript,
 	createHookMetadata,
-	executeHookScript,
 } from "../hooks/HookRuntime"
 import type { HookSettingsHandler } from "../../features/hooks/HookSettingsHandler"
-import { applyPreToolUseInputPatch, extractHookJsonResponse, hookDecisionFromResponse, mergeOptionalRecords, type PreToolUseDecision } from "../../features/hooks/HookPolicy"
+import type { HookExecutionHandler, HookExecutionObserver } from "../../features/hooks/HookExecutionHandler"
+import { applyPreToolUseInputPatch, type PreToolUseDecision } from "../../features/hooks/HookPolicy"
 import {
 	normalizeOllamaRootBaseUrl,
 	normalizeOllamaOpenAiBaseUrl,
@@ -325,6 +323,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private providerAuthActions: ProviderAuthActionHandler | null = null
 	private scheduledAgents: ScheduledAgentHandler | null = null
 	private hookSettings: HookSettingsHandler | null = null
+	private hookExecution: HookExecutionHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -391,6 +390,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
 	setScheduledAgentHandler(scheduledAgents: ScheduledAgentHandler) { this.scheduledAgents = scheduledAgents }
 	setHookSettingsHandler(hookSettings: HookSettingsHandler) { this.hookSettings = hookSettings }
+	setHookExecutionHandler(hookExecution: HookExecutionHandler) { this.hookExecution = hookExecution }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2956,89 +2956,33 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
-		if (this.state.hooksEnabled === false) {
-			return []
-		}
-
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
-		const scripts = this.requireHookSettings().scripts(workspaceRoot).filter((hook) => hook.name === hookName && hook.enabled)
-		if (scripts.length === 0) {
-			return []
-		}
-
-		const results: HookExecutionResult[] = []
-		for (const hook of scripts) {
-			results.push(await this.runHookScript(hook, { ...context, hookName, workspaceRoot }))
-		}
-		return results
+		return this.requireHookExecution().run(hookName, context, workspaceRoot, this.state.hooksEnabled !== false, this.createHookExecutionObserver())
 	}
 
 	private async runPreToolUseHooks(context: Record<string, unknown>): Promise<PreToolUseDecision> {
-		const results = await this.runLifecycleHooks("PreToolUse", context)
-		let inputDecision: PreToolUseDecision = { blocked: false, reason: "" }
-		for (const result of results) {
-			const decision = hookDecisionFromResponse(result.jsonResponse)
-			if (decision.blocked) {
-				this.logger.log("sidecar", "preToolUseBlocked", {
-					hookName: result.hook.name,
-					scriptPath: result.hook.path,
-					reason: decision.reason,
-				})
-				return decision
-			}
-			if (decision.inputPatch && Object.keys(decision.inputPatch).length > 0) {
-				inputDecision = {
-					blocked: false,
-					reason: decision.reason || inputDecision.reason,
-					inputPatch: {
-						...(inputDecision.replaceInput ? {} : inputDecision.inputPatch),
-						...decision.inputPatch,
-					},
-					replaceInput: decision.replaceInput === true || inputDecision.replaceInput === true,
-					validationMessage: decision.validationMessage || inputDecision.validationMessage,
-					contextPatch: mergeOptionalRecords(inputDecision.contextPatch, decision.contextPatch),
-					structuredDecision: mergeOptionalRecords(inputDecision.structuredDecision, decision.structuredDecision),
-				}
-			} else if (decision.validationMessage || decision.contextPatch || decision.structuredDecision) {
-				inputDecision = {
-					...inputDecision,
-					reason: decision.reason || inputDecision.reason,
-					validationMessage: decision.validationMessage || inputDecision.validationMessage,
-					contextPatch: mergeOptionalRecords(inputDecision.contextPatch, decision.contextPatch),
-					structuredDecision: mergeOptionalRecords(inputDecision.structuredDecision, decision.structuredDecision),
-				}
-			}
-		}
-		return inputDecision
+		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
+		return this.requireHookExecution().preToolUse(context, workspaceRoot, this.state.hooksEnabled !== false, this.createHookExecutionObserver())
 	}
 
-	private async runHookScript(hook: HookScript, context: Record<string, unknown>): Promise<HookExecutionResult> {
-		const ts = Date.now() + this.messageSequence++
-		const startedMetadata = createHookMetadata(hook, "running", context)
-		this.state.clineMessages.push({
-			ts,
-			type: "say",
-			say: "hook_status",
-			text: JSON.stringify(startedMetadata),
-		})
-		this.updateCurrentTaskItem()
-		await this.broadcastState().catch((error) => console.error(error))
-
-		const result = await executeHookScript(hook, context)
-		const jsonResponse = extractHookJsonResponse(result.stdout)
-		const completedMetadata = createHookMetadata(hook, result.exitCode === 0 ? "completed" : "failed", context, result, jsonResponse)
-		const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n")
-		this.upsertMessage(ts, {
-			type: "say",
-			say: "hook_status",
-			text: output ? `${JSON.stringify(completedMetadata)}\n__HOOK_OUTPUT__\n${output}` : JSON.stringify(completedMetadata),
-		})
-		this.updateCurrentTaskItem()
-		await this.broadcastState().catch((error) => console.error(error))
+	private createHookExecutionObserver(): HookExecutionObserver {
+		const messageIds = new Map<string, number>()
 		return {
-			hook,
-			...result,
-			jsonResponse,
+			started: async (hook, context) => {
+				const ts = Date.now() + this.messageSequence++
+				messageIds.set(`${hook.source}:${hook.name}:${hook.path}`, ts)
+				this.state.clineMessages.push({ ts, type: "say", say: "hook_status", text: JSON.stringify(createHookMetadata(hook, "running", context)) })
+				this.updateCurrentTaskItem()
+				await this.broadcastState().catch((error) => console.error(error))
+			},
+			completed: async (result, context) => {
+				const ts = messageIds.get(`${result.hook.source}:${result.hook.name}:${result.hook.path}`) || Date.now() + this.messageSequence++
+				const metadata = createHookMetadata(result.hook, result.exitCode === 0 ? "completed" : "failed", context, result, result.jsonResponse)
+				const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n")
+				this.upsertMessage(ts, { type: "say", say: "hook_status", text: output ? `${JSON.stringify(metadata)}\n__HOOK_OUTPUT__\n${output}` : JSON.stringify(metadata) })
+				this.updateCurrentTaskItem()
+				await this.broadcastState().catch((error) => console.error(error))
+			},
 		}
 	}
 
@@ -3118,6 +3062,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireHookSettings() {
 		if (!this.hookSettings) throw new Error("Hook settings handler is not attached.")
 		return this.hookSettings
+	}
+
+	private requireHookExecution() {
+		if (!this.hookExecution) throw new Error("Hook execution handler is not attached.")
+		return this.hookExecution
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

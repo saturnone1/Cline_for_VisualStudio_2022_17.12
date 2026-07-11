@@ -84,6 +84,9 @@ if (router.includes("readScheduledAgentSpecs") || router.includes("writeSchedule
 if (router.includes("getGlobalHooksDirectory") || router.includes("findHookScript") || router.includes("setHookToggle")) {
 	violations.push("VisualStudioWebviewBackend must delegate hook discovery and settings persistence to HookSettingsHandler.")
 }
+if (router.includes("executeHookScript") || router.includes("hookDecisionFromResponse")) {
+	violations.push("VisualStudioWebviewBackend must delegate hook execution and decision orchestration to HookExecutionHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -169,6 +172,7 @@ for (const requiredFile of [
 	"application/ports/ProviderAuthUiPort.ts",
 	"application/ports/ScheduledAgentStorePort.ts",
 	"application/ports/HookStorePort.ts",
+	"application/ports/HookExecutionPort.ts",
 	"application/dto/HookContracts.ts",
 	"application/dto/OAuthContracts.ts",
 	"features/mcp/McpHandler.ts",
@@ -188,6 +192,7 @@ for (const requiredFile of [
 	"infrastructure/auth/ProviderOAuthAuthorizationAdapter.ts",
 	"infrastructure/hooks/HookRuntime.ts",
 	"infrastructure/hooks/LocalHookStore.ts",
+	"infrastructure/hooks/ProcessHookExecutionAdapter.ts",
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",
@@ -219,6 +224,7 @@ for (const requiredFile of [
 	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",
 	"features/hooks/HookSettingsHandler.ts",
+	"features/hooks/HookExecutionHandler.ts",
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentHandler.ts",
 	"features/checkpoints/CheckpointPolicy.ts",
