@@ -57,6 +57,7 @@ try {
 		"Sidecar/runtime/features/browser/BrowserPolicy.js",
 		"Sidecar/runtime/features/hooks/HookPolicy.js",
 		"Sidecar/runtime/features/scheduledAgents/ScheduledAgentPolicy.js",
+		"Sidecar/runtime/features/checkpoints/CheckpointPolicy.js",
         "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
 		"Sidecar/runtime/infrastructure/persistence/LocalAutomationStore.js",
 		"Sidecar/runtime/infrastructure/auth/ProviderAuthSupport.js",

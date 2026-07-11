@@ -70,6 +70,7 @@ import {
 	writeScheduledAgentSpec,
 } from "../persistence/LocalAutomationStore"
 import { getScheduledSpecId } from "../../features/scheduledAgents/ScheduledAgentPolicy"
+import { createCheckpointDiffDescription, resolveCheckpointRestoreScope } from "../../features/checkpoints/CheckpointPolicy"
 import {
 	type HookExecutionResult,
 	type HookLifecycleName,
@@ -3832,17 +3833,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			throw new Error("No SDK checkpoint run count is available for this restore target.")
 		}
 
-		const restoreType = getString(message, "restoreType") || "taskAndWorkspace"
+		const { restore } = resolveCheckpointRestoreScope(getString(message, "restoreType"))
 		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
 		const cwd = workspaceRoots[0] || String(this.state.currentTaskItem.cwdOnTaskInitialization || process.cwd())
 		const result = await this.clineSdk.restore({
 			sessionId: String(this.state.currentTaskItem.id || ""),
 			checkpointRunCount,
 			cwd,
-			restore: {
-				messages: restoreType === "task" || restoreType === "taskAndWorkspace",
-				workspace: restoreType === "workspace" || restoreType === "taskAndWorkspace",
-			},
+			restore,
 			start: {
 				config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
 				interactive: true,
@@ -3888,7 +3886,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			getString(checkpointMessage, "checkpointWorkspaceRoot") ||
 			String(this.state.currentTaskItem.cwdOnTaskInitialization || "")
 		const createdAt = numberValue(checkpointMessage?.ts)
-		const createdAtText = createdAt ? new Date(createdAt).toLocaleString() : ""
 		const trackedChanges = Array.from(this.pendingChangeSummaries.values()).map((change) => ({
 			filePath: change.filePath,
 			action: change.action,
@@ -3897,38 +3894,16 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			beforePath: change.beforePath,
 			afterPath: change.afterPath,
 		}))
-		const text = [
-			`Checkpoint compare requested for SDK checkpoint #${checkpointRunCount}.`,
-			sessionId ? `Session: ${sessionId}` : "",
-			workspaceRoot ? `Workspace: ${workspaceRoot}` : "",
-			createdAtText ? `Created: ${createdAtText}` : "",
-			trackedChanges.length > 0 ? `Tracked edit snapshots: ${trackedChanges.length}` : "",
-			"The current SDK runtime exposes checkpoint restore metadata, but not a first-class checkpoint diff stream. Use the transcript change cards or Review controls for file-level snapshots.",
-		].filter(Boolean).join("\n")
+		const description = createCheckpointDiffDescription({ checkpointRunCount, sessionId, workspaceRoot, createdAt, trackedChanges })
 
 		this.addMessage({
 			type: "say",
 			say: "info",
-			text,
+			text: description.text,
 			checkpointRunCount,
 		})
 		this.updateCurrentTaskItem()
-		return {
-			success: true,
-			supported: true,
-			checkpointRunCount,
-			sessionId,
-			workspaceRoot,
-			comments: [
-				{
-					type: "sdk_checkpoint_limitation",
-					message: "Checkpoint diff stream is unavailable from the current SDK runtime; Visual Studio links the compare request to stored edit snapshots.",
-					trackedChanges,
-				},
-			],
-			trackedChanges,
-			text,
-		}
+		return description
 	}
 
 	private async refreshSdkInstructionSettings() {

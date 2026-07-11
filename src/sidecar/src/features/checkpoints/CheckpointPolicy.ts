@@ -1,0 +1,34 @@
+export type CheckpointRestoreScope = "task" | "workspace" | "taskAndWorkspace"
+
+export function resolveCheckpointRestoreScope(value: unknown) {
+	const scope: CheckpointRestoreScope = value === "task" || value === "workspace" ? value : "taskAndWorkspace"
+	return { scope, restore: { messages: scope === "task" || scope === "taskAndWorkspace", workspace: scope === "workspace" || scope === "taskAndWorkspace" } }
+}
+
+export function createCheckpointDiffDescription(input: {
+	checkpointRunCount: number
+	sessionId: string
+	workspaceRoot: string
+	createdAt?: number
+	trackedChanges: readonly Record<string, unknown>[]
+}) {
+	const createdAtText = input.createdAt ? new Date(input.createdAt).toLocaleString() : ""
+	const text = [
+		`Checkpoint compare requested for SDK checkpoint #${input.checkpointRunCount}.`,
+		input.sessionId ? `Session: ${input.sessionId}` : "",
+		input.workspaceRoot ? `Workspace: ${input.workspaceRoot}` : "",
+		createdAtText ? `Created: ${createdAtText}` : "",
+		input.trackedChanges.length ? `Tracked edit snapshots: ${input.trackedChanges.length}` : "",
+		"The current SDK runtime exposes checkpoint restore metadata, but not a first-class checkpoint diff stream. Use the transcript change cards or Review controls for file-level snapshots.",
+	].filter(Boolean).join("\n")
+	return {
+		success: true,
+		supported: true,
+		checkpointRunCount: input.checkpointRunCount,
+		sessionId: input.sessionId,
+		workspaceRoot: input.workspaceRoot,
+		comments: [{ type: "sdk_checkpoint_limitation", message: "Checkpoint diff stream is unavailable from the current SDK runtime; Visual Studio links the compare request to stored edit snapshots.", trackedChanges: input.trackedChanges }],
+		trackedChanges: input.trackedChanges,
+		text,
+	}
+}
