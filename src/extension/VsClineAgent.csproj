@@ -100,6 +100,7 @@
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EditorHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\FileSystemHostRpcAdapter.cs" />
     <Compile Include="Host\SidecarProcess.cs" />
     <Compile Include="$(VsVersionInfoPath)">
       <Link>Host\VisualStudioVersionInfo.cs</Link>

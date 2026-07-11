@@ -45,7 +45,8 @@ namespace VsClineAgent.Host
             _hostRpcAdapters = new IHostRpcAdapter[]
             {
                 new EnvironmentHostRpcAdapter(CaptureSidecarLine),
-                new EditorHostRpcAdapter(editorService)
+                new EditorHostRpcAdapter(editorService),
+                new FileSystemHostRpcAdapter()
             };
         }
 
@@ -247,21 +248,6 @@ namespace VsClineAgent.Host
                     return await GetWorkspacePathsAsync().ConfigureAwait(false);
                 case "workspace.getDiagnostics":
                     return await GetDiagnosticsAsync().ConfigureAwait(false);
-                case "host.fs.fileExists":
-                case "workspace.fileExists":
-                    return new JObject
-                    {
-                        ["exists"] = File.Exists(GetStringParameter(parameters, "path"))
-                    };
-                case "host.fs.readTextFile":
-                case "workspace.readTextFile":
-                    return ReadTextFile(parameters);
-                case "workspace.writeTextFile":
-                    return WriteTextFile(parameters);
-                case "workspace.deleteFile":
-                    return DeleteFile(parameters);
-                case "workspace.createDirectory":
-                    return CreateDirectory(parameters);
                 case "workspace.listFiles":
                     return ListFiles(parameters);
                 case "workspace.searchFiles":
@@ -461,59 +447,6 @@ namespace VsClineAgent.Host
                     ["folderOnly"] = true
                 };
             }
-        }
-
-        private static JObject ReadTextFile(JToken? parameters)
-        {
-            var path = GetStringParameter(parameters, "path");
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                return new JObject
-                {
-                    ["exists"] = false,
-                    ["content"] = ""
-                };
-            }
-
-            return new JObject
-            {
-                ["exists"] = true,
-                ["content"] = File.ReadAllText(path)
-            };
-        }
-
-        private static JObject WriteTextFile(JToken? parameters)
-        {
-            var path = GetStringParameter(parameters, "path");
-            if (string.IsNullOrWhiteSpace(path))
-                return new JObject { ["success"] = false };
-
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(path, GetStringParameter(parameters, "content"));
-            return new JObject { ["success"] = true };
-        }
-
-        private static JObject DeleteFile(JToken? parameters)
-        {
-            var path = GetStringParameter(parameters, "path");
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                return new JObject { ["success"] = false };
-
-            File.Delete(path);
-            return new JObject { ["success"] = true };
-        }
-
-        private static JObject CreateDirectory(JToken? parameters)
-        {
-            var path = GetStringParameter(parameters, "path");
-            if (string.IsNullOrWhiteSpace(path))
-                return new JObject { ["success"] = false };
-
-            Directory.CreateDirectory(path);
-            return new JObject { ["success"] = true };
         }
 
         private static JObject ListFiles(JToken? parameters)
