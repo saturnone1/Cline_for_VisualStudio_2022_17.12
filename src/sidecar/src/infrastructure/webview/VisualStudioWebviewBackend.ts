@@ -48,7 +48,7 @@ import {
 	checkIsImageUrl,
 	fetchOpenGraphData,
 } from "../browser/BrowserDevToolsAdapter"
-import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
+import { browserActionResultForTranscript, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
 import {
 	discoverLocalPlugins,
 	getSettingsPath,
@@ -67,6 +67,7 @@ import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
+import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -96,10 +97,8 @@ import {
 	getSearchQuery,
 	getSearchFilePattern,
 	summarizeToolInput,
-	summarizeToolOutput,
 	getPatchPathsFromUnknown,
 	parsePatchPaths,
-	summarizeCommandOutput,
 	summarizeCommandLabel,
 	sanitizeConsoleOutput,
 	stripCommandSentinel,
@@ -177,7 +176,6 @@ import {
 	toolTranscriptToActivityEntries,
 	buildGroupedToolActivityText,
 	formatToolActivitySection,
-	formatCompletedCommandActivity,
 	normalizeTerminalOutputText,
 	toolActivityEntryKey,
 	uniqueToolActivityEntries,
@@ -245,6 +243,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly foldedProgressProjector: FoldedProgressProjector
 	private readonly taskSnapshots: TaskSnapshotStore
 	private readonly agentTextEvents: AgentTextEventProjector
+	private readonly agentToolEvents: AgentToolEventProjector
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
@@ -295,6 +294,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
+		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -3021,98 +3021,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "content_start" && contentType === "tool") {
-			this.noteTaskActivity("content_start:tool")
-			this.clearReasoningStatus()
-			this.clearPartialIdleWatchdog()
-			this.conversationProjection.activePartialTextTs = null
-			const toolName = getString(event, "toolName")
-			if (toolName === "bash" || toolName === "run_commands") {
-				const command = getCommandText(asRecord(event.input))
-				if (command) {
-					this.recordToolActivity("executeCommand", JSON.stringify({ tool: "executeCommand", command }))
-				}
-				this.startTerminalStatePolling()
-			}
-		}
-
-		if (type === "content_end" && contentType === "tool") {
-			this.noteTaskActivity("content_end:tool")
-			this.clearReasoningStatus()
-			const toolName = getString(event, "toolName")
-			const error = getString(event, "error")
-			void this.runLifecycleHooks("PostToolUse", {
-				sessionId,
-				toolName,
-				input: event.input,
-				output: event.output,
-				error,
-				iteration: getNumber(event, "iteration"),
-			})
-			const isCommand = toolName === "bash" || toolName === "run_commands"
-			const input = asRecord(event.input)
-			if (isCommand) {
-				this.stopTerminalStatePolling()
-				this.pollTerminalState().catch((pollError) =>
-					this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(pollError) }),
-				)
-			}
-			if (isBrowserToolName(toolName)) {
-				void this.handleBrowserToolEvent(toolName, input, error)
-				return
-			}
-			const mappedToolName = mapToolName(toolName)
-			const trackedPath =
-				mappedToolName === "editedExistingFile"
-					? getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output)
-					: ""
-			if (
-				(toolName === "editor" || toolName === "edit") &&
-				(this.hasRecentlyTrackedChange() || (trackedPath && this.wasRecentlyTracked(trackedPath)))
-			) {
-				return
-			}
-			const text = isCommand
-				? truncateText(error || summarizeCommandOutput(event.output), readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
-				: JSON.stringify({
-						tool: mappedToolName,
-						path:
-							mappedToolName === "searchFiles"
-								? getToolPath(input) || getToolPath(asRecord(event.output)) || "/"
-								: getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output),
-						regex: mappedToolName === "searchFiles" ? getSearchQuery(input) || getSearchQuery(event.output) : undefined,
-						filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) || getSearchFilePattern(event.output) : undefined,
-						content: error || summarizeToolOutput(mappedToolName, event.output),
-						error: error || undefined,
-					})
-			this.rememberToolSummary(mappedToolName, text)
-			if (isCommand) {
-				this.appendTerminalActivityText(formatCompletedCommandActivity(text, this.getUiLanguage()))
-				this.foldedProgressProjector.moveActiveToEnd()
-			} else {
-				this.recordToolActivity(mappedToolName, text)
-			}
-		}
-
-		if (type === "content_update" && contentType === "tool") {
-			this.noteTaskActivity("content_update:tool")
-			this.clearReasoningStatus()
-			const rawToolName = getString(event, "toolName")
-			if (rawToolName === "bash" || rawToolName === "run_commands") {
-				this.startTerminalStatePolling()
-			}
-			const toolName = mapToolName(rawToolName)
-			const update = event.update
-			if (update !== undefined) {
-				this.rememberToolSummary(
-					toolName,
-					JSON.stringify({
-						tool: toolName,
-						path: getToolPathFromUnknown(update),
-						content: summarizeToolOutput(toolName, update),
-					}),
-				)
-			}
+		const toolProjection = this.agentToolEvents.handle(semanticEvent)
+		if (toolProjection.handled) {
+			this.updateCurrentTaskItem()
+			if (toolProjection.broadcast) this.broadcastState().catch((error) => console.error(error))
+			return
 		}
 
 		if (type === "iteration_start") {
@@ -3152,24 +3065,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 					this.addMessage({ type: "say", say: "text", text })
 				}
 			}
-		}
-
-		if (type === "tool-finished") {
-			this.noteTaskActivity("tool-finished")
-			this.clearReasoningStatus()
-			const toolCall = asRecord(event.toolCall)
-			const mappedToolName = mapToolName(getString(toolCall, "toolName"))
-			const result = asRecord(event.result)
-			const output = result.output ?? event.message
-			const input = asRecord(toolCall.input)
-			const text = JSON.stringify({
-				tool: mappedToolName,
-				path: getToolPathFromUnknown(input) || getToolPathFromUnknown(output),
-				content: summarizeToolOutput(mappedToolName, output),
-				error: result.isError === true ? summarizeToolOutput(mappedToolName, output) : undefined,
-			})
-			this.rememberToolSummary(mappedToolName, text)
-			this.recordToolActivity(mappedToolName, text)
 		}
 
 		if (type === "assistant-message") {

@@ -196,6 +196,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/PartialTextProjector.ts",
 	"infrastructure/conversation/FoldedProgressProjector.ts",
 	"infrastructure/conversation/AgentTextEventProjector.ts",
+	"infrastructure/conversation/AgentToolEventProjector.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
