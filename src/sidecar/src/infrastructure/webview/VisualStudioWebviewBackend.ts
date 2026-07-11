@@ -64,6 +64,7 @@ import type { PartialStateScheduler } from "../../features/runtime/PartialStateS
 import type { SendLatencyMonitor } from "../../features/runtime/SendLatencyMonitor"
 import type { ChangeTrackingHandler } from "../workspace/ChangeTrackingHandler"
 import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalogHandler"
+import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -113,7 +114,6 @@ import {
 	isEmptyJsonObjectString,
 	isEmptyTranscriptPlaceholder,
 	isEmptyPlainObject,
-	toProtoClineMessage,
 	toProtoAsk,
 	toProtoSay,
 	buildTaskInputWithAttachments,
@@ -136,7 +136,6 @@ import {
 	normalizeTimestamp,
 	stableSessionBaseTimestamp,
 	hashString,
-	partialMessageDeliveryKey,
 	sdkContentToVisibleAssistantText,
 	sdkContentToReasoningText,
 	sdkContentToToolActivityEntries,
@@ -235,11 +234,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
-	private readonly stateStreamRequestIds = new Set<string>()
-	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
 	private readonly taskSnapshots = new Map<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>()
-	private readonly lastStateBroadcastKeys = new Map<string, string>()
 	private readonly state: ReturnType<typeof createInitialState>
 	private readonly approvals = new ApprovalCoordinator()
 	private pendingQuestion:
@@ -251,9 +247,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly conversationProjection = new ConversationProjectionState()
 	private readonly partialTextProjector: PartialTextProjector
 	private readonly foldedProgressProjector: FoldedProgressProjector
-	private stateBroadcastInFlight: Promise<void> | null = null
-	private stateBroadcastQueued = false
-	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
@@ -274,6 +267,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private sendLatency: SendLatencyMonitor | null = null
 	private changeTracking: ChangeTrackingHandler | null = null
 	private providerModelCatalogs: ProviderModelCatalogHandler | null = null
+	private streamPublisher: WebviewStreamPublisher | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -350,12 +344,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setSendLatencyMonitor(sendLatency: SendLatencyMonitor) { this.sendLatency = sendLatency }
 	setChangeTrackingHandler(changeTracking: ChangeTrackingHandler) { this.changeTracking = changeTracking }
 	setProviderModelCatalogHandler(providerModelCatalogs: ProviderModelCatalogHandler) { this.providerModelCatalogs = providerModelCatalogs }
+	setWebviewStreamPublisher(streamPublisher: WebviewStreamPublisher) { this.streamPublisher = streamPublisher }
+	serializeState() { return JSON.stringify(this.state) }
 	async publishChangeTranscript(text: string) { this.addMessage({ type: "say", say: "tool", text }); this.updateCurrentTaskItem(); await this.broadcastState() }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
 	handleTaskIdleLongRunning() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
-	hasStateSubscribers() { return this.stateStreamRequestIds.size > 0 }
+	hasStateSubscribers() { return this.streamPublisher?.hasStateSubscribers === true }
 	getActivePartialSnapshot() { const message = this.state.clineMessages.find((item) => item.ts === this.conversationProjection.activePartialTextTs); const text = getString(message, "text"); return this.conversationProjection.activePartialTextTs && text.trim() ? { textLength: text.length } : null }
 	handlePartialIdle() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
 	requestStateBroadcast() { this.broadcastState().catch((error) => console.error(error)) }
@@ -366,11 +362,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearTaskIdleWatchdog()
 		this.terminalActivity?.dispose()
 		this.changeTracking?.dispose()
-		this.stateStreamRequestIds.clear()
-		this.partialMessageStreamRequestIds.clear()
+		this.streamPublisher?.dispose()
 		this.mcpServerStreamRequestIds.clear()
-		this.lastStateBroadcastKeys.clear()
-		this.lastPartialMessageKeys.clear()
 		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
@@ -708,9 +701,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async handleStreamingRequest(key: string, requestId: string) {
 		if (key === "StateService.subscribeToState") {
-			this.stateStreamRequestIds.add(requestId)
 			this.scheduleStateStreamsRefresh()
-			return grpcHandled(grpcResponse(requestId, { stateJson: JSON.stringify(this.state) }, true))
+			return grpcHandled(this.requireStreamPublisher().subscribeState(requestId))
 		}
 
 		if (key === "AccountService.subscribeToAuthStatusUpdate") {
@@ -718,7 +710,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		if (key === "UiService.subscribeToPartialMessage") {
-			this.partialMessageStreamRequestIds.add(requestId)
+			this.requireStreamPublisher().subscribePartial(requestId)
 			return grpcHandled()
 		}
 
@@ -1342,13 +1334,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private disposeStreamRequest(requestId: string) {
-		const removed =
-			this.stateStreamRequestIds.delete(requestId) ||
-			this.partialMessageStreamRequestIds.delete(requestId) ||
-			this.mcpServerStreamRequestIds.delete(requestId)
-		this.lastStateBroadcastKeys.delete(requestId)
-		this.lastPartialMessageKeys.delete(requestId)
-		return removed
+		return this.requireStreamPublisher().unsubscribe(requestId) || this.mcpServerStreamRequestIds.delete(requestId)
 	}
 
 	private logSlowGrpcRequest(key: string, startedAt: number, streaming: boolean) {
@@ -2992,6 +2978,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.providerModelCatalogs
 	}
 
+	private requireStreamPublisher() {
+		if (!this.streamPublisher) throw new Error("Webview stream publisher is not attached.")
+		return this.streamPublisher
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -4253,75 +4244,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.requireProviderModelCatalogs().unsupported(key)
 	}
 
-	private async broadcastState() {
-		if (this.stateBroadcastInFlight) {
-			this.stateBroadcastQueued = true
-			return this.stateBroadcastInFlight
-		}
+	private async broadcastState() { await this.requireStreamPublisher().broadcastState() }
 
-		this.stateBroadcastInFlight = this.broadcastStateCore()
-		try {
-			await this.stateBroadcastInFlight
-		} finally {
-			this.stateBroadcastInFlight = null
-			if (this.stateBroadcastQueued) {
-				this.stateBroadcastQueued = false
-				await this.broadcastState()
-			}
-		}
-	}
+	private buildStateMessages() { return this.requireStreamPublisher().buildStateMessages() }
 
-	private async broadcastStateCore() {
-		const messages = this.buildStateMessages()
-		if (messages.length === 0) {
-			return
-		}
-
-		this.logger.log("sidecar->webview", "state.broadcast", { count: messages.length, messages: messages.map(summarizeGrpcMessageForLog) })
-		await Promise.all(
-			messages.map((message) =>
-				this.transport.send("webview.postMessage", { message }),
-			),
-		)
-	}
-
-	private buildStateMessages() {
-		const stateJson = JSON.stringify(this.state)
-		const stateKey = String(stateJson.length) + ":" + fastStringHash(stateJson)
-		return [...this.stateStreamRequestIds]
-			.map((requestId) => {
-				const deliveryKey = `${requestId}:${stateKey}`
-				if (this.lastStateBroadcastKeys.get(requestId) === deliveryKey) {
-					return null
-				}
-				this.lastStateBroadcastKeys.set(requestId, deliveryKey)
-				return grpcResponse(requestId, { stateJson }, true)
-			})
-			.filter((message): message is ReturnType<typeof grpcResponse> => message !== null)
-	}
-
-	private sendPartialMessage(message: Record<string, unknown> | undefined) {
-		if (!message || this.partialMessageStreamRequestIds.size === 0) {
-			return
-		}
-
-		const messageKey = partialMessageDeliveryKey(message)
-		for (const requestId of this.partialMessageStreamRequestIds) {
-			const deliveryKey = `${requestId}:${messageKey}`
-			if (this.lastPartialMessageKeys.get(requestId) === deliveryKey) {
-				continue
-			}
-			this.lastPartialMessageKeys.set(requestId, deliveryKey)
-			this.logger.log("sidecar->webview", "partialMessage", { requestId, message: summarizeClineMessageForLog(message) })
-			this.transport.send(
-				"webview.postMessage",
-				{ message: grpcResponse(requestId, toProtoClineMessage(message), true) },
-			).catch((error) => {
-				this.lastPartialMessageKeys.delete(requestId)
-				console.error(error)
-			})
-		}
-	}
+	private sendPartialMessage(message: Record<string, unknown> | undefined) { this.requireStreamPublisher().sendPartial(message) }
 
 	private refreshStateStreamsInBackground() {
 		if (this.stateHydrationRefreshInFlight) {
@@ -4443,29 +4370,6 @@ function summarizeClineMessageForLog(message: Record<string, unknown>) {
 		textLength: text.length,
 		textPreview: truncateText(text, 240),
 	}
-}
-
-function summarizeGrpcMessageForLog(message: unknown) {
-	const record = asRecord(message)
-	const grpcResponseRecord = asRecord(record.grpc_response)
-	const responseMessage = asRecord(grpcResponseRecord.message)
-	const stateJson = getString(responseMessage, "stateJson")
-	return {
-		type: getString(record, "type"),
-		requestId: getString(grpcResponseRecord, "request_id"),
-		isStreaming: grpcResponseRecord.is_streaming === true,
-		error: truncateText(getString(grpcResponseRecord, "error"), 240),
-		stateJsonLength: stateJson.length,
-	}
-}
-
-function fastStringHash(value: string) {
-	let hash = 2166136261
-	for (let index = 0; index < value.length; index++) {
-		hash ^= value.charCodeAt(index)
-		hash = Math.imul(hash, 16777619)
-	}
-	return (hash >>> 0).toString(16)
 }
 
 function readRequestId(message: unknown) {

@@ -9,9 +9,11 @@ const providerConfigurationPath = path.join(root, "src", "infrastructure", "conf
 const webviewStatePath = path.join(root, "src", "infrastructure", "webview", "WebviewState.ts")
 const browserHandlerPath = path.join(root, "src", "features", "browser", "BrowserHandler.ts")
 const worktreeMutationHandlerPath = path.join(root, "src", "features", "worktrees", "WorktreeMutationHandler.ts")
+const webviewStreamPublisherPath = path.join(root, "src", "infrastructure", "webview", "WebviewStreamPublisher.ts")
 const scheduledAgentHandlerPath = path.join(root, "src", "features", "scheduledAgents", "ScheduledAgentHandler.ts")
 const scheduledAgentStorePath = path.join(root, "src", "infrastructure", "persistence", "LocalScheduledAgentStore.ts")
 const mainPath = path.join(root, "src", "main.ts")
+const connectionFactoryPath = path.join(root, "src", "bootstrap", "SidecarConnectionFactory.ts")
 const serverPath = path.join(root, "src", "infrastructure", "transport", "SidecarRpcServer.ts")
 const repoRoot = path.resolve(root, "..", "..")
 const apiConfigurationSectionPath = path.join(repoRoot, "src", "webview", "src", "components", "settings", "sections", "ApiConfigurationSection.tsx")
@@ -23,10 +25,12 @@ const providerConfiguration = fs.readFileSync(providerConfigurationPath, "utf8")
 const webviewState = fs.readFileSync(webviewStatePath, "utf8")
 const browserHandler = fs.readFileSync(browserHandlerPath, "utf8")
 const worktreeMutationHandler = fs.readFileSync(worktreeMutationHandlerPath, "utf8")
+const webviewStreamPublisher = fs.readFileSync(webviewStreamPublisherPath, "utf8")
 const scheduledAgentHandler = fs.readFileSync(scheduledAgentHandlerPath, "utf8")
 const scheduledAgentStore = fs.readFileSync(scheduledAgentStorePath, "utf8")
 const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}\n${browserHandler}\n${worktreeMutationHandler}\n${scheduledAgentHandler}\n${scheduledAgentStore}`
 const main = fs.readFileSync(mainPath, "utf8")
+const connectionFactory = fs.readFileSync(connectionFactoryPath, "utf8")
 const server = fs.readFileSync(serverPath, "utf8")
 const apiConfigurationSection = fs.readFileSync(apiConfigurationSectionPath, "utf8")
 const generalSettingsSection = fs.readFileSync(generalSettingsSectionPath, "utf8")
@@ -72,7 +76,7 @@ const requiredMarkers = [
 	["API profile snapshot replacement", "applyApiConfigurationProfileSnapshot"],
 ]
 
-const missing = requiredMarkers.filter(([, marker]) => !`${paritySource}\n${main}`.includes(marker))
+const missing = requiredMarkers.filter(([, marker]) => !`${paritySource}\n${main}\n${connectionFactory}`.includes(marker))
 
 if (missing.length > 0) {
 	console.error("VS2022 SDK parity smoke failed. Missing markers:")
@@ -133,13 +137,12 @@ requireSequence("MCP server stream cancellation", router, [
 	"this.disposeStreamRequest(requestId)",
 	"grpc_request_cancel.streamDisposed",
 ])
-requireSequence("all stream registries are cleaned", router, [
-	"private disposeStreamRequest(requestId: string)",
-	"this.stateStreamRequestIds.delete(requestId)",
-	"this.partialMessageStreamRequestIds.delete(requestId)",
-	"this.mcpServerStreamRequestIds.delete(requestId)",
-	"this.lastStateBroadcastKeys.delete(requestId)",
-	"this.lastPartialMessageKeys.delete(requestId)",
+requireSequence("state and partial stream registries are cleaned", webviewStreamPublisher, [
+	"unsubscribe(requestId: string)",
+	"this.stateRequests.delete(requestId)",
+	"this.partialRequests.delete(requestId)",
+	"this.stateDeliveryKeys.delete(requestId)",
+	"this.partialDeliveryKeys.delete(requestId)",
 ])
 
 for (const rpc of [
@@ -175,10 +178,12 @@ requireSequence("SDK restored transcript transport", sdkRuntime, [
 	"initialMessages: initialMessages.length > 0 ? initialMessages : undefined",
 ])
 
-requireSequence("sidecar composition root", main, [
-	"new SidecarRpcServer(",
+requireSequence("connection composition root", connectionFactory, [
 	"new VisualStudioWebviewBackend(",
 	"new VisualStudioWebviewController(backend)",
+])
+requireSequence("sidecar process bootstrap", main, [
+	"new SidecarRpcServer(",
 	"server.start()",
 ])
 
