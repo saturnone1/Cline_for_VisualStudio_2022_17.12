@@ -104,6 +104,7 @@
     <Compile Include="Host\Adapters\TerminalHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\DiffHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\WorkspaceHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\WebviewHostRpcAdapter.cs" />
     <Compile Include="Host\SidecarProcess.cs" />
     <Compile Include="$(VsVersionInfoPath)">
       <Link>Host\VisualStudioVersionInfo.cs</Link>

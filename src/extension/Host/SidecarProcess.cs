@@ -49,7 +49,8 @@ namespace VsClineAgent.Host
                 new FileSystemHostRpcAdapter(),
                 new TerminalHostRpcAdapter(assemblyDirectory, editorService, commandExecutionService),
                 new DiffHostRpcAdapter(editorService),
-                new WorkspaceHostRpcAdapter(editorService)
+                new WorkspaceHostRpcAdapter(editorService),
+                new WebviewHostRpcAdapter(() => _postToWebviewAsync)
             };
         }
 
@@ -250,17 +251,6 @@ namespace VsClineAgent.Host
                     return SearchFiles(parameters);
                 case "workspace.selectFiles":
                     return SelectFiles(parameters);
-                case "webview.postMessage":
-                    if (_postToWebviewAsync != null && parameters is JObject postMessage)
-                    {
-                        var message = postMessage["message"];
-                        if (message != null)
-                        {
-                            InteractionLog.Write("host->webview", "webview.postMessage", message);
-                            await _postToWebviewAsync(message).ConfigureAwait(false);
-                        }
-                    }
-                    return new JObject { ["posted"] = true };
                 default:
                     throw new InvalidOperationException("Unsupported host method: " + method);
             }
