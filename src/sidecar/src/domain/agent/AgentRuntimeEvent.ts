@@ -11,10 +11,10 @@ export type AgentEvent =
 	| { type: "NoticeReceived"; sessionId: string; message: string; reason: string; noticeType: string; raw: AgentEventPayload }
 	| { type: "ToolFinished"; sessionId: string; toolCall: AgentEventPayload; result: AgentEventPayload; message: unknown; raw: AgentEventPayload }
 	| { type: "AssistantMessageReceived"; sessionId: string; message: AgentEventPayload; raw: AgentEventPayload }
-	| { type: "RunFinished"; sessionId: string; result: AgentEventPayload; usage: AgentEventPayload; raw: AgentEventPayload }
+	| { type: "RunFinished"; sessionId: string; result: AgentEventPayload; usage: AgentEventPayload; completion: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "RunFailed"; sessionId: string; reason: string; raw: AgentEventPayload }
 	| { type: "UsageUpdated"; sessionId: string; usage: AgentEventPayload; totalInputTokens?: number; totalOutputTokens?: number; totalCacheReadTokens?: number; totalCacheWriteTokens?: number; totalCost?: number; raw: AgentEventPayload }
-	| { type: "AgentDone"; sessionId: string; result: AgentEventPayload; raw: AgentEventPayload }
+	| { type: "AgentDone"; sessionId: string; result: AgentEventPayload; completion: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "AgentError"; sessionId: string; error: unknown; raw: AgentEventPayload }
 	| { type: "ApprovalRequested"; sessionId: string; toolName: string; input: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "AgentCompleted"; sessionId: string; reason: string; raw: AgentEventPayload }

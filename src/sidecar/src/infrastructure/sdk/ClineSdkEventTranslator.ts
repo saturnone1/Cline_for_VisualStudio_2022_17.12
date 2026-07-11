@@ -79,10 +79,10 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 	if (type === "notice") return { type: "NoticeReceived", sessionId, message: readString(raw.message), reason: readString(raw.reason), noticeType: readString(raw.noticeType), raw }
 	if (type === "tool-finished") return { type: "ToolFinished", sessionId, toolCall: asRecord(raw.toolCall), result: asRecord(raw.result), message: raw.message, raw }
 	if (type === "assistant-message") return { type: "AssistantMessageReceived", sessionId, message: asRecord(raw.message), raw }
-	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), raw }
+	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), completion: completionFields(raw), raw }
 	if (type === "run-failed") return { type: "RunFailed", sessionId, reason: readString(raw.reason) || "failed", raw }
 	if (type === "usage") return { type: "UsageUpdated", sessionId, usage: asRecord(raw.usage), totalInputTokens: readNumber(raw.totalInputTokens), totalOutputTokens: readNumber(raw.totalOutputTokens), totalCacheReadTokens: readNumber(raw.totalCacheReadTokens), totalCacheWriteTokens: readNumber(raw.totalCacheWriteTokens), totalCost: readNumber(raw.totalCost), raw }
-	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), raw }
+	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), completion: completionFields(raw), raw }
 	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, raw }
 	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }
 }
@@ -135,3 +135,5 @@ function readString(value: unknown) {
 function readNumber(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
+
+function completionFields(raw: AgentEventPayload) { return Object.fromEntries(["outputText", "finalText", "finalResponse", "response", "answer", "text", "message", "content", "output", "result"].filter((key) => raw[key] !== undefined).map((key) => [key, raw[key]])) }

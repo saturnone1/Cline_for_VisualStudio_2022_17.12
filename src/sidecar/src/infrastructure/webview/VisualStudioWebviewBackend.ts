@@ -68,6 +68,7 @@ import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
+import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -140,7 +141,6 @@ import {
 	sdkContentToVisibleAssistantText,
 	sdkContentToReasoningText,
 	sdkContentToToolActivityEntries,
-	contentToText,
 	extractCompletionTextFromResult,
 	completionCandidateToText,
 	completionContentBlocksToText,
@@ -244,6 +244,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly taskSnapshots: TaskSnapshotStore
 	private readonly agentTextEvents: AgentTextEventProjector
 	private readonly agentToolEvents: AgentToolEventProjector
+	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
@@ -295,6 +296,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
+		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -3008,8 +3010,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private handleAgentEvent(semanticEvent: AgentEvent, sessionId = semanticEvent.sessionId) {
-		const event = semanticProjectionPayload(semanticEvent)
-		const { type, contentType } = legacyProjectionDiscriminator(semanticEvent)
 		if (sessionId) {
 			this.bindCurrentTaskToSession(sessionId)
 		}
@@ -3028,120 +3028,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "iteration_start") {
-			this.noteTaskActivity("iteration_start")
-		}
-
-		if (type === "iteration_end") {
-			this.noteTaskActivity("iteration_end")
-			const iteration = getNumber(event, "iteration")
-			const toolCallCount = getNumber(event, "toolCallCount") || 0
-			const hadToolCalls = asRecord(event).hadToolCalls === true || toolCallCount > 0
-			if (
-				!hadToolCalls &&
-				!this.hasCompletionResultAfterLastUserMessage() &&
-				(this.getActivePartialText().trim() || this.hasAssistantTextAfterLastUserMessage())
-			) {
-				this.logger.log("sidecar", "iterationEndCompletesTurn", {
-					sessionId,
-					iteration,
-					toolCallCount,
-					activePartialTextLength: this.getActivePartialText().length,
-				})
-				this.finishSdkTask(sessionId || String(this.state.currentTaskItem?.id || ""), "completed", this.getActivePartialText())
-			}
-		}
-
-		if (type === "notice") {
-			this.noteTaskActivity("notice")
-			const message = getString(event, "message")
-			const reason = getString(event, "reason")
-			const noticeType = getString(event, "noticeType")
-			if (message) {
-				const text = reason ? `${message}\n\nReason: ${reason}` : message
-				if (noticeType === "status") {
-					this.logger.log("sidecar", "sdkStatusNotice", { text })
-				} else {
-					this.addMessage({ type: "say", say: "text", text })
-				}
-			}
-		}
-
-		if (type === "assistant-message") {
-			this.noteTaskActivity("assistant-message")
-			this.clearReasoningStatus()
-			const text = contentToText(asRecord(event.message).content)
-			if (text.trim()) {
-				this.finalizeActivePartialText()
-				this.addMessage({ type: "say", say: "text", text })
-			}
-		}
-
-		if (type === "run-finished") {
-			this.noteTaskActivity("run-finished")
-			this.finishActiveToolActivity()
-			this.finishFoldedReasoningText()
-			this.clearReasoningStatus()
-			const result = asRecord(event.result)
-			const usage = normalizeUsageSnapshot(asRecord(result.usage || result.aggregateUsage || event.usage))
-			if (usage.reliable) {
-				this.updateCurrentTaskItem({
-					tokensIn: usage.inputTokens,
-					tokensOut: usage.outputTokens,
-					cacheReads: usage.cacheReadTokens,
-					cacheWrites: usage.cacheWriteTokens,
-					totalCost: usage.totalCost,
-				})
-			}
-			const text = extractCompletionTextFromResult(result, event)
-			this.finishSdkTask(sessionId, getString(result, "status") || "completed", text)
-		}
-
-		if (type === "run-failed") {
-			this.noteTaskActivity("run-failed")
-			this.finishActiveToolActivity()
-			this.finishFoldedReasoningText()
-			this.clearReasoningStatus()
-			this.finishSdkTask(sessionId, "failed")
-		}
-
-		if (type === "usage") {
-			this.noteTaskActivity("usage")
-			const usage = asRecord(event.usage)
-			const normalizedUsage = normalizeUsageSnapshot({
-				...usage,
-				totalInputTokens: event.totalInputTokens,
-				totalOutputTokens: event.totalOutputTokens,
-				totalCacheReadTokens: event.totalCacheReadTokens,
-				totalCacheWriteTokens: event.totalCacheWriteTokens,
-				totalCost: event.totalCost ?? usage.totalCost ?? usage.cost,
-			})
-			if (normalizedUsage.reliable) {
-				this.updateCurrentTaskItem({
-					tokensIn: normalizedUsage.inputTokens,
-					tokensOut: normalizedUsage.outputTokens,
-					cacheReads: normalizedUsage.cacheReadTokens,
-					cacheWrites: normalizedUsage.cacheWriteTokens,
-					totalCost: normalizedUsage.totalCost,
-				})
-			}
-		}
-
-		if (type === "done") {
-			this.noteTaskActivity("done")
-			this.finishFoldedReasoningText()
-			this.clearReasoningStatus()
-			const text = extractCompletionTextFromResult(asRecord(event.result), event)
-			this.finishSdkTask(sessionId, "completed", text)
-		}
-
-		if (type === "error") {
-			this.noteTaskActivity("error")
-			this.finishFoldedReasoningText()
-			this.clearReasoningStatus()
-			const text = formatProviderErrorForTranscript(event.error, this.getUiLanguage())
-			this.markSendLatencyError(sessionId, text)
-			this.addMessage({ type: "say", say: "error", text })
+		const lifecycleProjection = this.agentLifecycleEvents.handle(semanticEvent)
+		if (lifecycleProjection.handled) {
+			this.updateCurrentTaskItem()
+			if (lifecycleProjection.broadcast) this.broadcastState().catch((error) => console.error(error))
+			return
 		}
 
 		this.updateCurrentTaskItem()
@@ -4056,54 +3947,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			}
 			this.refreshStateStreamsInBackground()
 		}, delayMs).unref?.()
-	}
-}
-
-function semanticProjectionPayload(event: AgentEvent): Record<string, unknown> {
-	switch (event.type) {
-		case "TextDelta": return { accumulated: event.accumulated, delta: event.text, text: event.text }
-		case "ReasoningDelta": return { reasoning: event.text, text: event.text, delta: event.text }
-		case "ToolCallRequested": return { toolName: event.toolName, input: event.input }
-		case "ToolCallCompleted": return { toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }
-		case "ToolCallUpdated": return { toolName: event.toolName, update: event.update }
-		case "AgentStarted": return { iteration: event.iteration }
-		case "IterationCompleted": return { iteration: event.iteration, toolCallCount: event.toolCallCount, hadToolCalls: event.hadToolCalls }
-		case "NoticeReceived": return { message: event.message, reason: event.reason, noticeType: event.noticeType }
-		case "ToolFinished": return { toolCall: event.toolCall, result: event.result, message: event.message }
-		case "AssistantMessageReceived": return { message: event.message }
-		case "RunFinished": return { result: event.result, usage: event.usage }
-		case "RunFailed": return { reason: event.reason }
-		case "UsageUpdated": return { usage: event.usage, totalInputTokens: event.totalInputTokens, totalOutputTokens: event.totalOutputTokens, totalCacheReadTokens: event.totalCacheReadTokens, totalCacheWriteTokens: event.totalCacheWriteTokens, totalCost: event.totalCost }
-		case "AgentDone": return { result: event.result }
-		case "AgentError": return { error: event.error }
-		case "AgentCompleted": return { result: { status: event.reason } }
-		case "AgentFailed": return { error: event.reason }
-		case "ApprovalRequested": return { toolName: event.toolName, input: event.input }
-		case "AgentEventUnknown": return { ...event.raw }
-	}
-}
-
-function legacyProjectionDiscriminator(event: AgentEvent) {
-	switch (event.type) {
-		case "TextDelta": return { type: event.phase === "start" ? "content_start" : event.phase === "end" ? "content_end" : "content_update", contentType: "text" }
-		case "ReasoningDelta": return { type: event.phase === "start" ? "content_start" : event.phase === "end" ? "content_end" : "content_update", contentType: "reasoning" }
-		case "ToolCallRequested": return { type: "content_start", contentType: "tool" }
-		case "ToolCallCompleted": return { type: "content_end", contentType: "tool" }
-		case "ToolCallUpdated": return { type: "content_update", contentType: "tool" }
-		case "AgentStarted": return { type: "iteration_start", contentType: "" }
-		case "IterationCompleted": return { type: "iteration_end", contentType: "" }
-		case "NoticeReceived": return { type: "notice", contentType: "" }
-		case "ToolFinished": return { type: "tool-finished", contentType: "" }
-		case "AssistantMessageReceived": return { type: "assistant-message", contentType: "" }
-		case "RunFinished": return { type: "run-finished", contentType: "" }
-		case "RunFailed": return { type: "run-failed", contentType: "" }
-		case "UsageUpdated": return { type: "usage", contentType: "" }
-		case "AgentDone": return { type: "done", contentType: "" }
-		case "AgentError": return { type: "error", contentType: "" }
-		case "AgentEventUnknown": return { type: event.originalType, contentType: typeof event.raw.contentType === "string" ? event.raw.contentType : "" }
-		case "AgentCompleted": return { type: "done", contentType: "" }
-		case "AgentFailed": return { type: "error", contentType: "" }
-		default: return { type: "", contentType: "" }
 	}
 }
 
