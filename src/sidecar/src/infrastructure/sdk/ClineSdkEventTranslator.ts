@@ -1,0 +1,125 @@
+import type { AgentEvent, AgentEventPayload, AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
+
+export function normalizeAgentRuntimeEvent(value: unknown): AgentRuntimeEvent {
+	const record = asRecord(value)
+	const originalType = readString(record.type)
+	const payload = asRecord(record.payload)
+	const sessionId = readString(payload.sessionId)
+
+	switch (originalType) {
+		case "agent_event":
+			return { type: originalType, sessionId, event: translateClineAgentEvent(payload.event, sessionId), payload }
+		case "vscline_file_changed":
+			return { type: originalType, payload }
+		case "chunk":
+		case "session_snapshot":
+		case "team_progress":
+		case "hook":
+		case "pending_prompts":
+		case "pending_prompt_submitted":
+			return { type: originalType, sessionId, payload }
+		case "status": {
+			const status = readString(payload.status)
+			return { type: originalType, sessionId, status, lifecycle: lifecycleEvent(sessionId, status, payload), payload }
+		}
+		case "ended": {
+			const reason = readString(payload.reason) || "ended"
+			return { type: originalType, sessionId, reason, lifecycle: completionEvent(sessionId, reason, payload), payload }
+		}
+		default:
+			return { type: "unknown", originalType, payload }
+	}
+}
+
+export function translateClineAgentEvent(value: unknown, sessionId: string): AgentEvent {
+	const raw = asRecord(value)
+	const type = readString(raw.type)
+	const contentType = readString(raw.contentType)
+	const phase = contentPhase(type)
+
+	if (phase && contentType === "text") {
+		return {
+			type: "TextDelta",
+			sessionId,
+			text: readString(raw.delta) || readString(raw.text) || readString(raw.accumulated),
+			accumulated: readString(raw.accumulated),
+			phase,
+			raw,
+		}
+	}
+	if (phase && contentType === "reasoning") {
+		return {
+			type: "ReasoningDelta",
+			sessionId,
+			text: readString(raw.reasoning) || readString(raw.text) || readString(raw.accumulated) || readString(raw.delta),
+			phase,
+			raw,
+		}
+	}
+	if (type === "content_start" && contentType === "tool") {
+		return { type: "ToolCallRequested", sessionId, toolName: readString(raw.toolName), input: raw.input, raw }
+	}
+	if (type === "content_end" && contentType === "tool") {
+		return {
+			type: "ToolCallCompleted",
+			sessionId,
+			toolName: readString(raw.toolName),
+			output: raw.output,
+			error: readString(raw.error),
+			raw,
+		}
+	}
+	if (type === "iteration_start") {
+		return { type: "AgentStarted", sessionId, iteration: readNumber(raw.iteration), raw }
+	}
+	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }
+}
+
+export function translateToolApprovalRequest(value: unknown, sessionId: string): ApprovalRequestedEvent {
+	const raw = asRecord(value)
+	return {
+		type: "ApprovalRequested",
+		sessionId,
+		toolName: readString(raw.toolName) || readString(raw.name) || readString(raw.tool),
+		input: asRecord(raw.input || raw.params || raw.arguments),
+		raw,
+	}
+}
+
+function lifecycleEvent(sessionId: string, status: string, raw: AgentEventPayload): AgentEvent {
+	const normalized = status.trim().toLowerCase()
+	if (["failed", "error", "cancelled", "stopped"].includes(normalized)) {
+		return { type: "AgentFailed", sessionId, reason: status || "failed", raw }
+	}
+	if (["idle", "completed", "complete", "ended"].includes(normalized)) {
+		return { type: "AgentCompleted", sessionId, reason: status || "completed", raw }
+	}
+	return { type: "AgentStarted", sessionId, raw }
+}
+
+function completionEvent(sessionId: string, reason: string, raw: AgentEventPayload): AgentEvent {
+	return /fail|error|cancel|stop/i.test(reason)
+		? { type: "AgentFailed", sessionId, reason, raw }
+		: { type: "AgentCompleted", sessionId, reason, raw }
+}
+
+function contentPhase(type: string): "start" | "update" | "end" | null {
+	if (type === "content_start") return "start"
+	if (type === "content_update" || type === "content_delta") return "update"
+	if (type === "content_end") return "end"
+	return null
+}
+
+function asRecord(value: unknown): AgentEventPayload {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: {}
+}
+
+function readString(value: unknown) {
+	return typeof value === "string" ? value : ""
+}
+
+function readNumber(value: unknown) {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}

@@ -1,46 +1,22 @@
 export type AgentEventPayload = Readonly<Record<string, unknown>>
 
+export type AgentEvent =
+	| { type: "AgentStarted"; sessionId: string; iteration?: number; raw: AgentEventPayload }
+	| { type: "TextDelta"; sessionId: string; text: string; accumulated: string; phase: "start" | "update" | "end"; raw: AgentEventPayload }
+	| { type: "ReasoningDelta"; sessionId: string; text: string; phase: "start" | "update" | "end"; raw: AgentEventPayload }
+	| { type: "ToolCallRequested"; sessionId: string; toolName: string; input: unknown; raw: AgentEventPayload }
+	| { type: "ToolCallCompleted"; sessionId: string; toolName: string; output: unknown; error: string; raw: AgentEventPayload }
+	| { type: "ApprovalRequested"; sessionId: string; toolName: string; input: AgentEventPayload; raw: AgentEventPayload }
+	| { type: "AgentCompleted"; sessionId: string; reason: string; raw: AgentEventPayload }
+	| { type: "AgentFailed"; sessionId: string; reason: string; raw: AgentEventPayload }
+	| { type: "AgentEventUnknown"; sessionId: string; originalType: string; raw: AgentEventPayload }
+
+export type ApprovalRequestedEvent = Extract<AgentEvent, { type: "ApprovalRequested" }>
+
 export type AgentRuntimeEvent =
-	| { type: "agent_event"; sessionId: string; event: AgentEventPayload; payload: AgentEventPayload }
+	| { type: "agent_event"; sessionId: string; event: AgentEvent; payload: AgentEventPayload }
 	| { type: "vscline_file_changed"; payload: AgentEventPayload }
 	| { type: "chunk" | "session_snapshot" | "team_progress" | "hook" | "pending_prompts" | "pending_prompt_submitted"; sessionId: string; payload: AgentEventPayload }
-	| { type: "status"; sessionId: string; status: string; payload: AgentEventPayload }
-	| { type: "ended"; sessionId: string; reason: string; payload: AgentEventPayload }
+	| { type: "status"; sessionId: string; status: string; lifecycle: AgentEvent; payload: AgentEventPayload }
+	| { type: "ended"; sessionId: string; reason: string; lifecycle: AgentEvent; payload: AgentEventPayload }
 	| { type: "unknown"; originalType: string; payload: AgentEventPayload }
-
-export function normalizeAgentRuntimeEvent(value: unknown): AgentRuntimeEvent {
-	const record = asRecord(value)
-	const originalType = readString(record.type)
-	const payload = asRecord(record.payload)
-	const sessionId = readString(payload.sessionId)
-
-	switch (originalType) {
-		case "agent_event":
-			return { type: originalType, sessionId, event: asRecord(payload.event), payload }
-		case "vscline_file_changed":
-			return { type: originalType, payload }
-		case "chunk":
-		case "session_snapshot":
-		case "team_progress":
-		case "hook":
-		case "pending_prompts":
-		case "pending_prompt_submitted":
-			return { type: originalType, sessionId, payload }
-		case "status":
-			return { type: originalType, sessionId, status: readString(payload.status), payload }
-		case "ended":
-			return { type: originalType, sessionId, reason: readString(payload.reason), payload }
-		default:
-			return { type: "unknown", originalType, payload }
-	}
-}
-
-function asRecord(value: unknown): AgentEventPayload {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? value as Record<string, unknown>
-		: {}
-}
-
-function readString(value: unknown) {
-	return typeof value === "string" ? value : ""
-}

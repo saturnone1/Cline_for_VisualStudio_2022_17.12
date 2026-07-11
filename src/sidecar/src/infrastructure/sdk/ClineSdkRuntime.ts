@@ -7,7 +7,8 @@ import type { AgentEnginePort } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
-import { normalizeAgentRuntimeEvent, type AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
+import { normalizeAgentRuntimeEvent, translateToolApprovalRequest } from "./ClineSdkEventTranslator"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -39,7 +40,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly host: HostProviderPort,
 		private readonly sidecarRoot: string,
 		private readonly onCoreEvent?: (event: AgentRuntimeEvent) => void,
-		private readonly onToolApproval?: (request: unknown) => Promise<ToolApprovalResult>,
+		private readonly onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>,
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
 	) {}
@@ -684,7 +685,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			capabilities: {
 				requestToolApproval: async (request: unknown) => {
 					if (this.onToolApproval) {
-						return this.onToolApproval(request)
+						return this.onToolApproval(translateToolApprovalRequest(request, this.activeSessionId || ""))
 					}
 
 					return { approved: false, reason: "Visual Studio tool approval UI is not attached." }

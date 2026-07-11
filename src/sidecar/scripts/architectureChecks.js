@@ -74,6 +74,12 @@ const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk"
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
 	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")
 }
+const sdkEventTranslator = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventTranslator.ts"), "utf8")
+for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
+	if (!sdkEventTranslator.includes(`\"${eventName}\"`)) {
+		violations.push(`ClineSdkEventTranslator is missing semantic event: ${eventName}`)
+	}
+}
 
 const mainPath = path.join(sourceRoot, "main.ts")
 const main = fs.readFileSync(mainPath, "utf8")
@@ -104,6 +110,7 @@ if (router.includes("function createProviderAuthInfo") || router.includes("funct
 
 for (const requiredFile of [
 	"domain/agent/AgentRuntimeEvent.ts",
+	"infrastructure/sdk/ClineSdkEventTranslator.ts",
 	"application/ports/AgentEnginePort.ts",
 	"application/useCases/McpUseCase.ts",
 	"application/useCases/StatePersistenceUseCase.ts",

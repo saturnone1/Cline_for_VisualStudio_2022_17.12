@@ -26,6 +26,7 @@ import {
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
 import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -471,11 +472,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return isPlanModeBlockedTool(mappedToolName)
 	}
 
-	async requestToolApproval(request: unknown): Promise<ToolApprovalResult> {
+	async requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult> {
 		this.logger.log("sdk->sidecar", "toolApproval.request", request)
-		const approvalRequest = asRecord(request)
-		const toolName = getString(approvalRequest, "toolName") || getString(approvalRequest, "name") || getString(approvalRequest, "tool")
-		const input = asRecord(approvalRequest.input || approvalRequest.params || approvalRequest.arguments)
+		const approvalRequest = request.raw as Record<string, unknown>
+		const toolName = request.toolName
+		const input = request.input as Record<string, unknown>
 		const mappedToolName = mapToolName(toolName)
 		if (this.isPlanModeToolBlocked(mappedToolName)) {
 			const language = this.getUiLanguage()
@@ -616,8 +617,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				})
 				return
 			}
-			this.markSendLatencyFirstSdkEvent(sessionId, getString(asRecord(payload.event), "type") || type)
-			this.handleAgentEvent(event.event, sessionId)
+			this.markSendLatencyFirstSdkEvent(sessionId, getString(event.event.raw, "type") || type)
+			this.handleAgentEvent(event.event.raw, sessionId)
 			return
 		}
 
