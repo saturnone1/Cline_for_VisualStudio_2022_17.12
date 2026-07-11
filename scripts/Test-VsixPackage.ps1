@@ -49,6 +49,7 @@ try {
 		"Sidecar/runtime/features/chat/startTask/StartTaskHandler.js",
 		"Sidecar/runtime/features/chat/cancelTask/CancelTaskCommand.js",
 		"Sidecar/runtime/features/chat/cancelTask/CancelTaskHandler.js",
+		"Sidecar/runtime/features/approvals/ApprovalCoordinator.js",
         "Sidecar/runtime/infrastructure/persistence/JsonStateStore.js",
 		"Sidecar/runtime/infrastructure/persistence/LocalAutomationStore.js",
 		"Sidecar/runtime/infrastructure/auth/ProviderAuthSupport.js",

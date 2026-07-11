@@ -135,6 +135,7 @@ for (const requiredFile of [
 	"features/chat/startTask/StartTaskHandler.ts",
 	"features/chat/cancelTask/CancelTaskCommand.ts",
 	"features/chat/cancelTask/CancelTaskHandler.ts",
+	"features/approvals/ApprovalCoordinator.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)

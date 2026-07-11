@@ -32,6 +32,7 @@ import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMes
 import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCommand"
 import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
+import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -334,11 +335,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly taskSnapshots = new Map<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>()
 	private readonly lastStateBroadcastKeys = new Map<string, string>()
 	private readonly state: ReturnType<typeof createInitialState>
-	private pendingApproval:
-		| {
-				resolve: (value: ToolApprovalResult) => void
-		  }
-		| null = null
+	private readonly approvals = new ApprovalCoordinator()
 	private pendingQuestion:
 		| {
 				resolve: (value: AskQuestionResult) => void
@@ -461,8 +458,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.mcpServerStreamRequestIds.clear()
 		this.lastStateBroadcastKeys.clear()
 		this.lastPartialMessageKeys.clear()
-		this.pendingApproval?.resolve({ approved: false, reason: "LIG VS webview router was disposed." })
-		this.pendingApproval = null
+		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.flushPersistedStateSave()
@@ -551,20 +547,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 						...input,
 					})
 
-		if (this.pendingApproval) {
-			this.pendingApproval.resolve({ approved: false, reason: "Superseded by a newer LIG VS tool approval request." })
-			this.pendingApproval = null
-		}
-
 		this.transitionTask("awaiting_user", "tool-approval")
 		this.taskLifecycle.waitFor("tool_approval")
 		this.addMessage({ type: "ask", ask, text })
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
 
-		return new Promise<ToolApprovalResult>((resolve) => {
-			this.pendingApproval = { resolve }
-		})
+		return this.approvals.request()
 	}
 
 	private async notifyAutoApprovedTool(mappedToolName: string, input: Record<string, unknown>) {
@@ -2837,7 +2826,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private clearLiveInteractionState(reason: string) {
 		const hadState =
-			!!this.pendingApproval ||
+			this.approvals.hasPending ||
 			!!this.pendingQuestion ||
 			!!this.activePartialTextTs ||
 			!!this.activeReasoningTextTs ||
@@ -2853,8 +2842,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
 		this.stopTerminalStatePolling()
-		this.pendingApproval?.resolve({ approved: false, reason: `Cleared by ${reason}.` })
-		this.pendingApproval = null
+		this.approvals.clear({ approved: false, reason: `Cleared by ${reason}.` })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.activePartialTextTs = null
@@ -3032,18 +3020,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.logger.log("sidecar", "sendAskResponse.received", {
 			responseType,
 			textLength: text.length,
-			hasPendingApproval: !!this.pendingApproval,
+			hasPendingApproval: this.approvals.hasPending,
 			hasPendingQuestion: !!this.pendingQuestion,
 			activeSessionId,
 			selectedSessionId,
 		})
 
-		if (this.pendingApproval && activeSessionId) {
+		if (this.approvals.hasPending && activeSessionId) {
 			this.transitionTask("streaming", "approval-response")
 			const approved = responseType === "yesButtonClicked"
 			const feedback = text
-			const pending = this.pendingApproval
-			this.pendingApproval = null
+			const pending = this.approvals.take()
 			this.logger.log("sidecar", "sendAskResponse.pendingApproval", { approved, activeSessionId })
 			this.addMessage({
 				type: "say",
@@ -3054,7 +3041,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			})
 			this.updateCurrentTaskItem()
 			await this.broadcastState()
-			pending.resolve({ approved, reason: feedback.trim() || (approved ? "Visual Studio에서 승인됨." : "Visual Studio에서 거부됨.") })
+			pending?.({ approved, reason: feedback.trim() || (approved ? "Visual Studio에서 승인됨." : "Visual Studio에서 거부됨.") })
 			return
 		}
 
@@ -3083,15 +3070,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (this.pendingApproval || this.pendingQuestion) {
+		if (this.approvals.hasPending || this.pendingQuestion) {
 			this.logger.log("sidecar", "sendAskResponse.stalePendingIgnored", {
-				hasPendingApproval: !!this.pendingApproval,
+				hasPendingApproval: this.approvals.hasPending,
 				hasPendingQuestion: !!this.pendingQuestion,
 				activeSessionId,
 				selectedSessionId,
 			})
-			this.pendingApproval?.resolve({ approved: false, reason: "Superseded by resumed chat message." })
-			this.pendingApproval = null
+			this.approvals.clear({ approved: false, reason: "Superseded by resumed chat message." })
 			this.pendingQuestion?.resolve("")
 			this.pendingQuestion = null
 		}
@@ -3534,8 +3520,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.finalizeActivePartialText()
 		this.finishActiveToolActivity()
 		this.finishFoldedReasoningText()
-		this.pendingApproval?.resolve({ approved: false, reason: "Task was closed." })
-		this.pendingApproval = null
+		this.approvals.clear({ approved: false, reason: "Task was closed." })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.state.currentTaskItem = null
