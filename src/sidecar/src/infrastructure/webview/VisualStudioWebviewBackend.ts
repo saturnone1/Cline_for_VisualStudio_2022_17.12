@@ -99,6 +99,8 @@ import { TerminalRpcHandler } from "../../features/terminal/TerminalRpcHandler"
 import { decodeTerminalRpcCommand } from "./TerminalRpcDecoder"
 import { TaskRpcHandler, type TaskPromptRequest } from "../../features/chat/TaskRpcHandler"
 import { decodeTaskRpcCommand } from "./TaskRpcDecoder"
+import { CheckpointRpcHandler } from "../../features/checkpoints/CheckpointRpcHandler"
+import { decodeCheckpointRpcCommand } from "./CheckpointRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -274,6 +276,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly browserRpc: BrowserRpcHandler
 	private readonly terminalRpc: TerminalRpcHandler
 	private readonly taskRpc: TaskRpcHandler
+	private readonly checkpointRpc: CheckpointRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -346,6 +349,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskRpc = new TaskRpcHandler({ hasPendingQuestion: () => Boolean(this.pendingQuestion), hasCurrentTask: () => Boolean(this.state.currentTaskItem), start: (request, requestId) => this.startNewTask(request, { broadcast: true, requestId }), respond: (request, requestId) => this.sendAskResponse(request, requestId), compact: (requestId) => this.compactCurrentSession(requestId), cancel: () => this.cancelTask(), clear: () => this.clearTask(), refreshHistory: (source) => this.taskHistorySync.refreshInBackground(source), history: () => this.state.taskHistory, show: (taskId) => this.showTaskWithId(taskId), delete: (taskIds) => this.taskHistoryCommands.delete(taskIds), deleteAll: () => this.taskHistoryCommands.deleteAll(), toggleFavorite: (taskId, isFavorited) => this.taskHistoryCommands.toggleFavorite(taskId, isFavorited), broadcast: () => this.broadcastState() })
+		this.checkpointRpc = new CheckpointRpcHandler({ available: () => Boolean(this.clineSdk), checkpoints: () => this.requireCheckpoints(), currentTask: () => this.state.currentTaskItem, messages: () => this.state.clineMessages, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), showTask: (taskId) => this.showTaskWithId(taskId), addInfo: (text, checkpointRunCount) => { this.addMessage({ type: "say", say: "info", text, checkpointRunCount }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), trackedChanges: () => this.requireChangeTracking().pendingChanges() })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -852,6 +856,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(taskResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const checkpointCommand = decodeCheckpointRpcCommand(key, message)
+		if (checkpointCommand) {
+			const checkpointResult = await this.checkpointRpc.handle(checkpointCommand)
+			return grpcHandled(
+				grpcResponse(requestId, checkpointResult.payload, false),
+				...(checkpointResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -883,13 +895,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				Object.assign(this.state, createInitialState())
 				await this.clearTask()
 				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "CheckpointsService.checkpointRestore":
-				await this.restoreCheckpoint(message)
-				return grpcHandled(grpcResponse(requestId, { value: true }, false))
-
-			case "CheckpointsService.checkpointDiff":
-				return grpcHandled(grpcResponse(requestId, await this.describeCheckpointDiff(message), false), ...this.buildStateMessages())
 
 			case "FileService.refreshRules":
 				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
@@ -1388,41 +1393,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async hydrateCurrentTaskFromSdk(sessionId: string, source: string, force = false) {
 		return this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, force)
-	}
-
-	private async restoreCheckpoint(message: unknown) {
-		if (!this.clineSdk || !this.state.currentTaskItem) {
-			throw new Error("No SDK-backed task is selected for checkpoint restore.")
-		}
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const cwd = workspaceRoots[0] || String(this.state.currentTaskItem.cwdOnTaskInitialization || process.cwd())
-		const result = await this.requireCheckpoints().restore(message, {
-			taskItem: this.state.currentTaskItem,
-			messages: this.state.clineMessages,
-			cwd,
-			config: await this.buildSdkConfig(cwd, String(this.state.currentTaskItem.id || "")),
-			toolPolicies: this.createCurrentToolPolicies(),
-		})
-		if (result.restoredSessionId) {
-			await this.showTaskWithId(result.restoredSessionId)
-		} else {
-			this.addMessage({ type: "say", say: "info", text: "Checkpoint workspace restore completed." })
-			await this.broadcastState()
-		}
-	}
-
-	private async describeCheckpointDiff(message: unknown) {
-		const trackedChanges = this.requireChangeTracking().pendingChanges()
-		const description = this.requireCheckpoints().describe(message, { taskItem: this.state.currentTaskItem, messages: this.state.clineMessages, trackedChanges })
-
-		if (description.success) this.addMessage({
-			type: "say",
-			say: "info",
-			text: description.text,
-			checkpointRunCount: description.checkpointRunCount,
-		})
-		if (description.success) this.updateCurrentTaskItem()
-		return description
 	}
 
 	private async refreshSdkInstructionSettings() {
