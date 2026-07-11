@@ -1,43 +1,88 @@
 import { createProtoStub } from "../protoStub"
 
-export type ApiProvider = any
-export const ApiProvider = createProtoStub("ApiProvider")
+const apiProviderNames = [
+	"AIHUBMIX", "ANTHROPIC", "ASKSAGE", "BASETEN", "BEDROCK", "CEREBRAS", "CLAUDE_CODE", "CLINE",
+	"DEEPSEEK", "DIFY", "DOUBAO", "FIREWORKS", "GEMINI", "GROQ", "HICAP", "HUAWEI_CLOUD_MAAS",
+	"HUGGINGFACE", "LITELLM", "LMSTUDIO", "MINIMAX", "MISTRAL", "MOONSHOT", "NEBIUS", "NOUSRESEARCH",
+	"OCA", "OLLAMA", "OPENAI", "OPENAI_CODEX", "OPENAI_NATIVE", "OPENROUTER", "QWEN", "QWEN_CODE",
+	"REQUESTY", "SAMBANOVA", "SAPAICORE", "TOGETHER", "VERCEL_AI_GATEWAY", "VERTEX", "VSCODE_LM",
+	"WANDB", "XAI", "ZAI",
+] as const
 
-export type ApiFormat = any
-export const ApiFormat = createProtoStub("ApiFormat")
+export type ApiProvider = (typeof apiProviderNames)[number]
+export const ApiProvider = Object.fromEntries(apiProviderNames.map((name) => [name, name])) as Record<ApiProvider, ApiProvider>
 
-export type ClineRecommendedModel = any
-export const ClineRecommendedModel = createProtoStub("ClineRecommendedModel")
+export type ApiFormat = "OPENAI_RESPONSES" | "OPENAI_RESPONSES_WEBSOCKET_MODE"
+export const ApiFormat = {
+	OPENAI_RESPONSES: "OPENAI_RESPONSES",
+	OPENAI_RESPONSES_WEBSOCKET_MODE: "OPENAI_RESPONSES_WEBSOCKET_MODE",
+} as const satisfies Record<string, ApiFormat>
 
-export type ClineRecommendedModelsResponse = any
-export const ClineRecommendedModelsResponse = createProtoStub("ClineRecommendedModelsResponse")
+export type ClineRecommendedModel = { id: string; name: string; description: string; tags: string[] }
+export const ClineRecommendedModel = createProtoStub<ClineRecommendedModel>("ClineRecommendedModel")
 
-export type LanguageModelChatSelector = any
-export const LanguageModelChatSelector = createProtoStub("LanguageModelChatSelector")
+export type ClineRecommendedModelsResponse = { recommended: ClineRecommendedModel[]; free: ClineRecommendedModel[] }
+export const ClineRecommendedModelsResponse = createProtoStub<ClineRecommendedModelsResponse>("ClineRecommendedModelsResponse")
 
-export type LiteLLMModelInfo = any
-export const LiteLLMModelInfo = createProtoStub("LiteLLMModelInfo")
+export type LanguageModelChatSelector = { vendor: string; family: string; version: string; id: string }
+export const LanguageModelChatSelector = createProtoStub<LanguageModelChatSelector>("LanguageModelChatSelector")
 
+export type PriceTier = { tokenLimit: number; price: number }
+export type ModelTier = {
+	contextWindow: number
+	inputPrice?: number
+	outputPrice?: number
+	cacheWritesPrice?: number
+	cacheReadsPrice?: number
+}
+
+export type ThinkingConfig = { maxBudget?: number; outputPrice?: number; outputPriceTiers: PriceTier[] }
+export const ThinkingConfig = createProtoStub<ThinkingConfig>("ThinkingConfig")
+
+export type OpenRouterModelInfo = {
+	name?: string
+	maxTokens?: number
+	contextWindow?: number
+	supportsImages?: boolean
+	supportsPromptCache: boolean
+	supportsReasoning?: boolean
+	inputPrice?: number
+	outputPrice?: number
+	cacheWritesPrice?: number
+	cacheReadsPrice?: number
+	description?: string
+	thinkingConfig?: ThinkingConfig
+	supportsGlobalEndpoint?: boolean
+	tiers: ModelTier[]
+}
+export const OpenRouterModelInfo = createProtoStub<OpenRouterModelInfo>("OpenRouterModelInfo")
+
+export type OpenAiCompatibleModelInfo = OpenRouterModelInfo & { temperature?: number; isR1FormatRequired?: boolean }
+export const OpenAiCompatibleModelInfo = createProtoStub<OpenAiCompatibleModelInfo>("OpenAiCompatibleModelInfo")
+
+export type LiteLLMModelInfo = OpenRouterModelInfo & { temperature?: number }
+export const LiteLLMModelInfo = createProtoStub<LiteLLMModelInfo>("LiteLLMModelInfo")
+
+export type OcaModelInfo = Omit<OpenRouterModelInfo, "tiers"> & {
+	temperature?: number
+	modelName?: string
+	surveyId?: string
+	banner?: string
+	surveyContent?: string
+	apiFormat?: ApiFormat
+	reasoningEffortOptions?: string[]
+}
+export const OcaModelInfo = createProtoStub<OcaModelInfo>("OcaModelInfo")
+
+export type OpenRouterCompatibleModelInfo = { models: Record<string, OpenRouterModelInfo> }
+export const OpenRouterCompatibleModelInfo = createProtoStub<OpenRouterCompatibleModelInfo>("OpenRouterCompatibleModelInfo")
+
+export type OpenAiModelsRequest = { baseUrl: string; apiKey: string }
+export const OpenAiModelsRequest = createProtoStub<OpenAiModelsRequest>("OpenAiModelsRequest")
+
+// The full configuration transport is migrated separately because it spans every provider.
 export type ModelsApiConfiguration = any
 export const ModelsApiConfiguration = createProtoStub("ModelsApiConfiguration")
 
-export type OcaModelInfo = any
-export const OcaModelInfo = createProtoStub("OcaModelInfo")
-
-export type OpenAiCompatibleModelInfo = any
-export const OpenAiCompatibleModelInfo = createProtoStub("OpenAiCompatibleModelInfo")
-
-export type OpenAiModelsRequest = any
-export const OpenAiModelsRequest = createProtoStub("OpenAiModelsRequest")
-
-export type OpenRouterCompatibleModelInfo = any
-export const OpenRouterCompatibleModelInfo = createProtoStub("OpenRouterCompatibleModelInfo")
-
-export type OpenRouterModelInfo = any
-export const OpenRouterModelInfo = createProtoStub("OpenRouterModelInfo")
-
-export type ThinkingConfig = any
-export const ThinkingConfig = createProtoStub("ThinkingConfig")
-
-export type UpdateApiConfigurationRequest = any
-export const UpdateApiConfigurationRequest = createProtoStub("UpdateApiConfigurationRequest")
+export type UpdateApiConfigurationRequest = { apiConfiguration: ModelsApiConfiguration }
+export const UpdateApiConfigurationRequest = createProtoStub<UpdateApiConfigurationRequest>("UpdateApiConfigurationRequest")

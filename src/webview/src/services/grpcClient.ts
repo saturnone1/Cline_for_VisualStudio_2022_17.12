@@ -6,6 +6,7 @@ import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
 import type { SkillInfo } from "@shared/proto/cline/file"
 import type { McpServers } from "@shared/proto/cline/mcp"
+import type { ClineRecommendedModel, OpenRouterModelInfo } from "@shared/proto/cline/models"
 import type { TerminalProfile } from "@shared/proto/cline/state"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
@@ -234,21 +235,14 @@ interface FileServiceContract {
 	deleteSkillFile: UnaryOperation<RpcRequest>
 }
 
-interface RecommendedModel extends RpcRequest {
-	id: string
-	name?: string
-	description: string
-	tags: string[]
-}
-
-type ProviderModelsResponse = RpcRequest & { models: Record<string, ModelInfo>; error?: string }
+type ProviderModelsResponse = RpcRequest & { models: Record<string, OpenRouterModelInfo>; error?: string }
 type OcaModelsResponse = RpcRequest & { models: Record<string, OcaModelInfo>; error?: string }
 type StringModelsResponse = RpcRequest & { values: string[] }
 
 interface ModelsServiceContract {
 	refreshClineRecommendedModelsRpc: UnaryOperation<RpcRequest, RpcRequest & {
-		recommended: RecommendedModel[]
-		free: RecommendedModel[]
+		recommended: ClineRecommendedModel[]
+		free: ClineRecommendedModel[]
 	}>
 	getOllamaModels: UnaryOperation<RpcRequest, StringModelsResponse>
 	getLmStudioModels: UnaryOperation<RpcRequest, StringModelsResponse>

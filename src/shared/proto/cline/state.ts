@@ -1,5 +1,5 @@
 import { createProtoStub } from "../protoStub"
-import type { ModelInfo } from "../../api"
+import type { OpenRouterModelInfo } from "./models"
 
 export type McpDisplayMode = "RICH" | "PLAIN" | "MARKDOWN"
 export const McpDisplayMode = {
@@ -16,7 +16,7 @@ export type OnboardingModel = {
 	badge: string
 	score: number
 	latency: number
-	info?: ModelInfo
+	info?: OpenRouterModelInfo
 }
 export const OnboardingModel = createProtoStub<OnboardingModel>("OnboardingModel")
 

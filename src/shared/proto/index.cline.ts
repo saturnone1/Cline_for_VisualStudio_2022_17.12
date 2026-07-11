@@ -19,8 +19,7 @@ export const OcaUserInfo = createProtoStub("OcaUserInfo")
 
 export { OnboardingModel, OnboardingModelGroup } from "./cline/state"
 
-export type OpenRouterModelInfo = any
-export const OpenRouterModelInfo = createProtoStub("OpenRouterModelInfo")
+export { OpenRouterModelInfo } from "./cline/models"
 
 export type RuleFileRequest = any
 export const RuleFileRequest = createProtoStub("RuleFileRequest")
