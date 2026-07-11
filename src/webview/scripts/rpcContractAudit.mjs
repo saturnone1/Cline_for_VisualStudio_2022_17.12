@@ -9,8 +9,10 @@ const violations = []
 if (!source.includes("interface UiServiceContract")) {
 	violations.push("UiServiceClient must expose an operation-specific contract.")
 }
-if (/UiServiceClient\s*:\s*any\b/.test(source)) {
-	violations.push("UiServiceClient must not be exported as any.")
+for (const service of ["UiServiceClient", "CheckpointsServiceClient", "SlashServiceClient"]) {
+	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
+		violations.push(`${service} must not be exported as any.`)
+	}
 }
 
 for (const operation of [
@@ -23,6 +25,12 @@ for (const operation of [
 ]) {
 	if (!new RegExp(`\\b${operation}:`).test(source)) {
 		violations.push(`UiServiceContract is missing ${operation}.`)
+	}
+}
+
+for (const operation of ["checkpointRestore", "checkpointDiff", "condense", "reportBug"]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`Typed RPC contracts are missing ${operation}.`)
 	}
 }
 

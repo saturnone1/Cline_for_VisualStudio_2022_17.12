@@ -33,6 +33,16 @@ interface UiServiceContract {
 	subscribeToAddToInput: StreamingOperation<AddToInputEvent>
 }
 
+interface CheckpointsServiceContract {
+	checkpointRestore: UnaryOperation<RpcRequest>
+	checkpointDiff: UnaryOperation<RpcRequest>
+}
+
+interface SlashServiceContract {
+	condense: UnaryOperation<RpcRequest>
+	reportBug: UnaryOperation<RpcRequest>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -62,12 +72,12 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 
 export const AccountServiceClient: any = createServiceClient("AccountService")
 export const BrowserServiceClient: any = createServiceClient("BrowserService")
-export const CheckpointsServiceClient: any = createServiceClient("CheckpointsService")
+export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
 export const FileServiceClient: any = createServiceClient("FileService")
 export const McpServiceClient: any = createServiceClient("McpService")
 export const ModelsServiceClient: any = createServiceClient("ModelsService")
 export const OcaAccountServiceClient: any = createServiceClient("OcaAccountService")
-export const SlashServiceClient: any = createServiceClient("SlashService")
+export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")
 export const StateServiceClient: any = createServiceClient("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
 export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
