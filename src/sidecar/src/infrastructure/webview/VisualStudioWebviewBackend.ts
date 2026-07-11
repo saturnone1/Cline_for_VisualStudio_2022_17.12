@@ -27,6 +27,7 @@ import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMes
 import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCommand"
 import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
+import { CancelTaskFlow } from "../../features/chat/cancelTask/CancelTaskFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -229,6 +230,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private startTaskHandler: StartTaskHandler | null = null
 	private cancelTaskHandler: CancelTaskHandler | null = null
 	private readonly clearTaskHandler: ClearTaskHandler
+	private readonly cancelTaskFlow: CancelTaskFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -302,6 +304,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.state = loadInitialState(this.stateStore.load())
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.clearTaskHandler = new ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.transitionTask(status, source), advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, rememberSnapshot: (sessionId) => { if (this.state.currentTaskItem && this.state.clineMessages.length > 0) { const taskId = String(this.state.currentTaskItem.id || sessionId); if (taskId) this.rememberTaskSnapshot(taskId, this.state.currentTaskItem, this.state.clineMessages) } }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { const transition = this.taskLifecycle.reset(source); this.state.taskLifecycleStatus = transition.current }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.cancelTaskFlow = new CancelTaskFlow({ beginCancel: () => Boolean(this.transitionTask("cancelling", "cancel-request")), currentStatus: () => this.taskLifecycle.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", cancelRemote: async (sessionId) => { if (this.cancelTaskHandler) await this.cancelTaskHandler.execute({ sessionId }) }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText(); this.finalizeOpenPartialMessages(); this.removeTerminalAskMessages() }, addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, updateTask: () => this.updateCurrentTaskItem(), runHook: (sessionId) => this.runLifecycleHooks("TaskCancel", { sessionId }), completeCancel: () => { this.transitionTask("idle", "cancel-complete") }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -2140,38 +2143,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async cancelTask() {
-		if (!this.transitionTask("cancelling", "cancel-request")) {
-			this.logger.log("sidecar", "duplicateCancelIgnored", { status: this.taskLifecycle.status })
-			return
-		}
-		this.sdkRunGeneration++
-		const sessionIdForHook = this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
-		let cancelledSessionId = ""
-		if (this.clineSdk && this.cancelTaskHandler) {
-			const sessionId = this.clineSdk.status.activeSessionId
-			if (sessionId) {
-				cancelledSessionId = sessionId
-				await this.cancelTaskHandler.execute({ sessionId }).catch((error) => {
-					this.logger.log("sidecar", "cancelAbortFailed", {
-						sessionId,
-						error: error instanceof Error ? error.message : String(error),
-					})
-				})
-			}
-		}
-		this.clearTaskIdleWatchdog()
-		this.clearPartialIdleWatchdog()
-		this.clearPartialStateBroadcastTimer()
-		this.finalizeActivePartialText()
-		this.finishActiveToolActivity()
-		this.finishFoldedReasoningText()
-		this.finalizeOpenPartialMessages()
-		this.removeTerminalAskMessages()
-		this.addMessage({ type: "say", say: "info", text: "현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다." })
-		this.updateCurrentTaskItem()
-		await this.runLifecycleHooks("TaskCancel", { sessionId: sessionIdForHook })
-		this.transitionTask("idle", "cancel-complete")
-		await this.broadcastState()
+		await this.cancelTaskFlow.execute()
 	}
 
 	private async clearTask() {
