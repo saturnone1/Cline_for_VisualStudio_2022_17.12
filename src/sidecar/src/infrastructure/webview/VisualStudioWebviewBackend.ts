@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, HookRuntimeEvent, PendingPromptSubmittedRuntimeEvent, PendingPromptsRuntimeEvent, SessionSnapshotRuntimeEvent, TeamProgressRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, SessionSnapshotRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -72,6 +72,7 @@ import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHand
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
 import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
+import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEventProjector"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
@@ -251,6 +252,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentTextEvents: AgentTextEventProjector
 	private readonly agentToolEvents: AgentToolEventProjector
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
+	private readonly agentAuxiliaryEvents: AgentAuxiliaryEventProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
@@ -327,6 +329,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
+		this.agentAuxiliaryEvents = new AgentAuxiliaryEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), addMessage: (message) => { this.addMessage(message) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -593,7 +596,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handleTeamProgress(event)
+			this.agentAuxiliaryEvents.handle(event)
 			return
 		}
 
@@ -602,7 +605,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handleHookEvent(event)
+			this.agentAuxiliaryEvents.handle(event)
 			return
 		}
 
@@ -611,7 +614,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handlePendingPrompts(event)
+			this.agentAuxiliaryEvents.handle(event)
 			return
 		}
 
@@ -620,7 +623,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
-			this.handlePendingPromptSubmitted(event)
+			this.agentAuxiliaryEvents.handle(event)
 			return
 		}
 
@@ -2479,49 +2482,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
-	private handleTeamProgress(event: TeamProgressRuntimeEvent) {
-		const { message, agents, results } = event
-		this.noteTaskActivity("team_progress")
-		this.addMessage({
-			type: "say",
-			say: "use_subagents",
-			text: JSON.stringify({
-				message,
-				teamId: event.teamId || undefined,
-				teamName: event.teamName || undefined,
-				phase: event.phase || undefined,
-				status: event.status || undefined,
-				agents: agents.map((agent) => ({
-					...agent,
-				})),
-				results: results.map((result) => ({
-					...result,
-					summary: truncateText(result.summary, 500),
-				})),
-			}),
-			isCollapsed: true,
-			isExpanded: false,
-		})
-		this.logger.log("sidecar", "teamProgress", { message: truncateText(message, 500), agents: agents.length, results: results.length })
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
-	private handleHookEvent(event: HookRuntimeEvent) {
-		const { hookEventName, toolName } = event
-		const text = JSON.stringify({
-			hookEventName,
-			toolName,
-			agentId: event.agentId || undefined,
-			conversationId: event.conversationId || undefined,
-			iteration: event.iteration,
-		})
-		this.noteTaskActivity(`hook:${hookEventName || "unknown"}`)
-		this.addMessage({ type: "say", say: "hook_status", text })
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
 		return this.requireHookExecution().run(hookName, context, workspaceRoot, this.state.hooksEnabled !== false, this.createHookExecutionObserver())
@@ -2551,25 +2511,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				await this.broadcastState().catch((error) => console.error(error))
 			},
 		}
-	}
-
-	private handlePendingPrompts(event: PendingPromptsRuntimeEvent) {
-		this.noteTaskActivity("pending_prompts")
-		if (event.count > 0) {
-			this.logger.log("sidecar", "pendingPrompts", { count: event.count })
-		}
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
-	private handlePendingPromptSubmitted(event: PendingPromptSubmittedRuntimeEvent) {
-		const { prompt } = event
-		this.noteTaskActivity("pending_prompt_submitted")
-		if (prompt) {
-			this.logger.log("sidecar", "pendingPromptSubmitted", { prompt: truncateText(prompt, 160) })
-		}
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
 	}
 
 	private getBrowserSettings(): BrowserSettings {
