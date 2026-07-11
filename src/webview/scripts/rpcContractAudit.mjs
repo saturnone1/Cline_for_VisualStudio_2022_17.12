@@ -19,9 +19,47 @@ for (const service of [
 	"WorktreeServiceClient",
 	"McpServiceClient",
 	"AccountServiceClient",
+	"FileServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"openImage",
+	"openFile",
+	"openFileRelativePath",
+	"openVsClineDiff",
+	"revertVsClineChanges",
+	"copyToClipboard",
+	"openDiskConversationHistory",
+	"openFocusChainFile",
+	"openMention",
+	"ifFileExistsRelativePath",
+	"selectFiles",
+	"searchFiles",
+	"searchCommits",
+	"getRelativePaths",
+	"refreshRules",
+	"refreshHooks",
+	"refreshSkills",
+	"toggleClineRule",
+	"toggleCursorRule",
+	"toggleWindsurfRule",
+	"toggleAgentsRule",
+	"toggleHook",
+	"toggleWorkflow",
+	"toggleSkill",
+	"createHook",
+	"deleteHook",
+	"createRuleFile",
+	"deleteRuleFile",
+	"createSkillFile",
+	"deleteSkillFile",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`FileServiceContract is missing ${operation}.`)
 	}
 }
 

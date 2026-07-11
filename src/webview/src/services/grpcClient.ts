@@ -145,6 +145,97 @@ interface AccountServiceContract {
 	openAiCodexSignOut: UnaryOperation<RpcRequest, AccountAuthActionResponse>
 }
 
+interface FileSearchResult extends RpcRequest {
+	path: string
+	type: "file" | "folder"
+	value?: string
+	label?: string
+	description?: string
+	workspaceName?: string
+}
+
+interface FileCommit extends RpcRequest {
+	hash: string
+	shortHash: string
+	subject: string
+	author: string
+	date: string
+}
+
+interface FileRuleToggleGroup extends RpcRequest {
+	toggles?: Record<string, boolean>
+}
+
+interface FileRulesResponse extends RpcRequest {
+	globalClineRulesToggles?: FileRuleToggleGroup
+	localClineRulesToggles?: FileRuleToggleGroup
+	localCursorRulesToggles?: FileRuleToggleGroup
+	localWindsurfRulesToggles?: FileRuleToggleGroup
+	localAgentsRulesToggles?: FileRuleToggleGroup
+	localWorkflowToggles?: FileRuleToggleGroup
+	globalWorkflowToggles?: FileRuleToggleGroup
+}
+
+interface FileHookInfo extends RpcRequest {
+	name: string
+	enabled: boolean
+	absolutePath: string
+}
+
+interface WorkspaceHooks extends RpcRequest {
+	workspaceName: string
+	hooks: FileHookInfo[]
+}
+
+interface FileSkillInfo extends RpcRequest {
+	name?: string
+	path?: string
+	enabled?: boolean
+	description?: string
+}
+
+interface FileServiceContract {
+	openImage: UnaryOperation<RpcRequest>
+	openFile: UnaryOperation<RpcRequest>
+	openFileRelativePath: UnaryOperation<RpcRequest>
+	openVsClineDiff: UnaryOperation<RpcRequest>
+	revertVsClineChanges: UnaryOperation<RpcRequest>
+	copyToClipboard: UnaryOperation<RpcRequest>
+	openDiskConversationHistory: UnaryOperation<RpcRequest>
+	openFocusChainFile: UnaryOperation<RpcRequest>
+	openMention: UnaryOperation<RpcRequest>
+	ifFileExistsRelativePath: UnaryOperation<RpcRequest, RpcRequest & { value: boolean }>
+	selectFiles: UnaryOperation<RpcRequest, RpcRequest & { values1: string[]; values2: string[] }>
+	searchFiles: UnaryOperation<RpcRequest, RpcRequest & { results: FileSearchResult[] }>
+	searchCommits: UnaryOperation<RpcRequest, RpcRequest & { commits: FileCommit[] }>
+	getRelativePaths: UnaryOperation<RpcRequest, RpcRequest & { paths: string[] }>
+	refreshRules: UnaryOperation<RpcRequest, FileRulesResponse>
+	refreshHooks: UnaryOperation<RpcRequest, RpcRequest & { globalHooks: FileHookInfo[]; workspaceHooks: WorkspaceHooks[] }>
+	refreshSkills: UnaryOperation<RpcRequest, RpcRequest & { globalSkills: FileSkillInfo[]; localSkills: FileSkillInfo[] }>
+	toggleClineRule: UnaryOperation<RpcRequest, RpcRequest & {
+		globalClineRulesToggles?: FileRuleToggleGroup
+		localClineRulesToggles?: FileRuleToggleGroup
+		remoteRulesToggles?: FileRuleToggleGroup
+	}>
+	toggleCursorRule: UnaryOperation<RpcRequest, FileRuleToggleGroup>
+	toggleWindsurfRule: UnaryOperation<RpcRequest, FileRuleToggleGroup>
+	toggleAgentsRule: UnaryOperation<RpcRequest, FileRuleToggleGroup>
+	toggleHook: UnaryOperation<RpcRequest, RpcRequest & {
+		hooksToggles?: RpcRequest & { globalHooks?: FileHookInfo[]; workspaceHooks?: WorkspaceHooks[] }
+	}>
+	toggleWorkflow: UnaryOperation<RpcRequest, FileRuleToggleGroup>
+	toggleSkill: UnaryOperation<RpcRequest, RpcRequest & {
+		globalSkillsToggles?: Record<string, boolean>
+		localSkillsToggles?: Record<string, boolean>
+	}>
+	createHook: UnaryOperation<RpcRequest>
+	deleteHook: UnaryOperation<RpcRequest>
+	createRuleFile: UnaryOperation<RpcRequest>
+	deleteRuleFile: UnaryOperation<RpcRequest>
+	createSkillFile: UnaryOperation<RpcRequest>
+	deleteSkillFile: UnaryOperation<RpcRequest>
+}
+
 interface WorktreeInfo extends RpcRequest {
 	path: string
 	branch?: string
@@ -244,7 +335,7 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 export const AccountServiceClient = createServiceClient<AccountServiceContract>("AccountService")
 export const BrowserServiceClient = createServiceClient<BrowserServiceContract>("BrowserService")
 export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
-export const FileServiceClient: any = createServiceClient("FileService")
+export const FileServiceClient = createServiceClient<FileServiceContract>("FileService")
 export const McpServiceClient = createServiceClient<McpServiceContract>("McpService")
 export const ModelsServiceClient: any = createServiceClient("ModelsService")
 export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
