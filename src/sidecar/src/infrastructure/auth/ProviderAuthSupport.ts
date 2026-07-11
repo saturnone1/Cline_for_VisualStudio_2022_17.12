@@ -14,26 +14,8 @@ import {
 	oauthCredentialsField,
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
-
-export type OAuthCallbackSession = {
-	provider: string
-	state: string
-	callbackUrl: string
-	authorizationUrl?: string
-	createdAt: number
-	status: "pending" | "received" | "configured" | "error"
-	code?: string
-	token?: string
-	refreshToken?: string
-	tokenType?: string
-	expiresAt?: number
-	error?: string
-	message?: string
-	rawQuery?: Record<string, string>
-	tokenExchangeSupported?: boolean
-	tokenExchange?: OAuthTokenExchangeConfig
-	tokenResponse?: Record<string, unknown>
-}
+import type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
+export type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
 
 export function createUnauthenticatedAccountState() {
 	return {

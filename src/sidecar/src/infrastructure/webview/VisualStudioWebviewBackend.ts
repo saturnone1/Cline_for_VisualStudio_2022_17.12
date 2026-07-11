@@ -1,5 +1,4 @@
 import fs from "node:fs"
-import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
@@ -33,6 +32,8 @@ import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTas
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
 import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
+import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCallbackCoordinator"
+import type { OAuthCallbackListenerPort } from "../../application/ports/OAuthCallbackListenerPort"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -344,9 +345,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
 	private activeSessionRuntimeSettingsRevision = 0
-	private oauthCallbackServer: http.Server | null = null
 	private oauthCallbackPort = 0
-	private readonly oauthCallbackSessions = new Map<string, OAuthCallbackSession>()
+	private oauthCallbacks: OAuthCallbackCoordinator | null = null
+	private oauthCallbackListener: OAuthCallbackListenerPort | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -408,6 +409,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
 	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
 	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
+	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, listener: OAuthCallbackListenerPort) { this.oauthCallbacks = oauthCallbacks; this.oauthCallbackListener = listener }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -430,6 +432,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
 		this.flushPersistedStateSave()
+		this.oauthCallbackListener?.dispose()
 	}
 
 	isScheduledAgentsEnabled() {
@@ -1471,9 +1474,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async ensureOAuthCallbackBridge(provider: string, request: Record<string, unknown> = {}): Promise<OAuthCallbackSession> {
-		this.pruneOAuthCallbackSessions()
-		if (!this.oauthCallbackServer) {
-			await this.startOAuthCallbackServer()
+		this.requireOAuthCallbacks().prune()
+		if (!this.oauthCallbackPort) {
+			this.oauthCallbackPort = await this.requireOAuthCallbackListener().start((url) => this.handleOAuthCallbackUrl(url))
+			this.logger.log("sidecar", "oauthCallbackServerListening", { port: this.oauthCallbackPort })
 		}
 
 		const normalizedProvider = normalizeProviderValue(provider) || "account"
@@ -1491,7 +1495,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			tokenExchange: authorization.tokenExchange || undefined,
 			message: authorization.url ? "Waiting for OAuth provider authorization and redirect." : "Waiting for OAuth provider redirect.",
 		}
-		this.oauthCallbackSessions.set(state, session)
+		this.requireOAuthCallbacks().register(session)
 		this.logger.log("sidecar", "oauthCallbackBridgeReady", {
 			provider: normalizedProvider,
 			state,
@@ -1502,109 +1506,18 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return session
 	}
 
-	private async startOAuthCallbackServer() {
-		const preferredPort = readOptionalPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT") || 0
-		const server = http.createServer((request, response) => {
-			this.handleOAuthCallbackHttpRequest(request, response)
-		})
-
-		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				server.off("listening", onListening)
-				reject(error)
-			}
-			const onListening = () => {
-				server.off("error", onError)
-				resolve()
-			}
-			server.once("error", onError)
-			server.once("listening", onListening)
-			server.listen(preferredPort, "127.0.0.1")
-		})
-
-		const address = server.address()
-		this.oauthCallbackServer = server
-		this.oauthCallbackPort = typeof address === "object" && address ? address.port : preferredPort
-		this.logger.log("sidecar", "oauthCallbackServerListening", { port: this.oauthCallbackPort })
-	}
-
-	private handleOAuthCallbackHttpRequest(request: http.IncomingMessage, response: http.ServerResponse) {
-		const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`)
-		if (!["/oauth/callback", "/auth/callback", "/callback"].includes(requestUrl.pathname)) {
-			response.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
-			response.end("Not found")
-			return
+	private async handleOAuthCallbackUrl(url: string) {
+		const result = this.requireOAuthCallbacks().record(url)
+		if (result.success && result.session) {
+			await this.completeOAuthCallbackSession(result.session).catch((error) => {
+				result.session.status = "error"
+				result.session.error = stringify(error)
+				result.session.message = `OAuth token exchange failed: ${result.session.error}`
+				this.logger.log("sidecar", "oauthTokenExchangeFailed", { provider: result.session.provider, state: result.session.state, error: result.session.error })
+			})
 		}
-
-		const result = this.recordOAuthCallbackFromUrl(requestUrl)
-		response.writeHead(result.success ? 200 : 400, { "content-type": "text/html; charset=utf-8" })
-		response.end(
-			`<!doctype html><html><body><h3>LIG VS OAuth callback</h3><p>${escapeHtml(result.message)}</p><p>You can close this browser tab.</p></body></html>`,
-		)
-		if (result.success) {
-			const state = requestUrl.searchParams.get("state") || parseUrlFragmentParams(requestUrl).get("state") || ""
-			const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(result.provider || "")
-			if (session) {
-				this.completeOAuthCallbackSession(session)
-					.catch((error) => {
-						session.status = "error"
-						session.error = stringify(error)
-						session.message = `OAuth token exchange failed: ${session.error}`
-						this.logger.log("sidecar", "oauthTokenExchangeFailed", { provider: session.provider, state: session.state, error: session.error })
-					})
-					.finally(() => this.broadcastState().catch((error) => console.error(error)))
-				return
-			}
-		}
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
-	private recordOAuthCallbackFromUrl(url: URL) {
-		const hashParams = parseUrlFragmentParams(url)
-		const query = {
-			...Object.fromEntries(Array.from(url.searchParams.entries()).map(([key, value]) => [key, value])),
-			...Object.fromEntries(Array.from(hashParams.entries()).map(([key, value]) => [key, value])),
-		}
-		const state = url.searchParams.get("state") || hashParams.get("state") || ""
-		const provider = normalizeProviderValue(url.searchParams.get("provider") || hashParams.get("provider") || "") || "account"
-		const code = url.searchParams.get("code") || hashParams.get("code") || ""
-		const token =
-			url.searchParams.get("access_token") ||
-			hashParams.get("access_token") ||
-			url.searchParams.get("token") ||
-			hashParams.get("token") ||
-			url.searchParams.get("api_key") ||
-			hashParams.get("api_key") ||
-			url.searchParams.get("key") ||
-			hashParams.get("key") ||
-			""
-		const error = url.searchParams.get("error") || hashParams.get("error") || ""
-		const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(provider)
-		if (!session) {
-			return { success: false, message: "No matching LIG VS OAuth callback request is pending." }
-		}
-
-		session.status = error ? "error" : "received"
-		session.code = code || undefined
-		session.token = token || undefined
-		session.error = error || undefined
-		session.rawQuery = query
-		session.message = error
-			? `OAuth callback failed: ${error}`
-			: token
-				? "OAuth callback received a token. Credential storage will use the provider API-key field when available."
-				: code
-					? "OAuth callback received an authorization code. Provider-specific token exchange is still required."
-					: "OAuth callback was received, but it did not include a code or token."
-		this.logger.log("sidecar", "oauthCallbackReceived", {
-			provider: session.provider,
-			state: session.state,
-			status: session.status,
-			hasCode: Boolean(code),
-			hasToken: Boolean(token),
-			error: error || undefined,
-		})
-		return { success: true, provider: session.provider, state: session.state, message: session.message }
+		await this.broadcastState().catch((error) => console.error(error))
+		return { success: result.success, message: result.message }
 	}
 
 	private async completeOAuthCallbackSession(session: OAuthCallbackSession) {
@@ -1761,31 +1674,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private getOAuthCallbackStatus(message: unknown) {
 		const request = asRecord(message)
 		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || "account")
-		const state = getString(request, "state")
-		const session = (state && this.oauthCallbackSessions.get(state)) || this.latestOAuthCallbackSession(provider)
-		if (!session) {
-			return {
-				success: false,
-				provider,
-				authStatus: "unauthenticated",
-				message: "No OAuth callback request is pending for this provider.",
-			}
-		}
-
-		return {
-			success: true,
-			provider: session.provider,
-			state: session.state,
-			callbackUrl: session.callbackUrl,
-			authorizationUrl: session.authorizationUrl || undefined,
-			redirectUrl: session.callbackUrl,
-			authStatus: session.status,
-			hasCode: Boolean(session.code),
-			hasToken: Boolean(session.token),
-			error: session.error || undefined,
-			message: session.message || "",
-			tokenExchangeSupported: session.tokenExchangeSupported === true,
-		}
+		return this.requireOAuthCallbacks().status(provider, getString(request, "state"))
 	}
 
 	private async submitOAuthCallback(message: unknown) {
@@ -1796,15 +1685,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		let parsedUrl: URL
-		try {
-			parsedUrl = new URL(callbackUrl)
-		} catch {
-			return { success: false, message: "OAuth callback URL is invalid.", authStatus: "unknown" }
-		}
-		const result = this.recordOAuthCallbackFromUrl(parsedUrl)
+		try { parsedUrl = new URL(callbackUrl) } catch { return { success: false, message: "OAuth callback URL is invalid.", authStatus: "unknown" } }
+		const result = this.requireOAuthCallbacks().record(parsedUrl.toString())
 		const hashParams = parseUrlFragmentParams(parsedUrl)
 		const provider = normalizeProviderValue(parsedUrl.searchParams.get("provider") || hashParams.get("provider") || getString(request, "provider") || "account")
-		const session = this.latestOAuthCallbackSession(provider)
+		const session = this.requireOAuthCallbacks().latest(provider)
 		if (result.success && session) {
 			const completion = await this.completeOAuthCallbackSession(session)
 			return {
@@ -1819,22 +1704,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			...this.getOAuthCallbackStatus({ provider, state: session?.state }),
 			success: result.success,
 			message: result.message,
-		}
-	}
-
-	private latestOAuthCallbackSession(provider: string) {
-		const normalizedProvider = normalizeProviderValue(provider) || "account"
-		return Array.from(this.oauthCallbackSessions.values())
-			.filter((session) => session.provider === normalizedProvider)
-			.sort((left, right) => right.createdAt - left.createdAt)[0]
-	}
-
-	private pruneOAuthCallbackSessions() {
-		const cutoff = Date.now() - readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000)
-		for (const [state, session] of this.oauthCallbackSessions) {
-			if (session.createdAt < cutoff) {
-				this.oauthCallbackSessions.delete(state)
-			}
 		}
 	}
 
@@ -3844,6 +3713,16 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireWorktreeMutations() {
 		if (!this.worktreeMutations) throw new Error("Worktree mutation handler is not attached.")
 		return this.worktreeMutations
+	}
+
+	private requireOAuthCallbacks() {
+		if (!this.oauthCallbacks) throw new Error("OAuth callback coordinator is not attached.")
+		return this.oauthCallbacks
+	}
+
+	private requireOAuthCallbackListener() {
+		if (!this.oauthCallbackListener) throw new Error("OAuth callback listener is not attached.")
+		return this.oauthCallbackListener
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

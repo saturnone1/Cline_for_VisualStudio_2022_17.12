@@ -2,7 +2,8 @@ import { mapToolName, normalizeMcpDisplayMode } from "../conversation/Conversati
 import { inferModelInfo } from "../models/ModelCatalog"
 import { normalizeProviderId, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField, providerAuthLabel } from "../../application/services/ProviderIdentity"
 
-export type OAuthTokenExchangeConfig = { tokenUrl: string; clientId: string; clientSecret?: string; scope?: string; codeVerifier?: string; authMethod?: string }
+import type { OAuthTokenExchangeConfig } from "../../application/dto/OAuthContracts"
+export type { OAuthTokenExchangeConfig } from "../../application/dto/OAuthContracts"
 
 export function compactApiConfiguration(apiConfig: Record<string, unknown>) {
 	const compact: Record<string, unknown> = {}

@@ -60,6 +60,9 @@ if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSe
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
+if (router.includes("http.createServer") || router.includes("oauthCallbackSessions")) {
+	violations.push("VisualStudioWebviewBackend must delegate OAuth HTTP listening and callback session ownership.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -138,6 +141,8 @@ for (const requiredFile of [
 	"application/ports/AgentEnginePort.ts",
 	"application/ports/BrowserAutomationPort.ts",
 	"application/ports/WorktreeOperationsPort.ts",
+	"application/ports/OAuthCallbackListenerPort.ts",
+	"application/dto/OAuthContracts.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
@@ -147,6 +152,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/ConversationSupport.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
+	"infrastructure/auth/NodeOAuthCallbackListener.ts",
 	"infrastructure/hooks/HookRuntime.ts",
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
@@ -163,6 +169,7 @@ for (const requiredFile of [
 	"features/approvals/ApprovalCoordinator.ts",
 	"features/taskHistory/TaskHistoryCollection.ts",
 	"features/providers/ProviderSelection.ts",
+	"features/providers/OAuthCallbackCoordinator.ts",
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/worktrees/WorktreeQueryHandler.ts",
