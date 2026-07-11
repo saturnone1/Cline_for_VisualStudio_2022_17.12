@@ -48,7 +48,8 @@ namespace VsClineAgent.Host
                 new EditorHostRpcAdapter(editorService),
                 new FileSystemHostRpcAdapter(),
                 new TerminalHostRpcAdapter(assemblyDirectory, editorService, commandExecutionService),
-                new DiffHostRpcAdapter(editorService)
+                new DiffHostRpcAdapter(editorService),
+                new WorkspaceHostRpcAdapter(editorService)
             };
         }
 
@@ -243,13 +244,6 @@ namespace VsClineAgent.Host
                         ["host"] = "visualstudio-vsix",
                         ["received"] = parameters == null ? null : parameters.DeepClone()
                     };
-                case "host.workspace.getRoots":
-                case "workspace.getRoots":
-                    return await GetWorkspaceRootsAsync().ConfigureAwait(false);
-                case "workspace.getWorkspacePaths":
-                    return await GetWorkspacePathsAsync().ConfigureAwait(false);
-                case "workspace.getDiagnostics":
-                    return await GetDiagnosticsAsync().ConfigureAwait(false);
                 case "workspace.listFiles":
                     return ListFiles(parameters);
                 case "workspace.searchFiles":
@@ -267,169 +261,8 @@ namespace VsClineAgent.Host
                         }
                     }
                     return new JObject { ["posted"] = true };
-                case "workspace.openSolution":
-                    return await OpenSolutionAsync(parameters).ConfigureAwait(false);
-                case "workspace.openFolder":
-                    return await OpenFolderAsync(parameters).ConfigureAwait(false);
                 default:
                     throw new InvalidOperationException("Unsupported host method: " + method);
-            }
-        }
-
-        private async Task<JArray> GetWorkspaceRootsAsync()
-        {
-            var root = await _editorService.GetSolutionRootAsync().ConfigureAwait(false);
-            var roots = new JArray();
-
-            if (!string.IsNullOrWhiteSpace(root))
-            {
-                roots.Add(new JObject
-                {
-                    ["path"] = root,
-                    ["name"] = Path.GetFileName(root)
-                });
-            }
-
-            return roots;
-        }
-
-        private async Task<JArray> GetWorkspacePathsAsync()
-        {
-            var root = await _editorService.GetSolutionRootAsync().ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(root)
-                ? new JArray()
-                : new JArray(root!);
-        }
-
-        private async Task<JObject> GetDiagnosticsAsync()
-        {
-            var diagnostics = await _editorService.GetDiagnosticsAsync().ConfigureAwait(false);
-            var fileDiagnostics = new JArray();
-
-            foreach (var group in diagnostics.GroupBy(item => item.File ?? ""))
-            {
-                var entries = new JArray();
-                foreach (var diagnostic in group)
-                {
-                    entries.Add(new JObject
-                    {
-                        ["message"] = diagnostic.Message,
-                        ["line"] = diagnostic.Line,
-                        ["severity"] = diagnostic.Severity
-                    });
-                }
-
-                fileDiagnostics.Add(new JObject
-                {
-                    ["filePath"] = group.Key,
-                    ["diagnostics"] = entries
-                });
-            }
-
-            return new JObject { ["fileDiagnostics"] = fileDiagnostics };
-        }
-
-        private async Task<JObject> OpenSolutionAsync(JToken? parameters)
-        {
-            var solutionPath = GetStringParameter(parameters, "solutionPath");
-            var newWindow = GetBoolParameter(parameters, "newWindow");
-            if (string.IsNullOrWhiteSpace(solutionPath) || !File.Exists(solutionPath))
-            {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = "Solution file was not found.",
-                    ["solutionPath"] = solutionPath ?? ""
-                };
-            }
-
-            try
-            {
-                if (newWindow)
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "devenv.exe",
-                        Arguments = QuoteArgument(solutionPath),
-                        UseShellExecute = true,
-                        WindowStyle = ProcessWindowStyle.Normal
-                    });
-                }
-                else
-                {
-                    await _editorService.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
-                }
-
-                return new JObject
-                {
-                    ["success"] = true,
-                    ["solutionPath"] = solutionPath,
-                    ["newWindow"] = newWindow
-                };
-            }
-            catch (Exception ex)
-            {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = ex.Message,
-                    ["solutionPath"] = solutionPath,
-                    ["newWindow"] = newWindow
-                };
-            }
-        }
-
-        private async Task<JObject> OpenFolderAsync(JToken? parameters)
-        {
-            var folderPath = GetStringParameter(parameters, "folderPath");
-            if (string.IsNullOrWhiteSpace(folderPath))
-                folderPath = GetStringParameter(parameters, "path");
-            var newWindow = GetBoolParameter(parameters, "newWindow");
-            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
-            {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = "Folder was not found.",
-                    ["folderPath"] = folderPath ?? ""
-                };
-            }
-
-            try
-            {
-                if (newWindow)
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "devenv.exe",
-                        Arguments = QuoteArgument(folderPath),
-                        UseShellExecute = true,
-                        WindowStyle = ProcessWindowStyle.Normal
-                    });
-                }
-                else
-                {
-                    await _editorService.ExecuteCommandAsync("File.OpenFolder", QuoteArgument(folderPath)).ConfigureAwait(false);
-                }
-
-                return new JObject
-                {
-                    ["success"] = true,
-                    ["folderPath"] = folderPath,
-                    ["newWindow"] = newWindow,
-                    ["folderOnly"] = true
-                };
-            }
-            catch (Exception ex)
-            {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = ex.Message,
-                    ["folderPath"] = folderPath,
-                    ["newWindow"] = newWindow,
-                    ["folderOnly"] = true
-                };
             }
         }
 
@@ -598,11 +431,6 @@ namespace VsClineAgent.Host
         private static bool GetBoolParameter(JToken? parameters, string name)
         {
             return parameters is JObject obj && obj.Value<bool?>(name) == true;
-        }
-
-        private static string QuoteArgument(string value)
-        {
-            return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
         }
 
         private static bool FileContains(string filePath, string query)
