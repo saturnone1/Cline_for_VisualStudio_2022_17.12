@@ -87,6 +87,7 @@ import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEven
 import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
 import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
 import { TaskCompletionProjector } from "../conversation/TaskCompletionProjector"
+import { ConversationMessageStore } from "../conversation/ConversationMessageStore"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
@@ -128,10 +129,6 @@ import {
 	getAskResponseText,
 	firstString,
 	shouldAutoApproveTool,
-	normalizeClineMessagePayload,
-	isMeaninglessToolMessage,
-	isMeaninglessPlaceholderMessage,
-	isMeaninglessTextMessage,
 	isJsonObjectString,
 	isEmptyJsonObjectString,
 	isEmptyTranscriptPlaceholder,
@@ -255,8 +252,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				resolve: (value: AskQuestionResult) => void
 		  }
 		| null = null
-	private messageSequence = 0
 	private readonly conversationProjection = new ConversationProjectionState()
+	private readonly conversationMessages: ConversationMessageStore
 	private readonly partialTextProjector: PartialTextProjector
 	private readonly foldedProgressProjector: FoldedProgressProjector
 	private readonly taskSnapshots: TaskSnapshotStore
@@ -318,6 +315,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		private readonly taskLifecycle: TaskLifecycleUseCase,
 	) {
 		this.state = loadInitialState(this.stateStore.load())
+		this.conversationMessages = new ConversationMessageStore({ read: () => this.state.clineMessages, write: (messages) => { this.state.clineMessages = messages }, persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.clearTaskHandler = new ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.transitionTask(status, source), advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, rememberSnapshot: (sessionId) => { if (this.state.currentTaskItem && this.state.clineMessages.length > 0) { const taskId = String(this.state.currentTaskItem.id || sessionId); if (taskId) this.rememberTaskSnapshot(taskId, this.state.currentTaskItem, this.state.clineMessages) } }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { const transition = this.taskLifecycle.reset(source); this.state.taskLifecycleStatus = transition.current }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.cancelTaskFlow = new CancelTaskFlow({ beginCancel: () => Boolean(this.transitionTask("cancelling", "cancel-request")), currentStatus: () => this.taskLifecycle.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", cancelRemote: async (sessionId) => { if (this.cancelTaskHandler) await this.cancelTaskHandler.execute({ sessionId }) }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText(); this.finalizeOpenPartialMessages(); this.removeTerminalAskMessages() }, addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, updateTask: () => this.updateCurrentTaskItem(), runHook: (sessionId) => this.runLifecycleHooks("TaskCancel", { sessionId }), completeCancel: () => { this.transitionTask("idle", "cancel-complete") }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -357,8 +355,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			broadcast: () => this.broadcastState(),
 			isSessionNotFound: (error) => isSessionNotFoundError(error),
 		})
-		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
-		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
+		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
+		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.taskCompletion = new TaskCompletionProjector({ messages: () => this.state.clineMessages, transition: (status, source) => { this.transitionTask(status, source) }, clearFinishStatus: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus() }, finishProgress: () => { this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, prepareAssistant: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, activeText: () => this.getActivePartialText(), addMessage: (message) => { this.addMessage(message) }, markAssistantLatency: (length) => this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), length), finalizeOpenPartial: () => this.finalizeOpenPartialMessages(), lastActivityReason: () => this.taskActivity?.reason || "", runCompleteHook: (context) => { void this.runLifecycleHooks("TaskComplete", context) }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), language: () => this.getUiLanguage(), recentToolSummaries: () => this.conversationProjection.recentToolSummaries(5), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
@@ -1865,14 +1863,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const messageIds = new Map<string, number>()
 		return {
 			started: async (hook, context) => {
-				const ts = Date.now() + this.messageSequence++
+				const message = this.conversationMessages.add({ type: "say", say: "hook_status", text: JSON.stringify(createHookMetadata(hook, "running", context)) })
+				const ts = Number(message?.ts)
+				if (!Number.isFinite(ts)) return
 				messageIds.set(`${hook.source}:${hook.name}:${hook.path}`, ts)
-				this.state.clineMessages.push({ ts, type: "say", say: "hook_status", text: JSON.stringify(createHookMetadata(hook, "running", context)) })
 				this.updateCurrentTaskItem()
 				await this.broadcastState().catch((error) => console.error(error))
 			},
 			completed: async (result, context) => {
-				const ts = messageIds.get(`${result.hook.source}:${result.hook.name}:${result.hook.path}`) || Date.now() + this.messageSequence++
+				const ts = messageIds.get(`${result.hook.source}:${result.hook.name}:${result.hook.path}`) || this.conversationMessages.nextTimestamp()
 				const metadata = createHookMetadata(result.hook, result.exitCode === 0 ? "completed" : "failed", context, result, result.jsonResponse)
 				const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n")
 				this.upsertMessage(ts, { type: "say", say: "hook_status", text: output ? `${JSON.stringify(metadata)}\n__HOOK_OUTPUT__\n${output}` : JSON.stringify(metadata) })
@@ -2198,38 +2197,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private addMessage(message: Record<string, unknown>) {
-		if (isMeaninglessPlaceholderMessage(message)) {
-			this.logger.log("sidecar", "skipMeaninglessPlaceholderMessage", message)
-			return undefined
-		}
-		if (isMeaninglessTextMessage(message)) {
-			this.logger.log("sidecar", "skipMeaninglessTextMessage", message)
-			return undefined
-		}
-		if (isMeaninglessToolMessage(message)) {
-			this.logger.log("sidecar", "skipMeaninglessToolMessage", message)
-			return undefined
-		}
-		const normalizedMessage = {
-			ts: Date.now() + this.messageSequence++,
-			...normalizeClineMessagePayload(message),
-		}
-		this.state.clineMessages.push(normalizedMessage)
-		this.schedulePersistedStateSave()
-		return normalizedMessage
+		return this.conversationMessages.add(message)
 	}
 
 	private removeTerminalAskMessages() {
-		this.state.clineMessages = this.state.clineMessages.filter((message) => {
-			const ask = getString(message, "ask")
-			return ask !== "completion_result" && ask !== "resume_task" && ask !== "resume_completed_task"
-		})
-		this.schedulePersistedStateSave()
+		this.conversationMessages.removeTerminalAsks()
 	}
 
 	private removeAskMessages(askKind: string) {
-		this.state.clineMessages = this.state.clineMessages.filter((message) => getString(message, "ask") !== askKind)
-		this.schedulePersistedStateSave()
+		this.conversationMessages.removeAsks(askKind)
 	}
 
 	private addToolActivityMessage(tool: string, input: Record<string, unknown>, fallback: unknown) {
@@ -2359,29 +2335,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearPartialIdleWatchdog()
 		this.clearPartialStateBroadcastTimer()
 		this.stopTerminalStatePolling()
-		let changed = false
-		this.state.clineMessages = this.state.clineMessages.filter((message) => {
-			if (message.partial !== true) {
-				return true
-			}
-
-			if (message.say === "api_req_started" && isPlaceholderApiRequest(getString(message, "text"))) {
-				changed = true
-				return false
-			}
-
-			message.partial = false
-			if (message.say === "api_req_started" || message.say === "reasoning") {
-				message.isCollapsed = true
-				message.isExpanded = false
-			}
-			this.sendPartialMessage(message)
-			changed = true
-			return true
-		})
-		if (changed) {
-			this.logger.log("sidecar", "finalizedOpenPartials", {})
-		}
+		this.conversationMessages.finalizeOpenPartials()
 		this.conversationProjection.activePartialTextTs = null
 		this.conversationProjection.finishProgressMessage()
 	}
@@ -2476,16 +2430,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private upsertMessage(ts: number, updates: Record<string, unknown>) {
-		const index = this.state.clineMessages.findIndex((message) => message.ts === ts)
-		if (index >= 0) {
-			const normalized = normalizeClineMessagePayload({ ...this.state.clineMessages[index], ...updates, ts })
-			if (isMeaninglessPlaceholderMessage(normalized) || isMeaninglessToolMessage(normalized) || isMeaninglessTextMessage(normalized)) {
-				this.state.clineMessages.splice(index, 1)
-			} else {
-				this.state.clineMessages[index] = normalized
-			}
-			this.schedulePersistedStateSave()
-		}
+		this.conversationMessages.upsert(ts, updates)
 	}
 
 	private updateCurrentTaskItem(updates?: Record<string, unknown>) {
@@ -2788,18 +2733,6 @@ function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko")
 			: `Model provider response: rate limit exceeded.\n\n${text}`
 	}
 	return text
-}
-
-function isPlaceholderApiRequest(text: string) {
-	const parsed = asRecord(tryParseJson(text) ?? {})
-	const request = getString(parsed, "request") || text
-	const normalized = request.replace(/\s+/g, " ").trim().toLowerCase()
-	return (
-		normalized === "cline sdk is thinking..." ||
-		normalized === "thinking" ||
-		normalized === "모델 진행 중" ||
-		normalized === "모델 진행 기록"
-	)
 }
 
 function truncateText(value: string, maxChars: number) {
