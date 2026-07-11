@@ -4098,16 +4098,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		for (const entry of entries) {
-			const key = toolActivityEntryKey(entry)
-			if (!this.conversationProjection.activeToolActivityEntries.some((existing) => toolActivityEntryKey(existing) === key)) {
-				this.conversationProjection.activeToolActivityEntries.push(entry)
-			}
-		}
-
-		const groupedText = buildGroupedToolActivityText(this.conversationProjection.activeToolActivityEntries, true, this.getUiLanguage())
+		const activeEntries = this.conversationProjection.mergeToolActivities(entries, toolActivityEntryKey)
+		const groupedText = buildGroupedToolActivityText(activeEntries, true, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
-		this.conversationProjection.activeToolActivityTs = this.conversationProjection.activeReasoningTextTs
 	}
 
 	private startTerminalStatePolling() {
@@ -4123,14 +4116,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private finishActiveToolActivity() {
-		if (!this.conversationProjection.activeToolActivityTs && this.conversationProjection.activeToolActivityEntries.length === 0) {
-			return
-		}
-
-		const groupedText = buildGroupedToolActivityText(this.conversationProjection.activeToolActivityEntries, false, this.getUiLanguage())
+		const entries = this.conversationProjection.finishToolActivities()
+		if (entries.length === 0) return
+		const groupedText = buildGroupedToolActivityText(entries, false, this.getUiLanguage())
 		this.upsertFoldedActivityText(groupedText)
-		this.conversationProjection.activeToolActivityTs = null
-		this.conversationProjection.activeToolActivityEntries = []
 	}
 
 	private moveActiveReasoningToEnd() {
@@ -4289,32 +4278,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private beginProgressPhase(phase: ProgressPhase) {
-		if (!this.conversationProjection.activeProgressPhase) {
-			this.conversationProjection.activeProgressPhase = phase
-			return
-		}
-		if (this.conversationProjection.activeProgressPhase === phase) {
-			return
-		}
-
-		this.finishFoldedReasoningText(false)
-		this.conversationProjection.activeFoldedReasoningText = ""
-		this.conversationProjection.activeFoldedActivityText = ""
-		this.conversationProjection.activeTerminalActivityText = ""
-		this.conversationProjection.activeProgressPhase = null
-		this.conversationProjection.activeToolActivityTs = null
-		this.conversationProjection.activeToolActivityEntries = []
-		this.conversationProjection.activeProgressPhase = phase
+		const previous = this.conversationProjection.activeProgressPhase
+		if (previous && previous !== phase) this.finishFoldedReasoningText(false)
+		this.conversationProjection.beginProgressPhase(phase)
 	}
 
 	private upsertFoldedProgressMessage() {
-		const foldedText = [
-			this.conversationProjection.activeFoldedActivityText,
-			this.conversationProjection.activeTerminalActivityText,
-			this.conversationProjection.activeFoldedReasoningText,
-		]
-			.filter(Boolean)
-			.join("\n\n")
+		const foldedText = this.conversationProjection.foldedProgressText
 		if (!foldedText.trim() || isEmptyTranscriptPlaceholder(foldedText)) {
 			return
 		}
@@ -4373,11 +4343,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				isExpanded: false,
 			})
 			this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
-			this.conversationProjection.activeReasoningTextTs = null
-			this.conversationProjection.activeFoldedReasoningText = ""
-			this.conversationProjection.activeFoldedActivityText = ""
-			this.conversationProjection.activeTerminalActivityText = ""
-			this.conversationProjection.activeProgressPhase = null
+			this.conversationProjection.finishProgressMessage()
 			return
 		}
 
@@ -4389,11 +4355,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			isExpanded: false,
 		})
 		this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs))
-		this.conversationProjection.activeReasoningTextTs = null
-		this.conversationProjection.activeFoldedReasoningText = ""
-		this.conversationProjection.activeFoldedActivityText = ""
-		this.conversationProjection.activeTerminalActivityText = ""
-		this.conversationProjection.activeProgressPhase = null
+		this.conversationProjection.finishProgressMessage()
 	}
 
 	private getProgressPhaseTitle(completed = false) {
@@ -4534,12 +4496,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.logger.log("sidecar", "finalizedOpenPartials", {})
 		}
 		this.conversationProjection.activePartialTextTs = null
-		this.conversationProjection.activeReasoningTextTs = null
-		this.conversationProjection.activeFoldedReasoningText = ""
-		this.conversationProjection.activeFoldedActivityText = ""
-		this.conversationProjection.activeTerminalActivityText = ""
-		this.conversationProjection.activeToolActivityTs = null
-		this.conversationProjection.activeToolActivityEntries = []
+		this.conversationProjection.finishProgressMessage()
 	}
 
 	private schedulePartialIdleWatchdog() {
