@@ -98,6 +98,7 @@
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="Host\InteractionLog.cs" />
     <Compile Include="Host\HostRpcRouter.cs" />
+    <Compile Include="Host\HostDiagnosticReport.cs" />
     <Compile Include="Host\WebviewGrpcFallback.cs" />
     <Compile Include="Host\WebviewBootstrapScript.cs" />
     <Compile Include="Host\WebviewMessageQueue.cs" />
