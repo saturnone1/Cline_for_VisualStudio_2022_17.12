@@ -72,7 +72,7 @@ const requiredMarkers = [
 	["API profile snapshot replacement", "applyApiConfigurationProfileSnapshot"],
 ]
 
-const missing = requiredMarkers.filter(([, marker]) => !paritySource.includes(marker))
+const missing = requiredMarkers.filter(([, marker]) => !`${paritySource}\n${main}`.includes(marker))
 
 if (missing.length > 0) {
 	console.error("VS2022 SDK parity smoke failed. Missing markers:")

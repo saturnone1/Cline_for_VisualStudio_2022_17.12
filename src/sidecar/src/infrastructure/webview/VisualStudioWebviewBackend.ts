@@ -59,6 +59,7 @@ import type { ScheduledAgentHandler } from "../../features/scheduledAgents/Sched
 import type { CheckpointHandler } from "../../features/checkpoints/CheckpointHandler"
 import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMonitor"
 import { ConversationProjectionState, type ProgressPhase, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
+import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
 import {
 	type HookLifecycleName,
 	createHookMetadata,
@@ -280,10 +281,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly lastPartialMessageKeys = new Map<string, string>()
 	private lastPartialStateBroadcastAt = 0
 	private stateHydrationRefreshInFlight = false
-	private taskIdleNoticeTimer: NodeJS.Timeout | null = null
-	private taskIdleTimer: NodeJS.Timeout | null = null
-	private lastTaskActivityAt = 0
-	private lastTaskActivityReason = ""
 	private readonly recentlyTrackedChangePaths = new Map<string, number>()
 	private readonly pendingChangeSummaries = new Map<string, TrackedChangeSummary>()
 	private changeSummaryTimer: NodeJS.Timeout | null = null
@@ -302,6 +299,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private hookExecution: HookExecutionHandler | null = null
 	private checkpoints: CheckpointHandler | null = null
 	private terminalActivity: TerminalActivityMonitor | null = null
+	private taskActivity: TaskActivityMonitor | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -371,7 +369,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setHookExecutionHandler(hookExecution: HookExecutionHandler) { this.hookExecution = hookExecution }
 	setCheckpointHandler(checkpoints: CheckpointHandler) { this.checkpoints = checkpoints }
 	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
+	setTaskActivityMonitor(taskActivity: TaskActivityMonitor) { this.taskActivity = taskActivity }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.upsertFoldedProgressMessage(); this.updateCurrentTaskItem() }
+	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
+	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
+	handleTaskIdleLongRunning() { this.updateCurrentTaskItem(); this.broadcastState().catch((error) => console.error(error)) }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2032,7 +2034,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.logger.log("sidecar", "emptySdkResult", {
 				source,
 				sessionId,
-				lastTaskActivityReason: this.lastTaskActivityReason,
+				lastTaskActivityReason: (this.taskActivity?.reason || ""),
 				activePartialTextLength: this.getActivePartialText().length,
 				hasAssistantTextAfterLastUserMessage: this.hasAssistantTextAfterLastUserMessage(),
 			})
@@ -2060,7 +2062,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				source,
 				sessionId,
 				finishReason,
-				lastTaskActivityReason: this.lastTaskActivityReason,
+				lastTaskActivityReason: (this.taskActivity?.reason || ""),
 			})
 			this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage()))
 		} else {
@@ -2990,6 +2992,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.terminalActivity
 	}
 
+	private requireTaskActivity() {
+		if (!this.taskActivity) throw new Error("Task activity monitor is not attached.")
+		return this.taskActivity
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -3733,7 +3740,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (activeText) {
 			this.addAssistantTextResult(activeText)
 		} else if (!hasAssistantTextSinceUser) {
-			this.logger.log("sidecar", "emptyDoneNoFinalAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+			this.logger.log("sidecar", "emptyDoneNoFinalAssistantText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
 			const normalizedStatus = String(status || "").toLowerCase()
 			if (normalizedStatus === "completed" || normalizedStatus === "idle" || normalizedStatus === "ended") {
 				this.finalizeOpenPartialMessages()
@@ -3741,9 +3748,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 		} else if (!hasFinalAssistantText) {
-			this.logger.log("sidecar", "doneWithPreviousAssistantTextNoFinalText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+			this.logger.log("sidecar", "doneWithPreviousAssistantTextNoFinalText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
 		} else {
-			this.logger.log("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: this.lastTaskActivityReason })
+			this.logger.log("sidecar", "doneWithExistingAssistantText", { status, lastTaskActivityReason: (this.taskActivity?.reason || "") })
 		}
 		this.finalizeOpenPartialMessages()
 		this.addCompletionResultMarker(status)
@@ -4587,106 +4594,20 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private noteTaskActivity(reason: string) {
-		if (!this.state.currentTaskItem) {
-			return
-		}
-		this.lastTaskActivityAt = Date.now()
-		this.lastTaskActivityReason = reason
-		this.logger.log("sidecar", "taskActivity", { reason })
-		if (this.hasCompletionResultAfterLastUserMessage() || isTerminalTaskStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished") {
-			this.clearTaskIdleWatchdog()
+		const terminal = this.hasCompletionResultAfterLastUserMessage() || isTerminalTaskStatus(reason) || reason === "done" || reason === "ended" || reason === "run-finished"
+		this.requireTaskActivity().note(reason, terminal)
+		if (terminal) {
 			this.clearPartialIdleWatchdog()
 			this.clearPartialStateBroadcastTimer()
-			return
 		}
-		this.scheduleTaskIdleWatchdog()
 	}
 
 	private noteQuietTaskActivity(reason: string) {
-		if (!this.state.currentTaskItem) {
-			return
-		}
-		this.lastTaskActivityAt = Date.now()
-		this.lastTaskActivityReason = reason
-	}
-
-	private scheduleTaskIdleWatchdog() {
-		this.clearTaskIdleWatchdog()
-		if (!this.state.currentTaskItem) {
-			return
-		}
-		const noticeMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000)
-		const timeoutMs = readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)
-		if (noticeMs > 0 && noticeMs < timeoutMs) {
-			this.taskIdleNoticeTimer = setTimeout(() => {
-				if (!this.state.currentTaskItem || this.conversationProjection.activePartialTextTs) {
-					return
-				}
-				const idleForMs = Date.now() - this.lastTaskActivityAt
-				if (idleForMs < noticeMs - 1000) {
-					return
-				}
-
-				const text = `LIG VS SDK 응답을 기다리는 중입니다. 마지막 활동 후 ${Math.round(idleForMs / 1000)}초가 지났습니다. 마지막 활동: ${this.describeTaskActivityReason(this.lastTaskActivityReason)}`
-				this.logger.log("sidecar", "taskIdleNotice", { noticeMs, idleForMs, reason: this.lastTaskActivityReason })
-			}, noticeMs)
-		}
-		this.taskIdleTimer = setTimeout(() => {
-			if (!this.state.currentTaskItem) {
-				return
-			}
-			const idleForMs = Date.now() - this.lastTaskActivityAt
-			if (idleForMs < timeoutMs - 1000) {
-				this.scheduleTaskIdleWatchdog()
-				return
-			}
-
-			this.logger.log("sidecar", "taskIdleLongRunning", { timeoutMs, idleForMs, reason: this.lastTaskActivityReason })
-			this.updateCurrentTaskItem()
-			this.broadcastState().catch((error) => console.error(error))
-		}, timeoutMs)
+		this.requireTaskActivity().quiet(reason)
 	}
 
 	private clearTaskIdleWatchdog() {
-		if (this.taskIdleNoticeTimer) {
-			clearTimeout(this.taskIdleNoticeTimer)
-			this.taskIdleNoticeTimer = null
-		}
-		if (this.taskIdleTimer) {
-			clearTimeout(this.taskIdleTimer)
-			this.taskIdleTimer = null
-		}
-	}
-
-	private describeTaskActivityReason(reason: string) {
-		switch (reason) {
-			case "content_start:text":
-				return "모델 본문 수신"
-			case "content_end:text":
-				return "모델 본문 완료"
-			case "content_start:tool":
-				return "도구 호출 시작"
-			case "content_start:reasoning":
-				return "모델 reasoning 수신"
-			case "content_end:tool":
-				return "도구 호출 완료"
-			case "content_end:reasoning":
-				return "모델 reasoning 완료"
-			case "assistant-message":
-				return "모델 응답"
-			case "tool-finished":
-				return "도구 실행 완료"
-			case "run-finished":
-			case "done":
-				return "SDK 작업 완료"
-			case "run-failed":
-			case "error":
-				return "SDK 오류"
-			case "usage":
-				return "토큰 사용량 갱신"
-			default:
-				return reason || "알 수 없음"
-		}
+		this.taskActivity?.clear()
 	}
 
 	private shouldIgnoreSdkEvent(sessionId: string) {

@@ -234,6 +234,7 @@ for (const requiredFile of [
 	"features/checkpoints/CheckpointPolicy.ts",
 	"features/checkpoints/CheckpointHandler.ts",
 	"features/conversation/ConversationProjectionState.ts",
+	"features/runtime/TaskActivityMonitor.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
