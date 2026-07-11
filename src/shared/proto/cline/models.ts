@@ -1,4 +1,5 @@
 import { createProtoStub } from "../protoStub"
+import type { ApiConfiguration } from "../../api"
 
 const apiProviderNames = [
 	"AIHUBMIX", "ANTHROPIC", "ASKSAGE", "BASETEN", "BEDROCK", "CEREBRAS", "CLAUDE_CODE", "CLINE",
@@ -65,7 +66,7 @@ export const LiteLLMModelInfo = createProtoStub<LiteLLMModelInfo>("LiteLLMModelI
 
 export type OcaModelInfo = Omit<OpenRouterModelInfo, "tiers"> & {
 	temperature?: number
-	modelName?: string
+	modelName: string
 	surveyId?: string
 	banner?: string
 	surveyContent?: string
@@ -80,9 +81,27 @@ export const OpenRouterCompatibleModelInfo = createProtoStub<OpenRouterCompatibl
 export type OpenAiModelsRequest = { baseUrl: string; apiKey: string }
 export const OpenAiModelsRequest = createProtoStub<OpenAiModelsRequest>("OpenAiModelsRequest")
 
-// The full configuration transport is migrated separately because it spans every provider.
-export type ModelsApiConfiguration = any
-export const ModelsApiConfiguration = createProtoStub("ModelsApiConfiguration")
+type StandardModelInfoKey =
+	| "planModeOpenRouterModelInfo" | "planModeClineModelInfo" | "planModeRequestyModelInfo" | "planModeGroqModelInfo"
+	| "planModeBasetenModelInfo" | "planModeHuggingFaceModelInfo" | "planModeHuaweiCloudMaasModelInfo"
+	| "planModeHicapModelInfo" | "planModeVercelAiGatewayModelInfo"
+	| "actModeOpenRouterModelInfo" | "actModeClineModelInfo" | "actModeRequestyModelInfo" | "actModeGroqModelInfo"
+	| "actModeBasetenModelInfo" | "actModeHuggingFaceModelInfo" | "actModeHuaweiCloudMaasModelInfo"
+	| "actModeHicapModelInfo" | "actModeVercelAiGatewayModelInfo"
+type OpenAiModelInfoKey = "planModeOpenAiModelInfo" | "planModeAihubmixModelInfo" | "actModeOpenAiModelInfo" | "actModeAihubmixModelInfo"
+type LiteLlmModelInfoKey = "planModeLiteLlmModelInfo" | "actModeLiteLlmModelInfo"
+type OcaModelInfoKey = "planModeOcaModelInfo" | "actModeOcaModelInfo"
+type TransportOverrideKey =
+	| "planModeApiProvider" | "actModeApiProvider" | StandardModelInfoKey | OpenAiModelInfoKey | LiteLlmModelInfoKey | OcaModelInfoKey
+
+export type ModelsApiConfiguration = Omit<ApiConfiguration, TransportOverrideKey> & {
+	planModeApiProvider?: ApiProvider
+	actModeApiProvider?: ApiProvider
+} & Partial<Record<StandardModelInfoKey, OpenRouterModelInfo>>
+	& Partial<Record<OpenAiModelInfoKey, OpenAiCompatibleModelInfo>>
+	& Partial<Record<LiteLlmModelInfoKey, LiteLLMModelInfo>>
+	& Partial<Record<OcaModelInfoKey, OcaModelInfo>>
+export const ModelsApiConfiguration = createProtoStub<ModelsApiConfiguration>("ModelsApiConfiguration")
 
 export type UpdateApiConfigurationRequest = { apiConfiguration: ModelsApiConfiguration }
 export const UpdateApiConfigurationRequest = createProtoStub<UpdateApiConfigurationRequest>("UpdateApiConfigurationRequest")

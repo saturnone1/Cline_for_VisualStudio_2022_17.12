@@ -8,13 +8,14 @@ import type { SkillInfo } from "@shared/proto/cline/file"
 import type { McpServers } from "@shared/proto/cline/mcp"
 import type { ClineRecommendedModel, OpenRouterModelInfo } from "@shared/proto/cline/models"
 import type { TerminalProfile } from "@shared/proto/cline/state"
+import type { ClineMessage } from "@shared/proto/cline/ui"
+import type { SapAiCoreModelDeployment } from "@shared/proto/index.cline"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
 const decodeMessage = <TResponse>(response: TResponse) => response
 
 type RpcRequest = Record<string, unknown>
 type EmptyResponse = Record<string, never>
-type PartialMessageEvent = RpcRequest & { ts?: number }
 type ShowWebviewEvent = RpcRequest & { preserveEditorFocus?: boolean }
 type AddToInputEvent = RpcRequest & { value?: string }
 type UnaryOperation<TRequest extends RpcRequest = RpcRequest, TResponse = EmptyResponse> = (request: TRequest) => Promise<TResponse>
@@ -36,7 +37,7 @@ interface UiServiceContract {
 	subscribeToWorktreesButtonClicked: StreamingOperation<EmptyResponse>
 	subscribeToAccountButtonClicked: StreamingOperation<EmptyResponse>
 	subscribeToRelinquishControl: StreamingOperation<EmptyResponse>
-	subscribeToPartialMessage: StreamingOperation<PartialMessageEvent>
+	subscribeToPartialMessage: StreamingOperation<ClineMessage>
 	subscribeToShowWebview: StreamingOperation<ShowWebviewEvent>
 	subscribeToAddToInput: StreamingOperation<AddToInputEvent>
 }
@@ -249,7 +250,7 @@ interface ModelsServiceContract {
 	getAihubmixModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
 	getVsCodeLmModels: UnaryOperation<RpcRequest, RpcRequest & { models: RpcRequest[] }>
 	getSapAiCoreModels: UnaryOperation<RpcRequest, RpcRequest & {
-		deployments: RpcRequest[]
+		deployments: SapAiCoreModelDeployment[]
 		orchestrationAvailable: boolean
 	}>
 	refreshOpenRouterModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>

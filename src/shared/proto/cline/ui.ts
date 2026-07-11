@@ -1,4 +1,5 @@
 import { createProtoStub } from "../protoStub"
+import type { ClineMessage as AppClineMessage } from "../../ExtensionMessage"
 
 export const ClineAsk = {
 	FOLLOWUP: "FOLLOWUP",
@@ -23,8 +24,32 @@ export const ClineAsk = {
 } as const
 export type ClineAsk = (typeof ClineAsk)[keyof typeof ClineAsk]
 
-export type ClineMessage = any
-export const ClineMessage = createProtoStub("ClineMessage")
+export type ClineMessage = {
+	ts: number
+	type: ClineMessageType
+	ask: ClineAsk
+	say: ClineSay
+	text: string
+	reasoning: string
+	images: string[]
+	files: string[]
+	partial: boolean
+	lastCheckpointHash: string
+	isCheckpointCheckedOut: boolean
+	isOperationOutsideWorkspace: boolean
+	conversationHistoryIndex: number
+	conversationHistoryDeletedRange?: { startIndex: number; endIndex: number }
+	sayTool?: unknown
+	sayBrowserAction?: unknown
+	browserActionResult?: unknown
+	askUseMcpServer?: unknown
+	planModeResponse?: unknown
+	askQuestion?: unknown
+	askNewTask?: unknown
+	apiReqInfo?: unknown
+	modelInfo?: AppClineMessage["modelInfo"]
+}
+export const ClineMessage = createProtoStub<ClineMessage>("ClineMessage")
 
 export const ClineMessageType = {
 	ASK: "ASK",

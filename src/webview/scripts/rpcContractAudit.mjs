@@ -6,6 +6,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const source = fs.readFileSync(path.join(root, "src", "services", "grpcClient.ts"), "utf8")
 const violations = []
 
+const collectTypeScriptFiles = (directory) =>
+	fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+		const entryPath = path.join(directory, entry.name)
+		return entry.isDirectory() ? collectTypeScriptFiles(entryPath) : entry.name.endsWith(".ts") ? [entryPath] : []
+	})
+
+const protoRoot = path.resolve(root, "..", "shared", "proto")
+for (const protoFile of collectTypeScriptFiles(protoRoot)) {
+	const protoSource = fs.readFileSync(protoFile, "utf8")
+	if (/export type \w+\s*=\s*any\b/.test(protoSource)) {
+		violations.push(`${path.relative(root, protoFile)} must not export an any proto message.`)
+	}
+	if (path.basename(protoFile) === "protoStub.ts" && /\bany\b/.test(protoSource)) {
+		violations.push("The shared proto runtime must not use any.")
+	}
+}
+
 if (!source.includes("interface UiServiceContract")) {
 	violations.push("UiServiceClient must expose an operation-specific contract.")
 }
