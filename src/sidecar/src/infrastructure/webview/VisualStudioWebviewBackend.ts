@@ -25,6 +25,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
+import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -589,19 +590,18 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		})
 	}
 
-	handleSdkEvent(event: unknown) {
+	handleSdkEvent(event: AgentRuntimeEvent) {
 		if (shouldLogSdkEventForInteraction(event)) {
 			this.logger.log("sdk->sidecar", "sdk.event", summarizeSdkEventForLog(event))
 		}
-		const record = asRecord(event)
-		const type = getString(record, "type")
-		const payload = asRecord(record.payload)
+		const type = event.type === "unknown" ? event.originalType : event.type
+		const payload = event.payload
 		if (type && type !== "vscline_file_changed" && type !== "status" && type !== "ended") {
 			this.transitionTask("streaming", `sdk:${type}`)
 		}
 
-		if (type === "agent_event") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "agent_event") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				this.logger.log("sidecar", "ignoredSdkAgentEvent", {
 					sessionId,
@@ -611,17 +611,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 			this.markSendLatencyFirstSdkEvent(sessionId, getString(asRecord(payload.event), "type") || type)
-			this.handleAgentEvent(asRecord(payload.event), sessionId)
+			this.handleAgentEvent(event.event, sessionId)
 			return
 		}
 
-		if (type === "vscline_file_changed") {
+		if (event.type === "vscline_file_changed") {
 			this.handleFileChangedEvent(payload).catch((error) => console.error(error))
 			return
 		}
 
-		if (type === "chunk") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "chunk") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -630,8 +630,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "session_snapshot") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "session_snapshot") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -640,8 +640,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "team_progress") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "team_progress") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -649,8 +649,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "hook") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "hook") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -658,8 +658,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "pending_prompts") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "pending_prompts") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -667,8 +667,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "pending_prompt_submitted") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "pending_prompt_submitted") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -676,9 +676,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "status") {
-			const status = getString(payload, "status")
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "status") {
+			const status = event.status
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
@@ -703,13 +703,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (type === "ended") {
-			const sessionId = getString(payload, "sessionId")
+		if (event.type === "ended") {
+			const sessionId = event.sessionId
 			if (this.shouldIgnoreSdkEvent(sessionId)) {
 				return
 			}
 			const activeText = this.getActivePartialText()
-			this.finishSdkTask(sessionId, getString(payload, "reason") || "ended", activeText)
+			this.finishSdkTask(sessionId, event.reason || "ended", activeText)
 			this.updateCurrentTaskItem()
 			this.broadcastState().catch((error) => console.error(error))
 		}

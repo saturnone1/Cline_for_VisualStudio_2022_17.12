@@ -1,6 +1,7 @@
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { WebviewApplicationPort } from "../../application/ports/WebviewApplicationPort"
 import { parseWebviewEnvelope } from "../../application/dto/WebviewRpc"
+import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 
 export class VisualStudioWebviewController {
 	constructor(private readonly application: WebviewApplicationPort) {}
@@ -9,7 +10,7 @@ export class VisualStudioWebviewController {
 	isScheduledAgentsEnabled() { return this.application.isScheduledAgentsEnabled() }
 	requestToolApproval(request: unknown): Promise<ToolApprovalResult> { return this.application.requestToolApproval(request) }
 	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> { return this.application.requestQuestion(question, options) }
-	handleSdkEvent(event: unknown) { this.application.handleSdkEvent(event) }
+	handleSdkEvent(event: AgentRuntimeEvent) { this.application.handleSdkEvent(event) }
 	handle(params: unknown) {
 		try {
 			const rawJson = readRawJson(params)

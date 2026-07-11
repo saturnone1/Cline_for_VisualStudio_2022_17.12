@@ -7,6 +7,7 @@ import type { ClineRuntimePort } from "../../application/ports/ClineRuntimePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
+import { normalizeAgentRuntimeEvent, type AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -37,7 +38,7 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 	constructor(
 		private readonly host: HostProviderPort,
 		private readonly sidecarRoot: string,
-		private readonly onCoreEvent?: (event: CoreSessionEvent) => void,
+		private readonly onCoreEvent?: (event: AgentRuntimeEvent) => void,
 		private readonly onToolApproval?: (request: unknown) => Promise<ToolApprovalResult>,
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
@@ -850,7 +851,7 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 			},
 		})
 		if (this.onCoreEvent) {
-			core.subscribe(this.onCoreEvent)
+			core.subscribe((event: CoreSessionEvent) => this.onCoreEvent?.(normalizeAgentRuntimeEvent(event)))
 		}
 
 		return core
@@ -1031,10 +1032,10 @@ export class ClineSdkRuntime implements ClineRuntimePort {
 	}
 
 	private emitFileChanged(payload: Record<string, unknown>) {
-		;(this.onCoreEvent as ((event: unknown) => void) | undefined)?.({
+		this.onCoreEvent?.(normalizeAgentRuntimeEvent({
 			type: "vscline_file_changed",
 			payload,
-		})
+		}))
 	}
 
 	private readSdkVersion() {

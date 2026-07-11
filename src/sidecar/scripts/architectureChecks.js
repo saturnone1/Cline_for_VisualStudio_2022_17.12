@@ -66,6 +66,15 @@ for (const portPath of walk(portsRoot).filter((filePath) => filePath.endsWith(".
 	}
 }
 
+const webviewPort = fs.readFileSync(path.join(portsRoot, "WebviewApplicationPort.ts"), "utf8")
+if (/handleSdkEvent\(event:\s*unknown\)/.test(webviewPort) || !webviewPort.includes("AgentRuntimeEvent")) {
+	violations.push("WebviewApplicationPort must accept the normalized AgentRuntimeEvent contract.")
+}
+const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
+if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
+	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")
+}
+
 const mainPath = path.join(sourceRoot, "main.ts")
 const main = fs.readFileSync(mainPath, "utf8")
 if (main.split(/\r?\n/).length > 100) {
@@ -94,6 +103,7 @@ if (router.includes("function createProviderAuthInfo") || router.includes("funct
 }
 
 for (const requiredFile of [
+	"domain/agent/AgentRuntimeEvent.ts",
 	"application/useCases/McpUseCase.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
