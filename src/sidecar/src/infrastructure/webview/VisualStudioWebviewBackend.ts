@@ -107,6 +107,8 @@ import { ScheduledAgentRpcHandler } from "../../features/scheduledAgents/Schedul
 import { decodeScheduledAgentRpcCommand } from "./ScheduledAgentRpcDecoder"
 import { WorktreeRpcHandler } from "../../features/worktrees/WorktreeRpcHandler"
 import { decodeWorktreeRpcCommand } from "./WorktreeRpcDecoder"
+import { McpRpcHandler } from "../../features/mcp/McpRpcHandler"
+import { decodeMcpRpcCommand } from "./McpRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -286,6 +288,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly hookRpc: HookRpcHandler
 	private readonly scheduledAgentRpc: ScheduledAgentRpcHandler
 	private readonly worktreeRpc: WorktreeRpcHandler
+	private readonly mcpRpc: McpRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -362,6 +365,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.hookRpc = new HookRpcHandler({ hooks: () => this.requireHookSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enableHooks: () => { this.state.hooksEnabled = true } })
 		this.scheduledAgentRpc = new ScheduledAgentRpcHandler({ agents: () => this.requireScheduledAgents(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), launch: async (request) => { await this.startNewTask(request, { broadcast: false }) } })
 		this.worktreeRpc = new WorktreeRpcHandler({ queries: () => this.requireWorktreeQueries(), mutations: () => this.requireWorktreeMutations(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), setFeatureEnabled: (enabled) => this.setWorktreesFeatureFlag(enabled) })
+		this.mcpRpc = new McpRpcHandler({ mcp: () => this.requireMcp(), openSettings: (filePath) => this.host.windowClient.openFile({ filePath }), markRuntimeChanged: () => { this.runtimeSettingsRevision++ } })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -809,11 +813,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		if (key === "McpService.subscribeToMcpServers") {
 			this.mcpServerStreamRequestIds.add(requestId)
-			return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), true))
+			const result = await this.mcpRpc.handle({ type: "list" })
+			return grpcHandled(grpcResponse(requestId, result.payload, true))
 		}
 
 		if (key === "McpService.subscribeToMcpMarketplaceCatalog") {
-			return grpcHandled(grpcResponse(requestId, this.getMcpMarketplaceResponse(), true))
+			const result = await this.mcpRpc.handle({ type: "marketplace" })
+			return grpcHandled(grpcResponse(requestId, result.payload, true))
 		}
 
 		if (key === "OcaAccountService.ocaSubscribeToAuthStatusUpdate") {
@@ -888,6 +894,12 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 		const worktreeCommand = decodeWorktreeRpcCommand(key, message)
 		if (worktreeCommand) return grpcHandled(grpcResponse(requestId, await this.worktreeRpc.handle(worktreeCommand), false))
+		const mcpCommand = decodeMcpRpcCommand(key, message)
+		if (mcpCommand) {
+			const mcpResult = await this.mcpRpc.handle(mcpCommand)
+			if (mcpResult.error) return grpcHandled(grpcError(requestId, mcpResult.error, false))
+			return grpcHandled(grpcResponse(requestId, mcpResult.payload, false), ...(mcpResult.publishToStreams ? this.buildMcpServerStreamMessages(mcpResult.payload) : []))
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -1094,46 +1106,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "ModelsService.refreshClineRecommendedModelsRpc":
 				return grpcHandled(grpcResponse(requestId, this.createUnsupportedModelCatalog(key), false))
 
-			case "McpService.getLatestMcpServers":
-				return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), false))
-
-			case "McpService.refreshMcpMarketplace":
-				return grpcHandled(grpcResponse(requestId, this.getMcpMarketplaceResponse(), false))
-
-			case "McpService.addRemoteMcpServer":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("addRemoteServer", asRecord(message)))
-
-			case "McpService.openMcpSettings":
-				await this.openMcpSettingsFile()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "McpService.updateMcpTimeout":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("updateTimeout", asRecord(message)))
-
-			case "McpService.restartMcpServer":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("restartServer", asRecord(message)))
-
-			case "McpService.deleteMcpServer":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("deleteServer", asRecord(message)))
-
-			case "McpService.toggleToolAutoApprove":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("toggleToolAutoApprove", asRecord(message)))
-
-			case "McpService.toggleMcpServer":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("toggleServer", asRecord(message)))
-
-			case "McpService.authenticateMcpServer":
-				return this.grpcMcpServersMutation(requestId, await this.requireMcp().mutate("authenticateServer", asRecord(message)))
-
-			case "McpService.downloadMcp":
-				return grpcHandled(
-					grpcError(
-						requestId,
-						"MCP marketplace installation is not implemented in the Visual Studio port yet. Add stdio/SSE/streamable HTTP servers from the MCP configuration file or Add Server tab.",
-						false,
-					),
-				)
-
 			default:
 				return null
 		}
@@ -1172,10 +1144,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.clineSdk
 	}
 
-	private async getMcpServersResponse() {
-		return this.requireMcp().listServers()
-	}
-
 	private requireMcp() {
 		if (!this.mcp) {
 			throw new Error("LIG VS MCP application service is not attached.")
@@ -1183,30 +1151,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.mcp
 	}
 
-	private grpcMcpServersMutation(requestId: string, response: unknown) {
-		// MCP tools are fixed when an SDK session starts. Restart the session on the
-		// next user turn so the model receives the updated tool schemas.
-		this.runtimeSettingsRevision++
-		return grpcHandled(
-			grpcResponse(requestId, response, false),
-			...this.buildMcpServerStreamMessages(response),
-		)
-	}
-
 	private buildMcpServerStreamMessages(response: unknown) {
 		return [...this.mcpServerStreamRequestIds]
 			.filter((streamRequestId) => streamRequestId)
 			.map((streamRequestId) => grpcResponse(streamRequestId, response, true))
-	}
-
-	private getMcpMarketplaceResponse() {
-		const catalog = { items: [] }
-		return { catalog, items: catalog.items }
-	}
-
-	private async openMcpSettingsFile() {
-		const filePath = await this.requireMcp().getSettingsPath()
-		await this.host.windowClient.openFile({ filePath })
 	}
 
 	private clearLiveInteractionState(reason: string) {

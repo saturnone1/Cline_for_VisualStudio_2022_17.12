@@ -40,7 +40,7 @@ test("MCP mutations select the matching runtime operation", async () => {
 		"toggleServer",
 		"authenticateServer",
 	]) {
-		await useCase.mutate(action, request)
+		await useCase.mutate({ action, request })
 	}
 
 	assert.deepEqual(calls.map(([name]) => name), ["add", "timeout", "restart", "delete", "approve", "toggle", "authenticate"])
