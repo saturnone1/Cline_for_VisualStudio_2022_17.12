@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto"
 import { McpHandler } from "./features/mcp/McpHandler"
+import { BrowserHandler } from "./features/browser/BrowserHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -13,6 +15,7 @@ import { VisualStudioWebviewController } from "./presentation/webview/VisualStud
 import { SendMessageHandler } from "./features/chat/sendMessage/SendMessageHandler"
 import { StartTaskHandler } from "./features/chat/startTask/StartTaskHandler"
 import { CancelTaskHandler } from "./features/chat/cancelTask/CancelTaskHandler"
+import { BrowserDevToolsAdapter } from "./infrastructure/browser/BrowserDevToolsAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -43,6 +46,7 @@ const server = new SidecarRpcServer(
 		backend.setSendMessageHandler(new SendMessageHandler(runtime))
 		backend.setStartTaskHandler(new StartTaskHandler(runtime))
 		backend.setCancelTaskHandler(new CancelTaskHandler(runtime))
+		backend.setBrowserHandler(new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

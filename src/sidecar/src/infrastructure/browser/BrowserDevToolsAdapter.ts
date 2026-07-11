@@ -1,6 +1,14 @@
 import fs from "node:fs"
 import path from "node:path"
+import type { BrowserAutomationPort } from "../../application/ports/BrowserAutomationPort"
 import { normalizeBrowserActionName, normalizeBrowserDebugHost, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
+
+export class BrowserDevToolsAdapter implements BrowserAutomationPort {
+	resolveExecutablePath(configuredPath = "") { return resolveBrowserExecutablePath(configuredPath) }
+	fetchDebugInfo(host: string) { return fetchBrowserDebugInfo(host) }
+	listTabs(host: string) { return listDevToolsTabs(host) }
+	runAction(host: string, request: BrowserAction) { return runBrowserActionViaDevTools(host, request) }
+}
 
 export function resolveBrowserExecutablePath(configuredPath = "") {
 	const candidates = [

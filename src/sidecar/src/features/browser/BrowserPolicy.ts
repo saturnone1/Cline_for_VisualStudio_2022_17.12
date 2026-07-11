@@ -1,5 +1,5 @@
-export type BrowserViewport = { width: number; height: number }
-export type BrowserAction = { action: string; url?: string; tabId?: string; browserSessionId?: string; browserActionId?: string; coordinate?: string; text?: string; viewport: BrowserViewport; onPhase?: (phase: Record<string, unknown>) => void }
+import type { BrowserAction, BrowserViewport } from "../../application/ports/BrowserAutomationPort"
+export type { BrowserAction, BrowserViewport } from "../../application/ports/BrowserAutomationPort"
 
 export function normalizeBrowserDebugHost(host: string) {
 	const trimmed = host.trim()

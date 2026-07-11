@@ -32,6 +32,7 @@ import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMes
 import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCommand"
 import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
+import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -43,15 +44,10 @@ import {
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
 import {
-	canReachBrowserDebugHost,
 	checkIsImageUrl,
-	fetchBrowserDebugInfo,
 	fetchOpenGraphData,
-	listDevToolsTabs,
-	resolveBrowserExecutablePath,
-	runBrowserActionViaDevTools,
 } from "../browser/BrowserDevToolsAdapter"
-import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName, normalizeBrowserDebugHost, normalizeBrowserViewport, screenshotByteLength, type BrowserAction } from "../../features/browser/BrowserPolicy"
+import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
 import {
 	findSolutions,
 	isPathInside,
@@ -298,19 +294,6 @@ type SendLatencyTrace = {
 	textLength: number
 }
 
-type BrowserSessionRecord = {
-	sessionId: string
-	host: string
-	tabId?: string
-	url?: string
-	title?: string
-	createdAt: number
-	lastActionAt: number
-	lastActionId?: string
-	lastPhase?: string
-	reconnectReason?: string
-}
-
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
@@ -318,6 +301,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private sendMessage: SendMessageHandler | null = null
 	private startTaskHandler: StartTaskHandler | null = null
 	private cancelTaskHandler: CancelTaskHandler | null = null
+	private browserHandler: BrowserHandler | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
@@ -370,7 +354,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private oauthCallbackServer: http.Server | null = null
 	private oauthCallbackPort = 0
 	private readonly oauthCallbackSessions = new Map<string, OAuthCallbackSession>()
-	private readonly browserSessions = new Map<string, BrowserSessionRecord>()
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -429,6 +412,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	setStartTaskHandler(startTaskHandler: StartTaskHandler) { this.startTaskHandler = startTaskHandler }
 	setCancelTaskHandler(cancelTaskHandler: CancelTaskHandler) { this.cancelTaskHandler = cancelTaskHandler }
+	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -935,42 +919,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
 
 			case "BrowserService.getDetectedChromePath": {
-				const detectedPath = resolveBrowserExecutablePath(getString(asRecord(this.state.browserSettings), "chromeExecutablePath"))
-				return grpcHandled(grpcResponse(requestId, { path: detectedPath, isBundled: false }, false))
+				return grpcHandled(grpcResponse(requestId, this.requireBrowserHandler().getDetectedPath(this.getBrowserSettings()), false))
 			}
 
 			case "BrowserService.getBrowserConnectionInfo":
-				return grpcHandled(grpcResponse(requestId, await this.getBrowserConnectionInfo(), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().getConnectionInfo(this.getBrowserSettings()), false))
 
 			case "BrowserService.testBrowserConnection": {
 				const hostValue = getString(message, "value") || getString(message, "host") || getString(message, "url")
-				const debugInfo = await fetchBrowserDebugInfo(hostValue)
-				const success = Boolean(debugInfo.success)
-				return grpcHandled(
-					grpcResponse(
-						requestId,
-						{
-							success,
-							message: success
-								? `Browser connection successful.${debugInfo.browser ? ` ${debugInfo.browser}` : ""}`
-								: debugInfo.error || "Unable to reach the configured browser host.",
-							host: debugInfo.host || normalizeBrowserDebugHost(hostValue),
-							browser: debugInfo.browser || "",
-							protocolVersion: debugInfo.protocolVersion || "",
-							tabCount: debugInfo.tabCount ?? 0,
-							activeTabTitle: debugInfo.activeTabTitle || "",
-							activeTabUrl: debugInfo.activeTabUrl || "",
-							webFetchEnabled: isWebFetchEnabled(this.state.browserSettings),
-							webFetchDisabledReason: webFetchDisabledReason(this.state.browserSettings),
-							browserToolUseDisabled: asRecord(this.state.browserSettings).disableToolUse === true,
-						},
-						false,
-					),
-				)
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().testConnection(hostValue, this.getBrowserSettings()), false))
 			}
 
 			case "BrowserService.discoverBrowser":
-				return grpcHandled(grpcResponse(requestId, await this.discoverBrowser(), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().discover(this.getBrowserSettings()), false))
 
 			case "BrowserService.relaunchChromeDebugMode": {
 				const browserSettings = asRecord(this.state.browserSettings)
@@ -993,14 +954,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			}
 
 			case "BrowserService.listBrowserTabs":
-				return grpcHandled(grpcResponse(requestId, await this.listBrowserTabs(), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().listTabs(this.getBrowserSettings()), false))
 
 			case "BrowserService.captureScreenshot":
-				return grpcHandled(grpcResponse(requestId, await this.captureBrowserScreenshot(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().captureScreenshot(message, this.getBrowserSettings()), false))
 
 			case "BrowserService.performBrowserAction":
 			case "BrowserService.executeBrowserAction":
-				return grpcHandled(grpcResponse(requestId, await this.performBrowserAction(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireBrowserHandler().performAction(message, this.getBrowserSettings()), false))
 
 			case "StateService.getAvailableTerminalProfiles":
 				return grpcHandled(
@@ -4466,174 +4427,22 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.broadcastState().catch((error) => console.error(error))
 	}
 
-	private async getBrowserConnectionInfo() {
-		const browserSettings = asRecord(this.state.browserSettings)
-		const remoteBrowserEnabled = browserSettings.remoteBrowserEnabled === true
-		const host = getString(browserSettings, "remoteBrowserHost")
-		const webFetchEnabled = isWebFetchEnabled(browserSettings)
-		const debugInfo = remoteBrowserEnabled ? await fetchBrowserDebugInfo(host) : null
-		const executablePath = resolveBrowserExecutablePath(getString(browserSettings, "chromeExecutablePath"))
-		const isConnected = remoteBrowserEnabled ? Boolean(debugInfo?.success) : Boolean(executablePath)
-
+	private getBrowserSettings(): BrowserSettings {
+		const settings = asRecord(this.state.browserSettings)
 		return {
-			isConnected,
-			isRemote: remoteBrowserEnabled,
-			host: remoteBrowserEnabled ? normalizeBrowserDebugHost(host) : "",
-			path: remoteBrowserEnabled ? "" : executablePath,
-			browser: debugInfo?.browser || "",
-			protocolVersion: debugInfo?.protocolVersion || "",
-			tabCount: debugInfo?.tabCount ?? 0,
-			activeTabTitle: debugInfo?.activeTabTitle || "",
-			activeTabUrl: debugInfo?.activeTabUrl || "",
-			error: debugInfo?.error || "",
-			webFetchEnabled,
-			webFetchDisabledReason: webFetchDisabledReason(browserSettings),
-			browserToolUseDisabled: browserSettings.disableToolUse === true,
+			remoteBrowserEnabled: settings.remoteBrowserEnabled === true,
+			remoteBrowserHost: getString(settings, "remoteBrowserHost"),
+			chromeExecutablePath: getString(settings, "chromeExecutablePath"),
+			disableToolUse: settings.disableToolUse === true,
+			viewport: settings.viewport,
+			webFetchEnabled: isWebFetchEnabled(settings),
+			webFetchDisabledReason: webFetchDisabledReason(settings),
 		}
 	}
 
-	private async discoverBrowser() {
-		const browserSettings = asRecord(this.state.browserSettings)
-		const webFetchEnabled = isWebFetchEnabled(browserSettings)
-		if (browserSettings.remoteBrowserEnabled === true) {
-			const host = getString(browserSettings, "remoteBrowserHost")
-			const debugInfo = await fetchBrowserDebugInfo(host)
-			const success = Boolean(debugInfo.success)
-			return {
-				success,
-				message: success
-					? `Browser connection successful.${debugInfo.browser ? ` ${debugInfo.browser}` : ""}`
-					: debugInfo.error || "Unable to reach the configured browser host.",
-				host: normalizeBrowserDebugHost(host),
-				browser: debugInfo.browser || "",
-				protocolVersion: debugInfo.protocolVersion || "",
-				tabCount: debugInfo.tabCount ?? 0,
-				activeTabTitle: debugInfo.activeTabTitle || "",
-				activeTabUrl: debugInfo.activeTabUrl || "",
-				webFetchEnabled,
-				webFetchDisabledReason: webFetchDisabledReason(browserSettings),
-				browserToolUseDisabled: browserSettings.disableToolUse === true,
-			}
-		}
-
-		const detectedPath = resolveBrowserExecutablePath(getString(browserSettings, "chromeExecutablePath"))
-		return {
-			success: Boolean(detectedPath),
-			message: detectedPath ? `Detected browser at ${detectedPath}` : "No local Chrome or Edge executable could be found.",
-			path: detectedPath,
-			webFetchEnabled,
-			webFetchDisabledReason: webFetchDisabledReason(browserSettings),
-			browserToolUseDisabled: browserSettings.disableToolUse === true,
-		}
-	}
-
-	private getBrowserAdapterConfig() {
-		const browserSettings = asRecord(this.state.browserSettings)
-		return {
-			host: normalizeBrowserDebugHost(getString(browserSettings, "remoteBrowserHost") || "http://localhost:9222"),
-			viewport: normalizeBrowserViewport(browserSettings.viewport),
-			disabled: browserSettings.disableToolUse === true,
-		}
-	}
-
-	private async listBrowserTabs() {
-		const config = this.getBrowserAdapterConfig()
-		if (config.disabled) {
-			return { success: false, tabs: [], error: "Browser tool usage is disabled in Visual Studio settings." }
-		}
-		return listDevToolsTabs(config.host)
-	}
-
-	private async captureBrowserScreenshot(params: unknown) {
-		const config = this.getBrowserAdapterConfig()
-		if (config.disabled) {
-			return { success: false, error: "Browser tool usage is disabled in Visual Studio settings." }
-		}
-		const request = asRecord(params)
-		const tabId = getString(request, "tabId")
-		const result = await this.runBrowserActionWithSession(config.host, {
-			action: "screenshot",
-			tabId,
-			viewport: config.viewport,
-		})
-		return result
-	}
-
-	private async performBrowserAction(params: unknown) {
-		const config = this.getBrowserAdapterConfig()
-		const input = asRecord(params)
-		if (config.disabled) {
-			return { success: false, status: "error", error: "Browser tool usage is disabled in Visual Studio settings." }
-		}
-		return this.runBrowserActionWithSession(config.host, {
-			action: normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || "navigate"),
-			url: getString(input, "url") || getString(input, "value"),
-			tabId: getString(input, "tabId"),
-			coordinate: getString(input, "coordinate"),
-			text: getString(input, "text"),
-			viewport: config.viewport,
-		})
-	}
-
-	private async runBrowserActionWithSession(host: string, request: BrowserAction) {
-		this.pruneBrowserSessions()
-		const normalizedHost = normalizeBrowserDebugHost(host)
-		const requestedSessionId = getString(request as unknown as Record<string, unknown>, "browserSessionId")
-		const existingSession =
-			(requestedSessionId && this.browserSessions.get(requestedSessionId)) ||
-			Array.from(this.browserSessions.values()).find((session) => session.host === normalizedHost && (!request.tabId || session.tabId === request.tabId))
-		const sessionId = existingSession?.sessionId || `browser-${createId()}`
-		const actionId = `browser-action-${createId()}`
-		const session: BrowserSessionRecord = existingSession || {
-			sessionId,
-			host: normalizedHost,
-			createdAt: Date.now(),
-			lastActionAt: Date.now(),
-		}
-		session.lastActionId = actionId
-		session.lastActionAt = Date.now()
-		session.lastPhase = "starting"
-		this.browserSessions.set(sessionId, session)
-
-		const phases: Array<Record<string, unknown>> = []
-		const result = await runBrowserActionViaDevTools(normalizedHost, {
-			...request,
-			tabId: request.tabId || session.tabId,
-			browserSessionId: sessionId,
-			browserActionId: actionId,
-			onPhase: (phase) => {
-				session.lastPhase = getString(phase, "phase") || session.lastPhase
-				session.lastActionAt = Date.now()
-				phases.push({ ...phase, browserSessionId: sessionId, browserActionId: actionId })
-			},
-		})
-		const record = asRecord(result)
-		session.tabId = getString(record, "tabId") || session.tabId
-		session.url = getString(record, "currentUrl") || getString(record, "url") || session.url
-		session.title = getString(record, "title") || session.title
-		session.reconnectReason = getString(record, "reconnectReason") || session.reconnectReason
-		session.lastPhase = getString(record, "status") || session.lastPhase
-		session.lastActionAt = Date.now()
-		return {
-			...record,
-			browserSessionId: sessionId,
-			browserActionId: actionId,
-			phases,
-			tabId: session.tabId || getString(record, "tabId"),
-			currentUrl: session.url || getString(record, "currentUrl"),
-			title: session.title || getString(record, "title"),
-			screenshotBytes: screenshotByteLength(getString(record, "screenshot")),
-		}
-	}
-
-	private pruneBrowserSessions() {
-		const maxAgeMs = readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)
-		const now = Date.now()
-		for (const [sessionId, session] of this.browserSessions) {
-			if (now - session.lastActionAt > maxAgeMs) {
-				this.browserSessions.delete(sessionId)
-			}
-		}
+	private requireBrowserHandler() {
+		if (!this.browserHandler) throw new Error("Browser feature handler is not attached.")
+		return this.browserHandler
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
@@ -4657,7 +4466,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (error) {
 			result = { success: false, status: "error", error }
 		} else {
-			result = await this.performBrowserAction({ ...input, action })
+			result = asRecord(await this.requireBrowserHandler().performAction({ ...input, action }, this.getBrowserSettings()))
 		}
 
 		for (const phase of arrayOfRecords(result.phases)) {

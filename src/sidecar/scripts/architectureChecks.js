@@ -54,6 +54,9 @@ for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPo
 if (router.includes("VisualStudioHostProvider") || router.includes("sendHostRequest(")) {
 	violations.push("VisualStudioWebviewBackend must not reference concrete host or transport implementations.")
 }
+if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSessions")) {
+	violations.push("VisualStudioWebviewBackend must delegate browser execution and session ownership to BrowserHandler.")
+}
 
 const controllerPath = path.join(sourceRoot, "presentation", "webview", "VisualStudioWebviewController.ts")
 const controller = fs.readFileSync(controllerPath, "utf8")
@@ -127,6 +130,7 @@ for (const requiredFile of [
 	"domain/agent/AgentSessionState.ts",
 	"infrastructure/sdk/ClineSdkEventTranslator.ts",
 	"application/ports/AgentEnginePort.ts",
+	"application/ports/BrowserAutomationPort.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
@@ -154,6 +158,7 @@ for (const requiredFile of [
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/browser/BrowserPolicy.ts",
+	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 	"features/checkpoints/CheckpointPolicy.ts",

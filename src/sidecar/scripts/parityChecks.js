@@ -7,6 +7,7 @@ const sdkRuntimePath = path.join(root, "src", "infrastructure", "sdk", "ClineSdk
 const conversationPath = path.join(root, "src", "infrastructure", "conversation", "ConversationSupport.ts")
 const providerConfigurationPath = path.join(root, "src", "infrastructure", "configuration", "ProviderConfiguration.ts")
 const webviewStatePath = path.join(root, "src", "infrastructure", "webview", "WebviewState.ts")
+const browserHandlerPath = path.join(root, "src", "features", "browser", "BrowserHandler.ts")
 const mainPath = path.join(root, "src", "main.ts")
 const serverPath = path.join(root, "src", "infrastructure", "transport", "SidecarRpcServer.ts")
 const repoRoot = path.resolve(root, "..", "..")
@@ -17,7 +18,8 @@ const sdkRuntime = fs.readFileSync(sdkRuntimePath, "utf8")
 const conversation = fs.readFileSync(conversationPath, "utf8")
 const providerConfiguration = fs.readFileSync(providerConfigurationPath, "utf8")
 const webviewState = fs.readFileSync(webviewStatePath, "utf8")
-const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}`
+const browserHandler = fs.readFileSync(browserHandlerPath, "utf8")
+const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}\n${browserHandler}`
 const main = fs.readFileSync(mainPath, "utf8")
 const server = fs.readFileSync(serverPath, "utf8")
 const apiConfigurationSection = fs.readFileSync(apiConfigurationSectionPath, "utf8")
@@ -30,8 +32,8 @@ const requiredMarkers = [
 	["progress phase transitions", "beginProgressPhase"],
 	["MCP reduced marketplace diagnostics", "getMcpMarketplaceResponse"],
 	["MCP marketplace air-gap reason", "MCP marketplace installation is not implemented"],
-	["browser DevTools session registry", "browserSessions"],
-	["browser action execution phases", "runBrowserActionViaDevTools"],
+	["browser DevTools session registry", "private readonly sessions"],
+	["browser action execution phases", "this.automation.runAction"],
 	["OAuth refresh state RPC", "refreshOAuthCredential"],
 	["checkpoint compare RPC", "checkpointDiff"],
 	["worktree merge recovery", "recoverWorktreeMerge"],
