@@ -4,6 +4,7 @@ import { BrowserHandler } from "./features/browser/BrowserHandler"
 import { WorktreeQueryHandler } from "./features/worktrees/WorktreeQueryHandler"
 import { WorktreeMutationHandler } from "./features/worktrees/WorktreeMutationHandler"
 import { OAuthCallbackCoordinator } from "./features/providers/OAuthCallbackCoordinator"
+import { OAuthTokenHandler } from "./features/providers/OAuthTokenHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -21,6 +22,7 @@ import { CancelTaskHandler } from "./features/chat/cancelTask/CancelTaskHandler"
 import { BrowserDevToolsAdapter } from "./infrastructure/browser/BrowserDevToolsAdapter"
 import { NodeWorktreeOperationsAdapter } from "./infrastructure/worktree/NodeWorktreeOperationsAdapter"
 import { NodeOAuthCallbackListener } from "./infrastructure/auth/NodeOAuthCallbackListener"
+import { FetchOAuthTokenExchangeAdapter } from "./infrastructure/auth/FetchOAuthTokenExchangeAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -57,6 +59,7 @@ const server = new SidecarRpcServer(
 		backend.setWorktreeQueryHandler(worktreeQueries)
 		backend.setWorktreeMutationHandler(new WorktreeMutationHandler(worktreeOperations, worktreeQueries, interactionLogger))
 		backend.setOAuthCallbackServices(new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000)), new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)))
+		backend.setOAuthTokenHandler(new OAuthTokenHandler(new FetchOAuthTokenExchangeAdapter(), interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

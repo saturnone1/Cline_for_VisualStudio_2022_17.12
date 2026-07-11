@@ -34,6 +34,7 @@ import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQuer
 import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
 import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCallbackCoordinator"
 import type { OAuthCallbackListenerPort } from "../../application/ports/OAuthCallbackListenerPort"
+import type { OAuthTokenHandler } from "../../features/providers/OAuthTokenHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -251,10 +252,6 @@ import {
 	parseUrlFragmentParams,
 	hasConfiguredOAuthAuthorizationUrl,
 	hasConfiguredOAuthTokenExchange,
-	oauthProviderEnv,
-	redactUrl,
-	escapeHtml,
-	normalizeHttpUrl,
 } from "../auth/ProviderAuthSupport"
 
 type TrackedChangeSummary = {
@@ -348,6 +345,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private oauthCallbackPort = 0
 	private oauthCallbacks: OAuthCallbackCoordinator | null = null
 	private oauthCallbackListener: OAuthCallbackListenerPort | null = null
+	private oauthTokens: OAuthTokenHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -410,6 +408,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
 	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
 	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, listener: OAuthCallbackListenerPort) { this.oauthCallbacks = oauthCallbacks; this.oauthCallbackListener = listener }
+	setOAuthTokenHandler(oauthTokens: OAuthTokenHandler) { this.oauthTokens = oauthTokens }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -1526,7 +1525,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		if (!session.token && session.code && session.tokenExchange) {
-			await this.exchangeOAuthCodeForToken(session)
+			await this.requireOAuthTokens().exchangeAuthorizationCode(session)
 		}
 
 		if (session.token) {
@@ -1539,71 +1538,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			authStatus: session.status,
 			message: session.message || "OAuth callback did not provide a token.",
 		}
-	}
-
-	private async exchangeOAuthCodeForToken(session: OAuthCallbackSession) {
-		if (!session.code || !session.tokenExchange) {
-			return
-		}
-
-		const exchange = session.tokenExchange
-		const body = new URLSearchParams()
-		body.set("grant_type", "authorization_code")
-		body.set("code", session.code)
-		body.set("redirect_uri", session.callbackUrl)
-		body.set("client_id", exchange.clientId)
-		if (exchange.clientSecret && exchange.authMethod !== "client_secret_basic") {
-			body.set("client_secret", exchange.clientSecret)
-		}
-		if (exchange.scope) {
-			body.set("scope", exchange.scope)
-		}
-		if (exchange.codeVerifier) {
-			body.set("code_verifier", exchange.codeVerifier)
-		}
-
-		const headers: Record<string, string> = {
-			"content-type": "application/x-www-form-urlencoded",
-			accept: "application/json",
-		}
-		if (exchange.clientSecret && exchange.authMethod === "client_secret_basic") {
-			headers.authorization = `Basic ${Buffer.from(`${exchange.clientId}:${exchange.clientSecret}`).toString("base64")}`
-		}
-
-		this.logger.log("sidecar", "oauthTokenExchangeStarted", {
-			provider: session.provider,
-			state: session.state,
-			tokenUrl: redactUrl(exchange.tokenUrl),
-			authMethod: exchange.authMethod || "client_secret_post",
-		})
-
-		const response = await fetch(exchange.tokenUrl, { method: "POST", headers, body })
-		const text = await response.text()
-		const parsed = asRecord(tryParseJson(text) ?? {})
-		if (!response.ok) {
-			const error = getString(parsed, "error_description") || getString(parsed, "error") || truncateText(text, 500)
-			throw new Error(`Token endpoint returned HTTP ${response.status}: ${error || response.statusText}`)
-		}
-
-		const accessToken = getString(parsed, "access_token") || getString(parsed, "token")
-		if (!accessToken) {
-			throw new Error("Token endpoint response did not include access_token.")
-		}
-
-		const expiresIn = getNumber(parsed, "expires_in")
-		session.token = accessToken
-		session.refreshToken = getString(parsed, "refresh_token") || undefined
-		session.tokenType = getString(parsed, "token_type") || undefined
-		session.expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : undefined
-		session.tokenResponse = parsed
-		session.status = "received"
-		session.message = "OAuth token exchange completed. Saving credential for LIG VS."
-		this.logger.log("sidecar", "oauthTokenExchangeCompleted", {
-			provider: session.provider,
-			state: session.state,
-			hasRefreshToken: Boolean(session.refreshToken),
-			expiresIn: expiresIn || undefined,
-		})
 	}
 
 	private async persistOAuthTokenSession(session: OAuthCallbackSession) {
@@ -3723,6 +3657,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireOAuthCallbackListener() {
 		if (!this.oauthCallbackListener) throw new Error("OAuth callback listener is not attached.")
 		return this.oauthCallbackListener
+	}
+
+	private requireOAuthTokens() {
+		if (!this.oauthTokens) throw new Error("OAuth token handler is not attached.")
+		return this.oauthTokens
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
