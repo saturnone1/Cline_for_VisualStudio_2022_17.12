@@ -30,6 +30,8 @@ import { FetchOAuthTokenExchangeAdapter } from "./infrastructure/auth/FetchOAuth
 import { ProviderCredentialEnvironmentAdapter } from "./infrastructure/auth/ProviderCredentialEnvironmentAdapter"
 import { VisualStudioProviderAuthUiAdapter } from "./infrastructure/auth/VisualStudioProviderAuthUiAdapter"
 import { ProviderOAuthAuthorizationAdapter } from "./infrastructure/auth/ProviderOAuthAuthorizationAdapter"
+import { ScheduledAgentHandler } from "./features/scheduledAgents/ScheduledAgentHandler"
+import { LocalScheduledAgentStore } from "./infrastructure/persistence/LocalScheduledAgentStore"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -72,6 +74,7 @@ const server = new SidecarRpcServer(
 		backend.setOAuthCallbackServices(new OAuthAuthorizationHandler(oauthCallbacks, new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)), new ProviderOAuthAuthorizationAdapter(), interactionLogger, randomUUID), new OAuthCallbackHandler(oauthCallbacks, oauthTokenHandler, providerCredentials, interactionLogger))
 		backend.setProviderCredentialHandler(providerCredentials)
 		backend.setProviderAuthActionHandler(new ProviderAuthActionHandler(new VisualStudioProviderAuthUiAdapter(host), interactionLogger))
+		backend.setScheduledAgentHandler(new ScheduledAgentHandler(new LocalScheduledAgentStore(), () => backend.isScheduledAgentsEnabled()))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

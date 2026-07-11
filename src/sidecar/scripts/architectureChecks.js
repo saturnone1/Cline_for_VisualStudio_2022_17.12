@@ -78,6 +78,9 @@ if (router.includes("oauthCallbackServerListening") || router.includes("oauthCal
 if (router.includes("completeOAuthCallbackSession") || router.includes("oauthTokenExchangeFailed")) {
 	violations.push("VisualStudioWebviewBackend must delegate OAuth callback completion to OAuthCallbackHandler.")
 }
+if (router.includes("readScheduledAgentSpecs") || router.includes("writeScheduledAgentSpec") || router.includes("appendScheduledAgentRun")) {
+	violations.push("VisualStudioWebviewBackend must delegate scheduled agent persistence and orchestration to ScheduledAgentHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -161,12 +164,14 @@ for (const requiredFile of [
 	"application/ports/OAuthTokenExchangePort.ts",
 	"application/ports/ProviderCredentialEnvironmentPort.ts",
 	"application/ports/ProviderAuthUiPort.ts",
+	"application/ports/ScheduledAgentStorePort.ts",
 	"application/dto/OAuthContracts.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
 	"application/useCases/TaskLifecycleUseCase.ts",
 	"application/useCases/TaskSessionUseCase.ts",
 	"infrastructure/persistence/JsonStateStore.ts",
+	"infrastructure/persistence/LocalScheduledAgentStore.ts",
 	"infrastructure/browser/BrowserDevToolsAdapter.ts",
 	"infrastructure/conversation/ConversationSupport.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
@@ -208,6 +213,7 @@ for (const requiredFile of [
 	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
+	"features/scheduledAgents/ScheduledAgentHandler.ts",
 	"features/checkpoints/CheckpointPolicy.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {

@@ -51,16 +51,11 @@ import {
 } from "../browser/BrowserDevToolsAdapter"
 import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
 import {
-	appendScheduledAgentRun,
-	deleteScheduledAgentSpecFile,
 	discoverLocalPlugins,
 	getSettingsPath,
 	getSidecarDataPath,
-	readScheduledAgentRuns,
-	readScheduledAgentSpecs,
-	writeScheduledAgentSpec,
 } from "../persistence/LocalAutomationStore"
-import { getScheduledSpecId } from "../../features/scheduledAgents/ScheduledAgentPolicy"
+import type { ScheduledAgentHandler } from "../../features/scheduledAgents/ScheduledAgentHandler"
 import { createCheckpointDiffDescription, resolveCheckpointRestoreScope } from "../../features/checkpoints/CheckpointPolicy"
 import {
 	type HookExecutionResult,
@@ -337,6 +332,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private oauthCallbackHandler: OAuthCallbackHandler | null = null
 	private providerCredentials: ProviderCredentialHandler | null = null
 	private providerAuthActions: ProviderAuthActionHandler | null = null
+	private scheduledAgents: ScheduledAgentHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -401,6 +397,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setOAuthCallbackServices(oauthAuthorization: OAuthAuthorizationHandler, oauthCallbackHandler: OAuthCallbackHandler) { this.oauthAuthorization = oauthAuthorization; this.oauthCallbackHandler = oauthCallbackHandler }
 	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
 	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
+	setScheduledAgentHandler(scheduledAgents: ScheduledAgentHandler) { this.scheduledAgents = scheduledAgents }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -2755,83 +2752,22 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async listScheduledAgentSpecs() {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		const specs = readScheduledAgentSpecs(workspaceRoot)
-		return {
-			success: true,
-			supported: true,
-			workspaceRoot,
-			specs,
-			items: specs,
-			recentRuns: readScheduledAgentRuns(),
-			automationEnabled: this.isScheduledAgentsEnabled(),
-			source: workspaceRoot ? path.join(workspaceRoot, ".cline", "cron") : "",
-			message: this.isScheduledAgentsEnabled()
-				? ""
-				: "Scheduled agents are local-only and disabled until scheduled agents are enabled in Visual Studio settings.",
-		}
+		return this.requireScheduledAgents().list(await this.getPrimaryWorkspaceRoot())
 	}
 
 	private async saveScheduledAgentSpec(message: unknown) {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		if (!workspaceRoot) {
-			throw new Error("No workspace is open for scheduled agent specs.")
-		}
-		const spec = writeScheduledAgentSpec(workspaceRoot, asRecord(message))
-		return {
-			...(await this.listScheduledAgentSpecs()),
-			success: true,
-			supported: true,
-			spec,
-		}
+		return this.requireScheduledAgents().save(message, workspaceRoot)
 	}
 
 	private async deleteScheduledAgentSpec(message: unknown) {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		if (!workspaceRoot) {
-			throw new Error("No workspace is open for scheduled agent specs.")
-		}
-		const specId = getScheduledSpecId(asRecord(message))
-		const deleted = deleteScheduledAgentSpecFile(workspaceRoot, specId)
-		return {
-			...(await this.listScheduledAgentSpecs()),
-			success: deleted,
-			supported: true,
-			deleted,
-			specId,
-		}
+		return this.requireScheduledAgents().delete(message, workspaceRoot)
 	}
 
 	private async runScheduledAgentSpec(message: unknown) {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-		if (!workspaceRoot) {
-			throw new Error("No workspace is open for scheduled agent specs.")
-		}
-		const request = asRecord(message)
-		const specId = getScheduledSpecId(request)
-		const spec =
-			readScheduledAgentSpecs(workspaceRoot).find((item) => getString(item, "id") === specId || getString(item, "name") === specId || getString(item, "fileName") === specId) ||
-			writeScheduledAgentSpec(workspaceRoot, request)
-		const prompt = getString(request, "prompt") || getString(spec, "prompt") || getString(spec, "task") || getString(spec, "text")
-		if (!prompt.trim()) {
-			throw new Error("Scheduled agent spec does not contain a prompt/task.")
-		}
-		const run = appendScheduledAgentRun({
-			specId: getString(spec, "id"),
-			name: getString(spec, "name"),
-			workspaceRoot,
-			status: "started",
-			startedAt: Date.now(),
-			manual: true,
-		})
-		await this.startNewTask({ text: prompt, workspacePath: workspaceRoot, taskSessionId: run.runId }, { broadcast: false })
-		return {
-			success: true,
-			supported: true,
-			run,
-			spec,
-			recentRuns: readScheduledAgentRuns(),
-		}
+		return this.requireScheduledAgents().run(message, workspaceRoot, async (request) => { await this.startNewTask(request, { broadcast: false }) })
 	}
 
 	private async getLocalPluginConfigStatus() {
@@ -3260,6 +3196,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireProviderAuthActions() {
 		if (!this.providerAuthActions) throw new Error("Provider auth action handler is not attached.")
 		return this.providerAuthActions
+	}
+
+	private requireScheduledAgents() {
+		if (!this.scheduledAgents) throw new Error("Scheduled agent handler is not attached.")
+		return this.scheduledAgents
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
