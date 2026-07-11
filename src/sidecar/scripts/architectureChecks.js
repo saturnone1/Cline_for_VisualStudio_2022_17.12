@@ -131,7 +131,7 @@ if (router.includes("handleAgentEvent(event.event.raw")) {
 	violations.push("VisualStudioWebviewBackend must consume the semantic AgentEvent instead of reparsing raw SDK events at ingress.")
 }
 const sdkEventTranslator = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventTranslator.ts"), "utf8")
-for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
+for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ToolCallUpdated", "IterationCompleted", "NoticeReceived", "ToolFinished", "AssistantMessageReceived", "RunFinished", "RunFailed", "UsageUpdated", "AgentDone", "AgentError", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
 	if (!sdkEventTranslator.includes(`\"${eventName}\"`)) {
 		violations.push(`ClineSdkEventTranslator is missing semantic event: ${eventName}`)
 	}

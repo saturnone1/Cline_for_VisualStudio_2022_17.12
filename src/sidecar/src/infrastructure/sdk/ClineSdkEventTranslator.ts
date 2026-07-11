@@ -69,9 +69,19 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 			raw,
 		}
 	}
+	if (type === "content_update" && contentType === "tool") return { type: "ToolCallUpdated", sessionId, toolName: readString(raw.toolName), update: raw.update, raw }
 	if (type === "iteration_start") {
 		return { type: "AgentStarted", sessionId, iteration: readNumber(raw.iteration), raw }
 	}
+	if (type === "iteration_end") { const toolCallCount = readNumber(raw.toolCallCount) || 0; return { type: "IterationCompleted", sessionId, iteration: readNumber(raw.iteration), toolCallCount, hadToolCalls: raw.hadToolCalls === true || toolCallCount > 0, raw } }
+	if (type === "notice") return { type: "NoticeReceived", sessionId, message: readString(raw.message), reason: readString(raw.reason), noticeType: readString(raw.noticeType), raw }
+	if (type === "tool-finished") return { type: "ToolFinished", sessionId, toolCall: asRecord(raw.toolCall), result: asRecord(raw.result), message: raw.message, raw }
+	if (type === "assistant-message") return { type: "AssistantMessageReceived", sessionId, message: asRecord(raw.message), raw }
+	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), raw }
+	if (type === "run-failed") return { type: "RunFailed", sessionId, reason: readString(raw.reason) || "failed", raw }
+	if (type === "usage") return { type: "UsageUpdated", sessionId, usage: asRecord(raw.usage), raw }
+	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), raw }
+	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, raw }
 	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }
 }
 

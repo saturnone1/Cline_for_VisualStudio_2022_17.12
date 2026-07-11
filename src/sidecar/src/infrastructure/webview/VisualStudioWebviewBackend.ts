@@ -4231,7 +4231,17 @@ function legacyProjectionDiscriminator(event: AgentEvent) {
 		case "ReasoningDelta": return { type: event.phase === "start" ? "content_start" : event.phase === "end" ? "content_end" : "content_update", contentType: "reasoning" }
 		case "ToolCallRequested": return { type: "content_start", contentType: "tool" }
 		case "ToolCallCompleted": return { type: "content_end", contentType: "tool" }
+		case "ToolCallUpdated": return { type: "content_update", contentType: "tool" }
 		case "AgentStarted": return { type: "iteration_start", contentType: "" }
+		case "IterationCompleted": return { type: "iteration_end", contentType: "" }
+		case "NoticeReceived": return { type: "notice", contentType: "" }
+		case "ToolFinished": return { type: "tool-finished", contentType: "" }
+		case "AssistantMessageReceived": return { type: "assistant-message", contentType: "" }
+		case "RunFinished": return { type: "run-finished", contentType: "" }
+		case "RunFailed": return { type: "run-failed", contentType: "" }
+		case "UsageUpdated": return { type: "usage", contentType: "" }
+		case "AgentDone": return { type: "done", contentType: "" }
+		case "AgentError": return { type: "error", contentType: "" }
 		case "AgentEventUnknown": return { type: event.originalType, contentType: typeof event.raw.contentType === "string" ? event.raw.contentType : "" }
 		case "AgentCompleted": return { type: "done", contentType: "" }
 		case "AgentFailed": return { type: "error", contentType: "" }
