@@ -127,6 +127,9 @@ const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk"
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
 	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")
 }
+if (router.includes("handleAgentEvent(event.event.raw")) {
+	violations.push("VisualStudioWebviewBackend must consume the semantic AgentEvent instead of reparsing raw SDK events at ingress.")
+}
 const sdkEventTranslator = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventTranslator.ts"), "utf8")
 for (const eventName of ["AgentStarted", "TextDelta", "ReasoningDelta", "ToolCallRequested", "ToolCallCompleted", "ApprovalRequested", "AgentCompleted", "AgentFailed"]) {
 	if (!sdkEventTranslator.includes(`\"${eventName}\"`)) {

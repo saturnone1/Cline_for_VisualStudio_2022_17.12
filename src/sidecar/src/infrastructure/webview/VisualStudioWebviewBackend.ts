@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentEvent, AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -524,8 +524,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				})
 				return
 			}
-			this.markSendLatencyFirstSdkEvent(sessionId, getString(event.event.raw, "type") || type)
-			this.handleAgentEvent(event.event.raw, sessionId)
+			this.markSendLatencyFirstSdkEvent(sessionId, event.event.type)
+			this.handleAgentEvent(event.event, sessionId)
 			return
 		}
 
@@ -3005,9 +3005,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return !!currentTaskId && currentTaskId === sessionId
 	}
 
-	private handleAgentEvent(event: Record<string, unknown>, sessionId = "") {
-		const type = getString(event, "type")
-		const contentType = getString(event, "contentType")
+	private handleAgentEvent(semanticEvent: AgentEvent, sessionId = semanticEvent.sessionId) {
+		const event = semanticEvent.raw
+		const { type, contentType } = legacyProjectionDiscriminator(semanticEvent)
 		let shouldBroadcastState = true
 		if (sessionId) {
 			this.bindCurrentTaskToSession(sessionId)
@@ -4222,6 +4222,20 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			}
 			this.refreshStateStreamsInBackground()
 		}, delayMs).unref?.()
+	}
+}
+
+function legacyProjectionDiscriminator(event: AgentEvent) {
+	switch (event.type) {
+		case "TextDelta": return { type: event.phase === "start" ? "content_start" : event.phase === "end" ? "content_end" : "content_update", contentType: "text" }
+		case "ReasoningDelta": return { type: event.phase === "start" ? "content_start" : event.phase === "end" ? "content_end" : "content_update", contentType: "reasoning" }
+		case "ToolCallRequested": return { type: "content_start", contentType: "tool" }
+		case "ToolCallCompleted": return { type: "content_end", contentType: "tool" }
+		case "AgentStarted": return { type: "iteration_start", contentType: "" }
+		case "AgentEventUnknown": return { type: event.originalType, contentType: typeof event.raw.contentType === "string" ? event.raw.contentType : "" }
+		case "AgentCompleted": return { type: "done", contentType: "" }
+		case "AgentFailed": return { type: "error", contentType: "" }
+		default: return { type: "", contentType: "" }
 	}
 }
 
