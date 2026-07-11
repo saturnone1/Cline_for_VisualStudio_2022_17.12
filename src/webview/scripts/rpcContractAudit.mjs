@@ -20,9 +20,36 @@ for (const service of [
 	"McpServiceClient",
 	"AccountServiceClient",
 	"FileServiceClient",
+	"ModelsServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"refreshClineRecommendedModelsRpc",
+	"getOllamaModels",
+	"getLmStudioModels",
+	"getAihubmixModels",
+	"getVsCodeLmModels",
+	"getSapAiCoreModels",
+	"refreshOpenRouterModelsRpc",
+	"refreshHicapModels",
+	"refreshLiteLlmModelsRpc",
+	"refreshBasetenModelsRpc",
+	"refreshVercelAiGatewayModelsRpc",
+	"refreshClineModelsRpc",
+	"refreshGroqModelsRpc",
+	"refreshHuggingFaceModels",
+	"refreshRequestyModels",
+	"refreshOcaModels",
+	"refreshOpenAiModels",
+	"updateApiConfiguration",
+	"updateApiConfigurationProto",
+]) {
+	if (!new RegExp(`\\b${operation}(?:<[^>]+>)?[:(]`).test(source)) {
+		violations.push(`ModelsServiceContract is missing ${operation}.`)
 	}
 }
 

@@ -1,6 +1,7 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
 import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
+import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
 
 const encodeMessage = <TRequest>(request: TRequest) => request
@@ -236,6 +237,45 @@ interface FileServiceContract {
 	deleteSkillFile: UnaryOperation<RpcRequest>
 }
 
+interface RecommendedModel extends RpcRequest {
+	id: string
+	name?: string
+	description: string
+	tags: string[]
+}
+
+type ProviderModelsResponse = RpcRequest & { models: Record<string, ModelInfo>; error?: string }
+type OcaModelsResponse = RpcRequest & { models: Record<string, OcaModelInfo>; error?: string }
+type StringModelsResponse = RpcRequest & { values: string[] }
+
+interface ModelsServiceContract {
+	refreshClineRecommendedModelsRpc: UnaryOperation<RpcRequest, RpcRequest & {
+		recommended: RecommendedModel[]
+		free: RecommendedModel[]
+	}>
+	getOllamaModels: UnaryOperation<RpcRequest, StringModelsResponse>
+	getLmStudioModels: UnaryOperation<RpcRequest, StringModelsResponse>
+	getAihubmixModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	getVsCodeLmModels: UnaryOperation<RpcRequest, RpcRequest & { models: RpcRequest[] }>
+	getSapAiCoreModels: UnaryOperation<RpcRequest, RpcRequest & {
+		deployments: RpcRequest[]
+		orchestrationAvailable: boolean
+	}>
+	refreshOpenRouterModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshHicapModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshLiteLlmModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshBasetenModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshVercelAiGatewayModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshClineModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshGroqModelsRpc: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshHuggingFaceModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshRequestyModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	refreshOcaModels: UnaryOperation<RpcRequest, OcaModelsResponse>
+	refreshOpenAiModels: UnaryOperation<RpcRequest, ProviderModelsResponse>
+	updateApiConfiguration: UnaryOperation<RpcRequest>
+	updateApiConfigurationProto: UnaryOperation<RpcRequest>
+}
+
 interface WorktreeInfo extends RpcRequest {
 	path: string
 	branch?: string
@@ -337,7 +377,7 @@ export const BrowserServiceClient = createServiceClient<BrowserServiceContract>(
 export const CheckpointsServiceClient = createServiceClient<CheckpointsServiceContract>("CheckpointsService")
 export const FileServiceClient = createServiceClient<FileServiceContract>("FileService")
 export const McpServiceClient = createServiceClient<McpServiceContract>("McpService")
-export const ModelsServiceClient: any = createServiceClient("ModelsService")
+export const ModelsServiceClient = createServiceClient<ModelsServiceContract>("ModelsService")
 export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
 export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")
 export const StateServiceClient: any = createServiceClient("StateService")
