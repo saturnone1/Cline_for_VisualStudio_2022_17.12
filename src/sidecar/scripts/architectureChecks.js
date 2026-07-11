@@ -245,6 +245,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/AgentLifecycleEventProjector.ts",
 	"infrastructure/conversation/AgentAuxiliaryEventProjector.ts",
 	"infrastructure/conversation/AgentSnapshotEventProjector.ts",
+	"infrastructure/conversation/AgentChunkEventProjector.ts",
 	"features/taskHistory/TaskHistorySync.ts",
 	"features/taskHistory/TaskHistoryCommands.ts",
 	"features/taskHistory/TaskTranscriptHydrator.ts",

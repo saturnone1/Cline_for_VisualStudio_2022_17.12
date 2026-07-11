@@ -20,7 +20,7 @@ import {
 	loadInitialState,
 } from "./WebviewState"
 import { isTerminalTaskStatus, type TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
-import type { AgentChunkRuntimeEvent, AgentEvent, AgentRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
+import type { AgentEvent, AgentRuntimeEvent, WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { SendMessageCommand } from "../../features/chat/sendMessage/SendMessageCommand"
 import type { SendMessageHandler } from "../../features/chat/sendMessage/SendMessageHandler"
@@ -74,6 +74,7 @@ import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector
 import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
 import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEventProjector"
 import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
+import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
@@ -148,9 +149,6 @@ import {
 	extractCompletionTextFromResult,
 	completionCandidateToText,
 	completionContentBlocksToText,
-	agentChunkToTranscriptText,
-	agentChunkToFoldedReasoningText,
-	agentChunkToTerminalResult,
 	agentChunkRecordToTerminalResult,
 	agentChunkStringToTranscriptText,
 	agentChunkStringToFoldedReasoningText,
@@ -170,7 +168,6 @@ import {
 	mergeTextDelta,
 	looksLikeTokenizedReasoning,
 	looksLikeReasoningNarration,
-	isToolTranscript,
 	toolInputToText,
 	toolResultToText,
 	stringifyPretty,
@@ -254,6 +251,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
 	private readonly agentAuxiliaryEvents: AgentAuxiliaryEventProjector
 	private readonly agentSnapshotEvents: AgentSnapshotEventProjector
+	private readonly agentChunkEvents: AgentChunkEventProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
@@ -332,6 +330,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
 		this.agentAuxiliaryEvents = new AgentAuxiliaryEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), addMessage: (message) => { this.addMessage(message) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentSnapshotEvents = new AgentSnapshotEventProjector({ bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), noteActivity: (reason) => this.noteTaskActivity(reason), activeText: () => this.getActivePartialText(), updateTask: (updates) => this.updateCurrentTaskItem(updates), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) } })
+		this.agentChunkEvents = new AgentChunkEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), noteQuietActivity: (reason) => this.noteQuietTaskActivity(reason), finishTask: (status, text) => this.finishSdkTask(this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), status, text), addMessage: (message) => { this.addMessage(message) }, recordTool: (text) => this.recordToolActivity("tool", text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, schedulePartial: () => this.schedulePartialStateBroadcast(), recentTexts: () => this.state.clineMessages.slice(-3).map((message) => getString(message, "text")), commandOutputLimit: () => readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000), agentTranscriptLimit: () => readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000), logSkipped: (chunk) => this.logger.log("sidecar", "sdkAgentChunkSkippedForUi", summarizeAgentChunkForLog(chunk)) })
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
 	}
@@ -579,7 +578,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return
 			}
 			this.markSendLatencyFirstSdkEvent(sessionId, type)
-			this.handleSessionChunk(event)
+			this.agentChunkEvents.handle(event)
 			return
 		}
 
@@ -2378,83 +2377,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		} else {
 			this.state.lastDismissedInfoBannerVersion = version
 		}
-	}
-
-	private handleSessionChunk(event: AgentChunkRuntimeEvent) {
-		const { stream } = event
-		const chunk = typeof event.chunk === "string" ? event.chunk : ""
-		const chunkRecord = asRecord(event.chunk)
-		if (!chunk && Object.keys(chunkRecord).length === 0) {
-			return
-		}
-
-		if (stream === "agent") {
-			this.noteQuietTaskActivity("chunk:agent")
-			this.addAgentTranscriptChunk(event.chunk)
-			return
-		}
-
-		this.noteTaskActivity(`chunk:${stream || "unknown"}`)
-		const text = truncateText(chunk, readPositiveIntEnv("VSCLINE_COMMAND_OUTPUT_CHARS", 12000))
-		this.addMessage({
-			type: "say",
-			say: stream === "stderr" ? "command_output" : "tool",
-			text,
-			isCollapsed: true,
-			isExpanded: false,
-		})
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
-	private addAgentTranscriptChunk(chunk: unknown) {
-		const terminal = agentChunkToTerminalResult(chunk)
-		if (terminal) {
-			this.noteTaskActivity(terminal.reason)
-			this.finishSdkTask(this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), terminal.status, terminal.text)
-			this.updateCurrentTaskItem()
-			this.broadcastState().catch((error) => console.error(error))
-			return
-		}
-
-		const text = agentChunkToTranscriptText(chunk)
-		if (!text.trim()) {
-			const reasoning = agentChunkToFoldedReasoningText(chunk)
-			if (reasoning.trim()) {
-				this.upsertFoldedReasoningText(reasoning)
-				this.updateCurrentTaskItem()
-				this.schedulePartialStateBroadcast()
-				return
-			}
-			this.logger.log("sidecar", "sdkAgentChunkSkippedForUi", summarizeAgentChunkForLog(chunk))
-			return
-		}
-
-		const capped = truncateText(text, readPositiveIntEnv("VSCLINE_AGENT_TRANSCRIPT_CHARS", 12000))
-		if (this.isDuplicateRecentTranscript(capped)) {
-			return
-		}
-
-		if (isToolTranscript(capped)) {
-			this.recordToolActivity("tool", capped)
-		} else {
-			this.addMessage({
-				type: "say",
-				say: "text",
-				text: capped,
-			})
-		}
-		this.updateCurrentTaskItem()
-		this.broadcastState().catch((error) => console.error(error))
-	}
-
-	private isDuplicateRecentTranscript(text: string) {
-		const normalized = normalizeTranscriptText(text)
-		if (!normalized) {
-			return true
-		}
-
-		return this.state.clineMessages.slice(-3).some((message) => normalizeTranscriptText(getString(message, "text")) === normalized)
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
