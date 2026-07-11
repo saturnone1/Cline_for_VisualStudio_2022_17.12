@@ -298,7 +298,27 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
-		this.taskTranscriptHydrator = new TaskTranscriptHydrator({ isAvailable: () => Boolean(this.clineSdk && this.taskSessions), readCurrentTask: () => this.state.currentTaskItem, activeSessionId: () => this.clineSdk?.status.activeSessionId || "", hasLiveProjection: () => Boolean(this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs), readMessages: () => this.state.clineMessages, loadTranscript: (taskId) => this.taskSessions?.load(taskId) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), projectMessages: (messages, task) => sdkMessagesToClineMessages(messages, task), applySelected: (taskId, task, messages) => { this.state.currentTaskItem = task; this.state.clineMessages = messages; this.rememberTaskSnapshot(taskId, task, messages); this.schedulePersistedStateSave() }, applyCompleted: (taskId, task, messages) => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.conversationProjection.activePartialTextTs = null; this.conversationProjection.activeReasoningTextTs = null; this.conversationProjection.activeToolActivityTs = null; this.conversationProjection.activeAssistantTextBuffer = ""; this.state.currentTaskItem = task; this.state.clineMessages = messages; this.finalizeOpenPartialMessages(); this.addCompletionResultMarker("completed"); this.updateCurrentTaskItem(); this.rememberTaskSnapshot(taskId, task, this.state.clineMessages); this.schedulePersistedStateSave() }, summarizeMessage: (message) => summarizeClineMessageForLog(message), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
+			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
+			readCurrentTask: () => this.state.currentTaskItem,
+			activeSessionId: () => this.clineSdk?.status.activeSessionId || "",
+			hasLiveProjection: () => Boolean(this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs),
+			readMessages: () => this.state.clineMessages,
+			loadTranscript: (taskId) => this.taskSessions?.load(taskId) ?? Promise.resolve(null),
+			activateTranscript: (taskId) => this.taskSessions!.activateAndRead(taskId),
+			getSnapshot: (taskId) => this.getTaskSnapshot(taskId),
+			prepareActivation: (taskId) => { this.closingSessionIds.delete(taskId) },
+			clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason),
+			projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)),
+			projectMessages: (messages, task) => sdkMessagesToClineMessages(messages, task),
+			applySelected: (taskId, task, messages) => { this.state.currentTaskItem = task; this.state.clineMessages = messages; this.rememberTaskSnapshot(taskId, task, messages); this.schedulePersistedStateSave() },
+			applyShown: (taskId, task, messages) => { this.state.currentTaskItem = task; this.state.clineMessages = messages; this.rememberTaskSnapshot(taskId, task, messages); this.stateStore.save(createPersistedStateSnapshot(this.state)) },
+			applyCompleted: (taskId, task, messages) => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.conversationProjection.activePartialTextTs = null; this.conversationProjection.activeReasoningTextTs = null; this.conversationProjection.activeToolActivityTs = null; this.conversationProjection.activeAssistantTextBuffer = ""; this.state.currentTaskItem = task; this.state.clineMessages = messages; this.finalizeOpenPartialMessages(); this.addCompletionResultMarker("completed"); this.updateCurrentTaskItem(); this.rememberTaskSnapshot(taskId, task, this.state.clineMessages); this.schedulePersistedStateSave() },
+			summarizeMessage: (message) => summarizeClineMessageForLog(message),
+			log: (event, details) => this.logger.log("sidecar", event, details),
+			broadcast: () => this.broadcastState(),
+			isSessionNotFound: (error) => isSessionNotFoundError(error),
+		})
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
@@ -2185,54 +2205,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async showTaskWithId(taskId: string) {
-		if (String(this.state.currentTaskItem?.id || "") === taskId && this.state.clineMessages.length > 0) {
-			this.logger.log("sidecar", "showTaskWithId.currentStateFallback", { sessionId: taskId })
-			await this.broadcastState()
-			return
-		}
-
-		const snapshot = this.getTaskSnapshot(taskId)
-		if (snapshot) {
-			this.clearLiveInteractionState("showTaskWithId:snapshot")
-			this.state.currentTaskItem = { ...snapshot.taskItem }
-			this.state.clineMessages = snapshot.messages.map((message) => ({ ...message }))
-			this.stateStore.save(createPersistedStateSnapshot(this.state))
-			await this.broadcastState()
-			return
-		}
-
-		if (this.clineSdk && this.taskSessions && taskId) {
-			this.clearLiveInteractionState("showTaskWithId")
-			this.closingSessionIds.delete(taskId)
-			try {
-				const transcript = await this.taskSessions.activateAndRead(taskId)
-				const session = asRecord(transcript.session)
-				const messages = transcript.messages
-				const taskItem = sdkSessionToHistoryItem(session)
-				const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
-				this.logger.log("sidecar", "sdkMessagesHydrated", {
-					source: "showTaskWithId",
-					sessionId: taskId,
-					sdkCount: Array.isArray(messages) ? messages.length : 0,
-					clineCount: clineMessages.length,
-					messages: clineMessages.map(summarizeClineMessageForLog),
-				})
-				this.state.currentTaskItem = taskItem
-				this.state.clineMessages = clineMessages
-				this.rememberTaskSnapshot(taskId, taskItem, this.state.clineMessages)
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				await this.broadcastState()
-				return
-			} catch (error) {
-				if (!isSessionNotFoundError(error)) {
-					throw error
-				}
-				this.logger.log("sidecar", "showTaskWithId.sdkMissingFallback", {
-					sessionId: taskId,
-					error: error instanceof Error ? error.message : String(error),
-				})
-			}
-		}
+		await this.taskTranscriptHydrator.show(taskId)
 	}
 
 	private async refreshSelectedTaskFromSdk() {

@@ -9,16 +9,53 @@ type Callbacks = Readonly<{
 	hasLiveProjection: () => boolean
 	readMessages: () => readonly Message[]
 	loadTranscript: (taskId: string) => Promise<Transcript | null>
+	activateTranscript: (taskId: string) => Promise<Transcript>
+	getSnapshot: (taskId: string) => { taskItem: TaskHistoryItem; messages: Message[] } | null
+	prepareActivation: (taskId: string) => void
+	clearLiveInteraction: (reason: string) => void
 	projectSession: (session: unknown) => TaskHistoryItem
 	projectMessages: (messages: unknown[], task: TaskHistoryItem) => Message[]
 	applySelected: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
+	applyShown: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
 	applyCompleted: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
 	summarizeMessage: (message: Message) => unknown
 	log: (event: string, details: Record<string, unknown>) => void
+	broadcast: () => Promise<void>
+	isSessionNotFound: (error: unknown) => boolean
 }>
 
 export class TaskTranscriptHydrator {
 	constructor(private readonly callbacks: Callbacks) {}
+
+	async show(taskId: string) {
+		const current = this.callbacks.readCurrentTask()
+		if (String(current?.id || "") === taskId && this.callbacks.readMessages().length > 0) {
+			this.callbacks.log("showTaskWithId.currentStateFallback", { sessionId: taskId })
+			await this.callbacks.broadcast()
+			return
+		}
+		const snapshot = this.callbacks.getSnapshot(taskId)
+		if (snapshot) {
+			this.callbacks.clearLiveInteraction("showTaskWithId:snapshot")
+			this.callbacks.applyShown(taskId, { ...snapshot.taskItem }, snapshot.messages.map((message) => ({ ...message })))
+			await this.callbacks.broadcast()
+			return
+		}
+		if (!this.callbacks.isAvailable() || !taskId) return
+		this.callbacks.clearLiveInteraction("showTaskWithId")
+		this.callbacks.prepareActivation(taskId)
+		try {
+			const transcript = await this.callbacks.activateTranscript(taskId)
+			const projected = this.project(transcript, false, false)
+			if (!projected) return
+			this.callbacks.log("sdkMessagesHydrated", { source: "showTaskWithId", sessionId: taskId, sdkCount: projected.sdkCount, clineCount: projected.messages.length, messages: projected.messages.map(this.callbacks.summarizeMessage) })
+			this.callbacks.applyShown(taskId, projected.task, projected.messages)
+			await this.callbacks.broadcast()
+		} catch (error) {
+			if (!this.callbacks.isSessionNotFound(error)) throw error
+			this.callbacks.log("showTaskWithId.sdkMissingFallback", { sessionId: taskId, error: stringify(error) })
+		}
+	}
 
 	async refreshSelected() {
 		const current = this.callbacks.readCurrentTask()
@@ -53,8 +90,12 @@ export class TaskTranscriptHydrator {
 
 	private async load(taskId: string, requireMessages: boolean) {
 		const transcript = await this.callbacks.loadTranscript(taskId).catch(() => null)
+		return transcript ? this.project(transcript, requireMessages) : null
+	}
+
+	private project(transcript: Transcript, requireMessages: boolean, requireSession = true) {
 		const session = asRecord(transcript?.session)
-		if (!Object.keys(session).length) return null
+		if (requireSession && !Object.keys(session).length) return null
 		const sdkMessages = transcript?.messages
 		if (!Array.isArray(sdkMessages) || (requireMessages && !sdkMessages.length)) return null
 		const task = this.callbacks.projectSession(session)
@@ -67,3 +108,4 @@ export class TaskTranscriptHydrator {
 }
 
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
+function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }
