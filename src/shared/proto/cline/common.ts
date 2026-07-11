@@ -1,19 +1,19 @@
 import { createProtoStub } from "../protoStub"
 
-export type Boolean = any
-export const Boolean = createProtoStub("Boolean")
+export type Boolean = { value: boolean }
+export const Boolean = createProtoStub<Boolean>("Boolean")
 
-export type BooleanRequest = any
-export const BooleanRequest = createProtoStub("BooleanRequest")
+export type BooleanRequest = { value?: boolean }
+export const BooleanRequest = createProtoStub<BooleanRequest>("BooleanRequest")
 
-export type EmptyRequest = any
-export const EmptyRequest = createProtoStub("EmptyRequest")
+export type EmptyRequest = Record<string, never>
+export const EmptyRequest = createProtoStub<EmptyRequest>("EmptyRequest")
 
-export type Int64Request = any
-export const Int64Request = createProtoStub("Int64Request")
+export type Int64Request = { value: number }
+export const Int64Request = createProtoStub<Int64Request>("Int64Request")
 
-export type StringArrayRequest = any
-export const StringArrayRequest = createProtoStub("StringArrayRequest")
+export type StringArrayRequest = { value: string[] }
+export const StringArrayRequest = createProtoStub<StringArrayRequest>("StringArrayRequest")
 
-export type StringRequest = any
-export const StringRequest = createProtoStub("StringRequest")
+export type StringRequest = { value: string }
+export const StringRequest = createProtoStub<StringRequest>("StringRequest")

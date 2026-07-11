@@ -1,21 +1,21 @@
 type ProtoRecord = Record<string, unknown>
 
-export interface ProtoFactory {
-	<T>(value: T): T
-	create<T extends ProtoRecord>(value?: T): T
-	fromJson<T>(value: T): T
-	fromJSON<T>(value: T): T
-	fromBinary<T>(value: T): T
-	toJson<T>(value: T): T
-	toJSON<T>(value: T): T
-	toBinary<T>(value: T): T
+export interface ProtoFactory<TMessage = ProtoRecord> {
+	<TValue extends TMessage>(value: TValue): TValue
+	create<TValue extends TMessage = TMessage>(value?: TValue): TValue
+	fromJson<TValue extends TMessage = TMessage>(value: TValue): TValue
+	fromJSON<TValue extends TMessage = TMessage>(value: TValue): TValue
+	fromBinary<TValue extends TMessage = TMessage>(value: TValue): TValue
+	toJson<TValue extends TMessage = TMessage>(value: TValue): TValue
+	toJSON<TValue extends TMessage = TMessage>(value: TValue): TValue
+	toBinary<TValue extends TMessage = TMessage>(value: TValue): TValue
 	equals(left: unknown, right: unknown): boolean
 	[key: string]: unknown
 	[key: symbol]: unknown
 }
 
-export const createProtoStub = (name: string): ProtoFactory => {
-	const stubTarget = (<T>(value: T) => value) as ProtoFactory
+export const createProtoStub = <TMessage = ProtoRecord>(name: string): ProtoFactory<TMessage> => {
+	const stubTarget = (<TValue extends TMessage>(value: TValue) => value) as ProtoFactory<TMessage>
 
 	return new Proxy(stubTarget, {
 		get: (_target, property) => {

@@ -21,7 +21,7 @@ type StreamingOperation<TResponse, TRequest extends RpcRequest = RpcRequest> = (
 
 interface UiServiceContract {
 	initializeWebview: UnaryOperation
-	onDidShowAnnouncement: UnaryOperation
+	onDidShowAnnouncement: UnaryOperation<RpcRequest, RpcRequest & { value: boolean }>
 	openUrl: UnaryOperation<RpcRequest>
 	openWalkthrough: UnaryOperation
 	setTerminalExecutionMode: UnaryOperation<RpcRequest>
