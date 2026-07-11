@@ -99,6 +99,7 @@
     <Compile Include="Host\InteractionLog.cs" />
     <Compile Include="Host\HostRpcRouter.cs" />
     <Compile Include="Host\WebviewGrpcFallback.cs" />
+    <Compile Include="Host\WebviewBootstrapScript.cs" />
     <Compile Include="Host\WebviewMessageQueue.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
