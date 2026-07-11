@@ -33,6 +33,7 @@ import type { StartTaskCommand } from "../../features/chat/startTask/StartTaskCo
 import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHandler"
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
+import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
@@ -2891,7 +2892,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.activeTerminalActivityText = ""
 		this.activeProgressPhase = null
 		this.state.currentTaskItem = taskItem
-		this.state.taskHistory = [taskItem, ...this.state.taskHistory.filter((item) => item.id !== taskItem.id)]
+		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, taskItem)
 		this.addMessage({ type: "say", say: "task", text, images, files })
 		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
 		this.noteTaskActivity("start")
@@ -3282,10 +3283,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			cwdOnTaskInitialization: cwd,
 			modelId: String(taskItem.modelId || "") || this.getModelId(),
 		}
-		this.state.taskHistory = [
-			this.state.currentTaskItem,
-			...this.state.taskHistory.filter((item) => item.id !== sessionId),
-		]
+		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem)
 		this.noteTaskActivity("resume-session")
 		this.updateCurrentTaskItem()
 		await this.broadcastState()
@@ -3658,9 +3656,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		this.state.taskHistory = this.state.taskHistory.map((item) =>
-			item.id === taskId ? { ...item, isFavorited } : item,
-		)
+		this.state.taskHistory = setTaskHistoryFavorite(this.state.taskHistory, taskId, isFavorited)
 		const snapshot = this.getTaskSnapshot(taskId)
 		if (snapshot) {
 			snapshot.taskItem = { ...snapshot.taskItem, isFavorited }
@@ -6469,9 +6465,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			this.rememberTaskSnapshot(sessionId, snapshot.taskItem, snapshot.messages)
 		}
 		this.state.currentTaskItem = { ...this.state.currentTaskItem, id: sessionId }
-		this.state.taskHistory = this.state.taskHistory.map((item) =>
-			String(item.id || "") === currentTaskId ? { ...item, id: sessionId } : item,
-		)
+		this.state.taskHistory = rebindTaskHistoryId(this.state.taskHistory, currentTaskId, sessionId)
 		this.rebindSendLatencyTrace(currentTaskId, sessionId)
 		this.logger.log("sidecar", "taskSessionIdRebound", { previousTaskId: currentTaskId, sessionId })
 	}
@@ -6513,10 +6507,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			ts: Date.now(),
 			size: this.state.clineMessages.length,
 		}
-		this.state.taskHistory = [
-			this.state.currentTaskItem,
-			...this.state.taskHistory.filter((item) => item.id !== this.state.currentTaskItem?.id),
-		]
+		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem)
 		this.rememberTaskSnapshot(String(this.state.currentTaskItem.id || ""), this.state.currentTaskItem, this.state.clineMessages)
 		this.schedulePersistedStateSave()
 	}
