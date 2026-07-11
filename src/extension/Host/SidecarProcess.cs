@@ -47,7 +47,8 @@ namespace VsClineAgent.Host
                 new EnvironmentHostRpcAdapter(CaptureSidecarLine),
                 new EditorHostRpcAdapter(editorService),
                 new FileSystemHostRpcAdapter(),
-                new TerminalHostRpcAdapter(assemblyDirectory, editorService, commandExecutionService)
+                new TerminalHostRpcAdapter(assemblyDirectory, editorService, commandExecutionService),
+                new DiffHostRpcAdapter(editorService)
             };
         }
 
@@ -270,10 +271,6 @@ namespace VsClineAgent.Host
                     return await OpenSolutionAsync(parameters).ConfigureAwait(false);
                 case "workspace.openFolder":
                     return await OpenFolderAsync(parameters).ConfigureAwait(false);
-                case "diff.openDiff":
-                    return await OpenDiffAsync(parameters).ConfigureAwait(false);
-                case "diff.closeAllDiffs":
-                    return new JObject { ["success"] = true };
                 default:
                     throw new InvalidOperationException("Unsupported host method: " + method);
             }
@@ -412,7 +409,7 @@ namespace VsClineAgent.Host
                 }
                 else
                 {
-                    await _editorService.ExecuteCommandAsync("File.OpenFolder", QuoteVsCommandArgument(folderPath)).ConfigureAwait(false);
+                    await _editorService.ExecuteCommandAsync("File.OpenFolder", QuoteArgument(folderPath)).ConfigureAwait(false);
                 }
 
                 return new JObject
@@ -606,31 +603,6 @@ namespace VsClineAgent.Host
         private static string QuoteArgument(string value)
         {
             return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
-        }
-
-        private async Task<JObject> OpenDiffAsync(JToken? parameters)
-        {
-            var leftPath = GetStringParameter(parameters, "leftPath");
-            var rightPath = GetStringParameter(parameters, "rightPath");
-            if (!string.IsNullOrWhiteSpace(leftPath) && !string.IsNullOrWhiteSpace(rightPath))
-            {
-                var args = QuoteVsCommandArgument(leftPath) + " " + QuoteVsCommandArgument(rightPath);
-                await _editorService.ExecuteCommandAsync("Tools.DiffFiles", args).ConfigureAwait(false);
-                return new JObject { ["success"] = true };
-            }
-
-            if (!string.IsNullOrWhiteSpace(leftPath))
-                await _editorService.OpenFileAsync(leftPath).ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(rightPath))
-                await _editorService.OpenFileAsync(rightPath).ConfigureAwait(false);
-
-            return new JObject { ["success"] = true };
-        }
-
-        private static string QuoteVsCommandArgument(string value)
-        {
-            return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
         private static bool FileContains(string filePath, string query)
