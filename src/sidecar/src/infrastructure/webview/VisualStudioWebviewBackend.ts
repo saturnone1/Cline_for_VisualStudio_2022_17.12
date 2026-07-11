@@ -44,7 +44,6 @@ import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderId,
 	normalizeProviderValue,
-	normalizeSdkProviderId,
 	oauthCredentialsField,
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
@@ -81,6 +80,7 @@ import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventP
 import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
+import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -92,7 +92,6 @@ import type { HookExecutionHandler, HookExecutionObserver } from "../../features
 import { applyPreToolUseInputPatch, type PreToolUseDecision } from "../../features/hooks/HookPolicy"
 import {
 	normalizeOllamaRootBaseUrl,
-	normalizeOllamaOpenAiBaseUrl,
 	inferModelInfo,
 	inferContextWindow,
 	inferMaxTokens,
@@ -202,7 +201,6 @@ import {
 	resolveProviderEnvBaseUrl,
 	pickApiConfigurationFields,
 	normalizeApiConfiguration,
-	normalizePreferredLanguage,
 	resolveOAuthCredentials,
 	describeOAuthCredentialState,
 	isAutoApprovalSettingsLike,
@@ -257,6 +255,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentChunkEvents: AgentChunkEventProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
+	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private sdkRunGeneration = 0
@@ -309,6 +308,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), isCurrentSession: (sessionId) => this.isCurrentSdkResultSession(sessionId), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), failEmpty: (sessionId) => this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.finalizeOpenPartialMessages(), addCompletionMarker: (status) => this.addCompletionResultMarker(status), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
+		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => this.resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
@@ -2451,104 +2451,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 
 	private async buildSdkConfig(cwd: string, sessionId?: string) {
-		const apiConfig = asRecord(this.state.apiConfiguration)
-		const { modePrefix, providerId } = selectProvider(apiConfig, this.state.mode, process.env.CLINE_PROVIDER_ID || "anthropic")
-		const sdkProviderId = normalizeSdkProviderId(providerId)
-		const configuredBaseUrl = resolveBaseUrl(apiConfig, providerId)
-		const modelLookupBaseUrl = providerId === "ollama" ? normalizeOllamaRootBaseUrl(configuredBaseUrl) : configuredBaseUrl
-		const sdkBaseUrl = providerId === "ollama" ? normalizeOllamaOpenAiBaseUrl(configuredBaseUrl) : configuredBaseUrl
-		const modelId = await this.resolveEffectiveModelId(apiConfig, providerId, modePrefix, modelLookupBaseUrl)
-		const oauthCredentials = resolveOAuthCredentials(apiConfig, providerId)
-		const oauthAccessToken = getString(oauthCredentials, "accessToken") || getString(oauthCredentials, "access_token")
-		const apiKey = resolveApiKey(apiConfig, providerId) || oauthAccessToken || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
-		const maxTokensPerTurn = readOptionalPositiveIntEnv("VSCLINE_MAX_TOKENS_PER_TURN")
-		const apiTimeoutMs = resolveRequestTimeoutMs(apiConfig)
-		const reasoningEffort = resolveReasoningEffort(apiConfig, modePrefix)
-		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
-		const contextWindowTokens = resolveConfiguredContextWindow(apiConfig, providerId, modePrefix, modelId)
-		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
-		const maxParallelToolCalls = readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS")
-		const execution = buildOptionalExecutionConfig()
-		const subagentsEnabled = this.state.subagentsEnabled === true || process.env.VSCLINE_ENABLE_SUBAGENTS === "1"
-		const scheduledAgentsEnabled = this.isScheduledAgentsEnabled()
-		const preferredLanguage = normalizePreferredLanguage(getString(this.state, "preferredLanguage"))
-		const languageInstruction =
-			preferredLanguage === "Korean - 한국어"
-				? "Reply to the user in Korean unless the user explicitly asks for another language."
-				: "Reply to the user in English unless the user explicitly asks for another language."
-		const modeInstruction =
-			this.state.mode === "plan"
-				? "You are in PLAN mode. Do not modify files, run terminal commands, launch browsers, or perform destructive/external actions. Use read-only inspection only when necessary, ask clarifying questions when the requested change is ambiguous, and return a concrete plan for the user to approve before implementation."
-				: "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
-		const customPrompt = getString(this.state, "customPrompt").trim()
-		const systemPrompt = [
-			`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`,
-			customPrompt ? `Additional user-defined instructions:\n${customPrompt}` : "",
-		]
-			.filter(Boolean)
-			.join("\n\n")
-
-		this.logger.log("sidecar", "sdkConfig", {
-			providerId: sdkProviderId,
-			modelId,
-			baseUrl: sdkBaseUrl || undefined,
-			mode: this.state.mode,
-			maxTokensPerTurn,
-			apiTimeoutMs,
-			thinking,
-			reasoningEffort,
-			contextWindowTokens,
-			useAutoCondense: this.state.useAutoCondense === true,
-			sessionId: sessionId || undefined,
-			maxIterations,
-			maxParallelToolCalls,
-			subagentsEnabled,
-			scheduledAgentsEnabled,
-			oauthConfigured: Object.keys(oauthCredentials).length > 0,
-			execution,
-			preferredLanguage,
-		})
-
-		return {
-			providerId: sdkProviderId,
-			modelId,
-			sessionId: sessionId || undefined,
-			apiKey,
-			baseUrl: sdkBaseUrl || undefined,
-			cwd,
-			workspaceRoot: cwd,
-			mode: this.state.mode === "plan" ? "plan" : "act",
-			enableTools: true,
-			enableSpawnAgent: subagentsEnabled,
-			enableAgentTeams: subagentsEnabled,
-			...(maxIterations ? { maxIterations } : {}),
-			...(maxParallelToolCalls ? { maxParallelToolCalls } : {}),
-			...(maxTokensPerTurn ? { maxTokensPerTurn } : {}),
-			...(apiTimeoutMs ? { apiTimeoutMs } : {}),
-			thinking,
-			reasoningEffort,
-			providerConfig: {
-				...(maxTokensPerTurn ? { maxTokens: maxTokensPerTurn } : {}),
-				...(apiTimeoutMs ? { timeout: apiTimeoutMs } : {}),
-				...(Object.keys(oauthCredentials).length > 0 ? { oauthCredentials } : {}),
-				reasoning: {
-					enabled: thinking,
-					effort: reasoningEffort,
-				},
-			},
-			checkpoint: {
-				enabled: this.state.enableCheckpointsSetting !== false,
-			},
-			compaction: {
-				enabled: this.state.useAutoCondense === true,
-				strategy: "basic",
-				thresholdRatio: 0.9,
-				...(contextWindowTokens ? { maxInputTokens: contextWindowTokens } : {}),
-			},
-			...(execution ? { execution } : {}),
-			preferredLanguage,
-			systemPrompt,
-		}
+		return this.sdkConfigBuilder.build(cwd, sessionId)
 	}
 
 	private addAssistantTextResult(text: string) {
@@ -3333,14 +3236,6 @@ function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
 	return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : []
 }
 
-function numberValue(value: unknown) {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function booleanValue(value: unknown): boolean | undefined {
-	return typeof value === "boolean" ? value : undefined
-}
-
 function readPositiveIntEnv(name: string, fallback: number) {
 	const raw = process.env[name]
 	if (!raw) {
@@ -3349,109 +3244,6 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 	const value = Number.parseInt(raw, 10)
 	return Number.isFinite(value) && value > 0 ? value : fallback
-}
-
-function readOptionalPositiveIntEnv(name: string) {
-	const raw = process.env[name]
-	if (!raw) {
-		return undefined
-	}
-
-	const value = Number.parseInt(raw, 10)
-	return Number.isFinite(value) && value > 0 ? value : undefined
-}
-
-function resolveRequestTimeoutMs(apiConfig: Record<string, unknown>) {
-	const configured =
-		numberValue(apiConfig.requestTimeoutMs) ||
-		numberValue(apiConfig.apiTimeoutMs) ||
-		numberValue(apiConfig.openAiRequestTimeoutMs) ||
-		numberValue(apiConfig.openAiCompatibleRequestTimeoutMs)
-	return configured && configured > 0 ? configured : readPositiveIntEnv("VSCLINE_API_TIMEOUT_MS", 600_000)
-}
-
-function resolveReasoningEffort(apiConfig: Record<string, unknown>, modePrefix: string) {
-	const candidates = [
-		getString(apiConfig, `${modePrefix}ReasoningEffort`),
-		getString(apiConfig, `${modePrefix}OpenAiReasoningEffort`),
-		getString(apiConfig, "reasoningEffort"),
-		getString(apiConfig, "openAiReasoningEffort"),
-		getString(apiConfig, "openAiCompatibleReasoningEffort"),
-	]
-		.map((value) => value.trim().toLowerCase())
-		.filter(Boolean)
-
-	for (const candidate of candidates) {
-		if (candidate === "low" || candidate === "medium" || candidate === "high" || candidate === "xhigh" || candidate === "none") {
-			return candidate
-		}
-	}
-
-	return process.env.VSCLINE_REASONING_EFFORT as "low" | "medium" | "high" | "xhigh" | "none" | undefined
-}
-
-function resolveThinkingEnabled(
-	apiConfig: Record<string, unknown>,
-	modePrefix: string,
-	providerId: string,
-	reasoningEffort?: string,
-): boolean | undefined {
-	const candidates = [
-		booleanValue(apiConfig[`${modePrefix}EnableThinking`]),
-		booleanValue(apiConfig[`${modePrefix}ThinkingEnabled`]),
-		booleanValue(apiConfig.enableThinking),
-		booleanValue(apiConfig.thinking),
-		booleanValue(apiConfig.openAiThinkingEnabled),
-		booleanValue(apiConfig.openAiCompatibleThinkingEnabled),
-	].filter((value): value is boolean => value !== undefined)
-
-	if (candidates.length > 0) {
-		return candidates[0]
-	}
-
-	if (reasoningEffort === "none") {
-		return false
-	}
-	if (reasoningEffort) {
-		return true
-	}
-	if (providerId === "openai" || providerId === "openai-compatible") {
-		return false
-	}
-	return undefined
-}
-
-function buildOptionalExecutionConfig() {
-	const execution: Record<string, unknown> = {}
-	const maxConsecutiveMistakes = readOptionalPositiveIntEnv("VSCLINE_MAX_CONSECUTIVE_MISTAKES")
-	const reminderAfterIterations = readOptionalPositiveIntEnv("VSCLINE_REMINDER_AFTER_ITERATIONS")
-	const loopDetection = readLoopDetectionConfig()
-	if (maxConsecutiveMistakes) {
-		execution.maxConsecutiveMistakes = maxConsecutiveMistakes
-	}
-	if (reminderAfterIterations) {
-		execution.reminderAfterIterations = reminderAfterIterations
-	}
-	if (loopDetection !== undefined) {
-		execution.loopDetection = loopDetection
-	}
-	return Object.keys(execution).length > 0 ? execution : undefined
-}
-
-function readLoopDetectionConfig() {
-	const rawValue = process.env.VSCLINE_LOOP_DETECTION
-	if (!rawValue) {
-		return undefined
-	}
-	const raw = rawValue.trim().toLowerCase()
-	if (raw === "0" || raw === "false" || raw === "off") {
-		return false
-	}
-
-	return {
-		softThreshold: readOptionalPositiveIntEnv("VSCLINE_LOOP_SOFT_THRESHOLD") || 3,
-		hardThreshold: readOptionalPositiveIntEnv("VSCLINE_LOOP_HARD_THRESHOLD") || 5,
-	}
 }
 
 function isSessionNotFoundError(error: unknown) {

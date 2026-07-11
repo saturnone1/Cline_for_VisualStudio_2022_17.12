@@ -262,6 +262,7 @@ for (const requiredFile of [
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/configuration/SettingsMutationHandler.ts",
+	"infrastructure/configuration/AgentSdkConfigBuilder.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
 	"infrastructure/auth/FetchOAuthTokenExchangeAdapter.ts",
