@@ -25,7 +25,7 @@ namespace VsClineAgent.Host
         private readonly string _assemblyDirectory;
         private readonly VsEditorService _editorService;
         private readonly VsCommandExecutionService _commandExecutionService;
-        private readonly IHostRpcAdapter _environmentHostRpcAdapter;
+        private readonly IHostRpcAdapter[] _hostRpcAdapters;
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
         private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
@@ -42,7 +42,11 @@ namespace VsClineAgent.Host
             _assemblyDirectory = assemblyDirectory;
             _editorService = editorService;
             _commandExecutionService = commandExecutionService;
-            _environmentHostRpcAdapter = new EnvironmentHostRpcAdapter(CaptureSidecarLine);
+            _hostRpcAdapters = new IHostRpcAdapter[]
+            {
+                new EnvironmentHostRpcAdapter(CaptureSidecarLine),
+                new EditorHostRpcAdapter(editorService)
+            };
         }
 
         public bool IsRunning => _process != null && !_process.HasExited && _client != null && _client.IsConnected;
@@ -221,8 +225,11 @@ namespace VsClineAgent.Host
         private async Task<JToken?> HandleSidecarRequestAsync(string method, JToken? parameters)
         {
             InteractionLog.Write("sidecar->host", method, parameters);
-            if (_environmentHostRpcAdapter.CanHandle(method))
-                return await _environmentHostRpcAdapter.HandleAsync(method, parameters).ConfigureAwait(false);
+            foreach (var adapter in _hostRpcAdapters)
+            {
+                if (adapter.CanHandle(method))
+                    return await adapter.HandleAsync(method, parameters).ConfigureAwait(false);
+            }
 
             switch (method)
             {
@@ -236,19 +243,10 @@ namespace VsClineAgent.Host
                 case "host.workspace.getRoots":
                 case "workspace.getRoots":
                     return await GetWorkspaceRootsAsync().ConfigureAwait(false);
-                case "host.editor.getOpenDocuments":
-                case "workspace.getOpenDocuments":
-                    return new JArray(await _editorService.GetOpenDocumentsAsync().ConfigureAwait(false));
                 case "workspace.getWorkspacePaths":
                     return await GetWorkspacePathsAsync().ConfigureAwait(false);
                 case "workspace.getDiagnostics":
                     return await GetDiagnosticsAsync().ConfigureAwait(false);
-                case "host.editor.getActiveFile":
-                case "window.getActiveFile":
-                    return new JObject
-                    {
-                        ["path"] = await _editorService.GetActiveFilePathAsync().ConfigureAwait(false)
-                    };
                 case "host.fs.fileExists":
                 case "workspace.fileExists":
                     return new JObject
@@ -270,14 +268,6 @@ namespace VsClineAgent.Host
                     return SearchFiles(parameters);
                 case "workspace.selectFiles":
                     return SelectFiles(parameters);
-                case "window.showMessage":
-                    await _editorService.SetStatusBarAsync(GetStringParameter(parameters, "message")).ConfigureAwait(false);
-                    return new JObject { ["shown"] = true };
-                case "window.openFile":
-                    await _editorService.OpenFileAsync(
-                        GetStringParameter(parameters, "filePath"),
-                        GetIntParameter(parameters, "line")).ConfigureAwait(false);
-                    return new JObject();
                 case "webview.postMessage":
                     if (_postToWebviewAsync != null && parameters is JObject postMessage)
                     {
@@ -297,15 +287,6 @@ namespace VsClineAgent.Host
                     return await GetTerminalStateAsync().ConfigureAwait(false);
                 case "workspace.getUnretrievedTerminalOutput":
                     return await GetUnretrievedTerminalOutputAsync(parameters).ConfigureAwait(false);
-                case "workspace.saveOpenDocumentIfDirty":
-                    return new JObject
-                    {
-                        ["saved"] = await _editorService.SaveDocumentIfDirtyAsync(
-                            GetStringParameter(parameters, "filePath")).ConfigureAwait(false)
-                    };
-                case "workspace.openProblemsPanel":
-                    await _editorService.ExecuteCommandAsync("View.ErrorList").ConfigureAwait(false);
-                    return new JObject { ["success"] = true };
                 case "workspace.openTerminalPanel":
                     return await OpenTerminalPanelAsync(parameters).ConfigureAwait(false);
                 case "workspace.attachTerminalCommand":
