@@ -98,6 +98,59 @@ interface OcaAccountServiceContract {
 	ocaSubscribeToAuthStatusUpdate: StreamingOperation<OcaAuthStateEvent>
 }
 
+interface WorktreeInfo extends RpcRequest {
+	path: string
+	branch?: string
+	isBare?: boolean
+	isCurrent?: boolean
+}
+
+interface WorktreeMutationResponse extends RpcRequest {
+	success: boolean
+	message?: string
+	warning?: string
+	worktree?: WorktreeInfo
+	solutionCandidates?: string[]
+}
+
+interface WorktreeMergeResponse extends WorktreeMutationResponse {
+	hasConflicts?: boolean
+	conflictingFiles: string[]
+	recoveryPrompt?: string
+	recoveryCommands?: string[]
+	sourceWorktreePath?: string
+	sourceBranch?: string
+	targetWorktreePath?: string
+	targetBranch?: string
+}
+
+interface WorktreeServiceContract {
+	listWorktrees: UnaryOperation<RpcRequest, RpcRequest & {
+		worktrees: WorktreeInfo[]
+		isGitRepo: boolean
+		isMultiRoot: boolean
+		isSubfolder: boolean
+		gitRootPath?: string
+		errorKind?: string
+		error?: string
+	}>
+	getWorktreeIncludeStatus: UnaryOperation<RpcRequest, RpcRequest & { exists: boolean; hasGitignore: boolean; gitignoreContent: string }>
+	createWorktreeInclude: UnaryOperation<RpcRequest, WorktreeMutationResponse>
+	getWorktreeDefaults: UnaryOperation<RpcRequest, RpcRequest & {
+		suggestedBranch: string
+		suggestedPath: string
+		baseBranch?: string
+		currentBranch?: string
+		branches?: string[]
+		baseBranches?: string[]
+	}>
+	createWorktree: UnaryOperation<RpcRequest, WorktreeMutationResponse>
+	deleteWorktree: UnaryOperation<RpcRequest, WorktreeMutationResponse>
+	switchWorktree: UnaryOperation<RpcRequest, WorktreeMutationResponse>
+	mergeWorktree: UnaryOperation<RpcRequest, WorktreeMergeResponse>
+	trackWorktreeViewOpened: UnaryOperation<RpcRequest>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -137,4 +190,4 @@ export const StateServiceClient: any = createServiceClient("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
 export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
 export const WebServiceClient = createServiceClient<WebServiceContract>("WebService")
-export const WorktreeServiceClient: any = createServiceClient("WorktreeService")
+export const WorktreeServiceClient = createServiceClient<WorktreeServiceContract>("WorktreeService")

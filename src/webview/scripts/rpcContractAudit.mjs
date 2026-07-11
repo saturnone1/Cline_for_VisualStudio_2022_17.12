@@ -16,9 +16,26 @@ for (const service of [
 	"BrowserServiceClient",
 	"WebServiceClient",
 	"OcaAccountServiceClient",
+	"WorktreeServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of [
+	"listWorktrees",
+	"getWorktreeIncludeStatus",
+	"createWorktreeInclude",
+	"getWorktreeDefaults",
+	"createWorktree",
+	"deleteWorktree",
+	"switchWorktree",
+	"mergeWorktree",
+	"trackWorktreeViewOpened",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`WorktreeServiceContract is missing ${operation}.`)
 	}
 }
 
