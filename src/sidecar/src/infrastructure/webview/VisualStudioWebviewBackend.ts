@@ -67,6 +67,7 @@ import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import { TaskHistorySync } from "../../features/taskHistory/TaskHistorySync"
 import { TaskHistoryCommands } from "../../features/taskHistory/TaskHistoryCommands"
+import { TaskTranscriptHydrator } from "../../features/taskHistory/TaskTranscriptHydrator"
 import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
@@ -245,6 +246,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly taskSnapshots: TaskSnapshotStore
 	private readonly taskHistorySync: TaskHistorySync
 	private readonly taskHistoryCommands: TaskHistoryCommands
+	private readonly taskTranscriptHydrator: TaskTranscriptHydrator
 	private readonly agentTextEvents: AgentTextEventProjector
 	private readonly agentToolEvents: AgentToolEventProjector
 	private readonly agentLifecycleEvents: AgentLifecycleEventProjector
@@ -296,6 +298,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.taskTranscriptHydrator = new TaskTranscriptHydrator({ isAvailable: () => Boolean(this.clineSdk && this.taskSessions), readCurrentTask: () => this.state.currentTaskItem, activeSessionId: () => this.clineSdk?.status.activeSessionId || "", hasLiveProjection: () => Boolean(this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs), readMessages: () => this.state.clineMessages, loadTranscript: (taskId) => this.taskSessions?.load(taskId) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), projectMessages: (messages, task) => sdkMessagesToClineMessages(messages, task), applySelected: (taskId, task, messages) => { this.state.currentTaskItem = task; this.state.clineMessages = messages; this.rememberTaskSnapshot(taskId, task, messages); this.schedulePersistedStateSave() }, applyCompleted: (taskId, task, messages) => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.conversationProjection.activePartialTextTs = null; this.conversationProjection.activeReasoningTextTs = null; this.conversationProjection.activeToolActivityTs = null; this.conversationProjection.activeAssistantTextBuffer = ""; this.state.currentTaskItem = task; this.state.clineMessages = messages; this.finalizeOpenPartialMessages(); this.addCompletionResultMarker("completed"); this.updateCurrentTaskItem(); this.rememberTaskSnapshot(taskId, task, this.state.clineMessages); this.schedulePersistedStateSave() }, summarizeMessage: (message) => summarizeClineMessageForLog(message), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
@@ -2233,129 +2236,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async refreshSelectedTaskFromSdk() {
-		if (!this.clineSdk || !this.state.currentTaskItem) {
-			return
-		}
-
-		const taskId = String(this.state.currentTaskItem.id || "")
-		if (!taskId) {
-			return
-		}
-
-		const activeSessionId = this.clineSdk.status.activeSessionId
-		if (activeSessionId && activeSessionId !== taskId) {
-			return
-		}
-		if (this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs) {
-			this.logger.log("sidecar", "stateHydration.selectedTaskSkipped", {
-				reason: "live_interaction",
-				taskId,
-				activeSessionId,
-			})
-			return
-		}
-		if (activeSessionId === taskId && this.state.clineMessages.some((message) => message.partial === true)) {
-			this.logger.log("sidecar", "stateHydration.selectedTaskSkipped", {
-				reason: "partial_messages",
-				taskId,
-				activeSessionId,
-			})
-			return
-		}
-		if (activeSessionId === taskId && this.state.clineMessages.length > 0) {
-			return
-		}
-		if (activeSessionId === taskId && this.conversationProjection.activePartialTextTs) {
-			return
-		}
-		if (activeSessionId === taskId && (this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs)) {
-			return
-		}
-
-		if (!this.taskSessions) {
-			return
-		}
-		const transcript = await this.taskSessions.load(taskId).catch(() => null)
-		const session = asRecord(transcript?.session)
-		if (!session || Object.keys(session).length === 0) {
-			return
-		}
-
-		const messages = transcript?.messages
-		if (!Array.isArray(messages)) {
-			return
-		}
-
-		const taskItem = sdkSessionToHistoryItem(session)
-		const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
-		this.logger.log("sidecar", "sdkMessagesHydrated", {
-			source: "refreshSelectedTaskFromSdk",
-			sessionId: taskId,
-			sdkCount: messages.length,
-			clineCount: clineMessages.length,
-			messages: clineMessages.map(summarizeClineMessageForLog),
-		})
-		this.state.currentTaskItem = taskItem
-		this.state.clineMessages = clineMessages
-		this.rememberTaskSnapshot(taskId, taskItem, this.state.clineMessages)
-		this.schedulePersistedStateSave()
+		await this.taskTranscriptHydrator.refreshSelected()
 	}
 
 	private async hydrateCurrentTaskFromSdk(sessionId: string, source: string, force = false) {
-		if (!this.clineSdk || !this.state.currentTaskItem || !sessionId) {
-			return false
-		}
-
-		const currentTaskId = String(this.state.currentTaskItem.id || "")
-		if (currentTaskId && currentTaskId !== sessionId) {
-			return false
-		}
-		if (!force && (this.conversationProjection.activePartialTextTs || this.conversationProjection.activeReasoningTextTs || this.conversationProjection.activeToolActivityTs)) {
-			return false
-		}
-
-		if (!this.taskSessions) {
-			return false
-		}
-		const transcript = await this.taskSessions.load(sessionId).catch(() => null)
-		const session = asRecord(transcript?.session)
-		if (!session || Object.keys(session).length === 0) {
-			return false
-		}
-
-		const messages = transcript?.messages
-		if (!Array.isArray(messages) || messages.length === 0) {
-			return false
-		}
-
-		const taskItem = sdkSessionToHistoryItem(session)
-		const clineMessages = sdkMessagesToClineMessages(messages, taskItem)
-		if (clineMessages.length === 0) {
-			return false
-		}
-
-		this.clearTaskIdleWatchdog()
-		this.clearPartialIdleWatchdog()
-		this.clearReasoningStatus()
-		this.conversationProjection.activePartialTextTs = null
-		this.conversationProjection.activeReasoningTextTs = null
-		this.conversationProjection.activeToolActivityTs = null
-		this.conversationProjection.activeAssistantTextBuffer = ""
-		this.state.currentTaskItem = taskItem
-		this.state.clineMessages = clineMessages
-		this.finalizeOpenPartialMessages()
-		this.addCompletionResultMarker("completed")
-		this.updateCurrentTaskItem()
-		this.rememberTaskSnapshot(sessionId, taskItem, this.state.clineMessages)
-		this.schedulePersistedStateSave()
-		this.logger.log("sidecar", "sdkMessagesHydrated", {
-			source,
-			sessionId,
-			sdkCount: messages.length,
-			clineCount: this.state.clineMessages.length,
-			force,
-		})
-		return true
+		return this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, force)
 	}
 
 	private async restoreCheckpoint(message: unknown) {

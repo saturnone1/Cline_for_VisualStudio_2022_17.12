@@ -200,6 +200,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/AgentLifecycleEventProjector.ts",
 	"features/taskHistory/TaskHistorySync.ts",
 	"features/taskHistory/TaskHistoryCommands.ts",
+	"features/taskHistory/TaskTranscriptHydrator.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
