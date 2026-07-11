@@ -61,6 +61,7 @@ import type { TerminalActivityMonitor } from "../conversation/TerminalActivityMo
 import { ConversationProjectionState, type ToolActivityEntry } from "../../features/conversation/ConversationProjectionState"
 import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMonitor"
 import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
+import type { SendLatencyMonitor } from "../../features/runtime/SendLatencyMonitor"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -238,18 +239,6 @@ type TrackedChangeSummary = {
 	deletions: number
 }
 
-type SendLatencyTrace = {
-	requestId: string
-	kind: "newTask" | "askResponse"
-	sessionId: string
-	startedAt: number
-	sdkSendAt?: number
-	firstSdkEventAt?: number
-	firstAssistantAt?: number
-	errorAt?: number
-	textLength: number
-}
-
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private agentEngine: AgentEnginePort | null = null
 	private taskSessions: TaskSessionUseCase | null = null
@@ -285,7 +274,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private changeSummaryTimer: NodeJS.Timeout | null = null
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
-	private readonly sendLatencyTraces = new Map<string, SendLatencyTrace>()
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
 	private activeSessionRuntimeSettingsRevision = 0
@@ -300,6 +288,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private terminalActivity: TerminalActivityMonitor | null = null
 	private taskActivity: TaskActivityMonitor | null = null
 	private partialStateScheduler: PartialStateScheduler | null = null
+	private sendLatency: SendLatencyMonitor | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -373,6 +362,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setTerminalActivityMonitor(terminalActivity: TerminalActivityMonitor) { this.terminalActivity = terminalActivity }
 	setTaskActivityMonitor(taskActivity: TaskActivityMonitor) { this.taskActivity = taskActivity }
 	setPartialStateScheduler(partialStateScheduler: PartialStateScheduler) { this.partialStateScheduler = partialStateScheduler }
+	setSendLatencyMonitor(sendLatency: SendLatencyMonitor) { this.sendLatency = sendLatency }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
@@ -3009,6 +2999,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.partialStateScheduler
 	}
 
+	private requireSendLatency() {
+		if (!this.sendLatency) throw new Error("Send latency monitor is not attached.")
+		return this.sendLatency
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -4176,95 +4171,17 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 
 
-	private startSendLatencyTrace(requestId: string, kind: "newTask" | "askResponse", sessionId: string, textLength: number) {
-		if (!sessionId) {
-			return
-		}
-		const trace: SendLatencyTrace = {
-			requestId,
-			kind,
-			sessionId,
-			startedAt: Date.now(),
-			textLength,
-		}
-		this.sendLatencyTraces.set(sessionId, trace)
-		this.logger.log("sidecar", "sendLatency.received", {
-			requestId,
-			kind,
-			sessionId,
-			textLength,
-		})
-	}
+	private startSendLatencyTrace(requestId: string, kind: "newTask" | "askResponse", sessionId: string, textLength: number) { this.requireSendLatency().start(requestId, kind, sessionId, textLength) }
 
-	private markSendLatencySdkSend(sessionId: string) {
-		const trace = this.sendLatencyTraces.get(sessionId)
-		if (!trace || trace.sdkSendAt) {
-			return
-		}
-		trace.sdkSendAt = Date.now()
-		this.logger.log("sidecar", "sendLatency.sdkSend", this.createSendLatencyPayload(trace))
-	}
+	private markSendLatencySdkSend(sessionId: string) { this.requireSendLatency().markSdkSend(sessionId) }
 
-	private markSendLatencyFirstSdkEvent(sessionId: string, eventType: string) {
-		const trace = this.sendLatencyTraces.get(sessionId)
-		if (!trace || trace.firstSdkEventAt) {
-			return
-		}
-		trace.firstSdkEventAt = Date.now()
-		this.logger.log("sidecar", "sendLatency.firstSdkEvent", {
-			...this.createSendLatencyPayload(trace),
-			eventType,
-		})
-	}
+	private markSendLatencyFirstSdkEvent(sessionId: string, eventType: string) { this.requireSendLatency().markFirstSdkEvent(sessionId, eventType) }
 
-	private markSendLatencyFirstAssistant(sessionId: string, textLength: number) {
-		const trace = this.sendLatencyTraces.get(sessionId)
-		if (!trace || trace.firstAssistantAt) {
-			return
-		}
-		trace.firstAssistantAt = Date.now()
-		this.logger.log("sidecar", "sendLatency.firstAssistant", {
-			...this.createSendLatencyPayload(trace),
-			assistantTextLength: textLength,
-		})
-	}
+	private markSendLatencyFirstAssistant(sessionId: string, textLength: number) { this.requireSendLatency().markFirstAssistant(sessionId, textLength) }
 
-	private markSendLatencyError(sessionId: string, error: unknown) {
-		const trace = this.sendLatencyTraces.get(sessionId)
-		if (!trace || trace.errorAt) {
-			return
-		}
-		trace.errorAt = Date.now()
-		this.logger.log("sidecar", "sendLatency.error", {
-			...this.createSendLatencyPayload(trace),
-			error: stringify(error),
-		})
-	}
+	private markSendLatencyError(sessionId: string, error: unknown) { this.requireSendLatency().markError(sessionId, error) }
 
-	private rebindSendLatencyTrace(previousSessionId: string, nextSessionId: string) {
-		const trace = this.sendLatencyTraces.get(previousSessionId)
-		if (!trace || !nextSessionId || previousSessionId === nextSessionId) {
-			return
-		}
-		this.sendLatencyTraces.delete(previousSessionId)
-		trace.sessionId = nextSessionId
-		this.sendLatencyTraces.set(nextSessionId, trace)
-	}
-
-	private createSendLatencyPayload(trace: SendLatencyTrace) {
-		const now = Date.now()
-		return {
-			requestId: trace.requestId,
-			kind: trace.kind,
-			sessionId: trace.sessionId,
-			textLength: trace.textLength,
-			toSdkSendMs: trace.sdkSendAt ? trace.sdkSendAt - trace.startedAt : undefined,
-			toFirstSdkEventMs: trace.firstSdkEventAt ? trace.firstSdkEventAt - trace.startedAt : undefined,
-			toFirstAssistantMs: trace.firstAssistantAt ? trace.firstAssistantAt - trace.startedAt : undefined,
-			toErrorMs: trace.errorAt ? trace.errorAt - trace.startedAt : undefined,
-			elapsedMs: now - trace.startedAt,
-		}
-	}
+	private rebindSendLatencyTrace(previousSessionId: string, nextSessionId: string) { this.requireSendLatency().rebind(previousSessionId, nextSessionId) }
 
 	private getCurrentSessionId() {
 		return this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")

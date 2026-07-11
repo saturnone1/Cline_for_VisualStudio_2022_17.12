@@ -238,6 +238,7 @@ for (const requiredFile of [
 	"features/conversation/ConversationProjectionState.ts",
 	"features/runtime/TaskActivityMonitor.ts",
 	"features/runtime/PartialStateScheduler.ts",
+	"features/runtime/SendLatencyMonitor.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
