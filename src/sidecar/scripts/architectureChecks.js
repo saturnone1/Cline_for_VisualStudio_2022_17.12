@@ -142,6 +142,7 @@ for (const filePath of walk(webviewSourceRoot)) {
 	const relative = normalize(path.relative(webviewSourceRoot, filePath))
 	if (/\bfetch\s*\(/.test(source)) violations.push(`${relative} performs HTTP directly; passive WebView code must use a typed sidecar RPC.`)
 	if (/from\s+["']@cline\/sdk(?:[\/"'])/.test(source)) violations.push(`${relative} imports the Cline SDK; SDK access belongs to the sidecar adapter.`)
+	if (relative.startsWith("components/settings/providers/") && /\blocalStorage\b/.test(source)) violations.push(`${relative} persists provider state in the WebView; provider persistence belongs to the sidecar.`)
 }
 const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
 if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {

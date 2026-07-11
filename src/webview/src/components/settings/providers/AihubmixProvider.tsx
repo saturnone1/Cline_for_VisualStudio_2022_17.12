@@ -42,41 +42,18 @@ export const AIhubmixProvider = ({ showModelOptions, isPopup, currentMode }: AIh
 		return base
 	}
 
-	console.log("selectedModelId", selectedModelId)
-	console.log("selectedModelInfo", selectedModelInfo)
-
-	// Get the normalized configuration
-
 	useEffect(() => {
-		try {
-			const cached = window.localStorage.getItem("aihubmixModels")
-			if (cached) {
-				const parsed = JSON.parse(cached) as Record<string, ModelInfo>
-				if (parsed && typeof parsed === "object") {
-					setModels(ensureSelectedPresent(parsed))
-				}
-			}
-		} catch {
-			setModels(ensureSelectedPresent({}))
-		}
-
 		ModelsServiceClient.getAihubmixModels(EmptyRequest.create({}))
 			.then((response) => {
 				if (response.models) {
 					const nextModels = response.models as Record<string, ModelInfo>
-					const injected = ensureSelectedPresent(nextModels)
-					setModels(injected)
-					try {
-						window.localStorage.setItem("aihubmixModels", JSON.stringify(injected))
-					} catch {}
+					setModels(ensureSelectedPresent(nextModels))
 				}
 			})
 			.catch((error) => {
 				console.error("Failed to fetch AIhubmix models:", error)
 			})
 	}, [])
-
-	console.log("apiConfiguration", apiConfiguration)
 
 	return (
 		<div>
