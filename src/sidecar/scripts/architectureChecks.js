@@ -60,6 +60,9 @@ if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSe
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
+for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
+	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
+}
 
 const controllerPath = path.join(sourceRoot, "presentation", "webview", "VisualStudioWebviewController.ts")
 const controller = fs.readFileSync(controllerPath, "utf8")
@@ -163,6 +166,7 @@ for (const requiredFile of [
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/worktrees/WorktreeQueryHandler.ts",
+	"features/worktrees/WorktreeMutationHandler.ts",
 	"features/browser/BrowserPolicy.ts",
 	"features/browser/BrowserHandler.ts",
 	"features/hooks/HookPolicy.ts",

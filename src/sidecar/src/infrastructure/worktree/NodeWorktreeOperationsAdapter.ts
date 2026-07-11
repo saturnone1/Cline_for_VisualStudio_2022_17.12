@@ -4,7 +4,7 @@ import fs from "node:fs"
 import { promisify } from "node:util"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import type { WorktreeOperationsPort } from "../../application/ports/WorktreeOperationsPort"
-import { samePath } from "./WorktreeSupport"
+import { findSolutions, isPathInside, samePath } from "./WorktreeSupport"
 
 const execFile = promisify(childProcess.execFile)
 
@@ -19,6 +19,13 @@ export class NodeWorktreeOperationsAdapter implements WorktreeOperationsPort {
 	baseName(value: string) { return path.basename(value) }
 	dirName(value: string) { return path.dirname(value) }
 	samePath(left: string, right: string) { return samePath(left, right) }
+	resolvePath(...parts: string[]) { return path.resolve(...parts) }
+	isAbsolutePath(value: string) { return path.isAbsolute(value) }
+	isPathInside(candidate: string, root: string) { return isPathInside(candidate, root) }
+	copyPath(source: string, destination: string) { return fs.promises.cp(source, destination, { recursive: true, force: false, errorOnExist: false }) }
+	findSolutions(root: string) { return findSolutions(root) }
+	openFolder(folderPath: string, newWindow: boolean) { return this.host.workspaceClient.openFolder({ folderPath, newWindow }) }
+	openSolution(solutionPath: string, newWindow: boolean) { return this.host.workspaceClient.openSolution({ solutionPath, newWindow }) }
 
 	async runGit(args: readonly string[], cwd: string) {
 		try {

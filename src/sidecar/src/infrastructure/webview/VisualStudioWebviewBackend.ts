@@ -32,6 +32,7 @@ import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHa
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
+import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -47,13 +48,6 @@ import {
 	fetchOpenGraphData,
 } from "../browser/BrowserDevToolsAdapter"
 import { browserActionResultForTranscript, isBrowserToolName, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
-import {
-	findSolutions,
-	isPathInside,
-	pathExists,
-	samePath,
-} from "../worktree/WorktreeSupport"
-import { classifyWorktreeGitError, normalizeMergeRecoveryAction } from "../../features/worktrees/WorktreePolicy"
 import {
 	appendScheduledAgentRun,
 	deleteScheduledAgentSpecFile,
@@ -300,6 +294,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private cancelTaskHandler: CancelTaskHandler | null = null
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
+	private worktreeMutations: WorktreeMutationHandler | null = null
 	private readonly stateStreamRequestIds = new Set<string>()
 	private readonly partialMessageStreamRequestIds = new Set<string>()
 	private readonly mcpServerStreamRequestIds = new Set<string>()
@@ -412,6 +407,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setCancelTaskHandler(cancelTaskHandler: CancelTaskHandler) { this.cancelTaskHandler = cancelTaskHandler }
 	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
 	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
+	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -1335,20 +1331,20 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				return grpcHandled(grpcResponse(requestId, await this.createWorktreeInclude(message), false))
 
 			case "WorktreeService.createWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.createWorktree(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().create(message, await this.getPrimaryWorkspaceRoot()), false))
 
 			case "WorktreeService.switchWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.switchWorktree(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().switch(message), false))
 
 			case "WorktreeService.mergeWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.mergeWorktree(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().merge(message, await this.getPrimaryWorkspaceRoot()), false))
 
 			case "WorktreeService.recoverMerge":
 			case "WorktreeService.mergeRecovery":
-				return grpcHandled(grpcResponse(requestId, await this.recoverWorktreeMerge(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().recover(message), false))
 
 			case "WorktreeService.deleteWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.deleteWorktree(message), false))
+				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().delete(message, await this.getPrimaryWorkspaceRoot()), false))
 
 			case "WorktreeService.trackWorktreeViewOpened":
 				return grpcHandled(grpcResponse(requestId, { success: true }, false))
@@ -2095,22 +2091,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return workspaceRoots[0] || String(this.state.currentTaskItem?.cwdOnTaskInitialization || process.cwd())
 	}
 
-	private async runGit(args: string[], cwd: string) {
-		return this.requireWorktreeQueries().runGit(args, cwd)
-	}
-
-	private async getGitRoot(workspaceRoot = "") {
-		return this.requireWorktreeQueries().resolveGitRoot(workspaceRoot || await this.getPrimaryWorkspaceRoot())
-	}
-
 	private async listWorktrees() {
 		const result = await this.requireWorktreeQueries().listWorktrees(await this.getPrimaryWorkspaceRoot())
 		this.setWorktreesFeatureFlag(result.isGitRepo && !result.error)
 		return result
-	}
-
-	private async getWorktreeStatus(worktreePath: string) {
-		return this.requireWorktreeQueries().getStatus(worktreePath)
 	}
 
 	private setWorktreesFeatureFlag(enabled: boolean) {
@@ -2132,416 +2116,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async createWorktreeInclude(message: unknown) {
 		return this.requireWorktreeQueries().createInclude(getString(message, "content"), await this.getPrimaryWorkspaceRoot())
-	}
-
-	private async createWorktree(message: unknown) {
-		const request = asRecord(message)
-		const { gitRoot, error } = await this.getGitRoot()
-		if (!gitRoot) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "no_git_root", error })
-			return { success: false, message: error || "Worktrees require a git repository." }
-		}
-
-		const rawPath = getString(request, "path")
-		const branch = getString(request, "branch") || getString(request, "branchName")
-		if (!rawPath || !branch) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "missing_path_or_branch", gitRoot })
-			return { success: false, message: "Both a worktree folder path and branch name are required." }
-		}
-		const targetPath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(gitRoot, rawPath)
-		const baseBranch = getString(request, "baseBranch") || (await this.getWorktreeDefaults()).baseBranch || "HEAD"
-		this.logger.log("sidecar", "worktreeCreateStarted", {
-			gitRoot,
-			targetPath,
-			branch,
-			baseBranch,
-			createNewBranch: request.createNewBranch !== false,
-		})
-		if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-") || branch.includes("..") || branch.endsWith("/")) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "invalid_branch", branch })
-			return { success: false, message: `Invalid branch name: ${branch}` }
-		}
-		if (await pathExists(targetPath)) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "target_exists", targetPath })
-			return { success: false, message: `Worktree folder already exists: ${targetPath}` }
-		}
-		const existingList = await this.listWorktrees()
-		const existingWorktree = existingList.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), targetPath))
-		if (existingWorktree) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "registered_target_exists", targetPath })
-			return { success: false, message: `A git worktree is already registered at ${targetPath}` }
-		}
-		if (isPathInside(targetPath, gitRoot)) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "inside_repo", targetPath, gitRoot })
-			return { success: false, message: "Create the worktree outside the current repository folder." }
-		}
-		const parentWorktree = existingList.worktrees.find((item: Record<string, unknown>) => {
-			const existingPath = getString(item, "path")
-			return existingPath && isPathInside(targetPath, existingPath)
-		})
-		if (parentWorktree) {
-			this.logger.log("sidecar", "worktreeCreateFailed", {
-				reason: "inside_existing_worktree",
-				targetPath,
-				parentWorktree: getString(parentWorktree, "path"),
-			})
-			return { success: false, message: `Create the worktree outside existing worktree folders. Parent worktree: ${getString(parentWorktree, "path")}` }
-		}
-		const branchExists = await this.branchExists(gitRoot, branch)
-		if (request.createNewBranch !== false && branchExists) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "branch_exists", branch })
-			return { success: false, message: `Branch already exists: ${branch}. Choose existing-branch mode or enter a new branch name.` }
-		}
-		if (request.createNewBranch === false && !branchExists) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "branch_missing", branch })
-			return { success: false, message: `Branch does not exist: ${branch}. Choose new-branch mode or create the branch first.` }
-		}
-
-		const args = ["worktree", "add"]
-		if (request.createNewBranch !== false) {
-			args.push("-b", branch)
-		} else {
-			args.push("--checkout")
-		}
-		args.push(targetPath, request.createNewBranch === false ? branch : baseBranch)
-		const result = await this.runGit(args, gitRoot)
-		if (!result.success) {
-			this.logger.log("sidecar", "worktreeCreateFailed", { reason: "git_failed", stderr: truncateText(result.stderr, 1000) })
-			return { success: false, message: classifyWorktreeGitError(result.stderr, "create") }
-		}
-
-		await this.copyWorktreeIncludeFiles(gitRoot, targetPath)
-		const list = await this.listWorktrees()
-		const worktree = list.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), targetPath))
-		this.logger.log("sidecar", "worktreeCreateSucceeded", { targetPath, branch, baseBranch })
-		return { success: true, message: `Worktree created for ${branch} at ${targetPath}.`, worktree, worktrees: list.worktrees }
-	}
-
-	private async branchExists(gitRoot: string, branch: string) {
-		const local = await this.runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], gitRoot)
-		return local.success
-	}
-
-	private async copyWorktreeIncludeFiles(gitRoot: string, targetPath: string) {
-		const includePath = path.join(gitRoot, ".worktreeinclude")
-		if (!(await pathExists(includePath))) {
-			return
-		}
-		const entries = (await fs.promises.readFile(includePath, "utf8"))
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.filter((line) => line && !line.startsWith("#"))
-		for (const entry of entries) {
-			const source = path.resolve(gitRoot, entry)
-			const destination = path.resolve(targetPath, entry)
-			if (!isPathInside(source, gitRoot) || !isPathInside(destination, targetPath) || !(await pathExists(source))) {
-				continue
-			}
-			await fs.promises.cp(source, destination, { recursive: true, force: false, errorOnExist: false })
-		}
-	}
-
-	private async switchWorktree(message: unknown) {
-		const request = asRecord(message)
-		const requestedPath = getString(request, "path")
-		if (!requestedPath) {
-			this.logger.log("sidecar", "worktreeSwitchFailed", { reason: "missing_path" })
-			return { success: false, message: "Worktree path is required." }
-		}
-		const targetPath = path.resolve(requestedPath)
-		if (!(await pathExists(targetPath))) {
-			this.logger.log("sidecar", "worktreeSwitchFailed", { reason: "missing_folder", targetPath })
-			return { success: false, message: `Worktree folder does not exist: ${targetPath}` }
-		}
-
-		const solutionCandidates = findSolutions(targetPath)
-		if (solutionCandidates.length > 1 && !getString(request, "solutionPath")) {
-			this.logger.log("sidecar", "worktreeSwitchNeedsSolutionChoice", { targetPath, count: solutionCandidates.length })
-			return {
-				success: false,
-				message: "Multiple .sln files were found. Choose a solution to open.",
-				path: targetPath,
-				solutionCandidates,
-			}
-		}
-		const requestedSolution = getString(request, "solutionPath")
-		const solution = requestedSolution && solutionCandidates.some((candidate) => samePath(candidate, requestedSolution))
-			? requestedSolution
-			: solutionCandidates[0] || ""
-		if (!solution) {
-			this.logger.log("sidecar", "worktreeSwitchFolderFallbackStarted", { targetPath, newWindow: request.newWindow === true })
-			const folderResult = asRecord(await this.host.workspaceClient.openFolder({
-				folderPath: targetPath,
-				newWindow: request.newWindow === true,
-			}))
-			return {
-				success: folderResult.success !== false,
-				message: getString(folderResult, "message") ||
-					(request.newWindow === true
-						? `Folder-only worktree opened in a new Visual Studio window: ${targetPath}`
-						: `Folder-only worktree opened in this Visual Studio window: ${targetPath}`),
-				path: targetPath,
-				workspacePath: targetPath,
-				folderOnly: true,
-				folderOpenFallback: true,
-				solutionCandidates: [],
-			}
-		}
-
-		this.logger.log("sidecar", "worktreeSwitchStarted", { targetPath, solution, newWindow: request.newWindow === true })
-		const hostResult = asRecord(await this.host.workspaceClient.openSolution({
-			solutionPath: solution,
-			newWindow: request.newWindow === true,
-		}))
-		if (hostResult.success === false) {
-			this.logger.log("sidecar", "worktreeSwitchFailed", {
-				reason: "host_failed",
-				targetPath,
-				solution,
-				message: getString(hostResult, "message"),
-			})
-			return {
-				success: false,
-				message: getString(hostResult, "message") || "Visual Studio could not open the selected worktree solution.",
-				path: targetPath,
-				solutionPath: solution,
-				solutionCandidates,
-			}
-		}
-		this.logger.log("sidecar", "worktreeSwitchSucceeded", { targetPath, solution, newWindow: request.newWindow === true })
-		return {
-			success: true,
-			message: request.newWindow === true
-				? `Worktree opened in a new Visual Studio window: ${solution}`
-				: `Worktree opened in this Visual Studio window: ${solution}`,
-			path: targetPath,
-			workspacePath: targetPath,
-			solutionPath: solution,
-			solutionCandidates,
-		}
-	}
-
-	private async deleteWorktree(message: unknown) {
-		const request = asRecord(message)
-		const { gitRoot, error } = await this.getGitRoot()
-		if (!gitRoot) {
-			this.logger.log("sidecar", "worktreeDeleteFailed", { reason: "no_git_root", error })
-			return { success: false, message: error || "Worktrees require a git repository." }
-		}
-
-		const requestedPath = getString(request, "path")
-		if (!requestedPath) {
-			this.logger.log("sidecar", "worktreeDeleteFailed", { reason: "missing_path", gitRoot })
-			return { success: false, message: "Worktree path is required." }
-		}
-		const targetPath = path.resolve(requestedPath)
-		const force = request.force === true
-		this.logger.log("sidecar", "worktreeDeleteStarted", {
-			gitRoot,
-			targetPath,
-			force,
-			deleteBranch: request.deleteBranch === true,
-			branchName: getString(request, "branchName"),
-		})
-		const status = await this.getWorktreeStatus(targetPath)
-		if (!force && status.dirty) {
-			this.logger.log("sidecar", "worktreeDeleteFailed", { reason: "dirty", targetPath, statusSummary: status.statusSummary })
-			return { success: false, message: `Cannot delete a worktree with uncommitted changes (${status.statusSummary}). Commit/stash changes or retry with force.`, dirty: true, statusSummary: status.statusSummary }
-		}
-
-		const removeArgs = ["worktree", "remove"]
-		if (force) {
-			removeArgs.push("--force")
-		}
-		removeArgs.push(targetPath)
-		const removed = await this.runGit(removeArgs, gitRoot)
-		if (!removed.success) {
-			this.logger.log("sidecar", "worktreeDeleteFailed", { reason: "git_failed", targetPath, stderr: truncateText(removed.stderr, 1000) })
-			return { success: false, message: classifyWorktreeGitError(removed.stderr, "delete") }
-		}
-
-		const branchName = getString(request, "branchName")
-		if (request.deleteBranch === true && branchName) {
-			const deleted = await this.runGit(["branch", "-D", branchName], gitRoot)
-			if (!deleted.success) {
-				this.logger.log("sidecar", "worktreeDeleteBranchFailed", {
-					targetPath,
-					branchName,
-					stderr: truncateText(deleted.stderr, 1000),
-				})
-				return { success: true, warning: deleted.stderr || branchName, message: `Worktree deleted, but branch deletion failed: ${deleted.stderr || branchName}` }
-			}
-		}
-
-		this.logger.log("sidecar", "worktreeDeleteSucceeded", { targetPath, branchName: branchName || undefined })
-		return { success: true, message: `Worktree deleted: ${targetPath}.`, ...(await this.listWorktrees()) }
-	}
-
-	private async mergeWorktree(message: unknown) {
-		const request = asRecord(message)
-		const { gitRoot, error } = await this.getGitRoot()
-		if (!gitRoot) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "no_git_root", error })
-			return { success: false, message: error || "Worktrees require a git repository.", hasConflicts: false, conflictingFiles: [] }
-		}
-
-		const requestedPath = getString(request, "worktreePath") || getString(request, "path")
-		if (!requestedPath) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "missing_path", gitRoot })
-			return { success: false, message: "Worktree path is required.", hasConflicts: false, conflictingFiles: [] }
-		}
-		const worktreePath = path.resolve(requestedPath)
-		const targetBranch = getString(request, "targetBranch") || (await this.getWorktreeDefaults()).baseBranch || "main"
-		const sourceBranch = await this.getBranchForWorktree(worktreePath)
-		this.logger.log("sidecar", "worktreeMergeStarted", {
-			sourceWorktreePath: worktreePath,
-			sourceBranch,
-			targetWorktreePath: gitRoot,
-			targetBranch,
-			deleteAfterMerge: request.deleteAfterMerge === true,
-		})
-		if (!sourceBranch) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "source_branch_missing", worktreePath })
-			return { success: false, message: "Cannot merge a detached or unknown worktree branch.", hasConflicts: false, conflictingFiles: [] }
-		}
-
-		const sourceStatus = await this.getWorktreeStatus(worktreePath)
-		if (sourceStatus.dirty) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "source_dirty", worktreePath, statusSummary: sourceStatus.statusSummary })
-			return { success: false, message: `Cannot merge while the source worktree has uncommitted changes (${sourceStatus.statusSummary}).`, hasConflicts: false, conflictingFiles: [], sourceBranch, targetBranch }
-		}
-
-		const rootStatus = await this.getWorktreeStatus(gitRoot)
-		if (rootStatus.dirty) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "target_dirty", gitRoot, statusSummary: rootStatus.statusSummary })
-			return { success: false, message: `Cannot merge while the target worktree has uncommitted changes (${rootStatus.statusSummary}).`, hasConflicts: false, conflictingFiles: [], sourceBranch, targetBranch }
-		}
-
-		const checkout = await this.runGit(["checkout", targetBranch], gitRoot)
-		if (!checkout.success) {
-			this.logger.log("sidecar", "worktreeMergeFailed", { reason: "checkout_failed", targetBranch, stderr: truncateText(checkout.stderr, 1000) })
-			return {
-				success: false,
-				message: classifyWorktreeGitError(checkout.stderr || `Failed to checkout ${targetBranch}.`, "merge"),
-				hasConflicts: false,
-				conflictingFiles: [],
-				sourceBranch,
-				targetBranch,
-				sourceWorktreePath: worktreePath,
-				targetWorktreePath: gitRoot,
-			}
-		}
-
-		const merge = await this.runGit(["merge", "--no-ff", sourceBranch], gitRoot)
-		if (!merge.success) {
-			const conflicts = await this.getConflictFiles(gitRoot)
-			const recoveryCommands = [
-				"git status --short",
-				"git diff --name-only --diff-filter=U",
-				"git merge --abort",
-				`git checkout ${targetBranch}`,
-			]
-			this.logger.log("sidecar", "worktreeMergeFailed", {
-				reason: conflicts.length > 0 ? "conflict" : "merge_failed",
-				sourceBranch,
-				targetBranch,
-				conflictCount: conflicts.length,
-				stderr: truncateText(merge.stderr, 1000),
-			})
-			return {
-				success: false,
-				message: merge.stderr || "Merge failed.",
-				hasConflicts: conflicts.length > 0,
-				conflictingFiles: conflicts,
-				recoveryState: conflicts.length > 0 ? "merge_conflict" : "merge_failed",
-				recoveryCommands,
-				recoveryPrompt: `Merge conflict while merging ${sourceBranch} from ${worktreePath} into ${targetBranch} at ${gitRoot}. Conflicts: ${conflicts.join(", ") || "(unknown)"}.`,
-				sourceBranch,
-				targetBranch,
-				sourceWorktreePath: worktreePath,
-				targetWorktreePath: gitRoot,
-			}
-		}
-
-		let warning = ""
-		if (request.deleteAfterMerge === true) {
-			const deleteResult = asRecord(await this.deleteWorktree({ path: worktreePath, force: false, deleteBranch: false }))
-			if (deleteResult.success === false) {
-				warning = getString(deleteResult, "message") || "Merge succeeded, but the source worktree could not be deleted."
-			}
-		}
-
-		this.logger.log("sidecar", "worktreeMergeSucceeded", { sourceBranch, targetBranch, warning: warning || undefined })
-		return {
-			success: true,
-			message: warning ? `Merged ${sourceBranch} into ${targetBranch}. ${warning}` : `Merged ${sourceBranch} into ${targetBranch}.`,
-			hasConflicts: false,
-			conflictingFiles: [],
-			sourceBranch,
-			targetBranch,
-			sourceWorktreePath: worktreePath,
-			targetWorktreePath: gitRoot,
-			warning,
-		}
-	}
-
-	private async getBranchForWorktree(worktreePath: string) {
-		const list = await this.listWorktrees()
-		const match = list.worktrees.find((item: Record<string, unknown>) => samePath(getString(item, "path"), worktreePath))
-		return getString(match, "branch")
-	}
-
-	private async getConflictFiles(gitRoot: string) {
-		const result = await this.runGit(["diff", "--name-only", "--diff-filter=U"], gitRoot)
-		return result.success
-			? result.stdout
-					.split(/\r?\n/)
-					.map((line) => line.trim())
-					.filter(Boolean)
-			: []
-	}
-
-	private async recoverWorktreeMerge(message: unknown) {
-		const request = asRecord(message)
-		const action = normalizeMergeRecoveryAction(getString(request, "action") || getString(request, "value") || "status")
-		const requestedPath = getString(request, "targetWorktreePath") || getString(request, "workspacePath") || getString(request, "path")
-		const { gitRoot, error } = await this.getGitRoot(requestedPath)
-		if (!gitRoot) {
-			return { success: false, action, message: error || "Worktrees require a git repository.", conflictingFiles: [] }
-		}
-
-		if (action === "abort") {
-			const result = await this.runGit(["merge", "--abort"], gitRoot)
-			return {
-				success: result.success,
-				action,
-				message: result.success ? "Merge aborted." : result.stderr || "Failed to abort merge.",
-				conflictingFiles: await this.getConflictFiles(gitRoot),
-				targetWorktreePath: gitRoot,
-			}
-		}
-
-		if (action === "continue") {
-			const result = await this.runGit(["merge", "--continue"], gitRoot)
-			return {
-				success: result.success,
-				action,
-				message: result.success ? "Merge continued." : result.stderr || "Failed to continue merge.",
-				conflictingFiles: await this.getConflictFiles(gitRoot),
-				targetWorktreePath: gitRoot,
-			}
-		}
-
-		const status = await this.getWorktreeStatus(gitRoot)
-		return {
-			success: true,
-			action: "status",
-			message: status.statusSummary || "Merge status loaded.",
-			statusSummary: status.statusSummary,
-			statusEntries: status.statusEntries,
-			conflictingFiles: await this.getConflictFiles(gitRoot),
-			targetWorktreePath: gitRoot,
-		}
 	}
 
 	private requireClineSdk() {
@@ -4265,6 +3839,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireWorktreeQueries() {
 		if (!this.worktreeQueries) throw new Error("Worktree query handler is not attached.")
 		return this.worktreeQueries
+	}
+
+	private requireWorktreeMutations() {
+		if (!this.worktreeMutations) throw new Error("Worktree mutation handler is not attached.")
+		return this.worktreeMutations
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

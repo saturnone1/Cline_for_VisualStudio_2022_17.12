@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { McpHandler } from "./features/mcp/McpHandler"
 import { BrowserHandler } from "./features/browser/BrowserHandler"
 import { WorktreeQueryHandler } from "./features/worktrees/WorktreeQueryHandler"
+import { WorktreeMutationHandler } from "./features/worktrees/WorktreeMutationHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -49,7 +50,10 @@ const server = new SidecarRpcServer(
 		backend.setStartTaskHandler(new StartTaskHandler(runtime))
 		backend.setCancelTaskHandler(new CancelTaskHandler(runtime))
 		backend.setBrowserHandler(new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)))
-		backend.setWorktreeQueryHandler(new WorktreeQueryHandler(new NodeWorktreeOperationsAdapter(host), interactionLogger))
+		const worktreeOperations = new NodeWorktreeOperationsAdapter(host)
+		const worktreeQueries = new WorktreeQueryHandler(worktreeOperations, interactionLogger)
+		backend.setWorktreeQueryHandler(worktreeQueries)
+		backend.setWorktreeMutationHandler(new WorktreeMutationHandler(worktreeOperations, worktreeQueries, interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

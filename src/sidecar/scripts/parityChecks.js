@@ -8,6 +8,7 @@ const conversationPath = path.join(root, "src", "infrastructure", "conversation"
 const providerConfigurationPath = path.join(root, "src", "infrastructure", "configuration", "ProviderConfiguration.ts")
 const webviewStatePath = path.join(root, "src", "infrastructure", "webview", "WebviewState.ts")
 const browserHandlerPath = path.join(root, "src", "features", "browser", "BrowserHandler.ts")
+const worktreeMutationHandlerPath = path.join(root, "src", "features", "worktrees", "WorktreeMutationHandler.ts")
 const mainPath = path.join(root, "src", "main.ts")
 const serverPath = path.join(root, "src", "infrastructure", "transport", "SidecarRpcServer.ts")
 const repoRoot = path.resolve(root, "..", "..")
@@ -19,7 +20,8 @@ const conversation = fs.readFileSync(conversationPath, "utf8")
 const providerConfiguration = fs.readFileSync(providerConfigurationPath, "utf8")
 const webviewState = fs.readFileSync(webviewStatePath, "utf8")
 const browserHandler = fs.readFileSync(browserHandlerPath, "utf8")
-const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}\n${browserHandler}`
+const worktreeMutationHandler = fs.readFileSync(worktreeMutationHandlerPath, "utf8")
+const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}\n${browserHandler}\n${worktreeMutationHandler}`
 const main = fs.readFileSync(mainPath, "utf8")
 const server = fs.readFileSync(serverPath, "utf8")
 const apiConfigurationSection = fs.readFileSync(apiConfigurationSectionPath, "utf8")
@@ -36,7 +38,7 @@ const requiredMarkers = [
 	["browser action execution phases", "this.automation.runAction"],
 	["OAuth refresh state RPC", "refreshOAuthCredential"],
 	["checkpoint compare RPC", "checkpointDiff"],
-	["worktree merge recovery", "recoverWorktreeMerge"],
+	["worktree merge recovery", "async recover(message: unknown)"],
 	["scheduled agent local spec directory", "\"cron\""],
 	["local plugin discovery", "discoverLocalPlugins"],
 	["provider catalog diagnostics", "createCatalogDiagnostics"],
