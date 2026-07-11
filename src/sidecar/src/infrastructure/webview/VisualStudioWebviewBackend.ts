@@ -36,6 +36,7 @@ import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCal
 import type { OAuthCallbackListenerPort } from "../../application/ports/OAuthCallbackListenerPort"
 import type { OAuthTokenHandler } from "../../features/providers/OAuthTokenHandler"
 import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
+import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -244,7 +245,6 @@ import {
 	type OAuthCallbackSession,
 	createUnauthenticatedAccountState,
 	createVisualStudioAuthUnsupportedResponse,
-	createProviderAuthInfo,
 	isOAuthBridgeProvider,
 	createOAuthAuthorizationRequest,
 	parseUrlFragmentParams,
@@ -343,6 +343,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private oauthCallbackListener: OAuthCallbackListenerPort | null = null
 	private oauthTokens: OAuthTokenHandler | null = null
 	private providerCredentials: ProviderCredentialHandler | null = null
+	private providerAuthActions: ProviderAuthActionHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -407,6 +408,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, listener: OAuthCallbackListenerPort) { this.oauthCallbacks = oauthCallbacks; this.oauthCallbackListener = listener }
 	setOAuthTokenHandler(oauthTokens: OAuthTokenHandler) { this.oauthTokens = oauthTokens }
 	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
+	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -1421,27 +1423,12 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		const bridge = isOAuthBridgeProvider(provider) ? await this.ensureOAuthCallbackBridge(provider, request) : null
-		const authInfo = createProviderAuthInfo(provider, message, bridge)
-		if (authInfo.url) {
-			await this.host.envClient.openExternal({ value: authInfo.url })
-		}
-		if (authInfo.message) {
-			await this.host.windowClient.showMessage({ message: authInfo.message, type: authInfo.supported ? "info" : "warning" })
-		}
+		const response = await this.requireProviderAuthActions().execute(provider, message, bridge)
 		if (provider === "openAiCodex") {
 			this.state.openAiCodexIsAuthenticated = false
 			await this.broadcastState()
 		}
-		this.logger.log("sidecar", "accountAuthAction", {
-			provider,
-			supported: authInfo.supported,
-			url: authInfo.url || undefined,
-			reason: getString(authInfo, "reason") || undefined,
-		})
-		return {
-			...createUnauthenticatedAccountState(),
-			...authInfo,
-		}
+		return response
 	}
 
 	private async createOAuthCallbackBridgeResponse(message: unknown, fallbackProvider: string) {
@@ -3395,6 +3382,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireProviderCredentials() {
 		if (!this.providerCredentials) throw new Error("Provider credential handler is not attached.")
 		return this.providerCredentials
+	}
+
+	private requireProviderAuthActions() {
+		if (!this.providerAuthActions) throw new Error("Provider auth action handler is not attached.")
+		return this.providerAuthActions
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

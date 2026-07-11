@@ -6,6 +6,7 @@ import { WorktreeMutationHandler } from "./features/worktrees/WorktreeMutationHa
 import { OAuthCallbackCoordinator } from "./features/providers/OAuthCallbackCoordinator"
 import { OAuthTokenHandler } from "./features/providers/OAuthTokenHandler"
 import { ProviderCredentialHandler } from "./features/providers/ProviderCredentialHandler"
+import { ProviderAuthActionHandler } from "./features/providers/ProviderAuthActionHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -25,6 +26,7 @@ import { NodeWorktreeOperationsAdapter } from "./infrastructure/worktree/NodeWor
 import { NodeOAuthCallbackListener } from "./infrastructure/auth/NodeOAuthCallbackListener"
 import { FetchOAuthTokenExchangeAdapter } from "./infrastructure/auth/FetchOAuthTokenExchangeAdapter"
 import { ProviderCredentialEnvironmentAdapter } from "./infrastructure/auth/ProviderCredentialEnvironmentAdapter"
+import { VisualStudioProviderAuthUiAdapter } from "./infrastructure/auth/VisualStudioProviderAuthUiAdapter"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -64,6 +66,7 @@ const server = new SidecarRpcServer(
 		const oauthTokens = new FetchOAuthTokenExchangeAdapter()
 		backend.setOAuthTokenHandler(new OAuthTokenHandler(oauthTokens, interactionLogger))
 		backend.setProviderCredentialHandler(new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens, runtime))
+		backend.setProviderAuthActionHandler(new ProviderAuthActionHandler(new VisualStudioProviderAuthUiAdapter(host), interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

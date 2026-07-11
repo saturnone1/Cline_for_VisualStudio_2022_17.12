@@ -8,112 +8,12 @@ import {
 	isOAuthTokenBlobProvider,
 	normalizeProviderValue,
 	oauthCredentialsField,
-	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
 import type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
 export type { OAuthCallbackSession } from "../../features/providers/OAuthCallbackCoordinator"
 import { createFallbackProviderConfigFields, isOAuthBridgeProvider } from "../../features/providers/ProviderCredentialPolicy"
 export { createFallbackProviderConfigFields, isOAuthBridgeProvider } from "../../features/providers/ProviderCredentialPolicy"
-
-export function createUnauthenticatedAccountState() {
-	return {
-		loggedIn: false,
-		user: null,
-		organizations: [],
-		activeOrganization: null,
-		isAuthenticated: false,
-		openAiCodexIsAuthenticated: false,
-		authStatus: "unauthenticated",
-	}
-}
-
-export function createVisualStudioAuthUnsupportedResponse(provider: string, url = "") {
-	const label = providerAuthLabel(provider)
-	const message =
-		`${label} OAuth is not implemented in the Visual Studio 2022 host yet. ` +
-		"Use a local API key or a provider-specific credential file where available."
-	return {
-		success: false,
-		supported: false,
-		provider,
-		url,
-		value: url,
-		message,
-		reason: "visual_studio_oauth_callback_not_implemented",
-		...createUnauthenticatedAccountState(),
-	}
-}
-
-export function createProviderAuthInfo(provider: string, message: unknown, bridge: OAuthCallbackSession | null = null) {
-	const request = asRecord(message)
-	if (provider === "openrouter") {
-		const url = "https://openrouter.ai/settings/keys"
-		return {
-			success: true,
-			supported: true,
-			provider,
-			url,
-			value: url,
-			message: "OpenRouter API key page opened. Paste the generated key into LIG VS settings.",
-			authMode: "api_key",
-		}
-	}
-
-	if (provider === "requesty") {
-		const configuredBaseUrl = getString(request, "value") || getString(request, "baseUrl")
-		const root = normalizeHttpUrl(configuredBaseUrl) || "https://app.requesty.ai"
-		const url = new URL("api-keys", root.endsWith("/") ? root : `${root}/`).toString()
-		return {
-			success: true,
-			supported: true,
-			provider,
-			url,
-			value: url,
-			message: "Requesty API key page opened. Paste the generated key into LIG VS settings.",
-			authMode: "api_key",
-		}
-	}
-
-	if (provider === "hicap") {
-		const url = "https://hicap.ai"
-		return {
-			success: true,
-			supported: true,
-			provider,
-			url,
-			value: url,
-			message: "Hicap provider page opened. Use a local API key in LIG VS settings.",
-			authMode: "api_key",
-		}
-	}
-
-	if (bridge || isOAuthBridgeProvider(provider)) {
-		const callbackUrl = bridge?.callbackUrl || ""
-		const authorizationUrl = bridge?.authorizationUrl || ""
-		return {
-			...createUnauthenticatedAccountState(),
-			success: true,
-			supported: true,
-			provider,
-			value: authorizationUrl || callbackUrl,
-			url: authorizationUrl || undefined,
-			authorizationUrl: authorizationUrl || undefined,
-			callbackUrl,
-			redirectUrl: callbackUrl,
-			state: bridge?.state || "",
-			authMode: "oauth_callback",
-			authStatus: "pending",
-			authorizationUrlSupported: Boolean(authorizationUrl),
-			tokenExchangeSupported: bridge?.tokenExchangeSupported === true,
-			message:
-				authorizationUrl
-					? `${providerAuthLabel(provider)} OAuth authorization URL opened. Complete sign-in in the browser and return to LIG VS through the localhost callback.`
-					: `${providerAuthLabel(provider)} OAuth callback bridge is ready. Configure a provider authorization URL to open sign-in automatically.`,
-		}
-	}
-
-	return createVisualStudioAuthUnsupportedResponse(provider)
-}
+export { createProviderAuthInfo, createUnauthenticatedAccountState, createVisualStudioAuthUnsupportedResponse } from "../../features/providers/ProviderAuthActionPolicy"
 
 export function createOAuthAuthorizationRequest(provider: string, callbackUrl: string, state: string, request: Record<string, unknown>) {
 	const authorizationBaseUrl = getString(request, "authorizationUrl") || getString(request, "authUrl") || oauthProviderEnv(provider, "AUTHORIZE_URL")
@@ -196,41 +96,6 @@ export function redactUrl(value: string) {
 		return url.toString()
 	} catch {
 		return value ? "[configured]" : ""
-	}
-}
-
-export function escapeHtml(value: string) {
-	return value.replace(/[&<>"']/g, (char) => {
-		switch (char) {
-			case "&":
-				return "&amp;"
-			case "<":
-				return "&lt;"
-			case ">":
-				return "&gt;"
-			case '"':
-				return "&quot;"
-			case "'":
-				return "&#39;"
-			default:
-				return char
-		}
-	})
-}
-
-export function normalizeHttpUrl(value: string) {
-	const raw = String(value || "").trim()
-	if (!raw) {
-		return ""
-	}
-	try {
-		return new URL(raw).toString()
-	} catch {
-		try {
-			return new URL(`https://${raw}`).toString()
-		} catch {
-			return ""
-		}
 	}
 }
 

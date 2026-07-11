@@ -69,6 +69,9 @@ if (router.includes("Token endpoint returned HTTP") || router.includes("Buffer.f
 if (router.includes("SDK provider metadata could not be loaded")) {
 	violations.push("VisualStudioWebviewBackend must delegate provider config metadata projection to ProviderCredentialHandler.")
 }
+if (router.includes('this.logger.log("sidecar", "accountAuthAction"')) {
+	violations.push("VisualStudioWebviewBackend must delegate provider auth UI orchestration to ProviderAuthActionHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -150,6 +153,7 @@ for (const requiredFile of [
 	"application/ports/OAuthCallbackListenerPort.ts",
 	"application/ports/OAuthTokenExchangePort.ts",
 	"application/ports/ProviderCredentialEnvironmentPort.ts",
+	"application/ports/ProviderAuthUiPort.ts",
 	"application/dto/OAuthContracts.ts",
 	"features/mcp/McpHandler.ts",
 	"application/useCases/StatePersistenceUseCase.ts",
@@ -163,6 +167,7 @@ for (const requiredFile of [
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
 	"infrastructure/auth/FetchOAuthTokenExchangeAdapter.ts",
 	"infrastructure/auth/ProviderCredentialEnvironmentAdapter.ts",
+	"infrastructure/auth/VisualStudioProviderAuthUiAdapter.ts",
 	"infrastructure/hooks/HookRuntime.ts",
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
@@ -183,6 +188,8 @@ for (const requiredFile of [
 	"features/providers/OAuthTokenHandler.ts",
 	"features/providers/ProviderCredentialPolicy.ts",
 	"features/providers/ProviderCredentialHandler.ts",
+	"features/providers/ProviderAuthActionPolicy.ts",
+	"features/providers/ProviderAuthActionHandler.ts",
 	"features/settings/PlanActMode.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/worktrees/WorktreeQueryHandler.ts",
