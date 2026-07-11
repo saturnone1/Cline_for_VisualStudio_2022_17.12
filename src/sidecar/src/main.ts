@@ -42,6 +42,7 @@ import { TaskActivityMonitor } from "./features/runtime/TaskActivityMonitor"
 import { PartialStateScheduler } from "./features/runtime/PartialStateScheduler"
 import { SendLatencyMonitor } from "./features/runtime/SendLatencyMonitor"
 import { ChangeTrackingHandler } from "./infrastructure/workspace/ChangeTrackingHandler"
+import { ProviderModelCatalogHandler } from "./infrastructure/models/ProviderModelCatalogHandler"
 
 const pipeName = getArg("--pipe")
 if (!pipeName) {
@@ -94,6 +95,7 @@ const server = new SidecarRpcServer(
 		backend.setPartialStateScheduler(new PartialStateScheduler(interactionLogger, () => backend.hasStateSubscribers(), () => backend.getActivePartialSnapshot(), () => backend.handlePartialIdle(), () => backend.requestStateBroadcast(), readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000), readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)))
 		backend.setSendLatencyMonitor(new SendLatencyMonitor(interactionLogger))
 		backend.setChangeTrackingHandler(new ChangeTrackingHandler(host.workspaceClient, (text) => backend.publishChangeTranscript(text)))
+		backend.setProviderModelCatalogHandler(new ProviderModelCatalogHandler((modelId) => backend.applyDefaultOllamaModel(modelId)))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},
 	flushInteractionLog,

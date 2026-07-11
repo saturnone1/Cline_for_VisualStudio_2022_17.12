@@ -63,6 +63,7 @@ import type { TaskActivityMonitor } from "../../features/runtime/TaskActivityMon
 import type { PartialStateScheduler } from "../../features/runtime/PartialStateScheduler"
 import type { SendLatencyMonitor } from "../../features/runtime/SendLatencyMonitor"
 import type { ChangeTrackingHandler } from "../workspace/ChangeTrackingHandler"
+import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalogHandler"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -75,11 +76,6 @@ import { applyPreToolUseInputPatch, type PreToolUseDecision } from "../../featur
 import {
 	normalizeOllamaRootBaseUrl,
 	normalizeOllamaOpenAiBaseUrl,
-	normalizeOpenAiCompatibleBaseUrl,
-	isOpenAiCompatibleCatalogProvider,
-	defaultOpenAiCompatibleCatalogBaseUrl,
-	createModelCatalog,
-	createCatalogDiagnostics,
 	inferModelInfo,
 	inferContextWindow,
 	inferMaxTokens,
@@ -88,7 +84,6 @@ import {
 	modelInfoFromRemoteMetadata,
 	parseModelPrice,
 	getOllamaModels,
-	getOpenAiCompatibleModels,
 } from "../models/ModelCatalog"
 import {
 	RESUMED_CONVERSATION_MAX_CHARS,
@@ -278,6 +273,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private partialStateScheduler: PartialStateScheduler | null = null
 	private sendLatency: SendLatencyMonitor | null = null
 	private changeTracking: ChangeTrackingHandler | null = null
+	private providerModelCatalogs: ProviderModelCatalogHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -353,6 +349,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setPartialStateScheduler(partialStateScheduler: PartialStateScheduler) { this.partialStateScheduler = partialStateScheduler }
 	setSendLatencyMonitor(sendLatency: SendLatencyMonitor) { this.sendLatency = sendLatency }
 	setChangeTrackingHandler(changeTracking: ChangeTrackingHandler) { this.changeTracking = changeTracking }
+	setProviderModelCatalogHandler(providerModelCatalogs: ProviderModelCatalogHandler) { this.providerModelCatalogs = providerModelCatalogs }
 	async publishChangeTranscript(text: string) { this.addMessage({ type: "say", say: "tool", text }); this.updateCurrentTaskItem(); await this.broadcastState() }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
 	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
@@ -2990,6 +2987,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.changeTracking
 	}
 
+	private requireProviderModelCatalogs() {
+		if (!this.providerModelCatalogs) throw new Error("Provider model catalog handler is not attached.")
+		return this.providerModelCatalogs
+	}
+
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
 		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
 		const url = getString(input, "url") || getString(input, "value")
@@ -3855,7 +3857,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 	}
 
-	private applyDefaultOllamaModel(modelId: string) {
+	applyDefaultOllamaModel(modelId: string) {
 		const apiConfiguration = this.state.apiConfiguration as Record<string, unknown>
 		let changed = false
 
@@ -4232,13 +4234,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private createCurrentModelCatalog() {
-		const id = this.getModelId()
-		return createModelCatalog([id], {
-			providerId: normalizeProviderId(getString(asRecord(this.state.apiConfiguration), `${this.state.mode === "plan" ? "planMode" : "actMode"}ApiProvider`)),
-			selectedId: id,
-			reduced: true,
-			message: "Using the configured model because this provider catalog cannot be refreshed locally.",
-		})
+		return this.requireProviderModelCatalogs().current(asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId())
 	}
 
 	private schedulePersistedStateSave() {
@@ -4250,99 +4246,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async createProviderModelCatalog(providerId: string, request: Record<string, unknown>) {
-		const normalizedProviderId = normalizeProviderId(providerId)
-		const requestConfig = extractApiConfigurationUpdate(request)
-		const apiConfig = {
-			...asRecord(this.state.apiConfiguration),
-			...compactApiConfiguration(requestConfig),
-		}
-		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
-		const selectedId = resolveModelId(apiConfig, normalizedProviderId, modePrefix) || this.getModelId()
-		const oauthCredentials = resolveOAuthCredentials(apiConfig, normalizedProviderId)
-		const oauthState = describeOAuthCredentialState(oauthCredentials)
-		const apiKey = resolveApiKey(apiConfig, normalizedProviderId) || getString(oauthCredentials, "accessToken") || getString(oauthCredentials, "access_token")
-		const requestBaseUrl =
-			getString(request, "baseUrl") ||
-			getString(request, "baseURL") ||
-			getString(request, "url") ||
-			getString(request, "value")
-		const configuredBaseUrl = requestBaseUrl || resolveBaseUrl(apiConfig, normalizedProviderId)
-		const baseUrl =
-			normalizedProviderId === "lmstudio" && !configuredBaseUrl
-				? "http://localhost:1234/v1"
-				: configuredBaseUrl || defaultOpenAiCompatibleCatalogBaseUrl(normalizedProviderId, apiKey)
-
-		if (normalizedProviderId === "ollama") {
-			const ids = await getOllamaModels(baseUrl)
-			if (ids.length > 0) {
-				this.applyDefaultOllamaModel(ids[0])
-			}
-			return createModelCatalog(ids, {
-				providerId: normalizedProviderId,
-				selectedId: selectedId || ids[0],
-				source: "ollama:/api/tags",
-				supported: true,
-				reduced: ids.length === 0,
-				message: ids.length > 0 ? "" : "Ollama did not return any local models. Check that Ollama is running and has pulled models.",
-				diagnostics: createCatalogDiagnostics(normalizedProviderId, "ollama:/api/tags", {
-					baseUrl: normalizeOllamaRootBaseUrl(baseUrl),
-					authenticated: false,
-					modelCount: ids.length,
-				}),
-			})
-		}
-
-		if (isOpenAiCompatibleCatalogProvider(normalizedProviderId)) {
-			if (!baseUrl) {
-				return createModelCatalog(selectedId ? [selectedId] : [], {
-					providerId: normalizedProviderId,
-					selectedId,
-					supported: true,
-					reduced: true,
-					message: `${providerAuthLabel(normalizedProviderId)} does not expose a configured model catalog endpoint in this Visual Studio port, so the configured model is shown as a reduced catalog.`,
-					diagnostics: createCatalogDiagnostics(normalizedProviderId, "reduced", {
-						baseUrlConfigured: false,
-						authenticated: Boolean(apiKey),
-						oauthRefreshStatus: oauthState.refreshStatus,
-					}),
-				})
-			}
-
-			const result = await getOpenAiCompatibleModels(baseUrl, apiKey)
-			return createModelCatalog(result.ids, {
-				providerId: normalizedProviderId,
-				selectedId: selectedId || result.ids[0],
-				source: `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`,
-				supported: true,
-				reduced: result.ids.length === 0,
-				message: result.error || (result.ids.length > 0 ? "" : "The model endpoint returned no models."),
-				error: result.error,
-				modelInfoById: result.modelInfoById,
-				diagnostics: createCatalogDiagnostics(normalizedProviderId, "openai-compatible:/models", {
-					baseUrl: normalizeOpenAiCompatibleBaseUrl(baseUrl),
-					authenticated: Boolean(apiKey),
-					oauthRefreshStatus: oauthState.refreshStatus,
-					modelCount: result.ids.length,
-					error: result.error,
-				}),
-			})
-		}
-
-		return this.createUnsupportedModelCatalog(`ModelsService.refresh:${normalizedProviderId}`)
+		return this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId())
 	}
 
 	private createUnsupportedModelCatalog(key: string) {
-		const providerId = key.replace(/^ModelsService\./, "").replace(/Rpc$/, "")
-		return createModelCatalog([], {
-			providerId,
-			supported: false,
-			reduced: true,
-			message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`,
-			diagnostics: createCatalogDiagnostics(providerId, "unsupported", {
-				authenticated: false,
-				reason: "air_gap_provider_catalog_not_implemented",
-			}),
-		})
+		return this.requireProviderModelCatalogs().unsupported(key)
 	}
 
 	private async broadcastState() {

@@ -200,6 +200,7 @@ for (const requiredFile of [
 	"infrastructure/hooks/LocalHookStore.ts",
 	"infrastructure/hooks/ProcessHookExecutionAdapter.ts",
 	"infrastructure/models/ModelCatalog.ts",
+	"infrastructure/models/ProviderModelCatalogHandler.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",
 	"infrastructure/worktree/NodeWorktreeOperationsAdapter.ts",

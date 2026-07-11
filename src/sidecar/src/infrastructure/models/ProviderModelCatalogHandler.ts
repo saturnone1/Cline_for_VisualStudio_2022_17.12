@@ -1,0 +1,42 @@
+import { normalizeProviderId, providerAuthLabel } from "../../application/services/ProviderIdentity"
+import { compactApiConfiguration, describeOAuthCredentialState, extractApiConfigurationUpdate, resolveApiKey, resolveBaseUrl, resolveOAuthCredentials } from "../configuration/ProviderConfiguration"
+import { resolveModelId } from "../../features/providers/ProviderSelection"
+import { createCatalogDiagnostics, createModelCatalog, defaultOpenAiCompatibleCatalogBaseUrl, getOllamaModels, getOpenAiCompatibleModels, isOpenAiCompatibleCatalogProvider, normalizeOllamaRootBaseUrl, normalizeOpenAiCompatibleBaseUrl } from "./ModelCatalog"
+
+export class ProviderModelCatalogHandler {
+	constructor(private readonly applyDefaultOllamaModel: (modelId: string) => void) {}
+
+	current(configuration: Record<string, unknown>, mode: "plan" | "act", modelId: string) {
+		const modePrefix = mode === "plan" ? "planMode" : "actMode"
+		return createModelCatalog([modelId], { providerId: normalizeProviderId(readString(configuration[`${modePrefix}ApiProvider`])), selectedId: modelId, reduced: true, message: "Using the configured model because this provider catalog cannot be refreshed locally." })
+	}
+
+	async refresh(providerId: string, request: Record<string, unknown>, configuration: Record<string, unknown>, mode: "plan" | "act", fallbackModelId: string) {
+		const provider = normalizeProviderId(providerId), apiConfig = { ...configuration, ...compactApiConfiguration(extractApiConfigurationUpdate(request)) }
+		const modePrefix = mode === "plan" ? "planMode" : "actMode", selectedId = resolveModelId(apiConfig, provider, modePrefix) || fallbackModelId
+		const oauthCredentials = resolveOAuthCredentials(apiConfig, provider), oauthState = describeOAuthCredentialState(oauthCredentials)
+		const apiKey = resolveApiKey(apiConfig, provider) || readString(oauthCredentials.accessToken) || readString(oauthCredentials.access_token)
+		const requestedBaseUrl = readString(request.baseUrl) || readString(request.baseURL) || readString(request.url) || readString(request.value)
+		const configuredBaseUrl = requestedBaseUrl || resolveBaseUrl(apiConfig, provider)
+		const baseUrl = provider === "lmstudio" && !configuredBaseUrl ? "http://localhost:1234/v1" : configuredBaseUrl || defaultOpenAiCompatibleCatalogBaseUrl(provider, apiKey)
+
+		if (provider === "ollama") {
+			const ids = await getOllamaModels(baseUrl)
+			if (ids.length) this.applyDefaultOllamaModel(ids[0])
+			return createModelCatalog(ids, { providerId: provider, selectedId: selectedId || ids[0], source: "ollama:/api/tags", supported: true, reduced: ids.length === 0, message: ids.length ? "" : "Ollama did not return any local models. Check that Ollama is running and has pulled models.", diagnostics: createCatalogDiagnostics(provider, "ollama:/api/tags", { baseUrl: normalizeOllamaRootBaseUrl(baseUrl), authenticated: false, modelCount: ids.length }) })
+		}
+
+		if (!isOpenAiCompatibleCatalogProvider(provider)) return this.unsupported(`ModelsService.refresh:${provider}`)
+		if (!baseUrl) return createModelCatalog(selectedId ? [selectedId] : [], { providerId: provider, selectedId, supported: true, reduced: true, message: `${providerAuthLabel(provider)} does not expose a configured model catalog endpoint in this Visual Studio port, so the configured model is shown as a reduced catalog.`, diagnostics: createCatalogDiagnostics(provider, "reduced", { baseUrlConfigured: false, authenticated: Boolean(apiKey), oauthRefreshStatus: oauthState.refreshStatus }) })
+
+		const result = await getOpenAiCompatibleModels(baseUrl, apiKey)
+		return createModelCatalog(result.ids, { providerId: provider, selectedId: selectedId || result.ids[0], source: `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`, supported: true, reduced: result.ids.length === 0, message: result.error || (result.ids.length ? "" : "The model endpoint returned no models."), error: result.error, modelInfoById: result.modelInfoById, diagnostics: createCatalogDiagnostics(provider, "openai-compatible:/models", { baseUrl: normalizeOpenAiCompatibleBaseUrl(baseUrl), authenticated: Boolean(apiKey), oauthRefreshStatus: oauthState.refreshStatus, modelCount: result.ids.length, error: result.error }) })
+	}
+
+	unsupported(key: string) {
+		const providerId = key.replace(/^ModelsService\./, "").replace(/Rpc$/, "")
+		return createModelCatalog([], { providerId, supported: false, reduced: true, message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`, diagnostics: createCatalogDiagnostics(providerId, "unsupported", { authenticated: false, reason: "air_gap_provider_catalog_not_implemented" }) })
+	}
+}
+
+function readString(value: unknown) { return typeof value === "string" ? value : "" }
