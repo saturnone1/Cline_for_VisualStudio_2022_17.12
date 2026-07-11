@@ -31,9 +31,8 @@ import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTas
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
 import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeMutationHandler"
-import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCallbackCoordinator"
 import type { OAuthAuthorizationHandler } from "../../features/providers/OAuthAuthorizationHandler"
-import type { OAuthTokenHandler } from "../../features/providers/OAuthTokenHandler"
+import type { OAuthCallbackHandler } from "../../features/providers/OAuthCallbackHandler"
 import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
 import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
@@ -241,11 +240,9 @@ import {
 import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
 import { resolveRequestedPlanActMode } from "../../features/settings/PlanActMode"
 import {
-	type OAuthCallbackSession,
 	createUnauthenticatedAccountState,
 	createVisualStudioAuthUnsupportedResponse,
 	isOAuthBridgeProvider,
-	parseUrlFragmentParams,
 } from "../auth/ProviderAuthSupport"
 
 type TrackedChangeSummary = {
@@ -336,9 +333,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
 	private activeSessionRuntimeSettingsRevision = 0
-	private oauthCallbacks: OAuthCallbackCoordinator | null = null
 	private oauthAuthorization: OAuthAuthorizationHandler | null = null
-	private oauthTokens: OAuthTokenHandler | null = null
+	private oauthCallbackHandler: OAuthCallbackHandler | null = null
 	private providerCredentials: ProviderCredentialHandler | null = null
 	private providerAuthActions: ProviderAuthActionHandler | null = null
 
@@ -402,8 +398,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setBrowserHandler(browserHandler: BrowserHandler) { this.browserHandler = browserHandler }
 	setWorktreeQueryHandler(worktreeQueries: WorktreeQueryHandler) { this.worktreeQueries = worktreeQueries }
 	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
-	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, oauthAuthorization: OAuthAuthorizationHandler) { this.oauthCallbacks = oauthCallbacks; this.oauthAuthorization = oauthAuthorization }
-	setOAuthTokenHandler(oauthTokens: OAuthTokenHandler) { this.oauthTokens = oauthTokens }
+	setOAuthCallbackServices(oauthAuthorization: OAuthAuthorizationHandler, oauthCallbackHandler: OAuthCallbackHandler) { this.oauthAuthorization = oauthAuthorization; this.oauthCallbackHandler = oauthCallbackHandler }
 	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
 	setProviderAuthActionHandler(providerAuthActions: ProviderAuthActionHandler) { this.providerAuthActions = providerAuthActions }
 
@@ -1436,47 +1431,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async handleOAuthCallbackUrl(url: string) {
-		const result = this.requireOAuthCallbacks().record(url)
-		if (result.success && result.session) {
-			await this.completeOAuthCallbackSession(result.session).catch((error) => {
-				result.session.status = "error"
-				result.session.error = stringify(error)
-				result.session.message = `OAuth token exchange failed: ${result.session.error}`
-				this.logger.log("sidecar", "oauthTokenExchangeFailed", { provider: result.session.provider, state: result.session.state, error: result.session.error })
-			})
-		}
+		const result = await this.requireOAuthCallbackHandler().receive(url, (mutation) => this.applyProviderCredentialMutation(mutation))
 		await this.broadcastState().catch((error) => console.error(error))
-		return { success: result.success, message: result.message }
-	}
-
-	private async completeOAuthCallbackSession(session: OAuthCallbackSession) {
-		if (session.status === "error") {
-			return { success: false, message: session.message || session.error || "OAuth callback failed." }
-		}
-
-		if (!session.token && session.code && session.tokenExchange) {
-			await this.requireOAuthTokens().exchangeAuthorizationCode(session)
-		}
-
-		if (session.token) {
-			return this.persistOAuthTokenSession(session)
-		}
-
-		return {
-			success: false,
-			provider: session.provider,
-			authStatus: session.status,
-			message: session.message || "OAuth callback did not provide a token.",
-		}
-	}
-
-	private async persistOAuthTokenSession(session: OAuthCallbackSession) {
-		const response = await this.applyProviderCredentialMutation(this.requireProviderCredentials().persistOAuthSession(session))
-		if (response.success === true) {
-			session.status = "configured"
-			session.message = getString(response, "message") || "OAuth credential was saved."
-		}
-		return response
+		return result
 	}
 
 	private async clearOAuthCredential(provider: string) {
@@ -1484,39 +1441,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private getOAuthCallbackStatus(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || "account")
-		return this.requireOAuthCallbacks().status(provider, getString(request, "state"))
+		return this.requireOAuthCallbackHandler().status(message)
 	}
 
 	private async submitOAuthCallback(message: unknown) {
-		const request = asRecord(message)
-		const callbackUrl = getString(request, "callbackUrl") || getString(request, "url") || getString(request, "value")
-		if (!callbackUrl) {
-			return { success: false, message: "OAuth callback URL is required.", authStatus: "unknown" }
-		}
-
-		let parsedUrl: URL
-		try { parsedUrl = new URL(callbackUrl) } catch { return { success: false, message: "OAuth callback URL is invalid.", authStatus: "unknown" } }
-		const result = this.requireOAuthCallbacks().record(parsedUrl.toString())
-		const hashParams = parseUrlFragmentParams(parsedUrl)
-		const provider = normalizeProviderValue(parsedUrl.searchParams.get("provider") || hashParams.get("provider") || getString(request, "provider") || "account")
-		const session = this.requireOAuthCallbacks().latest(provider)
-		if (result.success && session) {
-			const completion = await this.completeOAuthCallbackSession(session)
-			return {
-				...this.getOAuthCallbackStatus({ provider, state: session.state }),
-				...completion,
-				success: typeof completion.success === "boolean" ? completion.success : result.success,
-				message: getString(completion, "message") || result.message,
-			}
-		}
-
-		return {
-			...this.getOAuthCallbackStatus({ provider, state: session?.state }),
-			success: result.success,
-			message: result.message,
-		}
+		return this.requireOAuthCallbackHandler().submit(message, (mutation) => this.applyProviderCredentialMutation(mutation))
 	}
 
 	private async saveProviderCredential(message: unknown) {
@@ -3313,19 +3242,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.worktreeMutations
 	}
 
-	private requireOAuthCallbacks() {
-		if (!this.oauthCallbacks) throw new Error("OAuth callback coordinator is not attached.")
-		return this.oauthCallbacks
-	}
-
 	private requireOAuthAuthorization() {
 		if (!this.oauthAuthorization) throw new Error("OAuth authorization handler is not attached.")
 		return this.oauthAuthorization
 	}
 
-	private requireOAuthTokens() {
-		if (!this.oauthTokens) throw new Error("OAuth token handler is not attached.")
-		return this.oauthTokens
+	private requireOAuthCallbackHandler() {
+		if (!this.oauthCallbackHandler) throw new Error("OAuth callback handler is not attached.")
+		return this.oauthCallbackHandler
 	}
 
 	private requireProviderCredentials() {

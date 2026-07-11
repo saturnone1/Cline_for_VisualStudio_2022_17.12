@@ -8,6 +8,7 @@ import { OAuthTokenHandler } from "./features/providers/OAuthTokenHandler"
 import { ProviderCredentialHandler } from "./features/providers/ProviderCredentialHandler"
 import { ProviderAuthActionHandler } from "./features/providers/ProviderAuthActionHandler"
 import { OAuthAuthorizationHandler } from "./features/providers/OAuthAuthorizationHandler"
+import { OAuthCallbackHandler } from "./features/providers/OAuthCallbackHandler"
 import { TaskSessionUseCase } from "./application/useCases/TaskSessionUseCase"
 import { TaskLifecycleUseCase } from "./application/useCases/TaskLifecycleUseCase"
 import { StatePersistenceUseCase } from "./application/useCases/StatePersistenceUseCase"
@@ -64,11 +65,12 @@ const server = new SidecarRpcServer(
 		const worktreeQueries = new WorktreeQueryHandler(worktreeOperations, interactionLogger)
 		backend.setWorktreeQueryHandler(worktreeQueries)
 		backend.setWorktreeMutationHandler(new WorktreeMutationHandler(worktreeOperations, worktreeQueries, interactionLogger))
-		const oauthCallbacks = new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000))
-		backend.setOAuthCallbackServices(oauthCallbacks, new OAuthAuthorizationHandler(oauthCallbacks, new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)), new ProviderOAuthAuthorizationAdapter(), interactionLogger, randomUUID))
 		const oauthTokens = new FetchOAuthTokenExchangeAdapter()
-		backend.setOAuthTokenHandler(new OAuthTokenHandler(oauthTokens, interactionLogger))
-		backend.setProviderCredentialHandler(new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens, runtime))
+		const oauthTokenHandler = new OAuthTokenHandler(oauthTokens, interactionLogger)
+		const providerCredentials = new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), oauthTokens, runtime)
+		const oauthCallbacks = new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000))
+		backend.setOAuthCallbackServices(new OAuthAuthorizationHandler(oauthCallbacks, new NodeOAuthCallbackListener(readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_PORT", 0)), new ProviderOAuthAuthorizationAdapter(), interactionLogger, randomUUID), new OAuthCallbackHandler(oauthCallbacks, oauthTokenHandler, providerCredentials, interactionLogger))
+		backend.setProviderCredentialHandler(providerCredentials)
 		backend.setProviderAuthActionHandler(new ProviderAuthActionHandler(new VisualStudioProviderAuthUiAdapter(host), interactionLogger))
 		return { runtime, webview, roundtrip: () => host.roundtrip() }
 	},

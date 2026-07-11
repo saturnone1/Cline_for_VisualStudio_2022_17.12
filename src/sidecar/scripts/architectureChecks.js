@@ -75,6 +75,9 @@ if (router.includes('this.logger.log("sidecar", "accountAuthAction"')) {
 if (router.includes("oauthCallbackServerListening") || router.includes("oauthCallbackBridgeReady")) {
 	violations.push("VisualStudioWebviewBackend must delegate OAuth authorization orchestration to OAuthAuthorizationHandler.")
 }
+if (router.includes("completeOAuthCallbackSession") || router.includes("oauthTokenExchangeFailed")) {
+	violations.push("VisualStudioWebviewBackend must delegate OAuth callback completion to OAuthCallbackHandler.")
+}
 for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
 	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
 }
@@ -190,6 +193,7 @@ for (const requiredFile of [
 	"features/taskHistory/TaskHistoryCollection.ts",
 	"features/providers/ProviderSelection.ts",
 	"features/providers/OAuthCallbackCoordinator.ts",
+	"features/providers/OAuthCallbackHandler.ts",
 	"features/providers/OAuthAuthorizationHandler.ts",
 	"features/providers/OAuthTokenHandler.ts",
 	"features/providers/ProviderCredentialPolicy.ts",
