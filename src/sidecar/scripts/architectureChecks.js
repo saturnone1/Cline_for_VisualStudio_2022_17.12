@@ -257,6 +257,7 @@ for (const requiredFile of [
 	"features/taskHistory/TaskTranscriptHydrator.ts",
 	"features/chat/clearTask/ClearTaskHandler.ts",
 	"features/chat/cancelTask/CancelTaskFlow.ts",
+	"features/chat/runtime/AgentRunRecoveryFlow.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
