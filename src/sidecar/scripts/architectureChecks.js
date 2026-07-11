@@ -321,6 +321,7 @@ for (const requiredFile of [
 	"features/hooks/HookPolicy.ts",
 	"features/hooks/HookSettingsHandler.ts",
 	"features/hooks/HookExecutionHandler.ts",
+	"features/hooks/HookLifecycleCoordinator.ts",
 	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 	"features/scheduledAgents/ScheduledAgentHandler.ts",
 	"features/checkpoints/CheckpointPolicy.ts",

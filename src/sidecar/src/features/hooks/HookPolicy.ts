@@ -1,4 +1,4 @@
-import type { HookLifecycleName } from "../../application/dto/HookContracts"
+import type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
 
 export const SUPPORTED_HOOK_NAMES: HookLifecycleName[] = ["TaskStart", "TaskResume", "TaskCancel", "TaskComplete", "PreToolUse", "PostToolUse", "UserPromptSubmit"]
 
@@ -8,6 +8,35 @@ export function normalizeHookName(value: string): HookLifecycleName | "" {
 }
 
 export type PreToolUseDecision = { blocked: boolean; reason: string; inputPatch?: Record<string, unknown>; replaceInput?: boolean; validationMessage?: string; contextPatch?: Record<string, unknown>; structuredDecision?: Record<string, unknown> }
+
+export function createHookMetadata(
+	hook: HookScript,
+	status: "running" | "completed" | "failed" | "cancelled",
+	context: Record<string, unknown>,
+	result?: Pick<HookExecutionResult, "exitCode" | "stderr" | "error">,
+	jsonResponse?: Record<string, unknown>,
+) {
+	const toolName = readString(context.toolName)
+	const hasJsonResponse = Boolean(jsonResponse && Object.keys(jsonResponse).length > 0)
+	const decision = hookDecisionFromResponse(jsonResponse)
+	return {
+		hookName: hook.name,
+		toolName: toolName || undefined,
+		status,
+		exitCode: result?.exitCode,
+		hasJsonResponse,
+		jsonResponse: hasJsonResponse ? jsonResponse : undefined,
+		blocked: decision.blocked || undefined,
+		modifiedInput: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? true : undefined,
+		replaceInput: decision.replaceInput || undefined,
+		modifiedInputKeys: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? Object.keys(decision.inputPatch) : undefined,
+		validationMessage: decision.validationMessage || undefined,
+		contextInjectionKeys: decision.contextPatch && Object.keys(decision.contextPatch).length > 0 ? Object.keys(decision.contextPatch) : undefined,
+		structuredDecision: decision.structuredDecision && Object.keys(decision.structuredDecision).length > 0 ? decision.structuredDecision : undefined,
+		reason: decision.reason || undefined,
+		error: status === "failed" ? { type: "execution", message: result?.error || result?.stderr || "Hook failed.", scriptPath: hook.path } : undefined,
+	}
+}
 
 export function extractHookJsonResponse(stdout: string): Record<string, unknown> | undefined {
 	const text = String(stdout || "").trim()

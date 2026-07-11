@@ -94,12 +94,10 @@ import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
-import {
-	type HookLifecycleName,
-	createHookMetadata,
-} from "../hooks/HookRuntime"
+import type { HookLifecycleName } from "../../application/dto/HookContracts"
 import type { HookSettingsHandler } from "../../features/hooks/HookSettingsHandler"
-import type { HookExecutionHandler, HookExecutionObserver } from "../../features/hooks/HookExecutionHandler"
+import type { HookExecutionHandler } from "../../features/hooks/HookExecutionHandler"
+import { HookLifecycleCoordinator } from "../../features/hooks/HookLifecycleCoordinator"
 import { applyPreToolUseInputPatch, type PreToolUseDecision } from "../../features/hooks/HookPolicy"
 import {
 	normalizeOllamaRootBaseUrl,
@@ -270,6 +268,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
+	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private sdkRunGeneration = 0
@@ -316,6 +315,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	) {
 		this.state = loadInitialState(this.stateStore.load())
 		this.conversationMessages = new ConversationMessageStore({ read: () => this.state.clineMessages, write: (messages) => { this.state.clineMessages = messages }, persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.hookLifecycle = new HookLifecycleCoordinator({ execution: () => this.requireHookExecution(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enabled: () => this.state.hooksEnabled !== false, addMessage: (message) => this.conversationMessages.add(message), nextTimestamp: () => this.conversationMessages.nextTimestamp(), upsertMessage: (timestamp, updates) => this.conversationMessages.upsert(timestamp, updates), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState().catch((error) => { console.error(error) }) })
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.clearTaskHandler = new ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.transitionTask(status, source), advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, rememberSnapshot: (sessionId) => { if (this.state.currentTaskItem && this.state.clineMessages.length > 0) { const taskId = String(this.state.currentTaskItem.id || sessionId); if (taskId) this.rememberTaskSnapshot(taskId, this.state.currentTaskItem, this.state.clineMessages) } }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { const transition = this.taskLifecycle.reset(source); this.state.taskLifecycleStatus = transition.current }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.cancelTaskFlow = new CancelTaskFlow({ beginCancel: () => Boolean(this.transitionTask("cancelling", "cancel-request")), currentStatus: () => this.taskLifecycle.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", cancelRemote: async (sessionId) => { if (this.cancelTaskHandler) await this.cancelTaskHandler.execute({ sessionId }) }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText(); this.finalizeOpenPartialMessages(); this.removeTerminalAskMessages() }, addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, updateTask: () => this.updateCurrentTaskItem(), runHook: (sessionId) => this.runLifecycleHooks("TaskCancel", { sessionId }), completeCancel: () => { this.transitionTask("idle", "cancel-complete") }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1850,35 +1850,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
-		return this.requireHookExecution().run(hookName, context, workspaceRoot, this.state.hooksEnabled !== false, this.createHookExecutionObserver())
+		return this.hookLifecycle.run(hookName, context)
 	}
 
 	private async runPreToolUseHooks(context: Record<string, unknown>): Promise<PreToolUseDecision> {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
-		return this.requireHookExecution().preToolUse(context, workspaceRoot, this.state.hooksEnabled !== false, this.createHookExecutionObserver())
-	}
-
-	private createHookExecutionObserver(): HookExecutionObserver {
-		const messageIds = new Map<string, number>()
-		return {
-			started: async (hook, context) => {
-				const message = this.conversationMessages.add({ type: "say", say: "hook_status", text: JSON.stringify(createHookMetadata(hook, "running", context)) })
-				const ts = Number(message?.ts)
-				if (!Number.isFinite(ts)) return
-				messageIds.set(`${hook.source}:${hook.name}:${hook.path}`, ts)
-				this.updateCurrentTaskItem()
-				await this.broadcastState().catch((error) => console.error(error))
-			},
-			completed: async (result, context) => {
-				const ts = messageIds.get(`${result.hook.source}:${result.hook.name}:${result.hook.path}`) || this.conversationMessages.nextTimestamp()
-				const metadata = createHookMetadata(result.hook, result.exitCode === 0 ? "completed" : "failed", context, result, result.jsonResponse)
-				const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n")
-				this.upsertMessage(ts, { type: "say", say: "hook_status", text: output ? `${JSON.stringify(metadata)}\n__HOOK_OUTPUT__\n${output}` : JSON.stringify(metadata) })
-				this.updateCurrentTaskItem()
-				await this.broadcastState().catch((error) => console.error(error))
-			},
-		}
+		return this.hookLifecycle.preToolUse(context)
 	}
 
 	private getBrowserSettings(): BrowserSettings {

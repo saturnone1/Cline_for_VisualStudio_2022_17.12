@@ -2,7 +2,7 @@ import childProcess from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { getSettingsPath } from "../persistence/LocalAutomationStore"
-import { hookDecisionFromResponse, normalizeHookName } from "../../features/hooks/HookPolicy"
+import { normalizeHookName } from "../../features/hooks/HookPolicy"
 export { SUPPORTED_HOOK_NAMES, normalizeHookName } from "../../features/hooks/HookPolicy"
 import type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
 export type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
@@ -93,42 +93,6 @@ export function removeHookToggle(source: "global" | "workspace", workspaceRoot: 
 	const store = readHookToggleStore()
 	delete store[hookToggleKey(source, workspaceRoot, hookName)]
 	writeHookToggleStore(store)
-}
-
-export function createHookMetadata(
-	hook: HookScript,
-	status: "running" | "completed" | "failed" | "cancelled",
-	context: Record<string, unknown>,
-	result?: { exitCode: number; stderr: string; error?: string },
-	jsonResponse?: Record<string, unknown>,
-) {
-	const toolName = getString(context, "toolName")
-	const hasJsonResponse = Boolean(jsonResponse && Object.keys(jsonResponse).length > 0)
-	const decision = hookDecisionFromResponse(jsonResponse)
-	return {
-		hookName: hook.name,
-		toolName: toolName || undefined,
-		status,
-		exitCode: result?.exitCode,
-		hasJsonResponse,
-		jsonResponse: hasJsonResponse ? jsonResponse : undefined,
-		blocked: decision.blocked || undefined,
-		modifiedInput: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? true : undefined,
-		replaceInput: decision.replaceInput || undefined,
-		modifiedInputKeys: decision.inputPatch && Object.keys(decision.inputPatch).length > 0 ? Object.keys(decision.inputPatch) : undefined,
-		validationMessage: decision.validationMessage || undefined,
-		contextInjectionKeys: decision.contextPatch && Object.keys(decision.contextPatch).length > 0 ? Object.keys(decision.contextPatch) : undefined,
-		structuredDecision: decision.structuredDecision && Object.keys(decision.structuredDecision).length > 0 ? decision.structuredDecision : undefined,
-		reason: decision.reason || undefined,
-		error:
-			status === "failed"
-				? {
-						type: "execution",
-						message: result?.error || result?.stderr || "Hook failed.",
-						scriptPath: hook.path,
-					}
-				: undefined,
-	}
 }
 
 export async function executeHookScript(hook: HookScript, context: Record<string, unknown>) {
