@@ -51,6 +51,7 @@ export interface AgentEnginePort {
 	restore(params: unknown): Promise<unknown>
 	listSettings(params: unknown): Promise<unknown>
 	toggleSetting(params: unknown): Promise<unknown>
+	getProviderConfigFields(providerId: string): Promise<unknown>
 	getMcpServersResponse(): Promise<unknown>
 	getMcpSettingsPath(): Promise<string>
 	authenticateMcpServer(params: unknown): Promise<unknown>

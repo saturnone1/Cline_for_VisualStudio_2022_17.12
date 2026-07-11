@@ -24,6 +24,9 @@ for (const filePath of walk(sourceRoot)) {
 	const source = fs.readFileSync(filePath, "utf8")
 	for (const specifier of importSpecifiers(filePath, source)) {
 		if (!specifier.startsWith(".")) {
+			if (specifier === "@cline/sdk" && !relative.startsWith("infrastructure/sdk/")) {
+				violations.push(`${relative} -> ${specifier} (Cline SDK imports must remain inside the SDK infrastructure adapter)`)
+			}
 			if (sourceLayer === "domain") {
 				violations.push(`${relative} -> ${specifier} (domain must not depend on runtime packages)`)
 			}

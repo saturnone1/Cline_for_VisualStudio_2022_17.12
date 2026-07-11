@@ -2049,11 +2049,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const sdkProviderId = normalizeSdkProviderId(provider)
 		const credentialStatus = this.getProviderCredentialStatus({ provider })
 		try {
-			const sdk = await import("@cline/sdk")
-			const fields =
-				typeof sdk.getProviderConfigFields === "function"
-					? sdk.getProviderConfigFields(sdkProviderId)
-					: createFallbackProviderConfigFields(provider)
+			const sdkFields = await this.requireClineSdk().getProviderConfigFields(sdkProviderId)
+			const fields = sdkFields ?? createFallbackProviderConfigFields(provider)
 			const fieldsRecord = asRecord(fields)
 			const authMethod = getString(fieldsRecord, "authMethod") || "api-key"
 			const supportsLocalCredential = Boolean(providerCredentialField(provider))

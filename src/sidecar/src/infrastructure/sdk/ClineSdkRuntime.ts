@@ -57,6 +57,12 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		}
 	}
 
+	async getProviderConfigFields(providerId: string): Promise<unknown> {
+		const sdk = await importClineSdk()
+		const getFields = sdk.getProviderConfigFields as ((providerId: string) => unknown) | undefined
+		return typeof getFields === "function" ? getFields(providerId) : null
+	}
+
 	markSessionInactive(sessionId?: string) {
 		if (!sessionId || this.activeSessionId === sessionId) {
 			this.activeSessionId = null
