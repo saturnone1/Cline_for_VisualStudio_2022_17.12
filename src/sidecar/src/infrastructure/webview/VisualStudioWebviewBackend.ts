@@ -29,6 +29,7 @@ import type { StartTaskHandler } from "../../features/chat/startTask/StartTaskHa
 import type { CancelTaskHandler } from "../../features/chat/cancelTask/CancelTaskHandler"
 import { CancelTaskFlow } from "../../features/chat/cancelTask/CancelTaskFlow"
 import { AgentRunRecoveryFlow } from "../../features/chat/runtime/AgentRunRecoveryFlow"
+import { AgentRunCompletionFlow } from "../../features/chat/runtime/AgentRunCompletionFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -233,6 +234,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly clearTaskHandler: ClearTaskHandler
 	private readonly cancelTaskFlow: CancelTaskFlow
 	private readonly agentRunRecovery: AgentRunRecoveryFlow
+	private readonly agentRunCompletion: AgentRunCompletionFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -308,6 +310,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.clearTaskHandler = new ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.transitionTask(status, source), advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, rememberSnapshot: (sessionId) => { if (this.state.currentTaskItem && this.state.clineMessages.length > 0) { const taskId = String(this.state.currentTaskItem.id || sessionId); if (taskId) this.rememberTaskSnapshot(taskId, this.state.currentTaskItem, this.state.clineMessages) } }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { const transition = this.taskLifecycle.reset(source); this.state.taskLifecycleStatus = transition.current }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.cancelTaskFlow = new CancelTaskFlow({ beginCancel: () => Boolean(this.transitionTask("cancelling", "cancel-request")), currentStatus: () => this.taskLifecycle.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", cancelRemote: async (sessionId) => { if (this.cancelTaskHandler) await this.cancelTaskHandler.execute({ sessionId }) }, clearProjection: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearPartialStateBroadcastTimer(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText(); this.finalizeOpenPartialMessages(); this.removeTerminalAskMessages() }, addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, updateTask: () => this.updateCurrentTaskItem(), runHook: (sessionId) => this.runLifecycleHooks("TaskCancel", { sessionId }), completeCancel: () => { this.transitionTask("idle", "cancel-complete") }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunRecovery = new AgentRunRecoveryFlow({ currentGeneration: () => this.sdkRunGeneration, activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), projectFailure: (source, error) => { this.clearTaskIdleWatchdog(); this.transitionTask("failed", `sdk-error:${source}`); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.addMessage({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) }) }, log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), isCurrentSession: (sessionId) => this.isCurrentSdkResultSession(sessionId), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), failEmpty: (sessionId) => this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.finalizeOpenPartialMessages(), addCompletionMarker: (status) => this.addCompletionResultMarker(status), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -2013,80 +2016,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async completeFromSdkResult(result: unknown, fallbackSessionId: string, source: string, runGeneration: number) {
-		const resultRecord = asRecord(result)
-		const sessionId = getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || "")
-		if (runGeneration !== this.sdkRunGeneration) {
-			this.logger.log("sidecar", "ignoredSupersededSdkResult", {
-				source,
-				sessionId,
-				runGeneration,
-				currentRunGeneration: this.sdkRunGeneration,
-			})
-			return
-		}
-
-		if (sessionId && fallbackSessionId && sessionId !== fallbackSessionId && String(this.state.currentTaskItem?.id || "") === fallbackSessionId) {
-			this.bindCurrentTaskToSession(sessionId)
-		}
-
-		if (!this.isCurrentSdkResultSession(sessionId)) {
-			this.logger.log("sidecar", "ignoredStaleSdkResult", {
-				source,
-				sessionId,
-				currentTaskId: this.state.currentTaskItem?.id,
-				activeSessionId: this.clineSdk?.status.activeSessionId,
-			})
-			return
-		}
-
-		if (await this.hydrateCurrentTaskFromSdk(sessionId, `complete:${source}`, true)) {
-			await this.broadcastState()
-			return
-		}
-
-		const agentResult = asRecord(resultRecord.result ?? result)
-		if (Object.keys(agentResult).length === 0) {
-			this.logger.log("sidecar", "emptySdkResult", {
-				source,
-				sessionId,
-				lastTaskActivityReason: (this.taskActivity?.reason || ""),
-				activePartialTextLength: this.getActivePartialText().length,
-				hasAssistantTextAfterLastUserMessage: this.hasAssistantTextAfterLastUserMessage(),
-			})
-			const activeText = this.getActivePartialText()
-			if (activeText || this.hasAssistantTextAfterLastUserMessage()) {
-				this.finishSdkTask(sessionId, "completed", activeText)
-				this.updateCurrentTaskItem()
-				await this.broadcastState()
-			} else if (await this.hydrateCurrentTaskFromSdk(sessionId, `empty:${source}`, true)) {
-				await this.broadcastState()
-			} else {
-				this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage()))
-				this.updateCurrentTaskItem()
-				await this.broadcastState()
-			}
-			return
-		}
-
-		const resultText = extractCompletionTextFromResult(agentResult, resultRecord)
-		const finishReason = getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed"
-		if (resultText) {
-			this.finishSdkTask(sessionId, finishReason, resultText)
-		} else if (!this.hasAssistantTextAfterLastUserMessage()) {
-			this.logger.log("sidecar", "emptySdkResultNoAssistantText", {
-				source,
-				sessionId,
-				finishReason,
-				lastTaskActivityReason: (this.taskActivity?.reason || ""),
-			})
-			this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage()))
-		} else {
-			this.finalizeOpenPartialMessages()
-			this.addCompletionResultMarker(finishReason)
-		}
-
-		this.updateCurrentTaskItem()
-		await this.broadcastState()
+		await this.agentRunCompletion.complete(result, fallbackSessionId, source, runGeneration)
 	}
 
 	private async recoverFromSdkRunError(sessionId: string, source: string, runGeneration: number, error: unknown) {
