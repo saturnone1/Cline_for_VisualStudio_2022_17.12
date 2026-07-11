@@ -52,20 +52,17 @@ namespace VsClineAgent.ToolWindows
         private string? _assemblyDirectory;
         private string? _lastSidecarError;
         private string? _lastWebMessageJson;
-        private bool _webViewReady;
+        private readonly WebviewMessageQueue _webviewMessages;
         private bool _loaded;
         private bool _disposed;
         private CancellationTokenSource? _pendingUnloadDispose;
-        private readonly object _webViewPostLock = new object();
-        private readonly Queue<string> _pendingWebViewMessages = new Queue<string>();
-        private bool _webViewPostFlushScheduled;
-        private const int MaxPendingWebViewMessages = 1000;
 		private const string LightTheme = "light";
 		private const string DarkTheme = "dark";
 
         public ChatToolWindowControl()
         {
             InitializeComponent();
+			_webviewMessages = new WebviewMessageQueue(Dispatcher, () => webView.CoreWebView2);
 			ApplyLoadingTheme(ReadPersistedTheme());
             InitializeLoadingLogo();
             _editorService = new VsEditorService();
@@ -987,7 +984,7 @@ html, body, #root {
                 return;
             }
 
-            _webViewReady = false;
+            _webviewMessages.SetReady(false);
         }
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -1056,7 +1053,7 @@ html, body, #root {
                     return;
                 }
 
-                _webViewReady = true;
+                _webviewMessages.SetReady(true);
                 if (Dispatcher.CheckAccess())
                 {
                     loadingPanel.Visibility = Visibility.Collapsed;
@@ -1070,7 +1067,6 @@ html, body, #root {
                         webView.Visibility = Visibility.Visible;
                     });
                 }
-                ScheduleWebViewMessageFlush();
 
                 await ReportBlankWebviewIfNeededAsync();
             }
@@ -1190,7 +1186,7 @@ html, body, #root {
             Unloaded -= OnUnloaded;
             DetachWebViewEventHandlers();
             CancelPendingUnloadDispose();
-            ClearPendingWebViewMessages();
+            _webviewMessages.Dispose();
 
             DisposeSidecarProcessQuietly();
 
@@ -1200,15 +1196,6 @@ html, body, #root {
             }
             catch
             {
-            }
-        }
-
-        private void ClearPendingWebViewMessages()
-        {
-            lock (_webViewPostLock)
-            {
-                _webViewPostFlushScheduled = false;
-                _pendingWebViewMessages.Clear();
             }
         }
 
@@ -1264,7 +1251,7 @@ html, body, #root {
                     await Dispatcher.InvokeAsync(() =>
                     {
                         if (!IsLoaded)
-                            ScheduleWebViewMessageFlush();
+                            _webviewMessages.ScheduleFlush();
                     });
                 }
                 catch (OperationCanceledException)
@@ -1585,146 +1572,11 @@ html, body, #root {
             {
                 var json = JsonConvert.SerializeObject(payload);
                 InteractionLog.Write("host->webview", "webview.postMessage", json);
-                EnqueueWebViewMessage(json);
+                _webviewMessages.Enqueue(json);
             }
             catch { }
 
             return Task.CompletedTask;
-        }
-
-        private void EnqueueWebViewMessage(string json)
-        {
-            lock (_webViewPostLock)
-            {
-                if (_disposed)
-                    return;
-
-                _pendingWebViewMessages.Enqueue(json);
-                TrimPendingWebViewMessages();
-                if (_webViewPostFlushScheduled)
-                    return;
-
-                _webViewPostFlushScheduled = true;
-            }
-
-            ScheduleWebViewMessageFlush();
-        }
-
-        private void TrimPendingWebViewMessages()
-        {
-            if (_pendingWebViewMessages.Count <= MaxPendingWebViewMessages)
-                return;
-
-            CoalescePendingStateMessages();
-            while (_pendingWebViewMessages.Count > MaxPendingWebViewMessages)
-                _pendingWebViewMessages.Dequeue();
-        }
-
-        private void CoalescePendingStateMessages()
-        {
-            var latestStateByRequest = new Dictionary<string, string>(StringComparer.Ordinal);
-            var ordered = _pendingWebViewMessages.ToList();
-            foreach (var message in ordered)
-            {
-                var requestId = TryGetStateResponseRequestId(message);
-                if (!string.IsNullOrWhiteSpace(requestId))
-                    latestStateByRequest[requestId!] = message;
-            }
-
-            if (latestStateByRequest.Count == 0)
-                return;
-
-            _pendingWebViewMessages.Clear();
-            var emittedLatestState = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var message in ordered)
-            {
-                var requestId = TryGetStateResponseRequestId(message);
-                if (string.IsNullOrWhiteSpace(requestId))
-                {
-                    _pendingWebViewMessages.Enqueue(message);
-                    continue;
-                }
-
-                if (emittedLatestState.Contains(requestId!))
-                    continue;
-
-                var latest = latestStateByRequest[requestId!];
-                if (ReferenceEquals(message, latest) || string.Equals(message, latest, StringComparison.Ordinal))
-                {
-                    _pendingWebViewMessages.Enqueue(latest);
-                    emittedLatestState.Add(requestId!);
-                }
-            }
-        }
-
-        private static string? TryGetStateResponseRequestId(string json)
-        {
-            try
-            {
-                var envelope = JObject.Parse(json);
-                if (!string.Equals(envelope.Value<string>("type"), "grpc_response", StringComparison.Ordinal))
-                    return null;
-
-                var response = envelope["grpc_response"] as JObject;
-                var message = response?["message"] as JObject;
-                if (message?["stateJson"] == null)
-                    return null;
-
-                return response?.Value<string>("request_id");
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private void ScheduleWebViewMessageFlush()
-        {
-            try
-            {
-                Dispatcher.BeginInvoke(
-                    new Action(FlushPendingWebViewMessages),
-                    System.Windows.Threading.DispatcherPriority.Background);
-            }
-            catch
-            {
-                lock (_webViewPostLock)
-                {
-                    _webViewPostFlushScheduled = false;
-                }
-            }
-        }
-
-        private void FlushPendingWebViewMessages()
-        {
-            string[] messages;
-            lock (_webViewPostLock)
-            {
-                _webViewPostFlushScheduled = false;
-                if (_disposed || _pendingWebViewMessages.Count == 0)
-                {
-                    _pendingWebViewMessages.Clear();
-                    return;
-                }
-
-                if (!_webViewReady || webView.CoreWebView2 == null)
-                    return;
-
-                messages = _pendingWebViewMessages.ToArray();
-                _pendingWebViewMessages.Clear();
-            }
-
-            foreach (var json in messages)
-            {
-                try
-                {
-                    if (webView.CoreWebView2 != null)
-                        webView.CoreWebView2.PostWebMessageAsJson(json);
-                }
-                catch
-                {
-                }
-            }
         }
 
         private void SetStatus(string message)
@@ -1768,7 +1620,7 @@ html, body, #root {
             builder.AppendLine("VsClineAgent assembly: " + GetDisplayAssemblyVersion(Assembly.GetExecutingAssembly()));
             builder.AppendLine("Assembly location: " + Assembly.GetExecutingAssembly().Location);
             builder.AppendLine("Assembly directory: " + (_assemblyDirectory ?? "(unset)"));
-            builder.AppendLine("WebView ready: " + _webViewReady);
+            builder.AppendLine("WebView ready: " + _webviewMessages.IsReady);
             builder.AppendLine("Loaded: " + _loaded);
             builder.AppendLine("Sidecar running: " + (_sidecarProcess != null && _sidecarProcess.IsRunning));
             builder.AppendLine("Last sidecar error: " + (_lastSidecarError ?? "(none)"));
