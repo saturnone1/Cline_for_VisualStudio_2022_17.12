@@ -95,6 +95,8 @@ import { AccountRpcHandler } from "../../features/providers/AccountRpcHandler"
 import { decodeAccountRpcCommand } from "./AccountRpcDecoder"
 import { BrowserRpcHandler } from "../../features/browser/BrowserRpcHandler"
 import { decodeBrowserRpcCommand } from "./BrowserRpcDecoder"
+import { TerminalRpcHandler } from "../../features/terminal/TerminalRpcHandler"
+import { decodeTerminalRpcCommand } from "./TerminalRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -269,6 +271,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly settingsRpc: SettingsRpcHandler
 	private readonly accountRpc: AccountRpcHandler
 	private readonly browserRpc: BrowserRpcHandler
+	private readonly terminalRpc: TerminalRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -336,6 +339,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState() })
 		this.accountRpc = new AccountRpcHandler({ authorization: () => this.requireOAuthAuthorization(), callback: () => this.requireOAuthCallbackHandler(), authActions: () => this.requireProviderAuthActions(), credentials: () => this.requireProviderCredentials(), configuration: () => asRecord(this.state.apiConfiguration), mutateConfiguration: (updates, deletes) => { const next = { ...asRecord(this.state.apiConfiguration), ...updates }; for (const field of deletes) delete next[field]; this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration }, syncProfiles: () => this.apiConfigurationProfiles.syncActive(), setCodexAuthenticated: (authenticated) => { this.state.openAiCodexIsAuthenticated = authenticated }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.browserRpc = new BrowserRpcHandler({ browser: () => this.requireBrowserHandler(), settings: () => this.getBrowserSettings() })
+		this.terminalRpc = new TerminalRpcHandler(this.host.workspaceClient)
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistoryCommands = new TaskHistoryCommands({ readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, clearMessages: () => { this.state.clineMessages = [] }, clearLiveInteraction: (reason) => this.clearLiveInteractionState(reason), markDeleted: (taskId) => this.taskHistorySync.markDeleted(taskId), removeDeleted: (history) => this.taskHistorySync.removeDeleted(history), listRemoteTaskIds: async () => { if (!this.clineSdk) return []; const sessions = await this.clineSdk.listHistory({ limit: 1000 }); return Array.isArray(sessions) ? sessions.map((session) => getString(asRecord(session), "id") || getString(asRecord(session), "sessionId")).filter(Boolean) : [] }, deleteRemote: (taskId) => this.clineSdk?.deleteSession({ sessionId: taskId }) ?? Promise.resolve(undefined), updateRemoteFavorite: (taskId, isFavorited) => this.clineSdk?.updateSession({ sessionId: taskId, metadata: { isFavorited } }) ?? Promise.resolve(undefined), getSnapshot: (taskId) => this.getTaskSnapshot(taskId), rememberSnapshot: (taskId, task, messages) => this.rememberTaskSnapshot(taskId, task, messages), forgetSnapshot: (taskId) => this.forgetTaskSnapshot(taskId), clearSnapshots: () => this.clearTaskSnapshots(), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -829,6 +833,14 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 		const browserCommand = decodeBrowserRpcCommand(key, message)
 		if (browserCommand) return grpcHandled(grpcResponse(requestId, await this.browserRpc.handle(browserCommand), false))
+		const terminalCommand = decodeTerminalRpcCommand(key, message)
+		if (terminalCommand) {
+			const terminalResult = await this.terminalRpc.handle(terminalCommand)
+			return grpcHandled(
+				grpcResponse(requestId, terminalResult.payload, false),
+				...(terminalResult.includeStateMessages ? this.buildStateMessages() : []),
+			)
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -854,40 +866,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 			case "WebService.fetchOpenGraphData":
 				return grpcHandled(grpcResponse(requestId, await fetchOpenGraphData(getString(message, "value") || getString(message, "url")), false))
-
-			case "StateService.getAvailableTerminalProfiles":
-				return grpcHandled(
-					grpcResponse(
-						requestId,
-						{
-							profiles: [
-								{
-									id: "visual-studio-command-host",
-									name: "Visual Studio Command Host",
-								},
-							],
-						},
-						false,
-					),
-				)
-
-			case "TerminalService.openTerminalPanel":
-			case "UiService.openTerminalPanel":
-				return grpcHandled(grpcResponse(requestId, await host.workspaceClient.openTerminalPanel(asRecord(message)), false))
-
-			case "TerminalService.attachTerminalCommand":
-			case "UiService.attachTerminalCommand":
-				return grpcHandled(
-					grpcResponse(requestId, await host.workspaceClient.attachTerminalCommand(asRecord(message)), false),
-					...this.buildStateMessages(),
-				)
-
-			case "TerminalService.continueTerminalCommand":
-			case "UiService.continueTerminalCommand":
-				return grpcHandled(
-					grpcResponse(requestId, await host.workspaceClient.continueTerminalCommand(asRecord(message)), false),
-					...this.buildStateMessages(),
-				)
 
 			case "StateService.resetState":
 				this.stateStore.clear()

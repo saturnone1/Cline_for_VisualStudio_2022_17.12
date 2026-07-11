@@ -1,4 +1,5 @@
 export type HostResponse = Record<string, unknown>
+export type TerminalCommandRequest = Readonly<{ terminalId?: string; commandId?: string }>
 
 export interface WorkspacePort {
 	getWorkspacePaths(request: unknown): Promise<string[]>
@@ -9,9 +10,9 @@ export interface WorkspacePort {
 	writeTextFile(request: HostResponse): Promise<unknown>
 	deleteFile(request: HostResponse): Promise<unknown>
 	selectFiles(request: HostResponse): Promise<unknown>
-	openTerminalPanel(request: HostResponse): Promise<unknown>
-	attachTerminalCommand(request: HostResponse): Promise<unknown>
-	continueTerminalCommand(request: HostResponse): Promise<unknown>
+	openTerminalPanel(request: TerminalCommandRequest): Promise<unknown>
+	attachTerminalCommand(request: TerminalCommandRequest): Promise<unknown>
+	continueTerminalCommand(request: TerminalCommandRequest): Promise<unknown>
 	getTerminalState(request: HostResponse): Promise<unknown>
 	getUnretrievedTerminalOutput(request: HostResponse): Promise<unknown>
 	openFolder(request: HostResponse): Promise<unknown>
