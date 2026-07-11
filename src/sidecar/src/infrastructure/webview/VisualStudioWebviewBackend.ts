@@ -3006,7 +3006,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private handleAgentEvent(semanticEvent: AgentEvent, sessionId = semanticEvent.sessionId) {
-		const event = semanticEvent.raw
+		const event = semanticProjectionPayload(semanticEvent)
 		const { type, contentType } = legacyProjectionDiscriminator(semanticEvent)
 		let shouldBroadcastState = true
 		if (sessionId) {
@@ -4222,6 +4222,30 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			}
 			this.refreshStateStreamsInBackground()
 		}, delayMs).unref?.()
+	}
+}
+
+function semanticProjectionPayload(event: AgentEvent): Record<string, unknown> {
+	switch (event.type) {
+		case "TextDelta": return { accumulated: event.accumulated, delta: event.text, text: event.text }
+		case "ReasoningDelta": return { reasoning: event.text, text: event.text, delta: event.text }
+		case "ToolCallRequested": return { toolName: event.toolName, input: event.input }
+		case "ToolCallCompleted": return { toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }
+		case "ToolCallUpdated": return { toolName: event.toolName, update: event.update }
+		case "AgentStarted": return { iteration: event.iteration }
+		case "IterationCompleted": return { iteration: event.iteration, toolCallCount: event.toolCallCount, hadToolCalls: event.hadToolCalls }
+		case "NoticeReceived": return { message: event.message, reason: event.reason, noticeType: event.noticeType }
+		case "ToolFinished": return { toolCall: event.toolCall, result: event.result, message: event.message }
+		case "AssistantMessageReceived": return { message: event.message }
+		case "RunFinished": return { result: event.result, usage: event.usage }
+		case "RunFailed": return { reason: event.reason }
+		case "UsageUpdated": return { usage: event.usage, totalInputTokens: event.totalInputTokens, totalOutputTokens: event.totalOutputTokens, totalCacheReadTokens: event.totalCacheReadTokens, totalCacheWriteTokens: event.totalCacheWriteTokens, totalCost: event.totalCost }
+		case "AgentDone": return { result: event.result }
+		case "AgentError": return { error: event.error }
+		case "AgentCompleted": return { result: { status: event.reason } }
+		case "AgentFailed": return { error: event.reason }
+		case "ApprovalRequested": return { toolName: event.toolName, input: event.input }
+		case "AgentEventUnknown": return { ...event.raw }
 	}
 }
 

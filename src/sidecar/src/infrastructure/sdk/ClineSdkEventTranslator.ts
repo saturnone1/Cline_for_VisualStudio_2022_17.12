@@ -64,8 +64,10 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 			type: "ToolCallCompleted",
 			sessionId,
 			toolName: readString(raw.toolName),
+			input: raw.input,
 			output: raw.output,
 			error: readString(raw.error),
+			iteration: readNumber(raw.iteration),
 			raw,
 		}
 	}
@@ -79,7 +81,7 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 	if (type === "assistant-message") return { type: "AssistantMessageReceived", sessionId, message: asRecord(raw.message), raw }
 	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), raw }
 	if (type === "run-failed") return { type: "RunFailed", sessionId, reason: readString(raw.reason) || "failed", raw }
-	if (type === "usage") return { type: "UsageUpdated", sessionId, usage: asRecord(raw.usage), raw }
+	if (type === "usage") return { type: "UsageUpdated", sessionId, usage: asRecord(raw.usage), totalInputTokens: readNumber(raw.totalInputTokens), totalOutputTokens: readNumber(raw.totalOutputTokens), totalCacheReadTokens: readNumber(raw.totalCacheReadTokens), totalCacheWriteTokens: readNumber(raw.totalCacheWriteTokens), totalCost: readNumber(raw.totalCost), raw }
 	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), raw }
 	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, raw }
 	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }

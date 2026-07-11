@@ -5,7 +5,7 @@ export type AgentEvent =
 	| { type: "TextDelta"; sessionId: string; text: string; accumulated: string; phase: "start" | "update" | "end"; raw: AgentEventPayload }
 	| { type: "ReasoningDelta"; sessionId: string; text: string; phase: "start" | "update" | "end"; raw: AgentEventPayload }
 	| { type: "ToolCallRequested"; sessionId: string; toolName: string; input: unknown; raw: AgentEventPayload }
-	| { type: "ToolCallCompleted"; sessionId: string; toolName: string; output: unknown; error: string; raw: AgentEventPayload }
+	| { type: "ToolCallCompleted"; sessionId: string; toolName: string; input: unknown; output: unknown; error: string; iteration?: number; raw: AgentEventPayload }
 	| { type: "ToolCallUpdated"; sessionId: string; toolName: string; update: unknown; raw: AgentEventPayload }
 	| { type: "IterationCompleted"; sessionId: string; iteration?: number; toolCallCount: number; hadToolCalls: boolean; raw: AgentEventPayload }
 	| { type: "NoticeReceived"; sessionId: string; message: string; reason: string; noticeType: string; raw: AgentEventPayload }
@@ -13,7 +13,7 @@ export type AgentEvent =
 	| { type: "AssistantMessageReceived"; sessionId: string; message: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "RunFinished"; sessionId: string; result: AgentEventPayload; usage: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "RunFailed"; sessionId: string; reason: string; raw: AgentEventPayload }
-	| { type: "UsageUpdated"; sessionId: string; usage: AgentEventPayload; raw: AgentEventPayload }
+	| { type: "UsageUpdated"; sessionId: string; usage: AgentEventPayload; totalInputTokens?: number; totalOutputTokens?: number; totalCacheReadTokens?: number; totalCacheWriteTokens?: number; totalCost?: number; raw: AgentEventPayload }
 	| { type: "AgentDone"; sessionId: string; result: AgentEventPayload; raw: AgentEventPayload }
 	| { type: "AgentError"; sessionId: string; error: unknown; raw: AgentEventPayload }
 	| { type: "ApprovalRequested"; sessionId: string; toolName: string; input: AgentEventPayload; raw: AgentEventPayload }
