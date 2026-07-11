@@ -1,6 +1,7 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
 import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
+import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
 import type { McpMarketplaceCatalog } from "@shared/mcp"
 
@@ -306,6 +307,24 @@ interface StateServiceContract {
 	updateModelBannerVersion: UnaryOperation<RpcRequest>
 }
 
+interface TaskServiceContract {
+	newTask: UnaryOperation<RpcRequest>
+	askResponse: UnaryOperation<RpcRequest>
+	cancelBackgroundCommand: UnaryOperation<RpcRequest>
+	cancelTask: UnaryOperation<RpcRequest>
+	clearTask: UnaryOperation<RpcRequest>
+	explainChanges: UnaryOperation<RpcRequest>
+	taskCompletionViewChanges: UnaryOperation<RpcRequest>
+	taskFeedback: UnaryOperation<RpcRequest>
+	deleteTasksWithIds: UnaryOperation<RpcRequest>
+	showTaskWithId: UnaryOperation<RpcRequest>
+	deleteAllTaskHistory: UnaryOperation<RpcRequest>
+	getTaskHistory: UnaryOperation<RpcRequest, RpcRequest & { tasks: HistoryItem[] }>
+	getTotalTasksSize: UnaryOperation<RpcRequest, RpcRequest & { value: number }>
+	toggleTaskFavorite: UnaryOperation<RpcRequest>
+	exportTaskWithId: UnaryOperation<RpcRequest>
+}
+
 interface WorktreeInfo extends RpcRequest {
 	path: string
 	branch?: string
@@ -411,7 +430,7 @@ export const ModelsServiceClient = createServiceClient<ModelsServiceContract>("M
 export const OcaAccountServiceClient = createServiceClient<OcaAccountServiceContract>("OcaAccountService")
 export const SlashServiceClient = createServiceClient<SlashServiceContract>("SlashService")
 export const StateServiceClient = createServiceClient<StateServiceContract>("StateService")
-export const TaskServiceClient: any = createServiceClient("TaskService")
+export const TaskServiceClient = createServiceClient<TaskServiceContract>("TaskService")
 export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
 export const WebServiceClient = createServiceClient<WebServiceContract>("WebService")
 export const WorktreeServiceClient = createServiceClient<WorktreeServiceContract>("WorktreeService")

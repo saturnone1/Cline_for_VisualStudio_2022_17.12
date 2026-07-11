@@ -22,10 +22,37 @@ for (const service of [
 	"FileServiceClient",
 	"ModelsServiceClient",
 	"StateServiceClient",
+	"TaskServiceClient",
 ]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
 	}
+}
+
+for (const operation of [
+	"newTask",
+	"askResponse",
+	"cancelBackgroundCommand",
+	"cancelTask",
+	"clearTask",
+	"explainChanges",
+	"taskCompletionViewChanges",
+	"taskFeedback",
+	"deleteTasksWithIds",
+	"showTaskWithId",
+	"deleteAllTaskHistory",
+	"getTaskHistory",
+	"getTotalTasksSize",
+	"toggleTaskFavorite",
+	"exportTaskWithId",
+]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`TaskServiceContract is missing ${operation}.`)
+	}
+}
+
+if (/export const \w+ServiceClient\s*:\s*any\b/.test(source)) {
+	violations.push("No WebView service client may be exported as any.")
 }
 
 for (const operation of [
