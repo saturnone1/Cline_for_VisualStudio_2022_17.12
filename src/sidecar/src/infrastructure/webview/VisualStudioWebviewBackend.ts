@@ -37,6 +37,7 @@ import { PrepareNewTaskFlow } from "../../features/chat/startTask/PrepareNewTask
 import { StartNewTaskFlow } from "../../features/chat/startTask/StartNewTaskFlow"
 import { AskResponseInteractionFlow } from "../../features/chat/sendMessage/AskResponseInteractionFlow"
 import { SendUserMessageFlow } from "../../features/chat/sendMessage/SendUserMessageFlow"
+import { CompactSessionFlow } from "../../features/chat/runtime/CompactSessionFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -243,6 +244,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly startNewTaskFlow: StartNewTaskFlow
 	private readonly askResponseInteractions: AskResponseInteractionFlow
 	private readonly sendUserMessage: SendUserMessageFlow
+	private readonly compactSession: CompactSessionFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -328,6 +330,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.startNewTaskFlow = new StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), transitionStarting: () => { this.transitionTask("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.getModelId()), startLatency: (requestId, taskId, textLength) => this.startSendLatencyTrace(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.addMessage({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => { void this.prepareAndLaunchNewTask({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) } })
 		this.askResponseInteractions = new AskResponseInteractionFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), takeApproval: () => this.approvals.take(), takeQuestion: () => { const pending = this.pendingQuestion; this.pendingQuestion = null; return pending?.resolve }, transitionStreaming: (source) => { this.transitionTask("streaming", source) }, removeFollowup: () => this.removeAskMessages("followup"), addFeedback: (text, images, files) => { this.addMessage({ type: "say", say: "user_feedback", text, images, files }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendUserMessage = new SendUserMessageFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), clearPending: () => { this.approvals.clear({ approved: false, reason: "Superseded by resumed chat message." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, startNewTask: (input) => this.startNewTask({ text: input.prompt, images: input.images, files: input.files }, { broadcast: true, requestId: input.requestId }), startLatency: (requestId, sessionId, textLength) => this.startSendLatencyTrace(requestId, "askResponse", sessionId, textLength), transitionStarting: () => { this.transitionTask("starting", "send-response") }, projectUserMessage: (text) => { this.removeTerminalAskMessages(); const message = this.addMessage({ type: "say", say: "user_feedback", text }); this.foldedProgressProjector.beginReasoning(); return message }, showPreparing: () => this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message !== null && typeof message === "object" && !Array.isArray(message) ? message as Record<string, unknown> : undefined), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, normalizeImages: (images) => normalizeSdkImageInputs(images), runHook: (context) => { void this.runLifecycleHooks("UserPromptSubmit", context) }, nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, send: (sessionId, command, textLength) => this.sendOrResumeSdkSession(sessionId, command, textLength), resultSessionId: (result, fallback) => getString(asRecord(result), "sessionId") || fallback, complete: (result, sessionId, generation) => this.completeFromSdkResult(result, sessionId, "send", generation), recover: (sessionId, generation, error) => this.recoverFromSdkRunError(sessionId, "send", generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.compactSession = new CompactSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", selectedSessionId: () => String(this.state.currentTaskItem?.id || ""), language: () => this.state.uiLanguage === "en" ? "en" : "ko", mode: () => this.state.mode === "plan" ? "plan" : "act", addError: (text) => { this.addMessage({ type: "say", say: "error", text }) }, startLatency: (requestId, sessionId, textLength) => this.startSendLatencyTrace(requestId, "askResponse", sessionId, textLength), showProgress: (text) => { this.foldedProgressProjector.beginReasoning(); this.upsertFoldedReasoningText(text) }, persist: () => this.schedulePersistedStateSave(), broadcast: () => this.broadcastState(), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, send: (sessionId, command, textLength) => this.sendOrResumeSdkSession(sessionId, command, textLength), resultSessionId: (result, fallback) => getString(asRecord(result), "sessionId") || fallback, complete: (result, sessionId, generation) => this.completeFromSdkResult(result, sessionId, "compact", generation), recover: (sessionId, generation, error) => this.recoverFromSdkRunError(sessionId, "compact", generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1650,58 +1653,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async compactCurrentSession(requestId = createId()) {
-		if (!this.clineSdk) {
-			throw new Error("LIG VS SDK runtime is not attached.")
-		}
-
-		const activeSessionId = this.clineSdk.status.activeSessionId
-		const selectedSessionId = String(this.state.currentTaskItem?.id || "")
-		const sessionId = activeSessionId || selectedSessionId
-		if (!sessionId) {
-			this.addMessage({
-				type: "say",
-				say: "error",
-				text: this.state.uiLanguage === "en" ? "No active session to compact." : "압축할 활성 세션이 없습니다.",
-			})
-			await this.broadcastState()
-			return
-		}
-
-		const prompt =
-			this.state.uiLanguage === "en"
-				? "Internal maintenance request: compact the current conversation context for future turns. Preserve the user's goals, important decisions, file paths, errors, pending tasks, and current state. Do not treat this as a user feature request."
-				: "내부 유지보수 요청: 이후 대화를 위해 현재 대화 컨텍스트를 압축해 주세요. 사용자의 목표, 중요한 결정, 파일 경로, 오류, 남은 작업, 현재 상태를 보존하세요. 이것을 사용자의 일반 기능 요청으로 처리하지 마세요."
-
-		this.startSendLatencyTrace(requestId, "askResponse", sessionId, prompt.length)
-		this.foldedProgressProjector.beginReasoning()
-		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
-		this.schedulePersistedStateSave()
-		await this.broadcastState()
-
-		const sendParams: SendMessageCommand = {
-			sessionId,
-			prompt,
-			mode: this.state.mode === "plan" ? "plan" : "act",
-			delivery: "steer" as const,
-		}
-
-		const runGeneration = ++this.sdkRunGeneration
-		try {
-			const result = await this.sendOrResumeSdkSession(sessionId, sendParams, prompt.length)
-			await this.completeFromSdkResult(result, getString(asRecord(result), "sessionId") || sessionId, "compact", runGeneration)
-		} catch (error) {
-			if (runGeneration !== this.sdkRunGeneration) {
-				this.logger.log("sidecar", "ignoredSupersededSdkError", {
-					source: "compact",
-					sessionId,
-					runGeneration,
-					currentRunGeneration: this.sdkRunGeneration,
-					error: error instanceof Error ? error.message : String(error),
-				})
-				return
-			}
-			await this.recoverFromSdkRunError(sessionId, "compact", runGeneration, error)
-		}
+		await this.compactSession.execute(requestId)
 	}
 
 	private async sendOrResumeSdkSession(
