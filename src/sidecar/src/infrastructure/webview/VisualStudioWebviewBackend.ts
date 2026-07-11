@@ -34,6 +34,7 @@ import { SendOrResumeSessionFlow } from "../../features/chat/runtime/SendOrResum
 import { ResumeSessionFlow } from "../../features/chat/runtime/ResumeSessionFlow"
 import { LaunchAgentSessionFlow } from "../../features/chat/runtime/LaunchAgentSessionFlow"
 import { PrepareNewTaskFlow } from "../../features/chat/startTask/PrepareNewTaskFlow"
+import { StartNewTaskFlow } from "../../features/chat/startTask/StartNewTaskFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -237,6 +238,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly resumeSession: ResumeSessionFlow
 	private readonly launchAgentSession: LaunchAgentSessionFlow
 	private readonly prepareNewTask: PrepareNewTaskFlow
+	private readonly startNewTaskFlow: StartNewTaskFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -319,6 +321,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.resumeSession = new ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.getModelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.runLifecycleHooks("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.getResumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.launchAgentSession = new LaunchAgentSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, complete: (result, sessionId, source, generation) => this.completeFromSdkResult(result, sessionId, source, generation), recover: (sessionId, source, generation, error) => this.recoverFromSdkRunError(sessionId, source, generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.prepareNewTask = new PrepareNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), resolveWorkspacePath: (requestedPath) => requestedPath && fs.existsSync(requestedPath) ? path.resolve(requestedPath) : null, updateTask: () => this.updateCurrentTaskItem(), publishPreparing: () => this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)), activeSessionId: () => this.requireClineSdk().status.activeSessionId || "", markClosing: (sessionId) => { this.closingSessionIds.add(sessionId) }, stopSession: (sessionId) => this.requireClineSdk().stop({ sessionId }), runHook: (name, context) => { void this.runLifecycleHooks(name, context) }, normalizeImages: (images) => normalizeSdkImageInputs(images), launch: (params, cwd, sessionId) => this.launchSdkStartSession(params, cwd, sessionId, "startSession"), projectError: async (error) => { this.clearTaskIdleWatchdog(); this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) }); this.updateCurrentTaskItem(); await this.broadcastState() }, log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.startNewTaskFlow = new StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), transitionStarting: () => { this.transitionTask("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.getModelId()), startLatency: (requestId, taskId, textLength) => this.startSendLatencyTrace(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.addMessage({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => { void this.prepareAndLaunchNewTask({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) } })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1578,11 +1581,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async startNewTask(message: unknown, options: { broadcast?: boolean; requestId?: string } = {}) {
-		if (!this.clineSdk) {
-			throw new Error("LIG VS SDK runtime is not attached.")
-		}
-		this.transitionTask("starting", "start-new-task")
-
 		const text = getString(message, "text")
 		const images = getStringArray(message, "images")
 		const files = getStringArray(message, "files")
@@ -1590,34 +1588,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const initialCwd = requestedWorkspacePath && fs.existsSync(requestedWorkspacePath)
 			? path.resolve(requestedWorkspacePath)
 			: process.cwd()
-		const taskItem = createHistoryItem(createId(), text, initialCwd, this.getModelId())
-		this.startSendLatencyTrace(options.requestId || createId(), "newTask", String(taskItem.id || ""), text.length)
-		if (requestedWorkspacePath) {
-			;(taskItem as Record<string, unknown>).workspacePath = initialCwd
-			;(taskItem as Record<string, unknown>).worktreePath = initialCwd
-		}
-
-		this.state.clineMessages = []
-		this.conversationProjection.beginTask()
-		this.state.currentTaskItem = taskItem
-		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, taskItem)
-		this.addMessage({ type: "say", say: "task", text, images, files })
-		this.upsertFoldedReasoningText(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다.")
-		this.noteTaskActivity("start")
-		this.updateCurrentTaskItem()
-		this.schedulePersistedStateSave()
-		if (options.broadcast !== false) {
-			this.broadcastState().catch((error) => console.error(error))
-		}
-
-		void this.prepareAndLaunchNewTask({
-			text,
-			images,
-			files,
-			requestedWorkspacePath,
-			initialCwd,
-			taskItem,
-		})
+		this.startNewTaskFlow.execute({ text, images, files, requestedWorkspacePath, initialCwd, requestId: options.requestId || createId(), broadcast: options.broadcast !== false })
 	}
 
 	private async prepareAndLaunchNewTask({
