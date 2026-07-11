@@ -3,7 +3,7 @@
 ## Status
 
 This document is the shared migration target for the Visual Studio 2022 17.0 and 17.12 products.
-It does not claim that the current code already satisfies the target.
+The common-source and dual-package prerequisite is complete. The architectural migration is active and is not complete while the legacy WebView backend still owns unrelated feature orchestration.
 
 ## Decision
 
@@ -20,20 +20,36 @@ Clean Architecture dependency direction remains useful, but technical layers mus
 
 ## Current evidence
 
-The current runtime boundary is sound:
+The canonical `VS2022_17.12` repository now builds both products from one authored source tree:
 
 ```text
-WebView -> Visual Studio host -> named-pipe JSON-RPC -> Node sidecar -> @cline/sdk
+common extension/sidecar/WebView source
+  -> packaging/vs2022-17.0 -> VS 2022 17.0 VSIX
+  -> packaging/vs2022-17.12 -> VS 2022 17.12 VSIX
 ```
 
-The principal risks are:
+The runtime boundary remains:
 
-- `VisualStudioWebviewBackend.ts` combines routing, sessions, transcript projection, providers, OAuth, MCP, worktrees, browser, hooks, settings, persistence, diagnostics, and watchdogs;
-- `SidecarProcess.cs` combines process lifecycle with most host RPC implementations;
-- `ChatToolWindowControl.xaml.cs` combines WebView lifecycle, runtime caching, transport, state restoration, and diagnostics;
-- boundary payloads frequently use `unknown`, `Record<string, unknown>`, or `JToken`;
-- the two repositories duplicate nearly all authored sidecar and WebView source;
-- legacy, upstream, generated, and active source are not sufficiently distinct.
+```text
+WebView -> Visual Studio host -> named-pipe JSON-RPC -> Node sidecar -> AgentEngine port -> @cline/sdk adapter
+```
+
+Verified progress includes:
+
+- the same commit builds and package-validates both VSIX variants through `scripts/Build-VsixVariants.ps1`;
+- version-specific authored files are confined to the two packaging profiles;
+- host RPC routing and focused environment, editor, filesystem, terminal, diff, workspace, WebView relay, and health adapters have been extracted;
+- the agent runtime exposes normalized typed events and keeps direct `@cline/sdk` imports inside `infrastructure/sdk`;
+- Chat start/send/cancel, approvals, task history, providers/settings, MCP, worktrees, browser, hooks, scheduled agents, and checkpoints have feature-owned handlers or policies;
+- WebView ingress and host/sidecar transport use versioned contracts, and shared WebView proto aliases no longer use `any`;
+- the presentation controller and WebView bridge are thin adapters, while the WebView remains a state renderer and typed-intent source.
+
+The principal remaining risks are:
+
+- `VisualStudioWebviewBackend.ts` is still a 7,000+ line transitional facade and directly owns provider OAuth, worktree execution, session/transcript projection, browser orchestration, persistence broadcasts, diagnostics, and watchdog behavior;
+- several internal handler inputs still use `unknown` or `Record<string, unknown>` after the process-boundary decoder, so operation-specific normalization is incomplete;
+- active, upstream-derived, generated, and obsolete source still needs a final source-hygiene audit;
+- architecture enforcement is local-script based and still needs an explicit CI gate if this branch becomes the integration branch.
 
 Implemented guardrails now include a versioned `protocolVersion: 1` contract for the
 `webview.message` request and response crossing the .NET host/Node sidecar boundary.
