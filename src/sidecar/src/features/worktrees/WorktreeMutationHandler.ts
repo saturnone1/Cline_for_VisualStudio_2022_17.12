@@ -3,11 +3,16 @@ import type { WorktreeOperationsPort } from "../../application/ports/WorktreeOpe
 import { classifyWorktreeGitError, normalizeMergeRecoveryAction } from "./WorktreePolicy"
 import type { WorktreeQueryHandler } from "./WorktreeQueryHandler"
 
+export type CreateWorktreeRequest = Readonly<{ path: string; branch: string; branchName: string; baseBranch: string; createNewBranch: boolean }>
+export type SwitchWorktreeRequest = Readonly<{ path: string; solutionPath: string; newWindow: boolean }>
+export type DeleteWorktreeRequest = Readonly<{ path: string; force: boolean; deleteBranch: boolean; branchName: string }>
+export type MergeWorktreeRequest = Readonly<{ worktreePath: string; path: string; targetBranch: string; deleteAfterMerge: boolean }>
+export type RecoverWorktreeRequest = Readonly<{ action: string; value: string; targetWorktreePath: string; workspacePath: string; path: string }>
+
 export class WorktreeMutationHandler {
 	constructor(private readonly operations: WorktreeOperationsPort, private readonly queries: WorktreeQueryHandler, private readonly logger: InteractionLoggerPort) {}
 
-	async create(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message)
+	async create(request: CreateWorktreeRequest, workspaceRoot: string) {
 		const { gitRoot, error } = await this.queries.resolveGitRoot(workspaceRoot)
 		if (!gitRoot) return this.failed("worktreeCreateFailed", { reason: "no_git_root", error }, error || "Worktrees require a git repository.")
 		const rawPath = getString(request, "path")
@@ -36,8 +41,7 @@ export class WorktreeMutationHandler {
 		return { success: true, message: `Worktree created for ${branch} at ${targetPath}.`, worktree, worktrees: list.worktrees }
 	}
 
-	async switch(message: unknown) {
-		const request = asRecord(message)
+	async switch(request: SwitchWorktreeRequest) {
 		const requestedPath = getString(request, "path")
 		if (!requestedPath) return this.failed("worktreeSwitchFailed", { reason: "missing_path" }, "Worktree path is required.")
 		const targetPath = this.operations.resolvePath(requestedPath)
@@ -59,8 +63,7 @@ export class WorktreeMutationHandler {
 		return { success: true, message: newWindow ? `Worktree opened in a new Visual Studio window: ${solution}` : `Worktree opened in this Visual Studio window: ${solution}`, path: targetPath, workspacePath: targetPath, solutionPath: solution, solutionCandidates: candidates }
 	}
 
-	async delete(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message)
+	async delete(request: DeleteWorktreeRequest, workspaceRoot: string) {
 		const { gitRoot, error } = await this.queries.resolveGitRoot(workspaceRoot)
 		if (!gitRoot) return this.failed("worktreeDeleteFailed", { reason: "no_git_root", error }, error || "Worktrees require a git repository.")
 		const requestedPath = getString(request, "path")
@@ -81,8 +84,7 @@ export class WorktreeMutationHandler {
 		return { success: true, message: `Worktree deleted: ${targetPath}.`, ...(await this.queries.listWorktrees(workspaceRoot)) }
 	}
 
-	async merge(message: unknown, workspaceRoot: string) {
-		const request = asRecord(message)
+	async merge(request: MergeWorktreeRequest, workspaceRoot: string) {
 		const { gitRoot, error } = await this.queries.resolveGitRoot(workspaceRoot)
 		if (!gitRoot) return { success: false, message: error || "Worktrees require a git repository.", hasConflicts: false, conflictingFiles: [] }
 		const requestedPath = getString(request, "worktreePath") || getString(request, "path")
@@ -104,13 +106,12 @@ export class WorktreeMutationHandler {
 			return { success: false, message: merged.stderr || "Merge failed.", hasConflicts: conflicts.length > 0, conflictingFiles: conflicts, recoveryState: conflicts.length ? "merge_conflict" : "merge_failed", recoveryCommands: ["git status --short", "git diff --name-only --diff-filter=U", "git merge --abort", `git checkout ${targetBranch}`], recoveryPrompt: `Merge conflict while merging ${sourceBranch} from ${worktreePath} into ${targetBranch} at ${gitRoot}. Conflicts: ${conflicts.join(", ") || "(unknown)"}.`, sourceBranch, targetBranch, sourceWorktreePath: worktreePath, targetWorktreePath: gitRoot }
 		}
 		let warning = ""
-		if (request.deleteAfterMerge === true) { const deleted = asRecord(await this.delete({ path: worktreePath, force: false, deleteBranch: false }, workspaceRoot)); if (deleted.success === false) warning = getString(deleted, "message") || "Merge succeeded, but the source worktree could not be deleted." }
+		if (request.deleteAfterMerge === true) { const deleted = asRecord(await this.delete({ path: worktreePath, force: false, deleteBranch: false, branchName: "" }, workspaceRoot)); if (deleted.success === false) warning = getString(deleted, "message") || "Merge succeeded, but the source worktree could not be deleted." }
 		this.logger.log("sidecar", "worktreeMergeSucceeded", { sourceBranch, targetBranch, warning: warning || undefined })
 		return { success: true, message: warning ? `Merged ${sourceBranch} into ${targetBranch}. ${warning}` : `Merged ${sourceBranch} into ${targetBranch}.`, hasConflicts: false, conflictingFiles: [], sourceBranch, targetBranch, sourceWorktreePath: worktreePath, targetWorktreePath: gitRoot, warning }
 	}
 
-	async recover(message: unknown) {
-		const request = asRecord(message)
+	async recover(request: RecoverWorktreeRequest) {
 		const action = normalizeMergeRecoveryAction(getString(request, "action") || getString(request, "value") || "status")
 		const requestedPath = getString(request, "targetWorktreePath") || getString(request, "workspacePath") || getString(request, "path")
 		const { gitRoot, error } = await this.queries.resolveGitRoot(requestedPath)

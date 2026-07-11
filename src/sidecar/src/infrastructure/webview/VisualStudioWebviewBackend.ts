@@ -105,6 +105,8 @@ import { HookRpcHandler } from "../../features/hooks/HookRpcHandler"
 import { decodeHookRpcCommand } from "./HookRpcDecoder"
 import { ScheduledAgentRpcHandler } from "../../features/scheduledAgents/ScheduledAgentRpcHandler"
 import { decodeScheduledAgentRpcCommand } from "./ScheduledAgentRpcDecoder"
+import { WorktreeRpcHandler } from "../../features/worktrees/WorktreeRpcHandler"
+import { decodeWorktreeRpcCommand } from "./WorktreeRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -283,6 +285,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly checkpointRpc: CheckpointRpcHandler
 	private readonly hookRpc: HookRpcHandler
 	private readonly scheduledAgentRpc: ScheduledAgentRpcHandler
+	private readonly worktreeRpc: WorktreeRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -358,6 +361,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.checkpointRpc = new CheckpointRpcHandler({ available: () => Boolean(this.clineSdk), checkpoints: () => this.requireCheckpoints(), currentTask: () => this.state.currentTaskItem, messages: () => this.state.clineMessages, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), showTask: (taskId) => this.showTaskWithId(taskId), addInfo: (text, checkpointRunCount) => { this.addMessage({ type: "say", say: "info", text, checkpointRunCount }) }, updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), trackedChanges: () => this.requireChangeTracking().pendingChanges() })
 		this.hookRpc = new HookRpcHandler({ hooks: () => this.requireHookSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enableHooks: () => { this.state.hooksEnabled = true } })
 		this.scheduledAgentRpc = new ScheduledAgentRpcHandler({ agents: () => this.requireScheduledAgents(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), launch: async (request) => { await this.startNewTask(request, { broadcast: false }) } })
+		this.worktreeRpc = new WorktreeRpcHandler({ queries: () => this.requireWorktreeQueries(), mutations: () => this.requireWorktreeMutations(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), setFeatureEnabled: (enabled) => this.setWorktreesFeatureFlag(enabled) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -882,6 +886,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				...(scheduledAgentResult.includeStateMessages ? this.buildStateMessages() : []),
 			)
 		}
+		const worktreeCommand = decodeWorktreeRpcCommand(key, message)
+		if (worktreeCommand) return grpcHandled(grpcResponse(requestId, await this.worktreeRpc.handle(worktreeCommand), false))
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -1088,37 +1094,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "ModelsService.refreshClineRecommendedModelsRpc":
 				return grpcHandled(grpcResponse(requestId, this.createUnsupportedModelCatalog(key), false))
 
-			case "WorktreeService.listWorktrees":
-				return grpcHandled(grpcResponse(requestId, await this.listWorktrees(), false))
-
-			case "WorktreeService.getWorktreeDefaults":
-				return grpcHandled(grpcResponse(requestId, await this.getWorktreeDefaults(), false))
-
-			case "WorktreeService.getWorktreeIncludeStatus":
-				return grpcHandled(grpcResponse(requestId, await this.getWorktreeIncludeStatus(), false))
-
-			case "WorktreeService.createWorktreeInclude":
-				return grpcHandled(grpcResponse(requestId, await this.createWorktreeInclude(message), false))
-
-			case "WorktreeService.createWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().create(message, await this.getPrimaryWorkspaceRoot()), false))
-
-			case "WorktreeService.switchWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().switch(message), false))
-
-			case "WorktreeService.mergeWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().merge(message, await this.getPrimaryWorkspaceRoot()), false))
-
-			case "WorktreeService.recoverMerge":
-			case "WorktreeService.mergeRecovery":
-				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().recover(message), false))
-
-			case "WorktreeService.deleteWorktree":
-				return grpcHandled(grpcResponse(requestId, await this.requireWorktreeMutations().delete(message, await this.getPrimaryWorkspaceRoot()), false))
-
-			case "WorktreeService.trackWorktreeViewOpened":
-				return grpcHandled(grpcResponse(requestId, { success: true }, false))
-
 			case "McpService.getLatestMcpServers":
 				return grpcHandled(grpcResponse(requestId, await this.getMcpServersResponse(), false))
 
@@ -1181,12 +1156,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return workspaceRoots[0] || String(this.state.currentTaskItem?.cwdOnTaskInitialization || process.cwd())
 	}
 
-	private async listWorktrees() {
-		const result = await this.requireWorktreeQueries().listWorktrees(await this.getPrimaryWorkspaceRoot())
-		this.setWorktreesFeatureFlag(result.isGitRepo && !result.error)
-		return result
-	}
-
 	private setWorktreesFeatureFlag(enabled: boolean) {
 		const current = asRecord(this.state.worktreesEnabled)
 		this.state.worktreesEnabled = {
@@ -1194,18 +1163,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			user: current.user !== false,
 			featureFlag: enabled,
 		}
-	}
-
-	private async getWorktreeDefaults() {
-		return this.requireWorktreeQueries().getDefaults(await this.getPrimaryWorkspaceRoot())
-	}
-
-	private async getWorktreeIncludeStatus() {
-		return this.requireWorktreeQueries().getIncludeStatus(await this.getPrimaryWorkspaceRoot())
-	}
-
-	private async createWorktreeInclude(message: unknown) {
-		return this.requireWorktreeQueries().createInclude(getString(message, "content"), await this.getPrimaryWorkspaceRoot())
 	}
 
 	private requireClineSdk() {
