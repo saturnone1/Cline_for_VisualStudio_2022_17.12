@@ -1098,7 +1098,7 @@ html, body, #root {
                     return;
 
                 if ((_sidecarProcess == null || !_sidecarProcess.IsRunning) &&
-                    TryHandlePassiveStreamingSubscription(webMessageAsJson))
+                    WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
                     return;
 
                 if (_sidecarProcess == null || !_sidecarProcess.IsRunning)
@@ -1106,7 +1106,7 @@ html, body, #root {
                     var restarted = await TryEnsureSidecarRunningAsync();
                     if (!restarted)
                     {
-                        await SendGrpcErrorIfPossibleAsync(webMessageAsJson, GetSidecarNotRunningMessage());
+                        await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, GetSidecarNotRunningMessage()));
                         return;
                     }
                 }
@@ -1114,7 +1114,7 @@ html, body, #root {
                 var sidecarProcess = _sidecarProcess;
                 if (sidecarProcess == null || !sidecarProcess.IsRunning)
                 {
-                    await SendGrpcErrorIfPossibleAsync(webMessageAsJson, GetSidecarNotRunningMessage());
+                    await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, GetSidecarNotRunningMessage()));
                     return;
                 }
 
@@ -1124,15 +1124,15 @@ html, body, #root {
                     CancellationToken.None);
 
                 if (!handledBySidecar)
-                    await SendGrpcErrorIfPossibleAsync(webMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar.");
+                    await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar."));
             }
             catch (Exception ex)
             {
                 _lastSidecarError = ex.ToString();
-                if (TryHandlePassiveStreamingSubscription(webMessageAsJson))
+                if (WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
                     return;
 
-                await SendGrpcErrorIfPossibleAsync(webMessageAsJson, ex.Message);
+                await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, ex.Message));
             }
         }
 
@@ -1293,94 +1293,6 @@ html, body, #root {
             finally
             {
                 pending.Dispose();
-            }
-        }
-
-        private static bool TryHandlePassiveStreamingSubscription(string rawJson)
-        {
-            try
-            {
-                var envelope = JObject.Parse(rawJson);
-                if (!string.Equals(envelope.Value<string>("type"), "grpc_request", StringComparison.Ordinal))
-                    return false;
-
-                var request = envelope["grpc_request"] as JObject;
-                if (request == null)
-                    return false;
-
-                var isStreaming = request.Value<bool?>("is_streaming") == true ||
-                                  request.Value<bool?>("isStreaming") == true;
-                if (!isStreaming)
-                    return false;
-
-                var key = (request.Value<string>("service") ?? "") + "." + (request.Value<string>("method") ?? "");
-                switch (key)
-                {
-                    case "UiService.subscribeToMcpButtonClicked":
-                    case "UiService.subscribeToHistoryButtonClicked":
-                    case "UiService.subscribeToChatButtonClicked":
-                    case "UiService.subscribeToSettingsButtonClicked":
-                    case "UiService.subscribeToWorktreesButtonClicked":
-                    case "UiService.subscribeToAccountButtonClicked":
-                    case "UiService.subscribeToRelinquishControl":
-                    case "UiService.subscribeToShowWebview":
-                    case "UiService.subscribeToAddToInput":
-                    case "UiService.subscribeToPartialMessage":
-                    case "McpService.subscribeToMcpMarketplaceCatalog":
-                    case "McpService.subscribeToMcpServers":
-                    case "ModelsService.subscribeToOpenRouterModels":
-                    case "ModelsService.subscribeToLiteLlmModels":
-                        return true;
-                    default:
-                        return false;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private async Task SendGrpcErrorIfPossibleAsync(string rawJson, string message)
-        {
-            try
-            {
-                var envelope = JObject.Parse(rawJson);
-                if (!string.Equals(envelope.Value<string>("type"), "grpc_request", StringComparison.Ordinal))
-                {
-                    await SendToWebViewAsync(new { type = "error", message });
-                    return;
-                }
-
-                var request = envelope["grpc_request"] as JObject;
-                if (request == null)
-                {
-                    await SendToWebViewAsync(new { type = "error", message });
-                    return;
-                }
-
-                var requestId = request.Value<string>("request_id") ?? request.Value<string>("requestId");
-                if (string.IsNullOrWhiteSpace(requestId))
-                {
-                    await SendToWebViewAsync(new { type = "error", message });
-                    return;
-                }
-
-                await SendToWebViewAsync(new
-                {
-                    type = "grpc_response",
-                    grpc_response = new
-                    {
-                        request_id = requestId,
-                        error = message,
-                        is_streaming = request.Value<bool?>("is_streaming") == true ||
-                                       request.Value<bool?>("isStreaming") == true
-                    }
-                });
-            }
-            catch
-            {
-                await SendToWebViewAsync(new { type = "error", message });
             }
         }
 
