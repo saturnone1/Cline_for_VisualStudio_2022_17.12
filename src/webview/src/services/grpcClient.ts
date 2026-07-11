@@ -73,6 +73,21 @@ interface BrowserServiceContract {
 	relaunchChromeDebugMode: UnaryOperation<RpcRequest, RpcRequest & { value: string }>
 }
 
+interface OpenGraphResponse extends RpcRequest {
+	title?: string
+	description?: string
+	image?: string
+	url?: string
+	siteName?: string
+	type?: string
+}
+
+interface WebServiceContract {
+	fetchOpenGraphData: UnaryOperation<RpcRequest, OpenGraphResponse>
+	checkIsImageUrl: UnaryOperation<RpcRequest, RpcRequest & { isImage: boolean }>
+	openInBrowser: UnaryOperation<RpcRequest>
+}
+
 const isStreamingCallbacks = (value: unknown): value is Callbacks<unknown> =>
 	!!value &&
 	typeof value === "object" &&
@@ -111,5 +126,5 @@ export const SlashServiceClient = createServiceClient<SlashServiceContract>("Sla
 export const StateServiceClient: any = createServiceClient("StateService")
 export const TaskServiceClient: any = createServiceClient("TaskService")
 export const UiServiceClient = createServiceClient<UiServiceContract>("UiService")
-export const WebServiceClient: any = createServiceClient("WebService")
+export const WebServiceClient = createServiceClient<WebServiceContract>("WebService")
 export const WorktreeServiceClient: any = createServiceClient("WorktreeService")

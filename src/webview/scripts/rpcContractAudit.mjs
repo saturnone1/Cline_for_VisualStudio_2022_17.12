@@ -9,9 +9,15 @@ const violations = []
 if (!source.includes("interface UiServiceContract")) {
 	violations.push("UiServiceClient must expose an operation-specific contract.")
 }
-for (const service of ["UiServiceClient", "CheckpointsServiceClient", "SlashServiceClient", "BrowserServiceClient"]) {
+for (const service of ["UiServiceClient", "CheckpointsServiceClient", "SlashServiceClient", "BrowserServiceClient", "WebServiceClient"]) {
 	if (new RegExp(`${service}\\s*:\\s*any\\b`).test(source)) {
 		violations.push(`${service} must not be exported as any.`)
+	}
+}
+
+for (const operation of ["fetchOpenGraphData", "checkIsImageUrl", "openInBrowser"]) {
+	if (!new RegExp(`\\b${operation}:`).test(source)) {
+		violations.push(`WebServiceContract is missing ${operation}.`)
 	}
 }
 
