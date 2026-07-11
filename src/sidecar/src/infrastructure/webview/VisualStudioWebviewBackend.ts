@@ -65,6 +65,7 @@ import type { ChangeTrackingHandler } from "../workspace/ChangeTrackingHandler"
 import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalogHandler"
 import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
 import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
+import type { SdkSettingsHandler } from "../../features/settings/SdkSettingsHandler"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -171,10 +172,6 @@ import {
 	toolResultToText,
 	stringifyPretty,
 	normalizeTranscriptText,
-	buildSettingsToggleMap,
-	isGlobalSettingsItem,
-	settingsItemKey,
-	settingsItemToSkillInfo,
 	mapToolName,
 	toolActivityEntriesFromMessage,
 	toolTranscriptToActivityEntries,
@@ -268,6 +265,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private changeTracking: ChangeTrackingHandler | null = null
 	private providerModelCatalogs: ProviderModelCatalogHandler | null = null
 	private streamPublisher: WebviewStreamPublisher | null = null
+	private sdkSettings: SdkSettingsHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -340,6 +338,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setChangeTrackingHandler(changeTracking: ChangeTrackingHandler) { this.changeTracking = changeTracking }
 	setProviderModelCatalogHandler(providerModelCatalogs: ProviderModelCatalogHandler) { this.providerModelCatalogs = providerModelCatalogs }
 	setWebviewStreamPublisher(streamPublisher: WebviewStreamPublisher) { this.streamPublisher = streamPublisher }
+	setSdkSettingsHandler(sdkSettings: SdkSettingsHandler) { this.sdkSettings = sdkSettings }
 	serializeState() { return JSON.stringify(this.state) }
 	async publishChangeTranscript(text: string) { this.addMessage({ type: "say", say: "tool", text }); this.updateCurrentTaskItem(); await this.broadcastState() }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.updateCurrentTaskItem() }
@@ -2511,13 +2510,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async refreshSdkInstructionSettings() {
-		const snapshot = await this.getSdkSettingsSnapshot()
-		const rules = Array.isArray(snapshot.rules) ? snapshot.rules.map(asRecord) : []
-		const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows.map(asRecord) : []
-		const globalClineRulesToggles = buildSettingsToggleMap(rules, "global")
-		const localClineRulesToggles = buildSettingsToggleMap(rules, "local")
-		const globalWorkflowToggles = buildSettingsToggleMap(workflows, "global")
-		const localWorkflowToggles = buildSettingsToggleMap(workflows, "local")
+		const result = await this.requireSdkSettings().instructions(await this.getPrimaryWorkspaceRoot())
+		const { globalClineRulesToggles, localClineRulesToggles, globalWorkflowToggles, localWorkflowToggles } = result
 
 		this.state.globalClineRulesToggles = globalClineRulesToggles
 		this.state.localClineRulesToggles = localClineRulesToggles
@@ -2592,45 +2586,16 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async refreshSdkSkills() {
-		const snapshot = await this.getSdkSettingsSnapshot()
-		const skills = Array.isArray(snapshot.skills) ? snapshot.skills.map(asRecord) : []
-		const globalSkills = skills.filter((item) => isGlobalSettingsItem(item)).map(settingsItemToSkillInfo)
-		const localSkills = skills.filter((item) => !isGlobalSettingsItem(item)).map(settingsItemToSkillInfo)
-		const globalSkillsToggles = Object.fromEntries(globalSkills.map((skill) => [skill.path, skill.enabled !== false]))
-		const localSkillsToggles = Object.fromEntries(localSkills.map((skill) => [skill.path, skill.enabled !== false]))
+		const { globalSkills, localSkills, globalSkillsToggles, localSkillsToggles } = await this.requireSdkSettings().skills(await this.getPrimaryWorkspaceRoot())
 
 		this.state.globalSkillsToggles = globalSkillsToggles
 		this.state.localSkillsToggles = localSkillsToggles
 		return { globalSkills, localSkills, globalSkillsToggles, localSkillsToggles }
 	}
 
-	private async getSdkSettingsSnapshot() {
-		if (!this.clineSdk) {
-			return {}
-		}
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const cwd = workspaceRoots[0] || process.cwd()
-		return asRecord(await this.clineSdk.listSettings({ cwd, workspaceRoot: cwd }).catch(() => ({})))
-	}
-
 	private async toggleSdkSetting(type: "rules" | "workflows" | "skills", message: unknown) {
-		if (!this.clineSdk) {
-			return
-		}
-		const request = asRecord(message)
-		const path = getString(request, "rulePath") || getString(request, "workflowPath") || getString(request, "skillPath") || getString(request, "path")
-		const enabled = request.enabled === true
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const cwd = workspaceRoots[0] || process.cwd()
-		await this.clineSdk.toggleSetting({
-			type,
-			path,
-			enabled,
-			cwd,
-			workspaceRoot: cwd,
-		}).catch((error) => {
-			this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) })
-		})
+		const result = await this.requireSdkSettings().toggle(type, message, await this.getPrimaryWorkspaceRoot())
+		if (!result.success) this.addMessage({ type: "say", say: "error", text: result.error })
 	}
 
 	private toggleFavoriteModel(modelId: string) {
@@ -2976,6 +2941,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireStreamPublisher() {
 		if (!this.streamPublisher) throw new Error("Webview stream publisher is not attached.")
 		return this.streamPublisher
+	}
+
+	private requireSdkSettings() {
+		if (!this.sdkSettings) throw new Error("SDK settings handler is not attached.")
+		return this.sdkSettings
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

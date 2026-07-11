@@ -228,6 +228,7 @@ for (const requiredFile of [
 	"features/providers/ProviderAuthActionPolicy.ts",
 	"features/providers/ProviderAuthActionHandler.ts",
 	"features/settings/PlanActMode.ts",
+	"features/settings/SdkSettingsHandler.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/worktrees/WorktreeQueryHandler.ts",
 	"features/worktrees/WorktreeMutationHandler.ts",

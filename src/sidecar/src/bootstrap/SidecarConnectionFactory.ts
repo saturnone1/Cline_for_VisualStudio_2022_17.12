@@ -44,6 +44,7 @@ import { SendLatencyMonitor } from "../features/runtime/SendLatencyMonitor"
 import { ChangeTrackingHandler } from "../infrastructure/workspace/ChangeTrackingHandler"
 import { ProviderModelCatalogHandler } from "../infrastructure/models/ProviderModelCatalogHandler"
 import { WebviewStreamPublisher } from "../infrastructure/webview/WebviewStreamPublisher"
+import { SdkSettingsHandler } from "../features/settings/SdkSettingsHandler"
 
 export function createSidecarConnectionScope(connection: JsonRpcConnection, stateStore: JsonStateStore) {
 	const host = VisualStudioHostProvider.create(connection), transport = new JsonRpcWebviewTransport(connection)
@@ -62,6 +63,7 @@ export function createSidecarConnectionScope(connection: JsonRpcConnection, stat
 	backend.setTerminalActivityMonitor(new TerminalActivityMonitor(host.workspaceClient, interactionLogger, (text) => backend.updateTerminalActivity(text), () => backend.getUiLanguage())); backend.setTaskActivityMonitor(new TaskActivityMonitor(interactionLogger, () => backend.hasActiveTask(), () => backend.hasActivePartialText(), () => backend.handleTaskIdleLongRunning(), readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000), readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)))
 	backend.setPartialStateScheduler(new PartialStateScheduler(interactionLogger, () => backend.hasStateSubscribers(), () => backend.getActivePartialSnapshot(), () => backend.handlePartialIdle(), () => backend.requestStateBroadcast(), readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000), readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000))); backend.setSendLatencyMonitor(new SendLatencyMonitor(interactionLogger))
 	backend.setChangeTrackingHandler(new ChangeTrackingHandler(host.workspaceClient, (text) => backend.publishChangeTranscript(text))); backend.setProviderModelCatalogHandler(new ProviderModelCatalogHandler((modelId) => backend.applyDefaultOllamaModel(modelId))); backend.setWebviewStreamPublisher(new WebviewStreamPublisher(transport, interactionLogger, () => backend.serializeState()))
+	backend.setSdkSettingsHandler(new SdkSettingsHandler(runtime))
 	return { runtime, webview, roundtrip: () => host.roundtrip() }
 }
 
