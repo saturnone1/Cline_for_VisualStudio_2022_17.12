@@ -261,6 +261,7 @@ for (const requiredFile of [
 	"features/chat/runtime/AgentRunCompletionFlow.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
+	"infrastructure/configuration/SettingsMutationHandler.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
 	"infrastructure/auth/NodeOAuthCallbackListener.ts",
 	"infrastructure/auth/FetchOAuthTokenExchangeAdapter.ts",
