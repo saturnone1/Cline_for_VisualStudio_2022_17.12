@@ -1,6 +1,6 @@
 # VsCline Sidecar
 
-This folder is the migration target for the Visual Studio port.
+This folder contains the active agent worker for the Visual Studio port.
 
 The VSIX packages the compiled runtime from `artifacts/Sidecar/cline-sidecar.js`. TypeScript sources remain under `src/sidecar`.
 
@@ -10,7 +10,8 @@ Current responsibilities:
 
 - own the Node process entrypoint
 - receive WebView messages from the C# WebView2 host
-- take ownership of safe gRPC service methods before the C# bridge fallback
-- eventually host upstream Cline core and a `VisualStudioHostProvider`
+- own typed WebView RPC handling and UI projections
+- run the agent through `AgentEnginePort` and the isolated Cline SDK adapter
+- call Visual Studio capabilities through focused host ports
 
-The C# `VisualStudioClineBridge` remains a fallback during migration only.
+The obsolete C# agent and direct bridge are not runtime fallbacks. They are preserved as read-only history under `legacy/dotnet-agent` and are excluded from the extension project.

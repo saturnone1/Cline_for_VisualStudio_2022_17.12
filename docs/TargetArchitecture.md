@@ -51,6 +51,9 @@ The principal remaining risks are:
 - active, upstream-derived, generated, and obsolete source still needs a final source-hygiene audit;
 - architecture enforcement is local-script based and still needs an explicit CI gate if this branch becomes the integration branch.
 
+The obsolete pre-sidecar C# agent and direct WebView bridge are isolated under
+`legacy/dotnet-agent`; they are not compiled and are retained only as read-only history.
+
 Implemented guardrails now include a versioned `protocolVersion: 1` contract for the
 `webview.message` request and response crossing the .NET host/Node sidecar boundary.
 The JSON-RPC transport supplies the request ID and method, while the boundary adapter

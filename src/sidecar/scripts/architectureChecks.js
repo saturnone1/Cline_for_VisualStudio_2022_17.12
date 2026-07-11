@@ -127,6 +127,12 @@ if (!webviewController.includes("parseHostSidecarWebviewRequest") || !webviewCon
 	violations.push("VisualStudioWebviewController must enforce the versioned host-sidecar WebView contract.")
 }
 const productSourceRoot = path.resolve(__dirname, "..", "..")
+const repositoryRoot = path.resolve(productSourceRoot, "..")
+for (const obsoleteActivePath of [path.join(productSourceRoot, "extension", "Agent"), path.join(productSourceRoot, "extension", "Bridge")]) {
+	if (fs.existsSync(obsoleteActivePath)) violations.push(`${normalize(path.relative(repositoryRoot, obsoleteActivePath))} contains an obsolete .NET agent runtime; legacy code must remain outside active source.`)
+}
+const legacyAgentReadme = path.join(repositoryRoot, "legacy", "dotnet-agent", "README.md")
+if (!fs.existsSync(legacyAgentReadme)) violations.push("The excluded legacy .NET agent archive is missing its ownership marker.")
 const themeContractSource = fs.readFileSync(path.join(productSourceRoot, "webview", "src", "utils", "ligTheme.ts"), "utf8")
 const themeHostSource = fs.readFileSync(path.join(productSourceRoot, "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"), "utf8")
 if (!themeContractSource.includes("LigThemeChangedMessage") || !themeContractSource.includes("protocolVersion: 1")) {

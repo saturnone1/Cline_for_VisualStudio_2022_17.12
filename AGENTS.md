@@ -6,4 +6,5 @@
 - Build and validate both VSIX variants from the same commit before publishing a feature change.
 - Document a real host compatibility difference before adding a version-specific adapter.
 - Preserve the former 17.0 repository as historical evidence; do not resume parallel feature development there.
+- Treat `legacy/` as read-only historical evidence; never implement product behavior or compile source from it.
 - Repository consolidation and dual-package reproducibility are prerequisites for the architecture migration in `docs/TargetArchitecture.md`.
