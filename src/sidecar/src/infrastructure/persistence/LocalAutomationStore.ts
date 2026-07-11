@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { buildScheduledAgentSpec, getScheduledSpecId, markdownBodyAfterFrontMatter, parseLooseKeyValueSpec, prependScheduledRun, safeFileStem } from "../../features/scheduledAgents/ScheduledAgentPolicy"
 
 export function getSettingsPath() {
 	return path.join(getSettingsRoot(), "settings.json")
@@ -109,16 +110,7 @@ export function writeScheduledAgentSpec(workspaceRoot: string, request: Record<s
 	const specId = safeFileStem(getScheduledSpecId(request) || "scheduled-agent")
 	const filePath = path.join(directory, `${specId}.json`)
 	const existing = fs.existsSync(filePath) ? asRecord(tryParseJson(fs.readFileSync(filePath, "utf8")) ?? {}) : {}
-	const spec = {
-		...existing,
-		id: specId,
-		name: getString(request, "name") || getString(existing, "name") || specId,
-		description: getString(request, "description") || getString(existing, "description"),
-		schedule: getString(request, "schedule") || getString(request, "cron") || getString(existing, "schedule"),
-		prompt: getString(request, "prompt") || getString(request, "task") || getString(request, "text") || getString(existing, "prompt"),
-		enabled: request.enabled === undefined ? existing.enabled !== false : request.enabled !== false,
-		updatedAt: new Date().toISOString(),
-	}
+	const spec = buildScheduledAgentSpec(existing, request, specId, new Date().toISOString())
 	fs.writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf8")
 	return scheduledSpecFromFile(filePath, workspaceRoot) || { ...spec, filePath }
 }
@@ -136,10 +128,6 @@ export function deleteScheduledAgentSpecFile(workspaceRoot: string, specId: stri
 	return true
 }
 
-export function getScheduledSpecId(request: Record<string, unknown>) {
-	return safeFileStem(getString(request, "id") || getString(request, "specId") || getString(request, "name") || getString(request, "fileName"))
-}
-
 export function readScheduledAgentRuns() {
 	try {
 		const value = tryParseJson(fs.readFileSync(getSidecarDataPath("scheduled-runs.json"), "utf8"))
@@ -150,8 +138,8 @@ export function readScheduledAgentRuns() {
 }
 
 export function appendScheduledAgentRun(run: Record<string, unknown>) {
-	const entry = { runId: `scheduled-${createId()}`, ...run }
-	const runs = [entry, ...readScheduledAgentRuns()].slice(0, 25)
+	const runs = prependScheduledRun(readScheduledAgentRuns(), run, `scheduled-${createId()}`)
+	const entry = runs[0]
 	fs.mkdirSync(path.dirname(getSidecarDataPath("scheduled-runs.json")), { recursive: true })
 	fs.writeFileSync(getSidecarDataPath("scheduled-runs.json"), JSON.stringify(runs, null, 2), "utf8")
 	return entry
@@ -220,32 +208,6 @@ export function pluginFromManifest(manifestPath: string, pluginRoot: string) {
 		local: true,
 		status: "discovered",
 	}
-}
-
-export function parseLooseKeyValueSpec(text: string) {
-	const result: Record<string, unknown> = {}
-	const frontMatter = text.match(/^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/)
-	const source = frontMatter?.[1] || text
-	for (const line of source.split(/\r?\n/)) {
-		const match = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/)
-		if (match) {
-			result[match[1]] = match[2].replace(/^["']|["']$/g, "")
-		}
-	}
-	return result
-}
-
-export function markdownBodyAfterFrontMatter(text: string) {
-	return text.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*/, "").trim()
-}
-
-export function safeFileStem(value: string) {
-	return String(value || "")
-		.trim()
-		.replace(/\.[^.]+$/, "")
-		.replace(/[^A-Za-z0-9._-]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 80)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

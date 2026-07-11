@@ -63,13 +63,13 @@ import {
 	appendScheduledAgentRun,
 	deleteScheduledAgentSpecFile,
 	discoverLocalPlugins,
-	getScheduledSpecId,
 	getSettingsPath,
 	getSidecarDataPath,
 	readScheduledAgentRuns,
 	readScheduledAgentSpecs,
 	writeScheduledAgentSpec,
 } from "../persistence/LocalAutomationStore"
+import { getScheduledSpecId } from "../../features/scheduledAgents/ScheduledAgentPolicy"
 import {
 	type HookExecutionResult,
 	type HookLifecycleName,

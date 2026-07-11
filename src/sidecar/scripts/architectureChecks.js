@@ -142,6 +142,7 @@ for (const requiredFile of [
 	"features/worktrees/WorktreePolicy.ts",
 	"features/browser/BrowserPolicy.ts",
 	"features/hooks/HookPolicy.ts",
+	"features/scheduledAgents/ScheduledAgentPolicy.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
