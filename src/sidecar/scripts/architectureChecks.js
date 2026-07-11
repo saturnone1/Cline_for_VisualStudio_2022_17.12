@@ -217,6 +217,7 @@ for (const requiredFile of [
 	"features/chat/cancelTask/CancelTaskHandler.ts",
 	"features/approvals/ApprovalCoordinator.ts",
 	"features/taskHistory/TaskHistoryCollection.ts",
+	"features/taskHistory/TaskSnapshotStore.ts",
 	"features/providers/ProviderSelection.ts",
 	"features/providers/OAuthCallbackCoordinator.ts",
 	"features/providers/OAuthCallbackHandler.ts",

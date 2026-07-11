@@ -13,7 +13,6 @@ import type { TaskLifecycleUseCase } from "../../application/useCases/TaskLifecy
 import type { StatePersistenceUseCase } from "../../application/useCases/StatePersistenceUseCase"
 import type { GrpcRequest, WebviewEnvelope } from "../../application/dto/WebviewRpc"
 import {
-	cloneTaskSnapshot,
 	createInitialState,
 	createMcpServersLazyResponse,
 	createPersistedStateSnapshot,
@@ -65,6 +64,7 @@ import type { SendLatencyMonitor } from "../../features/runtime/SendLatencyMonit
 import type { ChangeTrackingHandler } from "../workspace/ChangeTrackingHandler"
 import type { ProviderModelCatalogHandler } from "../models/ProviderModelCatalogHandler"
 import type { WebviewStreamPublisher } from "./WebviewStreamPublisher"
+import { TaskSnapshotStore } from "../../features/taskHistory/TaskSnapshotStore"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import {
@@ -235,7 +235,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
 	private readonly mcpServerStreamRequestIds = new Set<string>()
-	private readonly taskSnapshots = new Map<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>()
 	private readonly state: ReturnType<typeof createInitialState>
 	private readonly approvals = new ApprovalCoordinator()
 	private pendingQuestion:
@@ -247,6 +246,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly conversationProjection = new ConversationProjectionState()
 	private readonly partialTextProjector: PartialTextProjector
 	private readonly foldedProgressProjector: FoldedProgressProjector
+	private readonly taskSnapshots: TaskSnapshotStore
 	private stateHydrationRefreshInFlight = false
 	private readonly closingSessionIds = new Set<string>()
 	private readonly deletedTaskIds = new Set<string>()
@@ -292,16 +292,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		private readonly taskLifecycle: TaskLifecycleUseCase,
 	) {
 		this.state = loadInitialState(this.stateStore.load())
+		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => Date.now() + this.messageSequence++, (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.taskLifecycle.initialize(this.state.currentTaskItem ? "completed" : "idle")
 		this.state.taskLifecycleStatus = this.taskLifecycle.status
-		for (const [taskId, snapshot] of Object.entries(this.state.taskSnapshots)) {
-			const normalized = cloneTaskSnapshot(snapshot)
-			if (normalized) {
-				this.taskSnapshots.set(taskId, normalized)
-			}
-		}
 	}
 
 	setAgentEngine(agentEngine: AgentEnginePort) {
@@ -4169,38 +4164,19 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private getTaskSnapshot(taskId: string) {
-		const snapshot = this.taskSnapshots.get(taskId) || cloneTaskSnapshot(asRecord(this.state.taskSnapshots)[taskId])
-		if (snapshot) {
-			this.taskSnapshots.set(taskId, snapshot)
-		}
-		return snapshot
+		return this.taskSnapshots.get(taskId)
 	}
 
 	private rememberTaskSnapshot(taskId: string, taskItem: Record<string, unknown>, messages: Array<Record<string, unknown>>) {
-		if (!taskId) {
-			return
-		}
-		const snapshot = {
-			taskItem: { ...taskItem },
-			messages: messages.map((message) => ({ ...message })),
-		}
-		this.taskSnapshots.set(taskId, snapshot)
-		this.state.taskSnapshots = {
-			...this.state.taskSnapshots,
-			[taskId]: snapshot,
-		}
+		this.taskSnapshots.remember(taskId, taskItem, messages)
 	}
 
 	private forgetTaskSnapshot(taskId: string) {
-		this.taskSnapshots.delete(taskId)
-		const next = { ...this.state.taskSnapshots }
-		delete next[taskId]
-		this.state.taskSnapshots = next
+		this.taskSnapshots.forget(taskId)
 	}
 
 	private clearTaskSnapshots() {
 		this.taskSnapshots.clear()
-		this.state.taskSnapshots = {}
 	}
 
 	private getModelId() {
