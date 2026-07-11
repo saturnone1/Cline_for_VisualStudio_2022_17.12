@@ -119,6 +119,9 @@ for (const marker of ["HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION", "HostSidecarWebvi
 		violations.push(`WebviewRpc contract is missing versioned host-sidecar marker: ${marker}`)
 	}
 }
+if (webviewContract.includes("webviewMessages: unknown[]") || !webviewContract.includes("webviewMessages: JsonValue[]")) {
+	violations.push("Host-sidecar WebView responses must expose JSON values rather than unknown payloads.")
+}
 const webviewController = fs.readFileSync(controllerPath, "utf8")
 if (!webviewController.includes("parseHostSidecarWebviewRequest") || !webviewController.includes("createHostSidecarWebviewResponse")) {
 	violations.push("VisualStudioWebviewController must enforce the versioned host-sidecar WebView contract.")

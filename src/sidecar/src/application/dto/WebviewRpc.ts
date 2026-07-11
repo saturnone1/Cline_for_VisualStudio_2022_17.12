@@ -15,7 +15,7 @@ export type HostSidecarWebviewResponse = {
 	reason?: string
 	owner?: string
 	type?: string
-	webviewMessages: unknown[]
+	webviewMessages: JsonValue[]
 }
 
 export type HostSidecarWebviewRequestParseResult =
@@ -66,7 +66,9 @@ export function createHostSidecarWebviewResponse(value: unknown): HostSidecarWeb
 		...(typeof result.reason === "string" ? { reason: result.reason } : {}),
 		...(typeof result.owner === "string" ? { owner: result.owner } : {}),
 		...(typeof result.type === "string" ? { type: result.type } : {}),
-		webviewMessages: Array.isArray(result.webviewMessages) ? result.webviewMessages : [],
+		webviewMessages: Array.isArray(result.webviewMessages)
+			? result.webviewMessages.map(toJsonValue).filter((message): message is JsonValue => message !== undefined)
+			: [],
 	}
 }
 
@@ -121,4 +123,19 @@ function isJsonObject(value: unknown): value is JsonObject {
 
 function readString(value: JsonValue | undefined) {
 	return typeof value === "string" ? value : ""
+}
+
+function toJsonValue(value: unknown): JsonValue | undefined {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return value
+	if (typeof value === "number") return Number.isFinite(value) ? value : null
+	if (Array.isArray(value)) return value.map((item) => toJsonValue(item) ?? null)
+	if (!isUnknownObject(value)) return undefined
+	const entries = Object.entries(value)
+		.map(([key, item]) => [key, toJsonValue(item)] as const)
+		.filter((entry): entry is readonly [string, JsonValue] => entry[1] !== undefined)
+	return Object.fromEntries(entries)
+}
+
+function isUnknownObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
