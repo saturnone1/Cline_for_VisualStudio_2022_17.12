@@ -260,6 +260,7 @@ for (const requiredFile of [
 	"features/chat/runtime/AgentRunRecoveryFlow.ts",
 	"features/chat/runtime/AgentRunCompletionFlow.ts",
 	"features/chat/runtime/SendOrResumeSessionFlow.ts",
+	"features/chat/runtime/ResumeSessionFlow.ts",
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/configuration/SettingsMutationHandler.ts",

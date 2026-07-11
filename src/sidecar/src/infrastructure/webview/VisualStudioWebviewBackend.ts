@@ -31,6 +31,7 @@ import { CancelTaskFlow } from "../../features/chat/cancelTask/CancelTaskFlow"
 import { AgentRunRecoveryFlow } from "../../features/chat/runtime/AgentRunRecoveryFlow"
 import { AgentRunCompletionFlow } from "../../features/chat/runtime/AgentRunCompletionFlow"
 import { SendOrResumeSessionFlow } from "../../features/chat/runtime/SendOrResumeSessionFlow"
+import { ResumeSessionFlow } from "../../features/chat/runtime/ResumeSessionFlow"
 import { ClearTaskHandler } from "../../features/chat/clearTask/ClearTaskHandler"
 import type { BrowserHandler, BrowserSettings } from "../../features/browser/BrowserHandler"
 import type { WorktreeQueryHandler } from "../../features/worktrees/WorktreeQueryHandler"
@@ -231,6 +232,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentRunRecovery: AgentRunRecoveryFlow
 	private readonly agentRunCompletion: AgentRunCompletionFlow
 	private readonly sendOrResumeSession: SendOrResumeSessionFlow
+	private readonly resumeSession: ResumeSessionFlow
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
@@ -310,6 +312,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentRunRecovery = new AgentRunRecoveryFlow({ currentGeneration: () => this.sdkRunGeneration, activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), projectFailure: (source, error) => { this.clearTaskIdleWatchdog(); this.transitionTask("failed", `sdk-error:${source}`); this.clearPartialIdleWatchdog(); this.clearReasoningStatus(); this.addMessage({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) }) }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.bindCurrentTaskToSession(sessionId), isCurrentSession: (sessionId) => this.isCurrentSdkResultSession(sessionId), hydrate: (sessionId, source) => this.hydrateCurrentTaskFromSdk(sessionId, source, true), activeText: () => this.getActivePartialText(), hasAssistantText: () => this.hasAssistantTextAfterLastUserMessage(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), failEmpty: (sessionId) => this.failSdkTaskWithMessage(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.finalizeOpenPartialMessages(), addCompletionMarker: (status) => this.addCompletionResultMarker(status), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendOrResumeSession = new SendOrResumeSessionFlow(() => this.clineSdk, { activeSettingsRevision: () => this.activeSessionRuntimeSettingsRevision, settingsRevision: () => this.runtimeSettingsRevision, markClosing: (sessionId, closing) => { if (closing) this.closingSessionIds.add(sessionId); else this.closingSessionIds.delete(sessionId) }, send: (command) => { if (!this.sendMessage) return Promise.reject(new Error("SendMessageHandler is not attached.")); return this.sendMessage.execute(command) }, resume: (sessionId, command, textLength) => this.resumeSdkSessionForSend(sessionId, command, textLength), markSend: (sessionId) => this.markSendLatencySdkSend(sessionId), markError: (sessionId, error) => this.markSendLatencyError(sessionId, error), isSessionNotFound: (error) => isSessionNotFoundError(error), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.resumeSession = new ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.getModelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.noteTaskActivity(reason), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.runLifecycleHooks("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.getResumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd, sessionId) => this.buildSdkConfig(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -1907,55 +1910,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		sendParams: SendMessageCommand,
 		textLength: number,
 	): Promise<unknown> {
-		if (!this.clineSdk) {
-			throw new Error("LIG VS SDK runtime is not attached.")
-		}
-
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const cwd = String(this.state.currentTaskItem?.cwdOnTaskInitialization || "") || workspaceRoots[0] || process.cwd()
-		const prompt = getString(sendParams, "prompt")
-		const userImages = getStringArray(sendParams, "userImages")
-		const userFiles = getStringArray(sendParams, "userFiles")
-		const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId())
-
-		this.state.currentTaskItem = {
-			...taskItem,
-			id: sessionId,
-			cwdOnTaskInitialization: cwd,
-			modelId: String(taskItem.modelId || "") || this.getModelId(),
-		}
-		this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem)
-		this.noteTaskActivity("resume-session")
-		this.updateCurrentTaskItem()
-		await this.broadcastState()
-
-		this.logger.log("sidecar", "sendAskResponse.resumeStartSession", {
-			sessionId,
-			textLength,
-			cwd,
-		})
-		void this.runLifecycleHooks("TaskResume", { prompt, cwd, userImages, userFiles, sessionId })
-		const initialMessages = buildResumedConversationMessages(
-			this.state.clineMessages,
-			prompt,
-			this.getResumedConversationCharBudget(),
-		)
-		const taskTitle = String(taskItem.task || "").trim()
-		if (!this.startTaskHandler) throw new Error("StartTaskHandler is not attached.")
-		return this.startTaskHandler.execute({
-			prompt,
-			cwd,
-			userImages: await normalizeSdkImageInputs(userImages),
-			userFiles,
-			interactive: true,
-			initialMessages,
-			sessionMetadata: taskTitle ? { title: taskTitle, ligVsResumed: true } : { ligVsResumed: true },
-			config: await this.buildSdkConfig(cwd, sessionId),
-			toolPolicies: this.createCurrentToolPolicies(),
-		}).then((result) => {
-			this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision
-			return result
-		})
+		return this.resumeSession.execute(sessionId, sendParams, textLength)
 	}
 
 	private async completeFromSdkResult(result: unknown, fallbackSessionId: string, source: string, runGeneration: number) {
