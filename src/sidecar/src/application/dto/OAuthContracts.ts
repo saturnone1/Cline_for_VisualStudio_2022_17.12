@@ -12,6 +12,8 @@ export type OAuthAuthorizationCodeRequest = Readonly<OAuthTokenExchangeConfig & 
 	redirectUri: string
 }>
 
+export type OAuthRefreshTokenRequest = Readonly<OAuthTokenExchangeConfig & { refreshToken: string }>
+
 export type OAuthTokenResult = Readonly<{
 	accessToken: string
 	refreshToken?: string

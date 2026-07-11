@@ -24,3 +24,13 @@ test("OAuth token adapter surfaces sanitized endpoint errors", async () => {
 		await assert.rejects(() => new FetchOAuthTokenExchangeAdapter().exchangeAuthorizationCode({ tokenUrl: "https://example.com/token", clientId: "client", code: "code", redirectUri: "http://127.0.0.1/callback" }), /HTTP 401: invalid client/)
 	} finally { global.fetch = originalFetch }
 })
+
+test("OAuth token adapter keeps the previous refresh token when rotation is omitted", async () => {
+	const originalFetch = global.fetch
+	global.fetch = async () => ({ ok: true, status: 200, statusText: "OK", text: async () => JSON.stringify({ access_token: "new-access" }) })
+	try {
+		const result = await new FetchOAuthTokenExchangeAdapter().refreshAccessToken({ tokenUrl: "https://example.com/token", clientId: "client", refreshToken: "existing-refresh" })
+		assert.equal(result.accessToken, "new-access")
+		assert.equal(result.refreshToken, "existing-refresh")
+	} finally { global.fetch = originalFetch }
+})

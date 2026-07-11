@@ -35,6 +35,7 @@ import type { WorktreeMutationHandler } from "../../features/worktrees/WorktreeM
 import type { OAuthCallbackCoordinator } from "../../features/providers/OAuthCallbackCoordinator"
 import type { OAuthCallbackListenerPort } from "../../application/ports/OAuthCallbackListenerPort"
 import type { OAuthTokenHandler } from "../../features/providers/OAuthTokenHandler"
+import type { ProviderCredentialHandler, ProviderCredentialMutation } from "../../features/providers/ProviderCredentialHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
 import { rebindTaskHistoryId, setTaskHistoryFavorite, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
@@ -229,7 +230,6 @@ import {
 	normalizePreferredLanguage,
 	resolveOAuthCredentials,
 	describeOAuthCredentialState,
-	refreshOAuthToken,
 	extractAutoApprovalSettingsUpdate,
 	isAutoApprovalSettingsLike,
 	createToolPolicies,
@@ -346,6 +346,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private oauthCallbacks: OAuthCallbackCoordinator | null = null
 	private oauthCallbackListener: OAuthCallbackListenerPort | null = null
 	private oauthTokens: OAuthTokenHandler | null = null
+	private providerCredentials: ProviderCredentialHandler | null = null
 
 	private readonly inertStreams = new Set([
 		"UiService.subscribeToMcpButtonClicked",
@@ -409,6 +410,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setWorktreeMutationHandler(worktreeMutations: WorktreeMutationHandler) { this.worktreeMutations = worktreeMutations }
 	setOAuthCallbackServices(oauthCallbacks: OAuthCallbackCoordinator, listener: OAuthCallbackListenerPort) { this.oauthCallbacks = oauthCallbacks; this.oauthCallbackListener = listener }
 	setOAuthTokenHandler(oauthTokens: OAuthTokenHandler) { this.oauthTokens = oauthTokens }
+	setProviderCredentialHandler(providerCredentials: ProviderCredentialHandler) { this.providerCredentials = providerCredentials }
 
 	dispose() {
 		this.clearPartialIdleWatchdog()
@@ -850,10 +852,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 			case "AccountService.accountLogoutClicked":
 				this.state.openAiCodexIsAuthenticated = false
-				this.clearOAuthCredential("account")
-				this.clearOAuthCredential("openai-codex")
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				await this.broadcastState()
+				await this.clearOAuthCredential("account")
+				await this.clearOAuthCredential("openai-codex")
 				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false))
 
 			case "AccountService.openrouterAuthClicked":
@@ -872,9 +872,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 			case "AccountService.openAiCodexSignOut":
 				this.state.openAiCodexIsAuthenticated = false
-				this.clearOAuthCredential("openai-codex")
-				this.stateStore.save(createPersistedStateSnapshot(this.state))
-				await this.broadcastState()
+				await this.clearOAuthCredential("openai-codex")
 				return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), false), ...this.buildStateMessages())
 
 			case "AccountService.saveProviderCredential":
@@ -1541,68 +1539,16 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async persistOAuthTokenSession(session: OAuthCallbackSession) {
-		const field = providerCredentialField(session.provider)
-		if (field) {
-			const result = await this.saveProviderCredential({ provider: session.provider, value: session.token, source: "oauth_callback" })
+		const response = await this.applyProviderCredentialMutation(this.requireProviderCredentials().persistOAuthSession(session))
+		if (response.success === true) {
 			session.status = "configured"
-			session.message = getString(result, "message") || "OAuth credential was saved."
-			return result
+			session.message = getString(response, "message") || "OAuth credential was saved."
 		}
-
-		if (isOAuthTokenBlobProvider(session.provider)) {
-			const credentials = {
-				provider: session.provider,
-				accessToken: session.token,
-				refreshToken: session.refreshToken || undefined,
-				tokenType: session.tokenType || undefined,
-				expiresAt: session.expiresAt || undefined,
-				receivedAt: Date.now(),
-				tokenResponse: session.tokenResponse || undefined,
-			}
-			this.state.apiConfiguration = normalizeApiConfiguration({
-				...this.state.apiConfiguration,
-				[oauthCredentialsField(session.provider)]: JSON.stringify(credentials),
-			}) as typeof this.state.apiConfiguration
-			if (normalizeProviderValue(session.provider) === "openai-codex") {
-				this.state.openAiCodexIsAuthenticated = true
-			}
-			this.syncActiveApiConfigurationProfile()
-			this.stateStore.save(createPersistedStateSnapshot(this.state))
-			await this.broadcastState()
-			session.status = "configured"
-			session.message = `${providerAuthLabel(session.provider)} OAuth credential was saved to local LIG VS settings.`
-			this.logger.log("sidecar", "oauthTokenBlobSaved", {
-				provider: session.provider,
-				state: session.state,
-				hasRefreshToken: Boolean(session.refreshToken),
-			})
-			return {
-				success: true,
-				provider: session.provider,
-				authStatus: "configured",
-				isAuthenticated: true,
-				hasCredential: true,
-				message: session.message,
-			}
-		}
-
-		session.status = "received"
-		session.message = `${providerAuthLabel(session.provider)} OAuth token was received, but LIG VS has no credential storage mapping for this provider yet.`
-		return {
-			success: false,
-			provider: session.provider,
-			authStatus: "unsupported",
-			hasToken: true,
-			message: session.message,
-		}
+		return response
 	}
 
-	private clearOAuthCredential(provider: string) {
-		const field = oauthCredentialsField(provider)
-		const next = { ...this.state.apiConfiguration } as Record<string, unknown>
-		delete next[field]
-		this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
-		this.syncActiveApiConfigurationProfile()
+	private async clearOAuthCredential(provider: string) {
+		return this.applyProviderCredentialMutation(this.requireProviderCredentials().clear({ provider }))
 	}
 
 	private getOAuthCallbackStatus(message: unknown) {
@@ -1642,160 +1588,15 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async saveProviderCredential(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
-		if (!provider) {
-			return { success: false, message: "Provider is required.", authStatus: "unknown" }
-		}
-
-		const credential = extractProviderCredentialValue(request)
-		if (!credential) {
-			return { success: false, provider, message: "Credential value is required.", authStatus: "unauthenticated" }
-		}
-
-		const field = providerCredentialField(provider)
-		if (!field) {
-			return {
-				success: false,
-				provider,
-				message: `${providerAuthLabel(provider)} credential storage is not mapped for the Visual Studio host yet.`,
-				authStatus: "unsupported",
-			}
-		}
-
-		const update: Record<string, unknown> = {
-			[field]: credential,
-		}
-		const baseUrl = getString(request, "baseUrl") || getString(request, "url") || getString(request, "endpoint")
-		const baseUrlField = providerBaseUrlField(provider)
-		if (baseUrl && baseUrlField) {
-			update[baseUrlField] = baseUrl
-		}
-
-		this.state.apiConfiguration = normalizeApiConfiguration({
-			...this.state.apiConfiguration,
-			...update,
-		}) as typeof this.state.apiConfiguration
-		this.syncActiveApiConfigurationProfile()
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-		await this.broadcastState()
-
-		this.logger.log("sidecar", "providerCredentialSaved", {
-			provider,
-			field,
-			hasBaseUrl: Boolean(baseUrl && baseUrlField),
-			source: getString(request, "source") || undefined,
-		})
-
-		return {
-			success: true,
-			provider,
-			authStatus: "configured",
-			isAuthenticated: true,
-			field,
-			hasCredential: true,
-			message: `${providerAuthLabel(provider)} credential was saved to local LIG VS settings.`,
-		}
+		return this.applyProviderCredentialMutation(this.requireProviderCredentials().save(message))
 	}
 
 	private getProviderCredentialStatus(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
-		if (!provider) {
-			return { success: false, message: "Provider is required.", authStatus: "unknown" }
-		}
-
-		const field = providerCredentialField(provider)
-		const baseUrlField = providerBaseUrlField(provider)
-		const apiConfig = asRecord(this.state.apiConfiguration)
-		const credential = field ? getString(apiConfig, field) : ""
-		const oauthCredentials = resolveOAuthCredentials(apiConfig, provider)
-		const hasOAuthCredential = Object.keys(oauthCredentials).length > 0
-		const oauthState = describeOAuthCredentialState(oauthCredentials)
-		const envCredential = resolveProviderEnvApiKey(provider)
-		const baseUrl = (baseUrlField ? getString(apiConfig, baseUrlField) : "") || resolveProviderEnvBaseUrl(provider)
-		return {
-			success: true,
-			provider,
-			supported: Boolean(field) || isOAuthTokenBlobProvider(provider),
-			authStatus: credential || hasOAuthCredential ? "configured" : envCredential ? "environment" : field || isOAuthTokenBlobProvider(provider) ? "unauthenticated" : "unsupported",
-			isAuthenticated: Boolean(credential || hasOAuthCredential || envCredential),
-			hasCredential: Boolean(credential || hasOAuthCredential),
-			hasOAuthCredential,
-			oauthExpiresAt: oauthState.expiresAt,
-			oauthRefreshStatus: oauthState.refreshStatus,
-			oauthRefreshSupported: oauthState.refreshSupported && hasConfiguredOAuthTokenExchange(provider),
-			oauthRefreshRequired: oauthState.refreshStatus === "expired",
-			hasEnvironmentCredential: Boolean(envCredential),
-			field: field || (isOAuthTokenBlobProvider(provider) ? oauthCredentialsField(provider) : undefined),
-			baseUrl: baseUrl || undefined,
-			baseUrlField: baseUrlField || undefined,
-			sdkProviderId: normalizeSdkProviderId(provider),
-		}
+		return this.requireProviderCredentials().status(message, asRecord(this.state.apiConfiguration))
 	}
 
 	private async refreshOAuthCredential(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
-		if (!provider) {
-			return { success: false, message: "Provider is required.", authStatus: "unknown" }
-		}
-		if (!["openai-codex", "oca", "account", "lig"].includes(provider)) {
-			return {
-				success: false,
-				provider,
-				authStatus: "unsupported",
-				message: `${providerAuthLabel(provider)} OAuth refresh is not required for this Visual Studio deployment scope.`,
-			}
-		}
-
-		const credentials = resolveOAuthCredentials(asRecord(this.state.apiConfiguration), provider)
-		const refreshToken = getString(credentials, "refreshToken") || getString(credentials, "refresh_token")
-		if (!refreshToken) {
-			return {
-				...this.getProviderCredentialStatus({ provider }),
-				success: false,
-				message: `${providerAuthLabel(provider)} has no stored refresh token.`,
-			}
-		}
-		const tokenExchange = createOAuthTokenExchangeConfig(provider, request)
-		if (!tokenExchange) {
-			return {
-				...this.getProviderCredentialStatus({ provider }),
-				success: false,
-				message: `${providerAuthLabel(provider)} refresh requires a configured token endpoint and client id.`,
-			}
-		}
-
-		const refreshed = await refreshOAuthToken(provider, refreshToken, tokenExchange)
-		const merged = {
-			...credentials,
-			...refreshed,
-			provider,
-			refreshToken: getString(refreshed, "refreshToken") || refreshToken,
-			receivedAt: Date.now(),
-		}
-		this.state.apiConfiguration = normalizeApiConfiguration({
-			...this.state.apiConfiguration,
-			[oauthCredentialsField(provider)]: JSON.stringify(merged),
-		}) as typeof this.state.apiConfiguration
-		if (provider === "openai-codex") {
-			this.state.openAiCodexIsAuthenticated = true
-		}
-		this.syncActiveApiConfigurationProfile()
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-		await this.broadcastState()
-		this.logger.log("sidecar", "oauthTokenRefreshed", {
-			provider,
-			expiresAt: numberValue(merged.expiresAt) || undefined,
-			hasRefreshToken: Boolean(getString(merged, "refreshToken")),
-		})
-		return {
-			...this.getProviderCredentialStatus({ provider }),
-			success: true,
-			authStatus: "configured",
-			message: `${providerAuthLabel(provider)} OAuth credential was refreshed.`,
-		}
+		return this.applyProviderCredentialMutation(await this.requireProviderCredentials().refresh(message, asRecord(this.state.apiConfiguration)))
 	}
 
 	private async getProviderConfigFields(message: unknown) {
@@ -1854,39 +1655,21 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async clearProviderCredential(message: unknown) {
-		const request = asRecord(message)
-		const provider = normalizeProviderValue(getString(request, "provider") || getString(request, "providerId") || getString(request, "apiProvider"))
-		if (!provider) {
-			return { success: false, message: "Provider is required.", authStatus: "unknown" }
-		}
+		return this.applyProviderCredentialMutation(this.requireProviderCredentials().clear(message))
+	}
 
-		const field = providerCredentialField(provider)
-		if (!field) {
-			return { success: false, provider, message: `${providerAuthLabel(provider)} credential storage is not mapped.`, authStatus: "unsupported" }
+	private async applyProviderCredentialMutation(mutation: ProviderCredentialMutation) {
+		if (mutation.updates || mutation.deletes?.length || mutation.openAiCodexAuthenticated !== undefined) {
+			const next = { ...asRecord(this.state.apiConfiguration), ...mutation.updates }
+			for (const field of mutation.deletes || []) delete next[field]
+			this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration
+			if (mutation.openAiCodexAuthenticated !== undefined) this.state.openAiCodexIsAuthenticated = mutation.openAiCodexAuthenticated
+			this.syncActiveApiConfigurationProfile()
+			this.stateStore.save(createPersistedStateSnapshot(this.state))
+			await this.broadcastState()
 		}
-
-		const nextConfig = { ...asRecord(this.state.apiConfiguration) }
-		delete nextConfig[field]
-		if (request.clearBaseUrl === true) {
-			const baseUrlField = providerBaseUrlField(provider)
-			if (baseUrlField) {
-				delete nextConfig[baseUrlField]
-			}
-		}
-		this.state.apiConfiguration = normalizeApiConfiguration(nextConfig) as typeof this.state.apiConfiguration
-		this.syncActiveApiConfigurationProfile()
-		this.stateStore.save(createPersistedStateSnapshot(this.state))
-		await this.broadcastState()
-
-		this.logger.log("sidecar", "providerCredentialCleared", { provider, field })
-		return {
-			success: true,
-			provider,
-			authStatus: "unauthenticated",
-			isAuthenticated: false,
-			hasCredential: false,
-			message: `${providerAuthLabel(provider)} credential was removed from local LIG VS settings.`,
-		}
+		if (mutation.log) this.logger.log("sidecar", mutation.log.event, { ...mutation.log.details })
+		return { ...mutation.response }
 	}
 
 	private async getPrimaryWorkspaceRoot() {
@@ -3662,6 +3445,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private requireOAuthTokens() {
 		if (!this.oauthTokens) throw new Error("OAuth token handler is not attached.")
 		return this.oauthTokens
+	}
+
+	private requireProviderCredentials() {
+		if (!this.providerCredentials) throw new Error("Provider credential handler is not attached.")
+		return this.providerCredentials
 	}
 
 	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {

@@ -1,9 +1,10 @@
 import { mapToolName, normalizeMcpDisplayMode } from "../conversation/ConversationSupport"
 import { inferModelInfo } from "../models/ModelCatalog"
-import { normalizeProviderId, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField, providerAuthLabel } from "../../application/services/ProviderIdentity"
+import { normalizeProviderId, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField } from "../../application/services/ProviderIdentity"
 
-import type { OAuthTokenExchangeConfig } from "../../application/dto/OAuthContracts"
 export type { OAuthTokenExchangeConfig } from "../../application/dto/OAuthContracts"
+import { providerCredentialFields, providerCredentialField, providerBaseUrlField } from "../../features/providers/ProviderCredentialPolicy"
+export { providerCredentialFields, providerCredentialField, providerBaseUrlField, extractProviderCredentialValue, resolveOAuthCredentials, describeOAuthCredentialState } from "../../features/providers/ProviderCredentialPolicy"
 
 export function compactApiConfiguration(apiConfig: Record<string, unknown>) {
 	const compact: Record<string, unknown> = {}
@@ -70,93 +71,6 @@ export function resolveApiKey(apiConfig: Record<string, unknown>, providerId: st
 			? getString(apiConfig, "actModeOpenAiApiKey") || getString(apiConfig, "planModeOpenAiApiKey")
 			: "")
 	)
-}
-
-export function providerCredentialFields(providerId: string) {
-	const apiKeyFields: Record<string, string[]> = {
-		cline: ["clineApiKey", "clineAccountId"],
-		anthropic: ["apiKey"],
-		openrouter: ["openRouterApiKey"],
-		bedrock: ["awsBedrockApiKey", "awsAccessKey"],
-		openai: ["openAiApiKey"],
-		"openai-compatible": ["openAiApiKey"],
-		"openai-native": ["openAiNativeApiKey"],
-		ollama: ["ollamaApiKey"],
-		gemini: ["geminiApiKey"],
-		requesty: ["requestyApiKey"],
-		together: ["togetherApiKey"],
-		fireworks: ["fireworksApiKey"],
-		groq: ["groqApiKey"],
-		litellm: ["liteLlmApiKey"],
-		moonshot: ["moonshotApiKey"],
-		nebius: ["nebiusApiKey"],
-		deepseek: ["deepSeekApiKey"],
-		qwen: ["qwenApiKey"],
-		"qwen-code": ["qwenApiKey"],
-		doubao: ["doubaoApiKey"],
-		mistral: ["mistralApiKey"],
-		xai: ["xaiApiKey"],
-		zai: ["zaiApiKey"],
-		sambanova: ["sambanovaApiKey"],
-		cerebras: ["cerebrasApiKey"],
-		asksage: ["asksageApiKey"],
-		baseten: ["basetenApiKey"],
-		huggingface: ["huggingFaceApiKey"],
-		"huawei-cloud-maas": ["huaweiCloudMaasApiKey"],
-		dify: ["difyApiKey"],
-		"vercel-ai-gateway": ["vercelAiGatewayApiKey"],
-		minimax: ["minimaxApiKey"],
-		aihubmix: ["aihubmixApiKey"],
-		hicap: ["hicapApiKey"],
-		nousResearch: ["nousResearchApiKey"],
-		sapaicore: ["sapAiCoreClientId", "sapAiCoreClientSecret"],
-		oca: ["ocaApiKey"],
-		wandb: ["wandbApiKey"],
-	}
-	return apiKeyFields[providerId] || []
-}
-
-export function providerCredentialField(providerId: string) {
-	return providerCredentialFields(providerId)[0] || ""
-}
-
-export function extractProviderCredentialValue(request: Record<string, unknown>) {
-	return (
-		getString(request, "apiKey") ||
-		getString(request, "token") ||
-		getString(request, "accessToken") ||
-		getString(request, "credential") ||
-		getString(request, "secret") ||
-		getString(request, "value")
-	)
-}
-
-export function providerBaseUrlField(providerId: string) {
-	const baseUrlFields: Record<string, string> = {
-		anthropic: "anthropicBaseUrl",
-		bedrock: "awsBedrockEndpoint",
-		openai: "openAiBaseUrl",
-		"openai-compatible": "openAiBaseUrl",
-		"openai-native": "openAiBaseUrl",
-		openrouter: "openRouterBaseUrl",
-		groq: "groqBaseUrl",
-		gemini: "geminiBaseUrl",
-		ollama: "ollamaBaseUrl",
-		lmstudio: "lmStudioBaseUrl",
-		litellm: "liteLlmBaseUrl",
-		requesty: "requestyBaseUrl",
-		huggingface: "huggingFaceBaseUrl",
-		baseten: "basetenBaseUrl",
-		"vercel-ai-gateway": "vercelAiGatewayBaseUrl",
-		hicap: "hicapBaseUrl",
-		asksage: "asksageApiUrl",
-		sapaicore: "sapAiCoreBaseUrl",
-		dify: "difyBaseUrl",
-		oca: "ocaBaseUrl",
-		aihubmix: "aihubmixBaseUrl",
-	}
-
-	return baseUrlFields[providerId] || ""
 }
 
 export function resolveBaseUrl(apiConfig: Record<string, unknown>, providerId: string) {
@@ -378,70 +292,6 @@ export function normalizePreferredLanguage(value: string) {
 	return normalized === "korean" || normalized === "korean - 한국어" || normalized === "한국어"
 		? "Korean - 한국어"
 		: "English"
-}
-
-export function resolveOAuthCredentials(apiConfig: Record<string, unknown>, providerId: string) {
-	const field = oauthCredentialsField(providerId)
-	const raw = getString(apiConfig, field)
-	if (!raw) {
-		return {}
-	}
-
-	const parsed = asRecord(tryParseJson(raw) ?? {})
-	return Object.keys(parsed).length > 0 ? parsed : { accessToken: raw }
-}
-
-export function describeOAuthCredentialState(credentials: Record<string, unknown>) {
-	const expiresAt = numberValue(credentials.expiresAt) || numberValue(credentials.expires_at)
-	const refreshToken = getString(credentials, "refreshToken") || getString(credentials, "refresh_token")
-	if (!Object.keys(credentials).length) {
-		return { refreshStatus: "none", refreshSupported: false, expiresAt: undefined as number | undefined }
-	}
-	if (!expiresAt) {
-		return { refreshStatus: refreshToken ? "refreshable" : "unknown", refreshSupported: Boolean(refreshToken), expiresAt: undefined as number | undefined }
-	}
-	const skewMs = readPositiveIntEnv("VSCLINE_OAUTH_EXPIRY_SKEW_MS", 60_000)
-	const refreshStatus = expiresAt <= Date.now() + skewMs ? "expired" : refreshToken ? "refreshable" : "valid"
-	return { refreshStatus, refreshSupported: Boolean(refreshToken), expiresAt }
-}
-
-export async function refreshOAuthToken(provider: string, refreshToken: string, exchange: OAuthTokenExchangeConfig) {
-	const body = new URLSearchParams()
-	body.set("grant_type", "refresh_token")
-	body.set("refresh_token", refreshToken)
-	body.set("client_id", exchange.clientId)
-	if (exchange.clientSecret && exchange.authMethod !== "client_secret_basic") {
-		body.set("client_secret", exchange.clientSecret)
-	}
-	if (exchange.scope) {
-		body.set("scope", exchange.scope)
-	}
-	const headers: Record<string, string> = {
-		"content-type": "application/x-www-form-urlencoded",
-		accept: "application/json",
-	}
-	if (exchange.clientSecret && exchange.authMethod === "client_secret_basic") {
-		headers.authorization = `Basic ${Buffer.from(`${exchange.clientId}:${exchange.clientSecret}`).toString("base64")}`
-	}
-	const response = await fetch(exchange.tokenUrl, { method: "POST", headers, body })
-	const text = await response.text()
-	const parsed = asRecord(tryParseJson(text) ?? {})
-	if (!response.ok) {
-		const error = getString(parsed, "error_description") || getString(parsed, "error") || truncateText(text, 500)
-		throw new Error(`Token refresh for ${providerAuthLabel(provider)} returned HTTP ${response.status}: ${error || response.statusText}`)
-	}
-	const accessToken = getString(parsed, "access_token") || getString(parsed, "token")
-	if (!accessToken) {
-		throw new Error(`Token refresh for ${providerAuthLabel(provider)} did not include access_token.`)
-	}
-	const expiresIn = getNumber(parsed, "expires_in")
-	return {
-		accessToken,
-		refreshToken: getString(parsed, "refresh_token") || refreshToken,
-		tokenType: getString(parsed, "token_type") || undefined,
-		expiresAt: expiresIn ? Date.now() + expiresIn * 1000 : undefined,
-		tokenResponse: parsed,
-	}
 }
 
 export function extractAutoApprovalSettingsUpdate(request: Record<string, unknown>) {
