@@ -24,8 +24,9 @@ import {
 	requestyDefaultModelInfo,
 } from "@shared/api"
 import { Environment } from "@shared/configTypes"
-import type { McpMarketplaceCatalog, McpServer, McpViewTab } from "@shared/mcp"
+import type { McpMarketplaceCatalog, McpServer } from "@shared/mcp"
 import { ModelsServiceClient, StateServiceClient, UiServiceClient } from "../services/grpcClient"
+import { useNavigationState, type NavigationState } from "./NavigationState"
 
 export function mergeLivePartialMessages(prevState: ExtensionState, incomingState: ExtensionState): ExtensionState {
 	const currentTaskId = prevState.currentTaskItem?.id
@@ -92,7 +93,7 @@ function upsertMessageByTimestamp(messages: ClineMessage[], message: ClineMessag
 	return [...messages, message].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
 }
 
-export interface ExtensionStateContextType extends ExtensionState {
+export interface ExtensionStateContextType extends ExtensionState, NavigationState {
 	didHydrateState: boolean
 	showWelcome: boolean
 	onboardingModels: OnboardingModelGroup | undefined
@@ -115,19 +116,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	availableTerminalProfiles: TerminalProfile[]
 
 	// View state
-	showMcp: boolean
-	mcpTab?: McpViewTab
-	showSettings: boolean
-	settingsTargetSection?: string
-	settingsInitialModelTab?: "recommended" | "free"
-	showHistory: boolean
-	showAccount: boolean
-	showWorktrees: boolean
-	showAnnouncement: boolean
 	expandTaskHeader: boolean
 
 	// Setters
-	setShowAnnouncement: (value: boolean) => void
 	setShouldShowAnnouncement: (value: boolean) => void
 	setMcpServers: (value: McpServer[]) => void
 	setRequestyModels: (value: Record<string, ModelInfo>) => void
@@ -159,27 +150,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	refreshLiteLlmModels: () => Promise<void>
 	setUserInfo: (userInfo?: UserInfo) => void
 
-	// Navigation state setters
-	setShowMcp: (value: boolean) => void
-	setMcpTab: (tab?: McpViewTab) => void
-
-	// Navigation functions
-	navigateToMcp: (tab?: McpViewTab) => void
-	navigateToSettings: (targetSection?: string) => void
-	navigateToSettingsModelPicker: (opts: { targetSection?: string; initialModelTab?: "recommended" | "free" }) => void
-	navigateToHistory: () => void
-	navigateToAccount: () => void
-	navigateToWorktrees: () => void
-	navigateToChat: () => void
-
-	// Hide functions
-	hideSettings: () => void
-	hideHistory: () => void
-	hideAccount: () => void
-	hideWorktrees: () => void
-	hideAnnouncement: () => void
-	closeMcpView: () => void
-
 	// Event callbacks
 	onRelinquishControl: (callback: () => void) => () => void
 }
@@ -189,106 +159,34 @@ export const ExtensionStateContext = createContext<ExtensionStateContextType | u
 export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
 }> = ({ children }) => {
-	// UI view state
-	const [showMcp, setShowMcp] = useState(false)
-	const [mcpTab, setMcpTab] = useState<McpViewTab | undefined>(undefined)
-	const [showSettings, setShowSettings] = useState(false)
-	const [settingsTargetSection, setSettingsTargetSection] = useState<string | undefined>(undefined)
-	const [settingsInitialModelTab, setSettingsInitialModelTab] = useState<"recommended" | "free" | undefined>(undefined)
-	const [showHistory, setShowHistory] = useState(false)
-	const [showAccount, setShowAccount] = useState(false)
-	const [showWorktrees, setShowWorktrees] = useState(false)
-	const [showAnnouncement, setShowAnnouncement] = useState(false)
-
-	// Helper for MCP view
-	const closeMcpView = useCallback(() => {
-		setShowMcp(false)
-		setMcpTab(undefined)
-	}, [setShowMcp, setMcpTab])
-
-	// Hide functions
-	const hideSettings = useCallback(() => {
-		setShowSettings(false)
-		setSettingsTargetSection(undefined)
-		setSettingsInitialModelTab(undefined)
-	}, [])
-	const hideHistory = useCallback(() => setShowHistory(false), [setShowHistory])
-	const hideAccount = useCallback(() => setShowAccount(false), [setShowAccount])
-	const hideWorktrees = useCallback(() => setShowWorktrees(false), [setShowWorktrees])
-	const hideAnnouncement = useCallback(() => setShowAnnouncement(false), [setShowAnnouncement])
-
-	// Navigation functions
-	const navigateToMcp = useCallback(
-		(tab?: McpViewTab) => {
-			setShowSettings(false)
-			setShowHistory(false)
-			setShowAccount(false)
-			setShowWorktrees(false)
-			if (tab) {
-				setMcpTab(tab)
-			}
-			setShowMcp(true)
-		},
-		[setShowMcp, setMcpTab, setShowSettings, setShowHistory, setShowAccount, setShowWorktrees],
-	)
-
-	const navigateToSettings = useCallback(
-		(targetSection?: string) => {
-			setShowHistory(false)
-			closeMcpView()
-			setShowAccount(false)
-			setShowWorktrees(false)
-			setSettingsTargetSection(targetSection)
-			setSettingsInitialModelTab(undefined)
-			setShowSettings(true)
-		},
-		[closeMcpView],
-	)
-
-	const navigateToSettingsModelPicker = useCallback(
-		(opts: { targetSection?: string; initialModelTab?: "recommended" | "free" }) => {
-			setShowHistory(false)
-			closeMcpView()
-			setShowAccount(false)
-			setShowWorktrees(false)
-			setSettingsTargetSection(opts.targetSection)
-			setSettingsInitialModelTab(opts.initialModelTab)
-			setShowSettings(true)
-		},
-		[closeMcpView],
-	)
-
-	const navigateToHistory = useCallback(() => {
-		setShowSettings(false)
-		closeMcpView()
-		setShowAccount(false)
-		setShowWorktrees(false)
-		setShowHistory(true)
-	}, [setShowSettings, closeMcpView, setShowAccount, setShowWorktrees, setShowHistory])
-
-	const navigateToAccount = useCallback(() => {
-		setShowSettings(false)
-		closeMcpView()
-		setShowHistory(false)
-		setShowWorktrees(false)
-		setShowAccount(true)
-	}, [setShowSettings, closeMcpView, setShowHistory, setShowWorktrees, setShowAccount])
-
-	const navigateToWorktrees = useCallback(() => {
-		setShowSettings(false)
-		closeMcpView()
-		setShowHistory(false)
-		setShowAccount(false)
-		setShowWorktrees(true)
-	}, [setShowSettings, closeMcpView, setShowHistory, setShowAccount, setShowWorktrees])
-
-	const navigateToChat = useCallback(() => {
-		setShowSettings(false)
-		closeMcpView()
-		setShowHistory(false)
-		setShowAccount(false)
-		setShowWorktrees(false)
-	}, [setShowSettings, closeMcpView, setShowHistory, setShowAccount, setShowWorktrees])
+	const navigation = useNavigationState()
+	const {
+		showMcp,
+		mcpTab,
+		showSettings,
+		settingsTargetSection,
+		settingsInitialModelTab,
+		showHistory,
+		showAccount,
+		showWorktrees,
+		showAnnouncement,
+		setShowMcp,
+		setMcpTab,
+		setShowAnnouncement,
+		navigateToMcp,
+		navigateToSettings,
+		navigateToSettingsModelPicker,
+		navigateToHistory,
+		navigateToAccount,
+		navigateToWorktrees,
+		navigateToChat,
+		hideSettings,
+		hideHistory,
+		hideAccount,
+		hideWorktrees,
+		hideAnnouncement,
+		closeMcpView,
+	} = navigation
 
 	const [state, setState] = useState<ExtensionState>({
 		version: "",
