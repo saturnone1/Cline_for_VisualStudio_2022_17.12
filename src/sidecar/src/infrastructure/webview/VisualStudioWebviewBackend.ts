@@ -95,41 +95,27 @@ import { ApiConfigurationProfileManager } from "../configuration/ApiConfiguratio
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
 import { ToolRuntimePolicy } from "../configuration/ToolRuntimePolicy"
 import { SettingsRpcHandler } from "../../features/settings/SettingsRpcHandler"
-import { decodeSettingsRpcCommand } from "./SettingsRpcDecoder"
 import { AccountRpcHandler } from "../../features/providers/AccountRpcHandler"
-import { decodeAccountRpcCommand } from "./AccountRpcDecoder"
 import { BrowserRpcHandler } from "../../features/browser/BrowserRpcHandler"
-import { decodeBrowserRpcCommand } from "./BrowserRpcDecoder"
 import { TerminalRpcHandler } from "../../features/terminal/TerminalRpcHandler"
-import { decodeTerminalRpcCommand } from "./TerminalRpcDecoder"
 import { TaskRpcHandler } from "../../features/chat/TaskRpcHandler"
-import { decodeTaskRpcCommand } from "./TaskRpcDecoder"
 import { CheckpointRpcHandler } from "../../features/checkpoints/CheckpointRpcHandler"
-import { decodeCheckpointRpcCommand } from "./CheckpointRpcDecoder"
 import { HookRpcHandler } from "../../features/hooks/HookRpcHandler"
-import { decodeHookRpcCommand } from "./HookRpcDecoder"
 import { ScheduledAgentRpcHandler } from "../../features/scheduledAgents/ScheduledAgentRpcHandler"
-import { decodeScheduledAgentRpcCommand } from "./ScheduledAgentRpcDecoder"
 import { WorktreeRpcHandler } from "../../features/worktrees/WorktreeRpcHandler"
-import { decodeWorktreeRpcCommand } from "./WorktreeRpcDecoder"
 import { McpRpcHandler } from "../../features/mcp/McpRpcHandler"
-import { decodeMcpRpcCommand } from "./McpRpcDecoder"
 import { ModelCatalogRpcHandler } from "../../features/providers/ModelCatalogRpcHandler"
-import { decodeModelCatalogRpcCommand } from "./ModelCatalogRpcDecoder"
 import { FileRpcHandler } from "../../features/files/FileRpcHandler"
-import { decodeFileRpcCommand } from "./FileRpcDecoder"
 import { InstructionSettingsRpcHandler } from "../../features/settings/InstructionSettingsRpcHandler"
-import { decodeInstructionSettingsRpcCommand } from "./InstructionSettingsRpcDecoder"
 import { UiWebRpcHandler } from "../../features/web/UiWebRpcHandler"
-import { decodeUiWebRpcCommand } from "./UiWebRpcDecoder"
 import { PluginRpcHandler } from "../../features/plugins/PluginRpcHandler"
-import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { StreamingRpcHandler } from "../../features/web/StreamingRpcHandler"
 import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRefreshCoordinator"
 import { shouldLogSdkEventForInteraction, summarizeAgentChunkForLog, summarizeClineMessageForLog, summarizeSdkEventForLog } from "./WebviewInteractionLogSupport"
 import { grpcError, grpcHandled, grpcResponse } from "./WebviewGrpcSupport"
 import { formatEmptyModelResponseForUi, formatProviderErrorForTranscript, formatSdkErrorForUi, isSessionNotFoundError, stringify } from "./RuntimeErrorFormatter"
 import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
+import { WebviewUnaryRpcRouter } from "./WebviewUnaryRpcRouter"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { RuntimeModelContext } from "../models/RuntimeModelContext"
@@ -295,6 +281,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly uiWebRpc: UiWebRpcHandler
 	private readonly pluginRpc: PluginRpcHandler
 	private readonly streamingRpc: StreamingRpcHandler
+	private readonly unaryRpcRouter: WebviewUnaryRpcRouter
 	private readonly stateStreamRefresh: StateStreamRefreshCoordinator
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly modelContext: RuntimeModelContext
@@ -396,6 +383,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.conversationMessages.add({ type: "say", say: "error", text }) } })
 		this.uiWebRpc = new UiWebRpcHandler({ openExternal: (url) => this.host.envClient.openExternal({ value: url }), checkImage: (url) => checkIsImageUrl(url), openGraph: (url) => fetchOpenGraphData(url) })
 		this.pluginRpc = new PluginRpcHandler({ workspaceRoot: () => this.getPrimaryWorkspaceRoot(), discover: (workspaceRoot) => discoverLocalPlugins(workspaceRoot) })
+		this.unaryRpcRouter = new WebviewUnaryRpcRouter({ settings: this.settingsRpc, account: this.accountRpc, browser: this.browserRpc, terminal: this.terminalRpc, task: this.taskRpc, checkpoint: this.checkpointRpc, hook: this.hookRpc, scheduledAgent: this.scheduledAgentRpc, worktree: this.worktreeRpc, mcp: this.mcpRpc, modelCatalog: this.modelCatalogRpc, file: this.fileRpc, instructionSettings: this.instructionSettingsRpc, uiWeb: this.uiWebRpc, plugin: this.pluginRpc, stateMessages: () => this.buildStateMessages(), mcpStreamMessages: (payload) => this.buildMcpServerStreamMessages(payload) })
 		this.stateStreamRefresh = new StateStreamRefreshCoordinator({ logger: this.logger, delayMs: () => readPositiveIntEnv("VSCLINE_STATE_REFRESH_DELAY_MS", 2500), shouldSkipScheduledRefresh: () => Boolean(this.state.currentTaskItem && this.clineSdk?.status.activeSessionId), refreshHistory: () => this.taskHistorySync.refresh(), refreshSelectedTask: () => this.taskTranscriptHydrator.refreshSelected(), broadcast: () => this.broadcastState(), formatError: (error) => stringify(error) })
 		this.streamingRpc = new StreamingRpcHandler({ scheduleStateRefresh: () => this.stateStreamRefresh.schedule(), subscribeState: (requestId) => this.requireStreamPublisher().subscribeState(requestId), subscribePartial: (requestId) => { this.requireStreamPublisher().subscribePartial(requestId) }, unauthenticatedAccount: () => createUnauthenticatedAccountState(), mcpServers: async () => (await this.mcpRpc.handle({ type: "list" })).payload, mcpMarketplace: async () => (await this.mcpRpc.handle({ type: "marketplace" })).payload })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
@@ -601,7 +589,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		try {
-			const result = await this.handleUnaryRequest(key, requestId, request.message)
+			const result = await this.unaryRpcRouter.handle(key, requestId, request.message)
 			this.logSlowGrpcRequest(key, startedAt, false)
 			return result
 		} catch (error) {
@@ -622,83 +610,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		if (result.kind === "payload") return grpcHandled(grpcResponse(requestId, result.payload, true))
 		if (result.kind === "empty") return grpcHandled()
 		return { handled: true, owner: "sidecar", reason: result.reason, webviewMessages: [] }
-	}
-
-	private async handleUnaryRequest(key: string, requestId: string, message: unknown) {
-		const settingsCommand = decodeSettingsRpcCommand(key, message)
-		if (settingsCommand) {
-			const settingsResult = await this.settingsRpc.handle(settingsCommand)
-			return grpcHandled(
-				grpcResponse(requestId, settingsResult.payload, false),
-				...(settingsResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const accountCommand = decodeAccountRpcCommand(key, message)
-		if (accountCommand) {
-			const accountResult = await this.accountRpc.handle(accountCommand)
-			return grpcHandled(
-				grpcResponse(requestId, accountResult.payload, false),
-				...(accountResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const browserCommand = decodeBrowserRpcCommand(key, message)
-		if (browserCommand) return grpcHandled(grpcResponse(requestId, await this.browserRpc.handle(browserCommand), false))
-		const terminalCommand = decodeTerminalRpcCommand(key, message)
-		if (terminalCommand) {
-			const terminalResult = await this.terminalRpc.handle(terminalCommand)
-			return grpcHandled(
-				grpcResponse(requestId, terminalResult.payload, false),
-				...(terminalResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const taskCommand = decodeTaskRpcCommand(key, message)
-		if (taskCommand) {
-			const taskResult = await this.taskRpc.handle(taskCommand, requestId)
-			return grpcHandled(
-				grpcResponse(requestId, taskResult.payload, false),
-				...(taskResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const checkpointCommand = decodeCheckpointRpcCommand(key, message)
-		if (checkpointCommand) {
-			const checkpointResult = await this.checkpointRpc.handle(checkpointCommand)
-			return grpcHandled(
-				grpcResponse(requestId, checkpointResult.payload, false),
-				...(checkpointResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const hookCommand = decodeHookRpcCommand(key, message)
-		if (hookCommand) return grpcHandled(grpcResponse(requestId, await this.hookRpc.handle(hookCommand), false))
-		const scheduledAgentCommand = decodeScheduledAgentRpcCommand(key, message)
-		if (scheduledAgentCommand) {
-			const scheduledAgentResult = await this.scheduledAgentRpc.handle(scheduledAgentCommand)
-			return grpcHandled(
-				grpcResponse(requestId, scheduledAgentResult.payload, false),
-				...(scheduledAgentResult.includeStateMessages ? this.buildStateMessages() : []),
-			)
-		}
-		const worktreeCommand = decodeWorktreeRpcCommand(key, message)
-		if (worktreeCommand) return grpcHandled(grpcResponse(requestId, await this.worktreeRpc.handle(worktreeCommand), false))
-		const mcpCommand = decodeMcpRpcCommand(key, message)
-		if (mcpCommand) {
-			const mcpResult = await this.mcpRpc.handle(mcpCommand)
-			if (mcpResult.error) return grpcHandled(grpcError(requestId, mcpResult.error, false))
-			return grpcHandled(grpcResponse(requestId, mcpResult.payload, false), ...(mcpResult.publishToStreams ? this.buildMcpServerStreamMessages(mcpResult.payload) : []))
-		}
-		const modelCatalogCommand = decodeModelCatalogRpcCommand(key, message)
-		if (modelCatalogCommand) return grpcHandled(grpcResponse(requestId, await this.modelCatalogRpc.handle(modelCatalogCommand), false))
-		const fileCommand = decodeFileRpcCommand(key, message)
-		if (fileCommand) {
-			const fileResult = await this.fileRpc.handle(fileCommand)
-			return grpcHandled(grpcResponse(requestId, fileResult.payload, false), ...(fileResult.includeStateMessages ? this.buildStateMessages() : []))
-		}
-		const instructionSettingsCommand = decodeInstructionSettingsRpcCommand(key, message)
-		if (instructionSettingsCommand) return grpcHandled(grpcResponse(requestId, await this.instructionSettingsRpc.handle(instructionSettingsCommand), false))
-		const uiWebCommand = decodeUiWebRpcCommand(key, message)
-		if (uiWebCommand) return grpcHandled(grpcResponse(requestId, await this.uiWebRpc.handle(uiWebCommand), false))
-		const pluginCommand = decodePluginRpcCommand(key)
-		if (pluginCommand) return grpcHandled(grpcResponse(requestId, await this.pluginRpc.handle(pluginCommand), false))
-		return null
 	}
 
 	private disposeStreamRequest(requestId: string) {

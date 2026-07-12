@@ -39,6 +39,7 @@ const connectionFactory = read("bootstrap/SidecarConnectionFactory.ts")
 const server = read("infrastructure/transport/SidecarRpcServer.ts")
 const streamPublisher = read("infrastructure/webview/WebviewStreamPublisher.ts")
 const router = read("infrastructure/webview/VisualStudioWebviewBackend.ts")
+const unaryRouter = read("infrastructure/webview/WebviewUnaryRpcRouter.ts")
 
 requireMatch("long API timeout", configBuilder, /readPositiveIntEnv\("VSCLINE_API_TIMEOUT_MS", 600_000\)/)
 requireMatch("long idle watchdog", connectionFactory, /readPositiveIntEnv\("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000\)/)
@@ -51,7 +52,7 @@ requireText("connection composition root", connectionFactory, "new VisualStudioW
 requireText("passive WebView controller", connectionFactory, "new VisualStudioWebviewController(backend)")
 requireSequence("sidecar shutdown flush", server, ["scope.webview.dispose()", "scope.runtime.dispose()", "await this.flushLogs()"])
 requireSequence("stream cancellation cleanup", streamPublisher, ["unsubscribe(requestId: string)", "this.stateRequests.delete(requestId)", "this.partialRequests.delete(requestId)", "this.stateDeliveryKeys.delete(requestId)", "this.partialDeliveryKeys.delete(requestId)"])
-requireMatch("MCP mutations refresh runtime settings", router, /mcpResult\.publishToStreams[\s\S]{0,160}buildMcpServerStreamMessages/)
+requireMatch("MCP mutations refresh runtime settings", unaryRouter, /result\.publishToStreams[\s\S]{0,160}mcpStreamMessages/)
 
 if (sdkRuntime.includes("<lig-vs-mcp-context>")) fail("MCP status must not be injected into SDK prompts.")
 if (/\bfetch\s*\(/.test(webviewSources)) fail("The passive WebView must not perform direct HTTP requests.")

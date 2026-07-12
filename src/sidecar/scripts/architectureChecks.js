@@ -48,6 +48,7 @@ for (const filePath of walk(sourceRoot)) {
 
 const routerPath = path.join(sourceRoot, "infrastructure", "webview", "VisualStudioWebviewBackend.ts")
 const router = fs.readFileSync(routerPath, "utf8")
+const unaryRouter = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewUnaryRpcRouter.ts"), "utf8")
 for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPort", "InteractionLoggerPort"]) {
 	if (!router.includes(marker)) violations.push(`VisualStudioWebviewBackend is missing application port: ${marker}`)
 }
@@ -161,7 +162,7 @@ if (router.includes("executeHookScript") || router.includes("hookDecisionFromRes
 if (router.includes("findCheckpointRunCount") || router.includes("resolveCheckpointRestoreScope")) {
 	violations.push("VisualStudioWebviewBackend must delegate checkpoint target and restore orchestration to CheckpointHandler.")
 }
-if (!router.includes("WorktreeRpcHandler") || !router.includes("this.worktreeRpc.handle(worktreeCommand)")) {
+if (!unaryRouter.includes("WorktreeRpcHandler") || !unaryRouter.includes("d.worktree.handle(worktree)")) {
 	violations.push("Worktree RPC routes must be delegated through WorktreeRpcHandler.")
 }
 
