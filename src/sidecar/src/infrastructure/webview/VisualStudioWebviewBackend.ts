@@ -57,7 +57,7 @@ import {
 	checkIsImageUrl,
 	fetchOpenGraphData,
 } from "../browser/BrowserDevToolsAdapter"
-import { browserActionResultForTranscript, normalizeBrowserActionName } from "../../features/browser/BrowserPolicy"
+import { BrowserToolEventFlow } from "../../features/browser/BrowserToolEventFlow"
 import {
 	discoverLocalPlugins,
 	getSettingsPath,
@@ -302,6 +302,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly settingsRpc: SettingsRpcHandler
 	private readonly accountRpc: AccountRpcHandler
 	private readonly browserRpc: BrowserRpcHandler
+	private readonly browserToolEvents: BrowserToolEventFlow
 	private readonly terminalRpc: TerminalRpcHandler
 	private readonly taskRpc: TaskRpcHandler
 	private readonly checkpointRpc: CheckpointRpcHandler
@@ -394,6 +395,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), clearPersistedState: () => this.stateStore.clear(), resetState: () => { Object.assign(this.state, createInitialState()) }, clearTask: () => this.clearTaskHandler.execute() })
 		this.accountRpc = new AccountRpcHandler({ authorization: () => this.requireOAuthAuthorization(), callback: () => this.requireOAuthCallbackHandler(), authActions: () => this.requireProviderAuthActions(), credentials: () => this.requireProviderCredentials(), configuration: () => asRecord(this.state.apiConfiguration), mutateConfiguration: (updates, deletes) => { const next = { ...asRecord(this.state.apiConfiguration), ...updates }; for (const field of deletes) delete next[field]; this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration }, syncProfiles: () => this.apiConfigurationProfiles.syncActive(), setCodexAuthenticated: (authenticated) => { this.state.openAiCodexIsAuthenticated = authenticated }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.browserRpc = new BrowserRpcHandler({ browser: () => this.requireBrowserHandler(), settings: () => this.getBrowserSettings() })
+		this.browserToolEvents = new BrowserToolEventFlow({ browser: () => this.requireBrowserHandler(), settings: () => this.getBrowserSettings(), addMessage: (message) => { this.addMessage(message) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState() })
 		this.terminalRpc = new TerminalRpcHandler(this.host.workspaceClient)
 		this.sdkConfigBuilder = new AgentSdkConfigBuilder({ state: () => this.state as unknown as Record<string, unknown>, resolveModelId: (configuration, providerId, modePrefix, baseUrl) => resolveEffectiveModelId(configuration, providerId, modePrefix, baseUrl, (modelId) => this.applyDefaultOllamaModel(modelId)), scheduledAgentsEnabled: () => this.isScheduledAgentsEnabled(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskHistorySync = new TaskHistorySync({ isAvailable: () => Boolean(this.clineSdk), listHistory: () => this.clineSdk?.listHistory({ limit: 200 }) ?? Promise.resolve(null), projectSession: (session) => sdkSessionToHistoryItem(asRecord(session)), readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -440,7 +442,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.runtimeStatusEvents = new RuntimeStatusEventProjector({ shouldIgnore: (sessionId) => this.taskSession.shouldIgnoreEvent(sessionId), markFirstEvent: (sessionId, eventType) => this.runtimeMonitoring.markFirstSdkEvent(sessionId, eventType), activeText: () => this.partialTextProjector.activeText(), finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), updateTask: () => this.taskState.update(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, transitionStreaming: (source) => { this.taskSession.transition("streaming", source) }, noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), schedulePartial: () => this.runtimeMonitoring.schedulePartialBroadcast(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.runtimeEvents = new AgentRuntimeEventDispatcher({ transitionStreaming: (source) => { this.taskSession.transition("streaming", source) }, shouldIgnore: (sessionId) => this.taskSession.shouldIgnoreEvent(sessionId), markFirstEvent: (sessionId, eventType) => this.runtimeMonitoring.markFirstSdkEvent(sessionId, eventType), projectAgent: (event, sessionId) => this.semanticEvents.handle(event, sessionId), trackWorkspaceChange: (change) => { this.handleFileChangedEvent(change).catch((error) => console.error(error)) }, projectChunk: (event) => this.agentChunkEvents.handle(event), projectSnapshot: (event) => this.agentSnapshotEvents.handle(event), projectAuxiliary: (event) => this.agentAuxiliaryEvents.handle(event), projectLifecycle: (event) => this.runtimeStatusEvents.handle(event), log: (event, details) => this.logger.log("sidecar", event, details), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", currentTaskId: () => String(this.state.currentTaskItem?.id || "") })
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.foldedProgressProjector.upsertReasoning(text), upsertAssistant: (accumulated, delta) => this.conversationRuntime.upsertAssistant(accumulated, delta), completeAssistant: (text) => this.conversationRuntime.completeAssistant(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
-		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.runtimeMonitoring.clearPartialIdle(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.conversationRuntime.recordToolActivity(tool, text), startTerminal: () => this.requireTerminalActivity().start(), stopTerminal: () => this.terminalActivity?.stop(), finalPollTerminal: () => { this.requireTerminalActivity().poll().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.hookLifecycle.run("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.foldedProgressProjector.appendTerminal(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
+		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.runtimeMonitoring.clearPartialIdle(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.conversationRuntime.recordToolActivity(tool, text), startTerminal: () => this.requireTerminalActivity().start(), stopTerminal: () => this.terminalActivity?.stop(), finalPollTerminal: () => { this.requireTerminalActivity().poll().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.hookLifecycle.run("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.browserToolEvents.execute(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.foldedProgressProjector.appendTerminal(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.conversationRuntime.finishToolActivity(), finishProgress: () => this.foldedProgressProjector.finish(), finalizePartial: () => this.partialTextProjector.finalize(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), updateUsage: (usage) => this.taskState.update(usage), hasCompletion: () => this.taskCompletion.hasCompletionAfterLastUser(), activePartialText: () => this.partialTextProjector.activeText(), hasAssistantAfterUser: () => this.taskCompletion.hasAssistantAfterLastUser(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.runtimeMonitoring.markError(sessionId, error) })
 		this.semanticEvents = new AgentEventDispatcher({ bindSession: (sessionId) => this.taskSession.bindSession(sessionId), projectText: (event) => this.agentTextEvents.handle(event), projectTool: (event) => this.agentToolEvents.handle(event), projectLifecycle: (event) => this.agentLifecycleEvents.handle(event), updateTask: () => this.taskState.update(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) } })
 		this.agentAuxiliaryEvents = new AgentAuxiliaryEventProjector({ noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), addMessage: (message) => { this.addMessage(message) }, updateTask: () => this.taskState.update(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -889,54 +891,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.sdkSettings
 	}
 
-	private async handleBrowserToolEvent(toolName: string, input: Record<string, unknown>, error: string) {
-		const action = normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || toolName)
-		const url = getString(input, "url") || getString(input, "value")
-		if (action === "launch" || action === "navigate") {
-			this.addMessage({ type: "say", say: "browser_action_launch", text: url || "" })
-		} else {
-			this.addMessage({
-				type: "say",
-				say: "browser_action",
-				text: JSON.stringify({
-					action,
-					coordinate: getString(input, "coordinate"),
-					text: getString(input, "text"),
-				}),
-			})
-		}
-
-		let result: Record<string, unknown>
-		if (error) {
-			result = { success: false, status: "error", error }
-		} else {
-			result = asRecord(await this.requireBrowserHandler().performAction({ ...input, action }, this.getBrowserSettings()))
-		}
-
-		for (const phase of arrayOfRecords(result.phases)) {
-			this.addMessage({
-				type: "say",
-				say: "browser_action",
-				text: JSON.stringify({
-					action,
-					phase: getString(phase, "phase"),
-					tabId: getString(phase, "tabId"),
-					browserSessionId: getString(phase, "browserSessionId"),
-					browserActionId: getString(phase, "browserActionId"),
-					reconnectReason: getString(phase, "reconnectReason"),
-				}),
-			})
-		}
-
-		this.addMessage({
-			type: "say",
-			say: "browser_action_result",
-			text: JSON.stringify(browserActionResultForTranscript(result)),
-		})
-		this.taskState.update()
-		await this.broadcastState()
-	}
-
 	private handleReasoningDelta(text: string) {
 		if (!this.state.currentTaskItem) {
 			return
@@ -1206,10 +1160,6 @@ function truncateForStatus(value: string, maxLength: number) {
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
-	return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : []
 }
 
 function readPositiveIntEnv(name: string, fallback: number) {

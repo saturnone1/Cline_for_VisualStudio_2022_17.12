@@ -98,6 +98,9 @@ if (!router.includes("ToolApprovalFlow") || !router.includes("ToolApprovalPrompt
 if (!router.includes("TaskPromptFlow") || router.includes("private async startNewTask") || router.includes("private async sendAskResponse")) {
 	violations.push("VisualStudioWebviewBackend must delegate task prompt normalization and routing to TaskPromptFlow.")
 }
+if (!router.includes("BrowserToolEventFlow") || router.includes("private async handleBrowserToolEvent")) {
+	violations.push("VisualStudioWebviewBackend must delegate browser tool execution transcript projection to BrowserToolEventFlow.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -393,6 +396,7 @@ for (const requiredFile of [
 	"features/browser/BrowserPolicy.ts",
 	"features/browser/BrowserHandler.ts",
 	"features/browser/BrowserRpcHandler.ts",
+	"features/browser/BrowserToolEventFlow.ts",
 	"features/terminal/TerminalRpcHandler.ts",
 	"features/hooks/HookPolicy.ts",
 	"features/hooks/HookSettingsHandler.ts",
