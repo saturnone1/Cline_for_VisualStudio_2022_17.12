@@ -1,4 +1,5 @@
 import { parseDroppedUris } from "./useChatDrop"
+import { vi } from "vitest"
 
 describe("parseDroppedUris", () => {
 	it("decodes and filters multi-selection resource URLs", () => {
@@ -11,6 +12,7 @@ describe("parseDroppedUris", () => {
 	})
 
 	it("falls back to the URI list when resource URLs are invalid", () => {
+		vi.spyOn(console, "error").mockImplementationOnce(() => undefined)
 		expect(parseDroppedUris("not-json", "vscode-file:///C:/repo/a.cs\nfile:///C:/repo/b.cs\ninvalid")).toEqual([
 			"vscode-file:///C:/repo/a.cs",
 			"file:///C:/repo/b.cs",
