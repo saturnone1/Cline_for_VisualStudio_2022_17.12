@@ -161,8 +161,8 @@ if (router.includes("executeHookScript") || router.includes("hookDecisionFromRes
 if (router.includes("findCheckpointRunCount") || router.includes("resolveCheckpointRestoreScope")) {
 	violations.push("VisualStudioWebviewBackend must delegate checkpoint target and restore orchestration to CheckpointHandler.")
 }
-for (const marker of [".create(message", ".switch(message", ".merge(message", ".recover(message", ".delete(message"]) {
-	if (!router.includes(`requireWorktreeMutations()${marker}`)) violations.push(`Worktree mutation route is not delegated through WorktreeMutationHandler: ${marker}`)
+if (!router.includes("WorktreeRpcHandler") || !router.includes("this.worktreeRpc.handle(worktreeCommand)")) {
+	violations.push("Worktree RPC routes must be delegated through WorktreeRpcHandler.")
 }
 
 const controllerPath = path.join(sourceRoot, "presentation", "webview", "VisualStudioWebviewController.ts")
@@ -218,7 +218,8 @@ if (!grpcClientBase.includes("WEBVIEW_RPC_PROTOCOL_VERSION") || !grpcClientBase.
 	violations.push("WebView gRPC request envelopes must carry an explicit protocol version.")
 }
 const streamPublisherSource = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewStreamPublisher.ts"), "utf8")
-if (!router.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION") || !streamPublisherSource.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
+const grpcSupportSource = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewGrpcSupport.ts"), "utf8")
+if (!grpcSupportSource.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION") || !streamPublisherSource.includes("protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
 	violations.push("All sidecar WebView RPC responses must carry an explicit protocol version.")
 }
 if (!grpcClientBase.includes("envelope.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION")) {

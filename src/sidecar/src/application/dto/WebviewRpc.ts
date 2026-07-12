@@ -79,7 +79,7 @@ export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult
 
 	const type = readString(value.type)
 	if (type === "grpc_request") {
-		if (value.protocol_version !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION && value.protocolVersion !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION) return { ok: false, reason: "unsupported_webview_protocol_version" }
+		if (hasUnsupportedWebviewProtocolVersion(value)) return { ok: false, reason: "unsupported_webview_protocol_version" }
 		if (!isJsonObject(value.grpc_request)) {
 			return { ok: false, reason: "invalid_webview_envelope" }
 		}
@@ -108,7 +108,7 @@ export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult
 	}
 
 	if (type === "grpc_request_cancel") {
-		if (value.protocol_version !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION && value.protocolVersion !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION) return { ok: false, reason: "unsupported_webview_protocol_version" }
+		if (hasUnsupportedWebviewProtocolVersion(value)) return { ok: false, reason: "unsupported_webview_protocol_version" }
 		const cancel = value.grpc_request_cancel
 		const requestId = isJsonObject(cancel) ? readString(cancel.request_id) || readString(cancel.requestId) : ""
 		return requestId
@@ -117,6 +117,11 @@ export function parseWebviewEnvelope(value: unknown): WebviewEnvelopeParseResult
 	}
 
 	return { ok: true, value: { type: "unhandled", originalType: type, message: value } }
+}
+
+function hasUnsupportedWebviewProtocolVersion(value: JsonObject) {
+	const version = value.protocol_version ?? value.protocolVersion
+	return version !== undefined && version !== HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

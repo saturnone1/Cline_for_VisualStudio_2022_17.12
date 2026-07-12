@@ -21,7 +21,7 @@ export class TaskStateCoordinator {
 		const currentTask = this.dependencies.readCurrentTask()
 		if (!currentTask) return
 		const messages = this.dependencies.readMessages()
-		const task = {
+		const task: TaskRecord = {
 			...currentTask,
 			...updates,
 			ts: (this.dependencies.now ?? Date.now)(),

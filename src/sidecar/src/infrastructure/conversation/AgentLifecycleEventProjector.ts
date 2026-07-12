@@ -1,7 +1,7 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { contentToText, extractCompletionTextFromResult, normalizeUsageSnapshot } from "./ConversationSupport"
 
-type Usage = Readonly<{ tokensIn: number; tokensOut: number; cacheReads: number; cacheWrites: number; totalCost: number }>
+type Usage = Readonly<{ tokensIn?: number; tokensOut?: number; cacheReads?: number; cacheWrites?: number; totalCost?: number }>
 type Callbacks = Readonly<{
 	noteActivity: (reason: string) => void
 	clearReasoning: () => void
