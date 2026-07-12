@@ -1,5 +1,5 @@
 import type { SessionSnapshotRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { normalizeUsageSnapshot } from "./ConversationSupport"
+import { normalizeUsageSnapshot } from "./UsageNormalization"
 
 type Usage = Readonly<{ modelId?: string; tokensIn?: number; tokensOut?: number; cacheReads?: number; cacheWrites?: number; totalCost?: number }>
 type Callbacks = Readonly<{

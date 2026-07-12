@@ -134,6 +134,8 @@ import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { RuntimeModelContext } from "../models/RuntimeModelContext"
 import { AutoApprovalNotifier } from "../notifications/AutoApprovalNotifier"
+import { buildTaskInputWithAttachments, normalizeSdkImageInputs } from "../conversation/AttachmentNormalization"
+import { createHistoryItem, createId, sdkSessionToHistoryItem } from "../conversation/TaskHistoryProjection"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import { ConversationRuntimeProjector } from "../conversation/ConversationRuntimeProjector"
@@ -167,16 +169,6 @@ import {
 	isEmptyPlainObject,
 	toProtoAsk,
 	toProtoSay,
-	buildTaskInputWithAttachments,
-	normalizeSdkImageInputs,
-	normalizeSdkImageInput,
-	fileUrlToPath,
-	tryCreateImageDataUri,
-	getImageMimeType,
-	formatAttachmentSummaryValue,
-	createId,
-	createHistoryItem,
-	sdkSessionToHistoryItem,
 	sdkMessagesToClineMessages,
 	stripLegacyMcpContext,
 	sdkMessageTimestamp,

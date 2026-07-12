@@ -1,6 +1,9 @@
-import fs from "node:fs"
 import path from "node:path"
 import { normalizeProviderId } from "../../application/services/ProviderIdentity"
+export { buildTaskInputWithAttachments, fileUrlToPath, formatAttachmentSummaryValue, getImageMimeType, normalizeSdkImageInput, normalizeSdkImageInputs, tryCreateImageDataUri } from "./AttachmentNormalization"
+export { normalizeUsageSnapshot } from "./UsageNormalization"
+export { createHistoryItem, createId, removeDeletedHistoryItems, sdkSessionToHistoryItem } from "./TaskHistoryProjection"
+import { createId } from "./TaskHistoryProjection"
 
 export function getCommandText(input: Record<string, unknown>) {
 	const command = getString(input, "command")
@@ -521,87 +524,6 @@ export function toProtoSay(say: string) {
 	return mapping[say] || "TEXT"
 }
 
-export function buildTaskInputWithAttachments(text: string, images: string[], files: string[]) {
-	const attachments = [
-		...images.map((image) => `Image: ${formatAttachmentSummaryValue(image)}`),
-		...files.map((file) => `File: ${file}`),
-	]
-	return attachments.length > 0 ? `${text}\n\nAttachments:\n${attachments.join("\n")}` : text
-}
-
-export async function normalizeSdkImageInputs(images: string[]) {
-	return (await Promise.all(images.map((image) => normalizeSdkImageInput(image)))).filter(Boolean)
-}
-
-export async function normalizeSdkImageInput(image: string) {
-	const trimmed = image.trim()
-	if (!trimmed) {
-		return ""
-	}
-
-	if (/^(https?:|data:image\/)/i.test(trimmed)) {
-		return trimmed
-	}
-
-	const localPath = trimmed.startsWith("file://") ? fileUrlToPath(trimmed) : trimmed
-	const dataUri = await tryCreateImageDataUri(localPath)
-	return dataUri
-}
-
-export function fileUrlToPath(value: string) {
-	try {
-		return decodeURIComponent(value.replace(/^file:\/\/\/?/i, "")).replace(/\//g, path.sep)
-	} catch {
-		return value
-	}
-}
-
-export async function tryCreateImageDataUri(filePath: string) {
-	try {
-		if (!filePath || !(await fs.promises.stat(filePath)).isFile()) {
-			return ""
-		}
-
-		const mimeType = getImageMimeType(filePath)
-		if (!mimeType) {
-			return ""
-		}
-
-		return `data:${mimeType};base64,${(await fs.promises.readFile(filePath)).toString("base64")}`
-	} catch {
-		return ""
-	}
-}
-
-export function getImageMimeType(filePath: string) {
-	const extension = path.extname(filePath).toLowerCase()
-	switch (extension) {
-		case ".png":
-			return "image/png"
-		case ".jpg":
-		case ".jpeg":
-			return "image/jpeg"
-		case ".gif":
-			return "image/gif"
-		case ".webp":
-			return "image/webp"
-		case ".bmp":
-			return "image/bmp"
-		default:
-			return ""
-	}
-}
-
-export function formatAttachmentSummaryValue(value: string) {
-	if (value.toLowerCase().startsWith("data:image/")) {
-		const separatorIndex = value.toLowerCase().indexOf(";base64,")
-		const mimeType = separatorIndex > "data:".length ? value.slice("data:".length, separatorIndex) : "image"
-		return `[attached ${mimeType}]`
-	}
-
-	return value
-}
-
 export function getExternalUrlValue(message: unknown) {
 	return getString(message, "value") || getString(message, "url") || getString(message, "uri") || getString(message, "href")
 }
@@ -614,62 +536,6 @@ export function normalizeMcpDisplayMode(value: unknown, fallback: unknown = "pla
 
 	const fallbackNormalized = String(fallback || "").trim().toLowerCase()
 	return fallbackNormalized === "rich" || fallbackNormalized === "markdown" ? fallbackNormalized : "plain"
-}
-
-export function createId() {
-	return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-}
-
-export function createHistoryItem(id: string, task: string, cwd: string, modelId: string) {
-	return {
-		id,
-		ts: Date.now(),
-		task,
-		tokensIn: 0,
-		tokensOut: 0,
-		cacheWrites: 0,
-		cacheReads: 0,
-		totalCost: 0,
-		isFavorited: false,
-		size: 0,
-		cwdOnTaskInitialization: cwd,
-		modelId,
-	}
-}
-
-export function sdkSessionToHistoryItem(session: Record<string, unknown>) {
-	const metadata = asRecord(session.metadata)
-	const usage = normalizeUsageSnapshot(
-		metadata.aggregateUsage || metadata.usage || session.aggregateUsage || session.usage || asRecord(session.snapshot).aggregateUsage,
-	)
-	const checkpoint = asRecord(metadata.checkpoint)
-	const latestCheckpoint = asRecord(checkpoint.latest)
-	const id = getString(session, "sessionId") || getString(session, "id") || createId()
-	const task = stripLegacyMcpContext(
-		getString(metadata, "title") || getString(session, "title") || getString(session, "prompt") || "LIG VS SDK task",
-	)
-	return {
-		id,
-		ts: getNumber(session, "updatedAt") || getNumber(session, "createdAt") || Date.now(),
-		task,
-		tokensIn: usage.inputTokens || 0,
-		tokensOut: usage.outputTokens || 0,
-		cacheWrites: usage.cacheWriteTokens || 0,
-		cacheReads: usage.cacheReadTokens || 0,
-		totalCost: getNumber(metadata, "totalCost") || usage.totalCost || 0,
-		isFavorited: metadata.isFavorited === true,
-		size: getNumber(session, "messageCount") || 0,
-		cwdOnTaskInitialization: getString(session, "cwd") || getString(metadata, "cwd") || process.cwd(),
-		modelId: getString(metadata, "modelId") || getString(session, "modelId") || "",
-		latestCheckpointRunCount: getNumber(latestCheckpoint, "runCount"),
-	}
-}
-
-export function removeDeletedHistoryItems(items: Array<Record<string, unknown>>, deletedTaskIds: Set<string>) {
-	if (deletedTaskIds.size === 0) {
-		return items
-	}
-	return items.filter((item) => !deletedTaskIds.has(String(item.id || "")))
 }
 
 export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, unknown>) {
@@ -2035,29 +1901,13 @@ export function uniqueStrings(values: string[]) {
 }
 
 type ToolActivityEntry = { kind: "file" | "search" | "edit" | "command" | "tool"; label: string; detail?: string }
-type NormalizedUsage = { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; totalCost?: number; reliable: boolean }
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function getString(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "string" ? item : item == null ? "" : String(item) }
 function getStringArray(value: unknown, key: string) { const item = asRecord(value)[key]; return Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [] }
 function getBoolean(value: unknown, key: string) { return asRecord(value)[key] === true }
 function getNumber(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "number" && Number.isFinite(item) ? item : undefined }
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
-function booleanValue(value: unknown) { return typeof value === "boolean" ? value : undefined }
 function arrayOfRecords(value: unknown): Array<Record<string, unknown>> { return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : [] }
-function firstNumberValue(record: Record<string, unknown>, keys: string[]) { for (const key of keys) { const value = numberValue(record[key]); if (value !== undefined) return value } return undefined }
-export function normalizeUsageSnapshot(value: unknown): NormalizedUsage {
-	const usage = asRecord(value)
-	const normalized: NormalizedUsage = {
-		inputTokens: firstNumberValue(usage, ["inputTokens", "tokensIn", "promptTokens", "totalInputTokens"]),
-		outputTokens: firstNumberValue(usage, ["outputTokens", "tokensOut", "completionTokens", "totalOutputTokens"]),
-		cacheReadTokens: firstNumberValue(usage, ["cacheReadTokens", "cacheReads", "cache_read_tokens", "totalCacheReadTokens"]),
-		cacheWriteTokens: firstNumberValue(usage, ["cacheWriteTokens", "cacheWrites", "cache_creation_input_tokens", "totalCacheWriteTokens"]),
-		totalCost: firstNumberValue(usage, ["totalCost", "cost"]),
-		reliable: false,
-	}
-	normalized.reliable = (normalized.inputTokens || 0) + (normalized.outputTokens || 0) + (normalized.cacheReadTokens || 0) + (normalized.cacheWriteTokens || 0) > 0 || (normalized.totalCost || 0) > 0
-	return normalized
-}
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
 function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }
 function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

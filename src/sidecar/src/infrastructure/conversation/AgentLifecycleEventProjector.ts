@@ -1,5 +1,6 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { contentToText, extractCompletionTextFromResult, normalizeUsageSnapshot } from "./ConversationSupport"
+import { contentToText, extractCompletionTextFromResult } from "./ConversationSupport"
+import { normalizeUsageSnapshot } from "./UsageNormalization"
 
 type Usage = Readonly<{ tokensIn?: number; tokensOut?: number; cacheReads?: number; cacheWrites?: number; totalCost?: number }>
 type Callbacks = Readonly<{
