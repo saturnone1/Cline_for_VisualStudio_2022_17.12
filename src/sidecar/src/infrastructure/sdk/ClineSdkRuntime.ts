@@ -1,5 +1,4 @@
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
@@ -9,6 +8,7 @@ import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
 import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { normalizeAgentRuntimeEvent, translateToolApprovalRequest } from "./ClineSdkEventTranslator"
+import { ensureUsableHomeEnvironment, getLocalAppDataRoot, resolveWorkspacePath, sanitizePathPart } from "./SdkEnvironment"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -1343,98 +1343,6 @@ function toProtoMcpStatus(status: string) {
 
 function agentMode(value: unknown): "act" | "plan" | undefined {
 	return value === "act" || value === "plan" ? value : undefined
-}
-
-function resolveWorkspacePath(inputPath: string, workspaceRoots: string[], basePath?: string) {
-	if (!inputPath || inputPath.trim().length === 0) {
-		throw new Error("Path is required.")
-	}
-
-	const roots = workspaceRoots.map((root) => path.resolve(root))
-	const base = basePath && basePath.trim().length > 0 ? path.resolve(basePath) : roots[0]
-	const normalizedInputPath = expandTildePath(inputPath)
-	const resolved = path.resolve(path.isAbsolute(normalizedInputPath) ? normalizedInputPath : path.join(base || process.cwd(), normalizedInputPath))
-	const allowed = roots.some((root) => isPathInsideOrEqual(resolved, root))
-	if (!allowed) {
-		throw new Error(`Access denied: path outside Visual Studio workspace: ${inputPath}`)
-	}
-
-	return resolved
-}
-
-function expandTildePath(inputPath: string) {
-	const trimmed = inputPath.trim()
-	if (trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
-		return path.join(getUsableHomeDirectory(), trimmed.slice(1))
-	}
-	return inputPath
-}
-
-function ensureUsableHomeEnvironment() {
-	const fallbackHome = getFallbackHomeDirectory()
-	for (const name of ["HOME", "USERPROFILE"]) {
-		const current = process.env[name]
-		if (!isUsableHomePath(current)) {
-			process.env[name] = fallbackHome
-		}
-	}
-}
-
-function getUsableHomeDirectory() {
-	const candidates = [
-		process.env.USERPROFILE,
-		process.env.HOME,
-		os.homedir(),
-		getFallbackHomeDirectory(),
-	]
-	for (const candidate of candidates) {
-		if (candidate && isUsableHomePath(candidate)) {
-			return path.resolve(candidate)
-		}
-	}
-	return getFallbackHomeDirectory()
-}
-
-function getFallbackHomeDirectory() {
-	const root = process.env.LOCALAPPDATA || process.env.APPDATA || path.join(os.tmpdir(), "VsClineAgent")
-	const fallbackHome = path.join(root, "VsClineAgent", "home")
-	try {
-		fs.mkdirSync(fallbackHome, { recursive: true })
-	} catch {
-		return process.cwd()
-	}
-	return fallbackHome
-}
-
-function isUsableHomePath(value: string | undefined) {
-	if (!value || value.trim().length === 0 || hasLiteralTildeSegment(value)) {
-		return false
-	}
-	try {
-		const resolved = path.resolve(value)
-		fs.mkdirSync(resolved, { recursive: true })
-		fs.accessSync(resolved, fs.constants.W_OK)
-		return true
-	} catch {
-		return false
-	}
-}
-
-function hasLiteralTildeSegment(value: string) {
-	return value.split(/[\\/]+/).some((part) => part === "~")
-}
-
-function isPathInsideOrEqual(candidate: string, root: string) {
-	const relative = path.relative(root, candidate)
-	return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
-}
-
-function getLocalAppDataRoot() {
-	return process.env.LOCALAPPDATA || process.env.APPDATA || process.cwd()
-}
-
-function sanitizePathPart(value: string) {
-	return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "item"
 }
 
 async function importClineSdk(): Promise<ClineSdkModule> {
