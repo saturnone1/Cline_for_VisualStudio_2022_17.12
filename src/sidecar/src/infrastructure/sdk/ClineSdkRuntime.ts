@@ -10,6 +10,7 @@ import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/age
 import { normalizeAgentRuntimeEvent, translateToolApprovalRequest } from "./ClineSdkEventTranslator"
 import { ensureUsableHomeEnvironment, getLocalAppDataRoot, resolveWorkspacePath, sanitizePathPart } from "./SdkEnvironment"
 import { fetchWebContentForSdk, normalizeCommandResultForSdk, readPositiveIntEnv } from "./SdkToolSupport"
+import { callMcpListMethod, getArrayProperty, isToolAutoApproved, normalizeMcpPrompts, normalizeMcpResources, normalizeMcpResourceTemplates, toDisplayMcpConfig, toProtoMcpStatus } from "./McpProjection"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -1114,119 +1115,6 @@ function sdkInitialMessages(value: unknown) {
 		const content = stringValue(message.content)
 		return role && content ? [{ role, content }] : []
 	})
-}
-
-function isToolAutoApproved(serverConfig: Record<string, unknown>, toolName: string) {
-	const metadata = asRecord(serverConfig.metadata)
-	return stringArrayValue(metadata.autoApproveTools).includes(toolName)
-}
-
-async function callMcpListMethod(manager: McpManagerInstance, serverName: string, methodNames: string[]) {
-	const source = manager as unknown as Record<string, unknown>
-	for (const methodName of methodNames) {
-		const method = source[methodName]
-		if (typeof method !== "function") {
-			continue
-		}
-		try {
-			const result = await method.call(manager, serverName)
-			return Array.isArray(result) ? result : undefined
-		} catch {
-			return undefined
-		}
-	}
-	return undefined
-}
-
-function getArrayProperty(source: unknown, propertyName: string) {
-	const value = asRecord(source)[propertyName]
-	return Array.isArray(value) ? value : undefined
-}
-
-function normalizeMcpResources(values: unknown[] | undefined): Array<Record<string, unknown>> {
-	return (values || []).flatMap((value) => {
-		const record = asRecord(value)
-		const uri = stringValue(record.uri)
-		if (!uri) {
-			return []
-		}
-		return [{
-			uri,
-			name: stringValue(record.name) || uri,
-			mimeType: stringValue(record.mimeType),
-			description: stringValue(record.description),
-		}]
-	})
-}
-
-function normalizeMcpResourceTemplates(values: unknown[] | undefined): Array<Record<string, unknown>> {
-	return (values || []).flatMap((value) => {
-		const record = asRecord(value)
-		const uriTemplate = stringValue(record.uriTemplate)
-		if (!uriTemplate) {
-			return []
-		}
-		return [{
-			uriTemplate,
-			name: stringValue(record.name) || uriTemplate,
-			description: stringValue(record.description),
-			mimeType: stringValue(record.mimeType),
-		}]
-	})
-}
-
-function normalizeMcpPrompts(values: unknown[] | undefined): Array<Record<string, unknown>> {
-	return (values || []).flatMap((value) => {
-		const record = asRecord(value)
-		const name = stringValue(record.name)
-		if (!name) {
-			return []
-		}
-		return [{
-			name,
-			title: stringValue(record.title),
-			description: stringValue(record.description),
-			arguments: normalizeMcpPromptArguments(getArrayProperty(record, "arguments")),
-		}]
-	})
-}
-
-function normalizeMcpPromptArguments(values: unknown[] | undefined): Array<Record<string, unknown>> {
-	return (values || []).flatMap((value) => {
-		const record = asRecord(value)
-		const name = stringValue(record.name)
-		if (!name) {
-			return []
-		}
-		return [{
-			name,
-			description: stringValue(record.description),
-			required: record.required === true,
-		}]
-	})
-}
-
-function toDisplayMcpConfig(registration: Record<string, unknown>, serverConfig: Record<string, unknown>) {
-	const transport = asRecord(registration.transport) || asRecord(serverConfig.transport)
-	const metadata = asRecord(registration.metadata)
-	const timeout = numberValue(serverConfig.timeout) || numberValue(metadata.timeout)
-	return {
-		...transport,
-		...(timeout ? { timeout } : {}),
-		...(serverConfig.disabled === true || registration.disabled === true ? { disabled: true } : {}),
-	}
-}
-
-function toProtoMcpStatus(status: string) {
-	switch (status) {
-		case "connected":
-			return "MCP_SERVER_STATUS_CONNECTED"
-		case "connecting":
-			return "MCP_SERVER_STATUS_CONNECTING"
-		case "disconnected":
-		default:
-			return "MCP_SERVER_STATUS_DISCONNECTED"
-	}
 }
 
 function agentMode(value: unknown): "act" | "plan" | undefined {
