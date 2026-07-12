@@ -1,6 +1,5 @@
 import { mentionRegex, mentionRegexGlobal } from "@shared/contextMentions"
 import { StringRequest } from "@shared/proto/cline/common"
-import { FileSearchRequest, FileSearchType } from "@shared/proto/cline/file"
 import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
@@ -26,7 +25,6 @@ import {
 	insertMention,
 	insertMentionDirectly,
 	removeMention,
-	type SearchResult,
 	shouldShowContextMenu,
 } from "@/utils/contextMentions"
 import { useMetaKeyDetection, useShortcut } from "@/utils/hooks"
@@ -36,6 +34,7 @@ import ClineRulesToggleModal from "../clineRules/ClineRulesToggleModal"
 import ServersToggleModal from "./ServersToggleModal"
 import { useChatDrop } from "./useChatDrop"
 import { useChatPaste } from "./useChatPaste"
+import { useMentionSearch } from "./useMentionSearch"
 import { useSlashCommandMenu } from "./useSlashCommandMenu"
 
 // Set to "File" option by default
@@ -207,8 +206,13 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const [showDimensionError, setShowDimensionError] = useState(false)
 		const dimensionErrorTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-		const [fileSearchResults, setFileSearchResults] = useState<SearchResult[]>([])
-		const [searchLoading, setSearchLoading] = useState(false)
+		const {
+			fileSearchResults,
+			searchLoading,
+			runMentionSearch,
+			scheduleMentionSearch,
+			clearMentionSearch,
+		} = useMentionSearch()
 		const [, metaKeyChar] = useMetaKeyDetection(platform)
 		const {
 			showSlashCommandsMenu,
@@ -297,42 +301,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						setSearchQuery("")
 						setSelectedMenuIndex(0)
 
-						// Trigger search with the selected type
 						if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder) {
-							setSearchLoading(true)
-
-							// Map ContextMenuOptionType to FileSearchType enum
-							let searchType: FileSearchType | undefined
-							if (type === ContextMenuOptionType.File) {
-								searchType = FileSearchType.FILE
-							} else if (type === ContextMenuOptionType.Folder) {
-								searchType = FileSearchType.FOLDER
-							}
-
-							const myToken = ++latestSearchTokenRef.current
-							FileServiceClient.searchFiles(
-								FileSearchRequest.create({
-									query: "",
-									mentionsRequestId: String(myToken),
-									selectedType: searchType,
-								}),
-							)
-								.then((results) => {
-									if (myToken !== latestSearchTokenRef.current) {
-										// Stale response — a newer search has been issued.
-										return
-									}
-									setFileSearchResults((results.results || []) as SearchResult[])
-									setSearchLoading(false)
-								})
-								.catch((error) => {
-									if (myToken !== latestSearchTokenRef.current) {
-										return
-									}
-									console.error("Error searching files:", error)
-									setFileSearchResults([])
-									setSearchLoading(false)
-								})
+							void runMentionSearch("", type)
 						}
 						return
 					}
@@ -379,7 +349,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					}, 0)
 				}
 			},
-			[setInputValue, cursorPosition, searchQuery],
+			[setInputValue, cursorPosition, searchQuery, runMentionSearch],
 		)
 
 		const handleKeyDown = useCallback(
@@ -582,15 +552,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setPendingInsertions((prev) => prev.slice(1))
 		}, [pendingInsertions, setInputValue])
 
-		const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-		// Monotonic token; every searchFiles dispatch bumps it, and resolve
-		// handlers drop their result when the token they captured at fire time
-		// is no longer the latest. Prevents stale results from a cancelled or
-		// superseded picker (e.g. "Add File" still in flight when user picks
-		// "Add Folder") from clobbering fresh state.
-		const latestSearchTokenRef = useRef(0)
-
 		const handleInputChange = useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const newValue = e.target.value
@@ -615,75 +576,26 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 					if (query.length > 0) {
 						setSelectedMenuIndex(0)
-
-						// Clear any existing timeout
-						if (searchTimeoutRef.current) {
-							clearTimeout(searchTimeoutRef.current)
-						}
-
-						setSearchLoading(true)
-
-						const searchType =
-							selectedType === ContextMenuOptionType.File
-								? FileSearchType.FILE
-								: selectedType === ContextMenuOptionType.Folder
-									? FileSearchType.FOLDER
-									: undefined
-
-						// Parse workspace hint from query (e.g., "@frontend:/filename")
-						let workspaceHint: string | undefined
-						let searchQuery = query
-						const workspaceHintMatch = query.match(/^([\w-]+):\/(.*)$/)
-						if (workspaceHintMatch) {
-							workspaceHint = workspaceHintMatch[1]
-							searchQuery = workspaceHintMatch[2]
-						}
-
-						// Set a timeout to debounce the search requests
-						searchTimeoutRef.current = setTimeout(() => {
-							const myToken = ++latestSearchTokenRef.current
-							FileServiceClient.searchFiles(
-								FileSearchRequest.create({
-									query: searchQuery,
-									mentionsRequestId: String(myToken),
-									selectedType: searchType,
-									workspaceHint: workspaceHint,
-								}),
-							)
-								.then((results) => {
-									if (myToken !== latestSearchTokenRef.current) {
-										// Stale response — a newer search has been issued.
-										return
-									}
-									setFileSearchResults((results.results || []) as SearchResult[])
-									setSearchLoading(false)
-								})
-								.catch((error) => {
-									if (myToken !== latestSearchTokenRef.current) {
-										return
-									}
-									console.error("Error searching files:", error)
-									setFileSearchResults([])
-									setSearchLoading(false)
-								})
-						}, 200) // 200ms debounce
+						scheduleMentionSearch(query, selectedType)
 					} else {
 						setSelectedMenuIndex(DEFAULT_CONTEXT_MENU_OPTION)
+						clearMentionSearch()
 					}
 				} else {
 					setSearchQuery("")
 					setSelectedMenuIndex(-1)
-					setFileSearchResults([])
+					clearMentionSearch()
 				}
 			},
-			[setInputValue, setFileSearchResults, selectedType, updateSlashCommandsMenu],
+			[setInputValue, selectedType, updateSlashCommandsMenu, scheduleMentionSearch, clearMentionSearch],
 		)
 
 		useEffect(() => {
 			if (!showContextMenu) {
 				setSelectedType(null)
+				clearMentionSearch()
 			}
-		}, [showContextMenu])
+		}, [showContextMenu, clearMentionSearch])
 
 		const handleBlur = useCallback(() => {
 			// Only hide the context menu if the user didn't click on it
