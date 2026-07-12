@@ -107,6 +107,9 @@ if (!router.includes("ConversationActivityProjector") || router.includes("privat
 if (router.includes("private handleFileChangedEvent") || router.includes("private wasRecentlyTracked")) {
 	violations.push("VisualStudioWebviewBackend must use ChangeTrackingHandler directly instead of restoring forwarding methods.")
 }
+if (!router.includes("RuntimeModelContext") || router.includes("private getModelId") || router.includes("private getResumedConversationCharBudget")) {
+	violations.push("VisualStudioWebviewBackend must delegate runtime model selection and transcript budget policy to RuntimeModelContext.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -342,6 +345,7 @@ for (const requiredFile of [
 	"infrastructure/hooks/ProcessHookExecutionAdapter.ts",
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/models/ProviderModelCatalogHandler.ts",
+	"infrastructure/models/RuntimeModelContext.ts",
 	"features/providers/ModelCatalogRpcHandler.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",

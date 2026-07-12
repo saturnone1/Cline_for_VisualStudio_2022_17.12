@@ -49,7 +49,6 @@ import { ToolApprovalFlow } from "../../features/approvals/ToolApprovalFlow"
 import { rebindTaskHistoryId, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
 	isOAuthTokenBlobProvider,
-	normalizeProviderId,
 	oauthCredentialsField,
 	providerAuthLabel,
 } from "../../application/services/ProviderIdentity"
@@ -129,6 +128,7 @@ import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRef
 import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
+import { RuntimeModelContext } from "../models/RuntimeModelContext"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import { ConversationRuntimeProjector } from "../conversation/ConversationRuntimeProjector"
@@ -151,11 +151,8 @@ import {
 import {
 	RESUMED_CONVERSATION_MAX_CHARS,
 	getCommandText,
-	getToolPath,
 	getToolPathFromUnknown,
 	getSearchQuery,
-	getSearchFilePattern,
-	summarizeToolInput,
 	getPatchPathsFromUnknown,
 	parsePatchPaths,
 	summarizeCommandLabel,
@@ -221,7 +218,6 @@ import {
 } from "../conversation/ConversationSupport"
 import {
 	type OAuthTokenExchangeConfig,
-	resolveConfiguredContextWindow,
 	positiveIntegerValue,
 	resolveApiKey,
 	providerCredentialFields,
@@ -240,7 +236,6 @@ import {
 	isWebFetchEnabled,
 	webFetchDisabledReason,
 } from "../configuration/ProviderConfiguration"
-import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
 import { createUnauthenticatedAccountState } from "../auth/ProviderAuthSupport"
 
 export class VisualStudioWebviewBackend implements WebviewApplicationPort {
@@ -320,6 +315,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly streamingRpc: StreamingRpcHandler
 	private readonly stateStreamRefresh: StateStreamRefreshCoordinator
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
+	private readonly modelContext: RuntimeModelContext
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
@@ -349,6 +345,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		private readonly taskLifecycle: TaskLifecycleUseCase,
 	) {
 		this.state = loadInitialState(this.stateStore.load())
+		this.modelContext = new RuntimeModelContext({ configuration: () => asRecord(this.state.apiConfiguration), mode: () => this.state.mode === "plan" ? "plan" : "act", defaultModelId: () => process.env.CLINE_MODEL_ID || "", defaultOllamaModelId: () => process.env.OLLAMA_MODEL || process.env.CLINE_MODEL_ID || "", maxResumedConversationChars: RESUMED_CONVERSATION_MAX_CHARS })
 		this.taskSnapshots = new TaskSnapshotStore(this.state.taskSnapshots, (snapshots) => { this.state.taskSnapshots = snapshots })
 		this.taskState = new TaskStateCoordinator({ snapshots: this.taskSnapshots, readCurrentTask: () => this.state.currentTaskItem, writeCurrentTask: (task) => { this.state.currentTaskItem = task }, readMessages: () => this.state.clineMessages, readHistory: () => this.state.taskHistory, writeHistory: (history) => { this.state.taskHistory = history }, schedulePersist: () => this.schedulePersistedStateSave() })
 		this.runtimeMonitoring = new RuntimeMonitoringCoordinator({
@@ -384,10 +381,10 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.agentRunRecovery = new AgentRunRecoveryFlow({ currentGeneration: () => this.sdkRunGeneration, activeText: () => this.partialTextProjector.activeText(), hasAssistantText: () => this.taskCompletion.hasAssistantAfterLastUser(), hydrate: (sessionId, source) => this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, true), finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), projectFailure: (source, error) => { this.runtimeMonitoring.clearTaskActivity(); this.taskSession.transition("failed", `sdk-error:${source}`); this.runtimeMonitoring.clearPartialIdle(); this.conversationActivity.clearReasoning(); this.addMessage({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) }) }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunCompletion = new AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", bindSession: (sessionId) => this.taskSession.bindSession(sessionId), isCurrentSession: (sessionId) => this.taskSession.isCurrentResult(sessionId), hydrate: (sessionId, source) => this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, true), activeText: () => this.partialTextProjector.activeText(), hasAssistantText: () => this.taskCompletion.hasAssistantAfterLastUser(), lastActivityReason: () => this.taskActivity?.reason || "", finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), failEmpty: (sessionId) => this.taskCompletion.fail(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.conversationCleanup.finalizeOpenPartials(), addCompletionMarker: (status) => this.taskCompletion.addMarker(status), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendOrResumeSession = new SendOrResumeSessionFlow(() => this.clineSdk, { activeSettingsRevision: () => this.activeSessionRuntimeSettingsRevision, settingsRevision: () => this.runtimeSettingsRevision, markClosing: (sessionId, closing) => { if (closing) this.taskSession.markClosing(sessionId); else this.taskSession.prepareActivation(sessionId) }, send: (command) => { if (!this.sendMessage) return Promise.reject(new Error("SendMessageHandler is not attached.")); return this.sendMessage.execute(command) }, resume: (sessionId, command, textLength) => this.resumeSession.execute(sessionId, command, textLength), markSend: (sessionId) => this.runtimeMonitoring.markSdkSend(sessionId), markError: (sessionId, error) => this.runtimeMonitoring.markError(sessionId, error), isSessionNotFound: (error) => isSessionNotFoundError(error), log: (event, details) => this.logger.log("sidecar", event, details) })
-		this.resumeSession = new ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.getModelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.getModelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.hookLifecycle.run("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.getResumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd, sessionId) => this.sdkConfigBuilder.build(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.resumeSession = new ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.modelContext.modelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.modelContext.modelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.hookLifecycle.run("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.modelContext.resumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd, sessionId) => this.sdkConfigBuilder.build(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.launchAgentSession = new LaunchAgentSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), buildConfig: (cwd, sessionId) => this.sdkConfigBuilder.build(cwd, sessionId), toolPolicies: () => this.createCurrentToolPolicies(), markSend: (sessionId) => this.runtimeMonitoring.markSdkSend(sessionId), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, start: (command) => { if (!this.startTaskHandler) return Promise.reject(new Error("StartTaskHandler is not attached.")); return this.startTaskHandler.execute(command) }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, complete: (result, sessionId, source, generation) => this.agentRunCompletion.complete(result, sessionId, source, generation), recover: (sessionId, source, generation, error) => this.agentRunRecovery.recover(sessionId, source, generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.prepareNewTask = new PrepareNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), resolveWorkspacePath: (requestedPath) => requestedPath && fs.existsSync(requestedPath) ? path.resolve(requestedPath) : null, updateTask: () => this.taskState.update(), publishPreparing: () => this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)), activeSessionId: () => this.requireClineSdk().status.activeSessionId || "", markClosing: (sessionId) => { this.taskSession.markClosing(sessionId) }, stopSession: (sessionId) => this.requireClineSdk().stop({ sessionId }), runHook: (name, context) => { void this.hookLifecycle.run(name, context) }, normalizeImages: (images) => normalizeSdkImageInputs(images), launch: (params, cwd, sessionId) => this.launchAgentSession.execute(params, cwd, sessionId, "startSession"), projectError: async (error) => { this.runtimeMonitoring.clearTaskActivity(); this.addMessage({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) }); this.taskState.update(); await this.broadcastState() }, log: (event, details) => this.logger.log("sidecar", event, details) })
-		this.startNewTaskFlow = new StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), transitionStarting: () => { this.taskSession.transition("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.getModelId()), startLatency: (requestId, taskId, textLength) => this.runtimeMonitoring.startLatency(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.addMessage({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.foldedProgressProjector.upsertReasoning(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => { void this.prepareNewTask.execute({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) } })
+		this.startNewTaskFlow = new StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), transitionStarting: () => { this.taskSession.transition("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.modelContext.modelId()), startLatency: (requestId, taskId, textLength) => this.runtimeMonitoring.startLatency(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.addMessage({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.foldedProgressProjector.upsertReasoning(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => { void this.prepareNewTask.execute({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) } })
 		this.askResponseInteractions = new AskResponseInteractionFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), takeApproval: () => this.approvals.take(), takeQuestion: () => { const pending = this.pendingQuestion; this.pendingQuestion = null; return pending?.resolve }, transitionStreaming: (source) => { this.taskSession.transition("streaming", source) }, removeFollowup: () => this.removeAskMessages("followup"), addFeedback: (text, images, files) => { this.addMessage({ type: "say", say: "user_feedback", text, images, files }) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendUserMessage = new SendUserMessageFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), clearPending: () => { this.approvals.clear({ approved: false, reason: "Superseded by resumed chat message." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, startNewTask: (input) => this.taskPrompts.start({ text: input.prompt, images: input.images, files: input.files }, { broadcast: true, requestId: input.requestId }), startLatency: (requestId, sessionId, textLength) => this.runtimeMonitoring.startLatency(requestId, "askResponse", sessionId, textLength), transitionStarting: () => { this.taskSession.transition("starting", "send-response") }, projectUserMessage: (text) => { this.removeTerminalAskMessages(); const message = this.addMessage({ type: "say", say: "user_feedback", text }); this.foldedProgressProjector.beginReasoning(); return message }, showPreparing: () => this.foldedProgressProjector.upsertReasoning(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message !== null && typeof message === "object" && !Array.isArray(message) ? message as Record<string, unknown> : undefined), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, normalizeImages: (images) => normalizeSdkImageInputs(images), runHook: (context) => { void this.hookLifecycle.run("UserPromptSubmit", context) }, nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, send: (sessionId, command, textLength) => this.sendOrResumeSession.execute(sessionId, command, textLength), resultSessionId: (result, fallback) => getString(asRecord(result), "sessionId") || fallback, complete: (result, sessionId, generation) => this.agentRunCompletion.complete(result, sessionId, "send", generation), recover: (sessionId, generation, error) => this.agentRunRecovery.recover(sessionId, "send", generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.taskPrompts = new TaskPromptFlow({ startFlow: this.startNewTaskFlow, interactionFlow: this.askResponseInteractions, sendFlow: this.sendUserMessage, isRuntimeAvailable: () => Boolean(this.clineSdk), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", selectedSessionId: () => String(this.state.currentTaskItem?.id || ""), mode: () => this.state.mode === "plan" ? "plan" : "act", hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), resolveInitialCwd: (requestedWorkspacePath) => requestedWorkspacePath && fs.existsSync(requestedWorkspacePath) ? path.resolve(requestedWorkspacePath) : process.cwd(), buildTranscript: (text, images, files) => buildTaskInputWithAttachments(text, images, files), createRequestId: () => createId(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -408,7 +405,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.scheduledAgentRpc = new ScheduledAgentRpcHandler({ agents: () => this.requireScheduledAgents(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), launch: async (request) => { await this.taskPrompts.start(request, { broadcast: false }) } })
 		this.worktreeRpc = new WorktreeRpcHandler({ queries: () => this.requireWorktreeQueries(), mutations: () => this.requireWorktreeMutations(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), setFeatureEnabled: (enabled) => this.setWorktreesFeatureFlag(enabled) })
 		this.mcpRpc = new McpRpcHandler({ mcp: () => this.requireMcp(), openSettings: (filePath) => this.host.windowClient.openFile({ filePath }), markRuntimeChanged: () => { this.runtimeSettingsRevision++ } })
-		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
+		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.modelContext.modelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
 		this.fileRpc = new FileRpcHandler({ host: this.host, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), resolvePath: (workspaceRoot, filePath) => path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath, baseName: (filePath) => path.basename(filePath), exists: (filePath) => fs.existsSync(filePath), revert: (request) => this.requireChangeTracking().revert(request) })
 		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.addMessage({ type: "say", say: "error", text }) } })
 		this.uiWebRpc = new UiWebRpcHandler({ openExternal: (url) => this.host.envClient.openExternal({ value: url }), checkImage: (url) => checkIsImageUrl(url), openGraph: (url) => fetchOpenGraphData(url) })
@@ -944,47 +941,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.conversationMessages.removeAsks(askKind)
 	}
 
-	private addToolActivityMessage(tool: string, input: Record<string, unknown>, fallback: unknown) {
-		this.conversationRuntime.recordToolActivity(
-			tool,
-			JSON.stringify({
-				tool,
-				path: tool === "searchFiles" ? getToolPath(input) || "/" : getToolPathFromUnknown(input),
-				regex: tool === "searchFiles" ? getSearchQuery(input) : undefined,
-				filePattern: tool === "searchFiles" ? getSearchFilePattern(input) : undefined,
-				command: tool === "executeCommand" ? getCommandText(input) : undefined,
-				content: summarizeToolInput(input) || stringify(fallback),
-			}),
-		)
-	}
-
 	private getCurrentSessionId() {
 		return this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || "")
-	}
-
-	private getModelId() {
-		const apiConfig = asRecord(this.state.apiConfiguration)
-		const { modePrefix, providerId } = selectProvider(apiConfig, this.state.mode)
-		if (providerId === "ollama") {
-			return resolveModelId(apiConfig, providerId, modePrefix) || process.env.OLLAMA_MODEL || process.env.CLINE_MODEL_ID || "ollama"
-		}
-
-		return resolveModelId(apiConfig, providerId, modePrefix) || process.env.CLINE_MODEL_ID || "claude-sonnet-4-6"
-	}
-
-	private getResumedConversationCharBudget() {
-		const apiConfig = asRecord(this.state.apiConfiguration)
-		const modePrefix = this.state.mode === "plan" ? "planMode" : "actMode"
-		const providerId = normalizeProviderId(getString(apiConfig, `${modePrefix}ApiProvider`) || "anthropic")
-		const modelId = this.getModelId()
-		const contextWindowTokens = resolveConfiguredContextWindow(apiConfig, providerId, modePrefix, modelId)
-		return contextWindowTokens
-			? Math.min(RESUMED_CONVERSATION_MAX_CHARS, Math.max(2_000, Math.floor(contextWindowTokens * 0.5)))
-			: RESUMED_CONVERSATION_MAX_CHARS
-	}
-
-	private createCurrentModelCatalog() {
-		return this.requireProviderModelCatalogs().current(asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId())
 	}
 
 	private schedulePersistedStateSave() {
