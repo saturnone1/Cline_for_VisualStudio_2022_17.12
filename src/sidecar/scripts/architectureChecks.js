@@ -74,6 +74,9 @@ if (!router.includes("TaskSessionCoordinator") || router.includes("closingSessio
 if (!router.includes("StateStreamRefreshCoordinator") || router.includes("stateHydrationRefreshInFlight") || router.includes("private scheduleStateStreamsRefresh")) {
 	violations.push("VisualStudioWebviewBackend must delegate delayed state hydration refresh policy to StateStreamRefreshCoordinator.")
 }
+if (!router.includes("TaskStateCoordinator") || router.includes("private updateCurrentTaskItem") || router.includes("private rememberTaskSnapshot")) {
+	violations.push("VisualStudioWebviewBackend must delegate task metadata, history, snapshot, and persistence coordination to TaskStateCoordinator.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -340,6 +343,7 @@ for (const requiredFile of [
 	"features/approvals/ApprovalCoordinator.ts",
 	"features/taskHistory/TaskHistoryCollection.ts",
 	"features/taskHistory/TaskSnapshotStore.ts",
+	"features/taskHistory/TaskStateCoordinator.ts",
 	"features/providers/ProviderSelection.ts",
 	"features/providers/OAuthCallbackCoordinator.ts",
 	"features/providers/OAuthCallbackHandler.ts",
