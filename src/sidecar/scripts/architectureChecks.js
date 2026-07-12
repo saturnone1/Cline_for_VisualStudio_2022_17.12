@@ -116,6 +116,12 @@ if (!router.includes("ToolRuntimePolicy") || router.includes("private createCurr
 if (!router.includes("WebviewInteractionLogSupport") || router.includes("function summarizeSdkEventForLog") || router.includes("function summarizeAgentChunkForLog")) {
 	violations.push("VisualStudioWebviewBackend must delegate SDK interaction log projection to WebviewInteractionLogSupport.")
 }
+if (!router.includes("WebviewGrpcSupport") || router.includes("function grpcResponse") || router.includes("HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
+	violations.push("VisualStudioWebviewBackend must delegate gRPC envelope construction to WebviewGrpcSupport.")
+}
+if (!router.includes("RuntimeErrorFormatter") || router.includes("function formatSdkErrorForUi") || router.includes("function stringify")) {
+	violations.push("VisualStudioWebviewBackend must delegate runtime and provider error formatting to RuntimeErrorFormatter.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -362,6 +368,8 @@ for (const requiredFile of [
 	"infrastructure/webview/WebviewState.ts",
 	"infrastructure/webview/WebviewStreamPublisher.ts",
 	"infrastructure/webview/WebviewInteractionLogSupport.ts",
+	"infrastructure/webview/WebviewGrpcSupport.ts",
+	"infrastructure/webview/RuntimeErrorFormatter.ts",
 	"infrastructure/webview/SettingsRpcDecoder.ts",
 	"infrastructure/webview/AccountRpcDecoder.ts",
 	"infrastructure/webview/BrowserRpcDecoder.ts",

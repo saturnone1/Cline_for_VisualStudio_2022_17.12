@@ -11,7 +11,7 @@ import type { TaskSessionUseCase } from "../../application/useCases/TaskSessionU
 import type { McpHandler } from "../../features/mcp/McpHandler"
 import type { TaskLifecycleUseCase } from "../../application/useCases/TaskLifecycleUseCase"
 import type { StatePersistenceUseCase } from "../../application/useCases/StatePersistenceUseCase"
-import { HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION, type GrpcRequest, type WebviewEnvelope } from "../../application/dto/WebviewRpc"
+import type { GrpcRequest, WebviewEnvelope } from "../../application/dto/WebviewRpc"
 import {
 	createInitialState,
 	createMcpServersLazyResponse,
@@ -127,6 +127,8 @@ import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { StreamingRpcHandler } from "../../features/web/StreamingRpcHandler"
 import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRefreshCoordinator"
 import { shouldLogSdkEventForInteraction, summarizeAgentChunkForLog, summarizeClineMessageForLog, summarizeSdkEventForLog } from "./WebviewInteractionLogSupport"
+import { grpcError, grpcHandled, grpcResponse } from "./WebviewGrpcSupport"
+import { formatEmptyModelResponseForUi, formatProviderErrorForTranscript, formatSdkErrorForUi, isSessionNotFoundError, stringify } from "./RuntimeErrorFormatter"
 import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
@@ -976,89 +978,4 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 	const value = Number.parseInt(raw, 10)
 	return Number.isFinite(value) && value > 0 ? value : fallback
-}
-
-function isSessionNotFoundError(error: unknown) {
-	const message = error instanceof Error ? error.message : String(error)
-	return /session not found/i.test(message)
-}
-
-function stringify(value: unknown): string {
-	if (typeof value === "string") {
-		return value
-	}
-	if (value instanceof Error) {
-		const details = [value.name, value.message].filter(Boolean).join(": ")
-		const errorWithCause = value as Error & { cause?: unknown }
-		const cause: string = errorWithCause.cause === undefined ? "" : stringify(errorWithCause.cause)
-		return cause ? `${details}\nCaused by: ${cause}` : details
-	}
-	try {
-		const serialized = JSON.stringify(value)
-		return serialized === "{}" ? String(value) : serialized
-	} catch {
-		return String(value)
-	}
-}
-
-function formatEmptyModelResponseForUi(language: "en" | "ko") {
-	return language === "ko"
-		? "모델이 응답 본문을 생성하지 못했습니다. 선택한 모델이 Ollama에서 정상적으로 실행되는지 확인하거나 다른 모델로 다시 시도해 주세요."
-		: "The model returned no response body. Verify that the selected model runs correctly in Ollama, or retry with another model."
-}
-
-function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko") {
-	const text = stringify(value).trim()
-	if (!text) {
-		return language === "ko" ? "모델 제공자가 빈 오류를 반환했습니다." : "The model provider returned an empty error."
-	}
-	if (/too many requests|rate limit|429/i.test(text)) {
-		return language === "ko"
-			? `모델 제공자 응답: 요청 한도를 초과했습니다.\n\n${text}`
-			: `Model provider response: rate limit exceeded.\n\n${text}`
-	}
-	return text
-}
-
-function grpcHandled(...webviewMessages: unknown[]) {
-	return {
-		handled: true,
-		owner: "sidecar",
-		webviewMessages,
-	}
-}
-
-function grpcResponse(requestId: string, message: unknown, isStreaming: boolean) {
-	return {
-		protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
-		type: "grpc_response",
-		grpc_response: {
-			request_id: requestId,
-			message,
-			is_streaming: isStreaming,
-		},
-	}
-}
-
-function grpcError(requestId: string, error: string, isStreaming: boolean) {
-	return {
-		protocol_version: HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION,
-		type: "grpc_response",
-		grpc_response: {
-			request_id: requestId,
-			error,
-			is_streaming: isStreaming,
-		},
-	}
-}
-
-function formatSdkErrorForUi(error: unknown, language: "en" | "ko") {
-	const text = error instanceof Error ? error.message : String(error ?? "")
-	if (text && text !== "[object Object]" && text !== "{}") {
-		return text
-	}
-
-	return language === "en"
-		? "The SDK request ended before a final response could be synchronized."
-		: "SDK 요청이 최종 응답을 동기화하기 전에 종료되었습니다."
 }
