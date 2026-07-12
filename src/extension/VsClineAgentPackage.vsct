@@ -4,6 +4,7 @@
 
   <Extern href="stdidcmd.h" />
   <Extern href="vsshlids.h" />
+  <Include href="KnownImageIds.vsct" />
 
   <Commands package="guidVsClineAgentPackage">
     <Groups>
@@ -15,6 +16,7 @@
     <Buttons>
       <Button guid="guidVsClineAgentCmdSet" id="cmdOpenChatWindow" priority="0x0100" type="Button">
         <Parent guid="guidVsClineAgentCmdSet" id="grpAIAgentMenu" />
+        <Icon guid="ImageCatalogGuid" id="MessageBubble" />
         <Strings>
           <ButtonText>LIG VS</ButtonText>
           <CommandName>View.LIGVS</CommandName>
