@@ -3,10 +3,33 @@
   "$id": "https://lig-vs.local/contracts/webview-rpc.schema.json",
   "title": "LIG VS WebView RPC operation registry",
   "type": "object",
-  "required": ["schemaVersion", "protocolVersion", "operations"],
+  "required": ["schemaVersion", "protocolVersion", "shapes", "operations"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "protocolVersion": { "type": "integer", "minimum": 1 },
+    "shapes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["fields"],
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "enum": ["string", "number", "boolean", "stringArray", "unknown"] },
+                "required": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "allowAdditionalFields": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
     "operations": {
       "type": "array",
       "items": {
@@ -18,7 +41,9 @@
           "kind": { "enum": ["unary", "serverStream"] },
           "client": { "type": "boolean" },
           "sidecar": { "type": "boolean" },
-          "fallback": { "enum": ["passive"] }
+          "fallback": { "enum": ["passive"] },
+          "requestShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "responseShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
         },
         "additionalProperties": false
       }

@@ -1,4 +1,4 @@
-import { WEBVIEW_RPC_PROTOCOL_VERSION, webviewRpcOperation } from "./generated/WebviewRpcContract"
+import { validateWebviewRpcPayload, WEBVIEW_RPC_PROTOCOL_VERSION, webviewRpcOperation } from "./generated/WebviewRpcContract"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
@@ -43,13 +43,14 @@ export type WebviewEnvelopeParseResult =
 
 export type GrpcRequestContractValidation =
 	| { ok: true }
-	| { ok: false; reason: "unknown_rpc_operation" | "unsupported_sidecar_operation" | "rpc_kind_mismatch" }
+	| { ok: false; reason: "unknown_rpc_operation" | "unsupported_sidecar_operation" | "rpc_kind_mismatch" | "invalid_rpc_payload" }
 
 export function validateGrpcRequestContract(request: GrpcRequest): GrpcRequestContractValidation {
 	const operation = webviewRpcOperation(request.service, request.method)
 	if (!operation) return { ok: false, reason: "unknown_rpc_operation" }
 	if (!operation.sidecar) return { ok: false, reason: "unsupported_sidecar_operation" }
 	if (request.isStreaming !== (operation.kind === "serverStream")) return { ok: false, reason: "rpc_kind_mismatch" }
+	if (!validateWebviewRpcPayload(request.service, request.method, "request", request.message).ok) return { ok: false, reason: "invalid_rpc_payload" }
 	return { ok: true }
 }
 

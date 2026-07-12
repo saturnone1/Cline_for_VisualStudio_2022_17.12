@@ -1,7 +1,47 @@
 {
   "$schema": "./webview-rpc.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "protocolVersion": 1,
+  "shapes": {
+    "Empty": { "fields": {} },
+    "TaskPromptRequest": {
+      "fields": {
+        "text": { "type": "string" },
+        "answerText": { "type": "string" },
+        "responseType": { "type": "string" },
+        "images": { "type": "stringArray" },
+        "files": { "type": "stringArray" },
+        "workspacePath": { "type": "string" },
+        "cwd": { "type": "string" },
+        "worktreePath": { "type": "string" },
+        "delivery": { "type": "string" }
+      },
+      "allowAdditionalFields": true
+    },
+    "StringListValueRequest": {
+      "fields": { "value": { "type": "stringArray", "required": true } }
+    },
+    "TaskIdRequest": {
+      "fields": {
+        "value": { "type": "string" },
+        "taskId": { "type": "string" }
+      }
+    },
+    "TaskFavoriteRequest": {
+      "fields": {
+        "taskId": { "type": "string", "required": true },
+        "isFavorited": { "type": "boolean", "required": true }
+      }
+    },
+    "TaskHistoryResponse": {
+      "fields": { "tasks": { "type": "unknown", "required": true } },
+      "allowAdditionalFields": true
+    },
+    "NumberValueResponse": {
+      "fields": { "value": { "type": "number", "required": true } },
+      "allowAdditionalFields": true
+    }
+  },
   "operations": [
     {
       "service": "AccountService",
@@ -1062,7 +1102,9 @@
       "method": "askResponse",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "TaskPromptRequest",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
@@ -1076,28 +1118,36 @@
       "method": "cancelTask",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
       "method": "clearTask",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
       "method": "deleteAllTaskHistory",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
       "method": "deleteTasksWithIds",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "StringListValueRequest",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
@@ -1118,28 +1168,36 @@
       "method": "getTaskHistory",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "TaskHistoryResponse"
     },
     {
       "service": "TaskService",
       "method": "getTotalTasksSize",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "NumberValueResponse"
     },
     {
       "service": "TaskService",
       "method": "newTask",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "TaskPromptRequest",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
       "method": "showTaskWithId",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "TaskIdRequest",
+      "responseShape": "Empty"
     },
     {
       "service": "TaskService",
@@ -1160,7 +1218,9 @@
       "method": "toggleTaskFavorite",
       "kind": "unary",
       "client": true,
-      "sidecar": true
+      "sidecar": true,
+      "requestShape": "TaskFavoriteRequest",
+      "responseShape": "Empty"
     },
     {
       "service": "TerminalService",

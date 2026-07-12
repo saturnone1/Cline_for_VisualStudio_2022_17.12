@@ -3,6 +3,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const test = require("node:test")
 const { validateGrpcRequestContract } = require("../dist/application/dto/WebviewRpc")
+const { validateWebviewRpcPayload } = require("../dist/application/dto/generated/WebviewRpcContract")
 
 const repoRoot = path.resolve(__dirname, "../../..")
 const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "contracts/webview-rpc.json"), "utf8"))
@@ -35,5 +36,28 @@ test("sidecar contract rejects unknown and invocation-kind drift", () => {
 	assert.deepEqual(validateGrpcRequestContract({ service: "StateService", method: "subscribeToState", requestId: "2", isStreaming: false, message: {} }), {
 		ok: false,
 		reason: "rpc_kind_mismatch",
+	})
+})
+
+test("generated payload shapes reject Task RPC field drift on both wire directions", () => {
+	assert.deepEqual(
+		validateGrpcRequestContract({
+			service: "TaskService",
+			method: "newTask",
+			requestId: "task-1",
+			isStreaming: false,
+			message: { text: "start", images: [42] },
+		}),
+		{ ok: false, reason: "invalid_rpc_payload" },
+	)
+	assert.deepEqual(validateWebviewRpcPayload("TaskService", "toggleTaskFavorite", "request", { taskId: "1" }), {
+		ok: false,
+		reason: "missing_required_field",
+		field: "isFavorited",
+	})
+	assert.deepEqual(validateWebviewRpcPayload("TaskService", "getTotalTasksSize", "response", { value: "1" }), {
+		ok: false,
+		reason: "invalid_field_type",
+		field: "value",
 	})
 })

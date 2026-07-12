@@ -2179,7 +2179,9 @@
         "method": "deleteTasksWithIds",
         "request_id": "contract-156",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "value": []
+        }
       }
     }
   },
@@ -2305,7 +2307,10 @@
         "method": "toggleTaskFavorite",
         "request_id": "contract-165",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "taskId": "fixture",
+          "isFavorited": false
+        }
       }
     }
   },

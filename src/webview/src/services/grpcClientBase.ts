@@ -6,7 +6,7 @@
  * import is safe and ensures the methods work consistently regardless of React context.
  */
 import { PLATFORM_CONFIG } from "../config/platform.config"
-import { WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
+import { validateWebviewRpcPayload, WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
 
 export interface Callbacks<TResponse> {
 	onResponse: (response: TResponse) => void
@@ -31,6 +31,13 @@ export abstract class ProtoBusClient {
 		encodeRequest: (_: TRequest) => unknown,
 		decodeResponse: (value: Record<string, unknown>) => TResponse,
 	): Promise<TResponse> {
+		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest)
+		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest)
+		if (requestValidation.ok === false) {
+			return Promise.reject(
+				new Error(`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`),
+			)
+		}
 		return new Promise((resolve, reject) => {
 			const requestId = this.createRequestId()
 			let closed = false
@@ -67,6 +74,11 @@ export abstract class ProtoBusClient {
 					// Remove listener once we get our response
 					cleanup()
 					if (response.message) {
+						const responseValidation = validateWebviewRpcPayload(this.serviceName, methodName, "response", response.message)
+						if (responseValidation.ok === false) {
+							reject(new Error(`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`))
+							return
+						}
 						resolve(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
 					} else if (response.error) {
 						reject(new Error(response.error))
@@ -83,7 +95,7 @@ export abstract class ProtoBusClient {
 				grpc_request: {
 					service: this.serviceName,
 					method: methodName,
-					message: PLATFORM_CONFIG.encodeMessage(request, encodeRequest),
+					message: encodedRequest,
 					request_id: requestId,
 					is_streaming: false,
 				},
@@ -98,6 +110,14 @@ export abstract class ProtoBusClient {
 		decodeResponse: (value: Record<string, unknown>) => TResponse,
 		callbacks: Callbacks<TResponse>,
 	): () => void {
+		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest)
+		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest)
+		if (requestValidation.ok === false) {
+			callbacks.onError(
+				new Error(`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`),
+			)
+			return () => undefined
+		}
 		const requestId = this.createRequestId()
 		let closed = false
 		const cleanup = () => {
@@ -116,6 +136,12 @@ export abstract class ProtoBusClient {
 			const response = parseGrpcResponse(event.data, requestId)
 			if (response) {
 				if (response.message) {
+					const responseValidation = validateWebviewRpcPayload(this.serviceName, methodName, "response", response.message)
+					if (responseValidation.ok === false) {
+						callbacks.onError(new Error(`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`))
+						cleanup()
+						return
+					}
 					// Process streaming message
 					callbacks.onResponse(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
 				} else if (response.error) {
@@ -142,7 +168,7 @@ export abstract class ProtoBusClient {
 			grpc_request: {
 				service: this.serviceName,
 				method: methodName,
-				message: PLATFORM_CONFIG.encodeMessage(request, encodeRequest),
+				message: encodedRequest,
 				request_id: requestId,
 				is_streaming: true,
 			},
