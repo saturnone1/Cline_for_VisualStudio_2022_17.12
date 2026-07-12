@@ -89,6 +89,9 @@ if (!router.includes("ConversationRuntimeProjector") || router.includes("private
 if (!router.includes("ConversationCleanupCoordinator") || router.includes("private clearLiveInteractionState") || router.includes("private finalizeOpenPartialMessages")) {
 	violations.push("VisualStudioWebviewBackend must delegate conversation cleanup ordering to ConversationCleanupCoordinator.")
 }
+if (router.includes("private completeFromSdkResult") || router.includes("private hydrateCurrentTaskFromSdk") || router.includes("private runLifecycleHooks")) {
+	violations.push("VisualStudioWebviewBackend must call extracted chat, transcript, and hook flows directly instead of restoring forwarding methods.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
