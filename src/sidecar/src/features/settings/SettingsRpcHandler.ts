@@ -12,6 +12,7 @@ export type SettingsCommand =
 	| Readonly<{ type: "completeWelcome" }>
 	| Readonly<{ type: "unsupported" }>
 	| Readonly<{ type: "toggleFavorite"; modelId: string }>
+	| Readonly<{ type: "reset" }>
 
 export type SettingsRpcResult = Readonly<{ payload: Record<string, unknown>; includeStateMessages?: boolean }>
 
@@ -20,6 +21,9 @@ type SettingsRpcCallbacks = Readonly<{
 	applySettings: (settings: Record<string, unknown>) => void
 	persist: () => void
 	broadcast: () => Promise<void>
+	clearPersistedState: () => void
+	resetState: () => void
+	clearTask: () => Promise<void>
 }>
 
 export class SettingsRpcHandler {
@@ -58,6 +62,11 @@ export class SettingsRpcHandler {
 			case "toggleFavorite":
 				toggleFavoriteModel(state, command.modelId)
 				return this.broadcastEmpty()
+			case "reset":
+				this.callbacks.clearPersistedState()
+				this.callbacks.resetState()
+				await this.callbacks.clearTask()
+				return { payload: {} }
 		}
 	}
 

@@ -54,6 +54,10 @@ for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPo
 if (router.includes("VisualStudioHostProvider") || router.includes("sendHostRequest(")) {
 	violations.push("VisualStudioWebviewBackend must not reference concrete host or transport implementations.")
 }
+const unaryHandler = router.match(/private async handleUnaryRequest[\s\S]*?\n\t}\n\n\tprivate disposeStreamRequest/)?.[0] || ""
+if (unaryHandler.includes("switch (key)")) {
+	violations.push("VisualStudioWebviewBackend must dispatch unary WebView RPC through typed boundary decoders instead of owning a raw switch table.")
+}
 if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSessions")) {
 	violations.push("VisualStudioWebviewBackend must delegate browser execution and session ownership to BrowserHandler.")
 }
@@ -308,6 +312,8 @@ for (const requiredFile of [
 	"infrastructure/webview/ModelCatalogRpcDecoder.ts",
 	"infrastructure/webview/FileRpcDecoder.ts",
 	"infrastructure/webview/InstructionSettingsRpcDecoder.ts",
+	"infrastructure/webview/UiWebRpcDecoder.ts",
+	"infrastructure/webview/PluginRpcDecoder.ts",
 	"infrastructure/transport/SidecarRpcServer.ts",
 	"bootstrap/SidecarConnectionFactory.ts",
 	"features/chat/sendMessage/SendMessageCommand.ts",
@@ -332,6 +338,8 @@ for (const requiredFile of [
 	"features/settings/PlanActMode.ts",
 	"features/settings/SdkSettingsHandler.ts",
 	"features/settings/InstructionSettingsRpcHandler.ts",
+	"features/web/UiWebRpcHandler.ts",
+	"features/plugins/PluginRpcHandler.ts",
 	"features/settings/SettingsRpcHandler.ts",
 	"features/worktrees/WorktreePolicy.ts",
 	"features/worktrees/WorktreeQueryHandler.ts",

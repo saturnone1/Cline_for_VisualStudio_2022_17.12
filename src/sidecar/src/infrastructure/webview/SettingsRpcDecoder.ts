@@ -21,6 +21,7 @@ export function decodeSettingsRpcCommand(key: string, message: unknown): Setting
 		case "StateService.testPromptUploading":
 		case "StateService.installClineCli": return { type: "unsupported" }
 		case "StateService.toggleFavoriteModel": return { type: "toggleFavorite", modelId: readString(request.value ?? request.modelId) }
+		case "StateService.resetState": return { type: "reset" }
 		default: return undefined
 	}
 }

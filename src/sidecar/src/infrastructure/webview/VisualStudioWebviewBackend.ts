@@ -115,6 +115,10 @@ import { FileRpcHandler } from "../../features/files/FileRpcHandler"
 import { decodeFileRpcCommand } from "./FileRpcDecoder"
 import { InstructionSettingsRpcHandler } from "../../features/settings/InstructionSettingsRpcHandler"
 import { decodeInstructionSettingsRpcCommand } from "./InstructionSettingsRpcDecoder"
+import { UiWebRpcHandler } from "../../features/web/UiWebRpcHandler"
+import { decodeUiWebRpcCommand } from "./UiWebRpcDecoder"
+import { PluginRpcHandler } from "../../features/plugins/PluginRpcHandler"
+import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -163,7 +167,6 @@ import {
 	tryCreateImageDataUri,
 	getImageMimeType,
 	formatAttachmentSummaryValue,
-	getExternalUrlValue,
 	createId,
 	createHistoryItem,
 	sdkSessionToHistoryItem,
@@ -297,6 +300,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly modelCatalogRpc: ModelCatalogRpcHandler
 	private readonly fileRpc: FileRpcHandler
 	private readonly instructionSettingsRpc: InstructionSettingsRpcHandler
+	private readonly uiWebRpc: UiWebRpcHandler
+	private readonly pluginRpc: PluginRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -361,7 +366,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.compactSession = new CompactSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), activeSessionId: () => this.clineSdk?.status.activeSessionId || "", selectedSessionId: () => String(this.state.currentTaskItem?.id || ""), language: () => this.state.uiLanguage === "en" ? "en" : "ko", mode: () => this.state.mode === "plan" ? "plan" : "act", addError: (text) => { this.addMessage({ type: "say", say: "error", text }) }, startLatency: (requestId, sessionId, textLength) => this.startSendLatencyTrace(requestId, "askResponse", sessionId, textLength), showProgress: (text) => { this.foldedProgressProjector.beginReasoning(); this.upsertFoldedReasoningText(text) }, persist: () => this.schedulePersistedStateSave(), broadcast: () => this.broadcastState(), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, send: (sessionId, command, textLength) => this.sendOrResumeSdkSession(sessionId, command, textLength), resultSessionId: (result, fallback) => getString(asRecord(result), "sessionId") || fallback, complete: (result, sessionId, generation) => this.completeFromSdkResult(result, sessionId, "compact", generation), recover: (sessionId, generation, error) => this.recoverFromSdkRunError(sessionId, "compact", generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.apiConfigurationProfiles = new ApiConfigurationProfileManager({ readConfiguration: () => asRecord(this.state.apiConfiguration), writeConfiguration: (configuration) => { this.state.apiConfiguration = configuration as typeof this.state.apiConfiguration }, readProfiles: () => this.state.apiConfigurationProfiles, writeProfiles: (profiles) => { this.state.apiConfigurationProfiles = profiles }, readActiveId: () => this.state.activeApiConfigurationProfileId, writeActiveId: (profileId) => { this.state.activeApiConfigurationProfileId = profileId }, readSeparateModels: () => this.state.planActSeparateModelsSetting, writeSeparateModels: (enabled) => { this.state.planActSeparateModelsSetting = enabled } })
 		this.settingsMutations = new SettingsMutationHandler({ state: () => this.state as unknown as Record<string, unknown>, profiles: this.apiConfigurationProfiles, refreshWebTools: () => this.refreshWebToolFeatureState(), runtimeChanged: () => { this.runtimeSettingsRevision++; this.logger.log("sidecar", "runtimeSettingsChanged", { runtimeSettingsRevision: this.runtimeSettingsRevision, activeSessionRuntimeSettingsRevision: this.activeSessionRuntimeSettingsRevision }) } })
-		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState() })
+		this.settingsRpc = new SettingsRpcHandler({ state: () => this.state as unknown as Record<string, unknown>, applySettings: (settings) => this.settingsMutations.apply(settings), persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), clearPersistedState: () => this.stateStore.clear(), resetState: () => { Object.assign(this.state, createInitialState()) }, clearTask: () => this.clearTask() })
 		this.accountRpc = new AccountRpcHandler({ authorization: () => this.requireOAuthAuthorization(), callback: () => this.requireOAuthCallbackHandler(), authActions: () => this.requireProviderAuthActions(), credentials: () => this.requireProviderCredentials(), configuration: () => asRecord(this.state.apiConfiguration), mutateConfiguration: (updates, deletes) => { const next = { ...asRecord(this.state.apiConfiguration), ...updates }; for (const field of deletes) delete next[field]; this.state.apiConfiguration = normalizeApiConfiguration(next) as typeof this.state.apiConfiguration }, syncProfiles: () => this.apiConfigurationProfiles.syncActive(), setCodexAuthenticated: (authenticated) => { this.state.openAiCodexIsAuthenticated = authenticated }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.browserRpc = new BrowserRpcHandler({ browser: () => this.requireBrowserHandler(), settings: () => this.getBrowserSettings() })
 		this.terminalRpc = new TerminalRpcHandler(this.host.workspaceClient)
@@ -377,6 +382,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
 		this.fileRpc = new FileRpcHandler({ host: this.host, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), resolvePath: (workspaceRoot, filePath) => path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath, baseName: (filePath) => path.basename(filePath), exists: (filePath) => fs.existsSync(filePath), revert: (request) => this.requireChangeTracking().revert(request) })
 		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.addMessage({ type: "say", say: "error", text }) } })
+		this.uiWebRpc = new UiWebRpcHandler({ openExternal: (url) => this.host.envClient.openExternal({ value: url }), checkImage: (url) => checkIsImageUrl(url), openGraph: (url) => fetchOpenGraphData(url) })
+		this.pluginRpc = new PluginRpcHandler({ workspaceRoot: () => this.getPrimaryWorkspaceRoot(), discover: (workspaceRoot) => discoverLocalPlugins(workspaceRoot) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -850,7 +857,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async handleUnaryRequest(key: string, requestId: string, message: unknown) {
-		const host = this.host
 		const settingsCommand = decodeSettingsRpcCommand(key, message)
 		if (settingsCommand) {
 			const settingsResult = await this.settingsRpc.handle(settingsCommand)
@@ -920,47 +926,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 		const instructionSettingsCommand = decodeInstructionSettingsRpcCommand(key, message)
 		if (instructionSettingsCommand) return grpcHandled(grpcResponse(requestId, await this.instructionSettingsRpc.handle(instructionSettingsCommand), false))
-
-		switch (key) {
-			case "UiService.initializeWebview":
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "UiService.onDidShowAnnouncement":
-				return grpcHandled(grpcResponse(requestId, { value: false }, false))
-
-			case "UiService.openUrl":
-				await host.envClient.openExternal({ value: getExternalUrlValue(message) })
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "UiService.openWalkthrough":
-			case "UiService.setTerminalExecutionMode":
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "WebService.openInBrowser":
-				await host.envClient.openExternal({ value: getExternalUrlValue(message) })
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "WebService.checkIsImageUrl":
-				return grpcHandled(grpcResponse(requestId, await checkIsImageUrl(getString(message, "value") || getString(message, "url")), false))
-
-			case "WebService.fetchOpenGraphData":
-				return grpcHandled(grpcResponse(requestId, await fetchOpenGraphData(getString(message, "value") || getString(message, "url")), false))
-
-			case "StateService.resetState":
-				this.stateStore.clear()
-				Object.assign(this.state, createInitialState())
-				await this.clearTask()
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "PluginService.listPlugins":
-			case "PluginService.getPluginConfigStatus":
-			case "PluginsService.listPlugins":
-			case "PluginsService.getPluginConfigStatus":
-				return grpcHandled(grpcResponse(requestId, await this.getLocalPluginConfigStatus(), false))
-
-			default:
-				return null
-		}
+		const uiWebCommand = decodeUiWebRpcCommand(key, message)
+		if (uiWebCommand) return grpcHandled(grpcResponse(requestId, await this.uiWebRpc.handle(uiWebCommand), false))
+		const pluginCommand = decodePluginRpcCommand(key)
+		if (pluginCommand) return grpcHandled(grpcResponse(requestId, await this.pluginRpc.handle(pluginCommand), false))
+		return null
 	}
 
 	private disposeStreamRequest(requestId: string) {
@@ -1135,22 +1105,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private async hydrateCurrentTaskFromSdk(sessionId: string, source: string, force = false) {
 		return this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, force)
-	}
-
-	private async getLocalPluginConfigStatus() {
-		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
-		const plugins = discoverLocalPlugins(workspaceRoot)
-		return {
-			success: true,
-			supported: true,
-			plugins,
-			items: plugins,
-			count: plugins.length,
-			workspaceRoot,
-			marketplaceEnabled: false,
-			marketplaceInstallSupported: false,
-			marketplaceDisabledReason: "Air-gap Visual Studio mode only discovers local plugin configuration; online marketplace install is intentionally disabled.",
-		}
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
