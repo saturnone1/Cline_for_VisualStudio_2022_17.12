@@ -68,6 +68,9 @@ if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSe
 if (!router.includes("RuntimeMonitoringCoordinator") || router.includes("isTerminalTaskStatus")) {
 	violations.push("VisualStudioWebviewBackend must delegate runtime activity, partial-state, and latency coordination to RuntimeMonitoringCoordinator.")
 }
+if (!router.includes("TaskSessionCoordinator") || router.includes("closingSessionIds") || router.includes("private transitionTask") || router.includes("private shouldIgnoreSdkEvent")) {
+	violations.push("VisualStudioWebviewBackend must delegate task/session ownership and lifecycle policy to TaskSessionCoordinator.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -375,6 +378,7 @@ for (const requiredFile of [
 	"features/runtime/PartialStateScheduler.ts",
 	"features/runtime/SendLatencyMonitor.ts",
 	"features/runtime/RuntimeMonitoringCoordinator.ts",
+	"features/runtime/TaskSessionCoordinator.ts",
 	"features/runtime/AgentRuntimeEventDispatcher.ts",
 	"features/runtime/AgentEventDispatcher.ts",
 ]) {
