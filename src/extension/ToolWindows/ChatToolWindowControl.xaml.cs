@@ -254,7 +254,12 @@ namespace VsClineAgent.ToolWindows
                         "No WebView2 runtime could initialize.\n" + string.Join("\n", initializationFailures));
 
                 SetStatus("LIG VS 사이드카를 시작하는 중입니다...");
-                await _sidecar.EnsureRunningAsync();
+                var sidecarStarted = await _sidecar.EnsureRunningAsync();
+                if (!sidecarStarted)
+                {
+                    ShowError(_sidecar.GetNotRunningMessage());
+                    return;
+                }
 
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(WebviewBootstrapScript.Source);
 

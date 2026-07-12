@@ -45,17 +45,17 @@ namespace VsClineAgent.Host
                     AppDomain.CurrentDomain.BaseDirectory;
                 DisposeProcessQuietly();
                 _process = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                _setStatus("Preparing the LIG VS sidecar...");
+                _setStatus("LIG VS 사이드카를 준비하는 중입니다...");
 
                 var process = _process ?? throw new InvalidOperationException("Cline sidecar process was not created.");
                 var status = await Task.Run(() => process.EnsureStartedAsync(CancellationToken.None)).ConfigureAwait(false);
                 LastError = null;
-                _setStatus("LIG VS sidecar: " + status);
+                _setStatus("LIG VS 사이드카: " + status);
                 return IsRunning;
             }
             catch (Exception ex)
             {
-                LastError = "LIG VS sidecar failed to start: " + ex.Message;
+                LastError = "LIG VS 사이드카를 시작하지 못했습니다: " + ex.Message;
                 _setStatus(LastError);
                 return false;
             }

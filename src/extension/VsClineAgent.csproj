@@ -196,17 +196,19 @@
 
   <Target Name="PrepareSidecarRuntimeFallback" BeforeTargets="GetVsixSourceItems">
     <RemoveDir Directories="$(ArtifactsRoot)\Sidecar\runtime" />
-    <MakeDir Directories="$(ArtifactsRoot)\Sidecar\runtime;$(ArtifactsRoot)\Sidecar\runtime\application;$(ArtifactsRoot)\Sidecar\runtime\domain;$(ArtifactsRoot)\Sidecar\runtime\features;$(ArtifactsRoot)\Sidecar\runtime\infrastructure;$(ArtifactsRoot)\Sidecar\runtime\presentation" />
+    <MakeDir Directories="$(ArtifactsRoot)\Sidecar\runtime;$(ArtifactsRoot)\Sidecar\runtime\application;$(ArtifactsRoot)\Sidecar\runtime\bootstrap;$(ArtifactsRoot)\Sidecar\runtime\domain;$(ArtifactsRoot)\Sidecar\runtime\features;$(ArtifactsRoot)\Sidecar\runtime\infrastructure;$(ArtifactsRoot)\Sidecar\runtime\presentation" />
     <Copy SourceFiles="$(ArtifactsRoot)\Sidecar\cline-sidecar.js" DestinationFiles="$(ArtifactsRoot)\Sidecar\runtime\cline-sidecar.js" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(ArtifactsRoot)\Sidecar\node.exe" DestinationFiles="$(ArtifactsRoot)\Sidecar\runtime\node.exe" SkipUnchangedFiles="true" />
     <ItemGroup>
       <SidecarApplicationFiles Include="$(ArtifactsRoot)\Sidecar\application\**\*" />
+      <SidecarBootstrapFiles Include="$(ArtifactsRoot)\Sidecar\bootstrap\**\*" />
       <SidecarDomainFiles Include="$(ArtifactsRoot)\Sidecar\domain\**\*" />
       <SidecarFeatureFiles Include="$(ArtifactsRoot)\Sidecar\features\**\*" />
       <SidecarInfrastructureFiles Include="$(ArtifactsRoot)\Sidecar\infrastructure\**\*" />
       <SidecarPresentationFiles Include="$(ArtifactsRoot)\Sidecar\presentation\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(SidecarApplicationFiles)" DestinationFiles="@(SidecarApplicationFiles->'$(ArtifactsRoot)\Sidecar\runtime\application\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarBootstrapFiles)" DestinationFiles="@(SidecarBootstrapFiles->'$(ArtifactsRoot)\Sidecar\runtime\bootstrap\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SidecarDomainFiles)" DestinationFiles="@(SidecarDomainFiles->'$(ArtifactsRoot)\Sidecar\runtime\domain\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SidecarFeatureFiles)" DestinationFiles="@(SidecarFeatureFiles->'$(ArtifactsRoot)\Sidecar\runtime\features\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SidecarInfrastructureFiles)" DestinationFiles="@(SidecarInfrastructureFiles->'$(ArtifactsRoot)\Sidecar\runtime\infrastructure\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
