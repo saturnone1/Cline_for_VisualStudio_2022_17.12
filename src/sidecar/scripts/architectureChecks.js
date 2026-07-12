@@ -113,6 +113,9 @@ if (!router.includes("RuntimeModelContext") || router.includes("private getModel
 if (!router.includes("ToolRuntimePolicy") || router.includes("private createCurrentToolPolicies") || router.includes("private refreshWebToolFeatureState")) {
 	violations.push("VisualStudioWebviewBackend must delegate tool policy and Web feature-state projection to ToolRuntimePolicy.")
 }
+if (!router.includes("WebviewInteractionLogSupport") || router.includes("function summarizeSdkEventForLog") || router.includes("function summarizeAgentChunkForLog")) {
+	violations.push("VisualStudioWebviewBackend must delegate SDK interaction log projection to WebviewInteractionLogSupport.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -358,6 +361,7 @@ for (const requiredFile of [
 	"features/files/FileRpcHandler.ts",
 	"infrastructure/webview/WebviewState.ts",
 	"infrastructure/webview/WebviewStreamPublisher.ts",
+	"infrastructure/webview/WebviewInteractionLogSupport.ts",
 	"infrastructure/webview/SettingsRpcDecoder.ts",
 	"infrastructure/webview/AccountRpcDecoder.ts",
 	"infrastructure/webview/BrowserRpcDecoder.ts",

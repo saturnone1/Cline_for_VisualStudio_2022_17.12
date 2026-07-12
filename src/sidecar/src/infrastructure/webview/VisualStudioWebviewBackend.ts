@@ -126,6 +126,7 @@ import { PluginRpcHandler } from "../../features/plugins/PluginRpcHandler"
 import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { StreamingRpcHandler } from "../../features/web/StreamingRpcHandler"
 import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRefreshCoordinator"
+import { shouldLogSdkEventForInteraction, summarizeAgentChunkForLog, summarizeClineMessageForLog, summarizeSdkEventForLog } from "./WebviewInteractionLogSupport"
 import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
@@ -159,7 +160,6 @@ import {
 	summarizeCommandLabel,
 	sanitizeConsoleOutput,
 	stripCommandSentinel,
-	tryParseJson,
 	firstString,
 	shouldAutoApproveTool,
 	isJsonObjectString,
@@ -945,99 +945,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 }
 
-function shouldLogSdkEventForInteraction(event: unknown) {
-	const record = asRecord(event)
-	const type = getString(record, "type")
-	if (type !== "chunk") {
-		return true
-	}
-
-	const payload = asRecord(record.payload)
-	if (getString(payload, "stream") !== "agent") {
-		return true
-	}
-
-	const chunkRecord = sdkChunkRecord(payload.chunk)
-	const chunkType = getString(chunkRecord, "type")
-	const contentType = getString(chunkRecord, "contentType")
-	return !(
-		(chunkType === "content_start" || chunkType === "content_update" || chunkType === "content_delta") &&
-		(contentType === "reasoning" || contentType === "text")
-	)
-}
-
-function sdkChunkRecord(chunk: unknown) {
-	if (typeof chunk === "string") {
-		return asRecord(tryParseJson(chunk) ?? {})
-	}
-	return asRecord(chunk)
-}
-
-function summarizeSdkEventForLog(event: unknown) {
-	const record = asRecord(event)
-	const type = getString(record, "type")
-	const payload = asRecord(record.payload)
-	if (type === "agent_event") {
-		return {
-			type,
-			sessionId: getString(payload, "sessionId"),
-			event: summarizeAgentChunkForLog(payload.event),
-		}
-	}
-	if (type === "chunk") {
-		return {
-			type,
-			sessionId: getString(payload, "sessionId"),
-			stream: getString(payload, "stream"),
-			chunk: summarizeAgentChunkForLog(payload.chunk),
-		}
-	}
-	if (type === "session_snapshot") {
-		const snapshot = asRecord(payload.snapshot)
-		return {
-			type,
-			sessionId: getString(payload, "sessionId"),
-			status: getString(snapshot, "status"),
-			messageCount: getNumber(snapshot, "messageCount"),
-		}
-	}
-	return event
-}
-
-function summarizeAgentChunkForLog(value: unknown) {
-	if (typeof value === "string") {
-		return { kind: "string", length: value.length, preview: truncateText(value, 240) }
-	}
-	const record = asRecord(value)
-	if (Object.keys(record).length === 0) {
-		return { kind: typeof value }
-	}
-	return {
-		type: getString(record, "type"),
-		contentType: getString(record, "contentType"),
-		toolName: getString(record, "toolName"),
-		textLength: getString(record, "text").length,
-		accumulatedLength: getString(record, "accumulated").length,
-		reasoningLength: getString(record, "reasoning").length,
-		hasInput: Object.keys(asRecord(record.input)).length > 0,
-		hasOutput: record.output !== undefined,
-		hasUsage: record.usage !== undefined,
-	}
-}
-
-function summarizeClineMessageForLog(message: Record<string, unknown>) {
-	const text = getString(message, "text")
-	return {
-		ts: getNumber(message, "ts"),
-		type: getString(message, "type"),
-		say: getString(message, "say"),
-		ask: getString(message, "ask"),
-		partial: message.partial === true,
-		textLength: text.length,
-		textPreview: truncateText(text, 240),
-	}
-}
-
 function readRequestId(message: unknown) {
 	const record = asRecord(message)
 	return getString(record, "request_id") || getString(record, "requestId")
@@ -1050,12 +957,6 @@ function getString(message: unknown, key: string): string {
 
 	const value = (message as Record<string, unknown>)[key]
 	return typeof value === "string" ? value : ""
-}
-
-function getNumber(message: unknown, key: string): number | undefined {
-	const record = asRecord(message)
-	const value = record[key]
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
 function truncateForStatus(value: string, maxLength: number) {
@@ -1117,13 +1018,6 @@ function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko")
 			: `Model provider response: rate limit exceeded.\n\n${text}`
 	}
 	return text
-}
-
-function truncateText(value: string, maxChars: number) {
-	if (value.length <= maxChars) {
-		return value
-	}
-	return `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} chars]`
 }
 
 function grpcHandled(...webviewMessages: unknown[]) {
