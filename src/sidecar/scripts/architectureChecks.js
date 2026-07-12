@@ -65,6 +65,9 @@ if (streamingHandler.includes('key === "')) {
 if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSessions")) {
 	violations.push("VisualStudioWebviewBackend must delegate browser execution and session ownership to BrowserHandler.")
 }
+if (!router.includes("RuntimeMonitoringCoordinator") || router.includes("isTerminalTaskStatus")) {
+	violations.push("VisualStudioWebviewBackend must delegate runtime activity, partial-state, and latency coordination to RuntimeMonitoringCoordinator.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -371,6 +374,7 @@ for (const requiredFile of [
 	"features/runtime/TaskActivityMonitor.ts",
 	"features/runtime/PartialStateScheduler.ts",
 	"features/runtime/SendLatencyMonitor.ts",
+	"features/runtime/RuntimeMonitoringCoordinator.ts",
 	"features/runtime/AgentRuntimeEventDispatcher.ts",
 	"features/runtime/AgentEventDispatcher.ts",
 ]) {
