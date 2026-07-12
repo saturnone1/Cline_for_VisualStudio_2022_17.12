@@ -5,6 +5,8 @@ namespace VsClineAgent.Host
 {
     internal static class WebviewGrpcFallback
     {
+        private const int ProtocolVersion = 1;
+
         public static bool IsPassiveStreamingSubscription(string rawJson)
         {
             try
@@ -53,6 +55,7 @@ namespace VsClineAgent.Host
 
                 return new JObject
                 {
+                    ["protocol_version"] = ProtocolVersion,
                     ["type"] = "grpc_response",
                     ["grpc_response"] = new JObject
                     {
@@ -71,6 +74,10 @@ namespace VsClineAgent.Host
         private static JObject? GetGrpcRequest(string rawJson)
         {
             var envelope = JObject.Parse(rawJson);
+            var protocolVersion = envelope.Value<int?>("protocol_version") ??
+                                  envelope.Value<int?>("protocolVersion");
+            if (protocolVersion.HasValue && protocolVersion.Value != ProtocolVersion)
+                return null;
             return string.Equals(envelope.Value<string>("type"), "grpc_request", StringComparison.Ordinal)
                 ? envelope["grpc_request"] as JObject
                 : null;
@@ -84,7 +91,12 @@ namespace VsClineAgent.Host
 
         private static JObject CreateGenericError(string message)
         {
-            return new JObject { ["type"] = "error", ["message"] = message };
+            return new JObject
+            {
+                ["protocol_version"] = ProtocolVersion,
+                ["type"] = "error",
+                ["message"] = message
+            };
         }
     }
 }

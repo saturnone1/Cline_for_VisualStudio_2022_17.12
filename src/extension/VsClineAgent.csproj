@@ -97,6 +97,7 @@
     <Compile Include="Guids.cs" />
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="Host\InteractionLog.cs" />
+    <Compile Include="Host\InteractionLogSanitizer.cs" />
     <Compile Include="Host\HostRpcRouter.cs" />
     <Compile Include="Host\HostDiagnosticReport.cs" />
     <Compile Include="Host\WebviewGrpcFallback.cs" />

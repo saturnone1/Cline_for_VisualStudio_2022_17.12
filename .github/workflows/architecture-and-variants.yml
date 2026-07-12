@@ -35,6 +35,9 @@ jobs:
           npm test
           npm run build
 
+      - name: Verify .NET host contracts
+        run: dotnet test .\tests\extension\VsClineAgent.Host.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+
       - name: Build and validate both VSIX profiles
         shell: pwsh
         run: .\scripts\Build-VsixVariants.ps1 -Configuration Release -SkipFrontend
