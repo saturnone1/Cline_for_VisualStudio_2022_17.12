@@ -1,4 +1,5 @@
 import type { TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
+import { capabilityRegistry } from "../../application/services/CapabilityRegistry"
 import { normalizeClineMessagePayload, normalizeMcpDisplayMode } from "../conversation/ConversationSupport"
 import {
 	isWebFetchEnabled,
@@ -326,62 +327,7 @@ export function createSdkCoverageState(lastError: string | null) {
 		sdkVersion: readBundledSdkVersion(),
 		status: lastError ? "error" : "ready",
 		lastError: lastError || undefined,
-		supported: [
-			{ id: "sessions", label: "Sessions", owner: "cline-sdk" },
-			{ id: "history", label: "History", owner: "cline-sdk" },
-			{ id: "messages", label: "Messages", owner: "cline-sdk" },
-			{ id: "settings", label: "Rules, workflows, skills", owner: "cline-sdk" },
-			{ id: "tool-approval", label: "Tool approvals", owner: "cline-sdk" },
-			{ id: "streaming", label: "Streaming output", owner: "cline-sdk" },
-			{ id: "terminal-command-host", label: "VS command host attach/continue/cancel", owner: "visual-studio-host" },
-			{ id: "checkpoints", label: "Checkpoint restore and snapshot comments", owner: "cline-sdk" },
-			{ id: "usage", label: "Token and cost usage", owner: "cline-sdk" },
-			{ id: "mcp", label: "MCP server settings and tools", owner: "cline-sdk" },
-			{ id: "browser-devtools", label: "Browser DevTools sessions and phases", owner: "visual-studio-host" },
-			{ id: "auth", label: "Provider-scoped OAuth and token state", owner: "cline-sdk" },
-			{ id: "models", label: "Provider catalog refresh diagnostics", owner: "cline-sdk" },
-			{ id: "worktrees", label: "Worktree routing and merge recovery", owner: "visual-studio-host" },
-			{ id: "hooks", label: "Local lifecycle hooks", owner: "cline-sdk" },
-			{ id: "scheduled-agents", label: "Workspace scheduled agents", owner: "cline-sdk" },
-			{ id: "plugins-local", label: "Local plugin discovery and config status", owner: "cline-sdk" },
-			{ id: "subagents", label: "Subagent and team progress", owner: "cline-sdk" },
-		],
-		partial: [
-			{ id: "mcp-marketplace", label: "MCP marketplace install", owner: "cline-sdk" },
-			{ id: "remote-mcp-oauth", label: "Remote MCP OAuth callbacks", owner: "cline-sdk" },
-			{ id: "browser-auto-launch", label: "Automatic browser relaunch", owner: "cline-sdk" },
-			{ id: "global-account-billing", label: "Global Cline account billing/org controls", owner: "cline-sdk" },
-			{ id: "sdk-checkpoint-diff-streams", label: "SDK checkpoint diff streams", owner: "cline-sdk" },
-			{ id: "scheduler-queue-controls", label: "Hosted scheduler queue controls", owner: "cline-sdk" },
-			{ id: "provider-specific-catalogs", label: "Non-OpenAI provider-specific catalog APIs", owner: "cline-sdk" },
-		],
-		visualStudioUnsupported: [
-			{
-				id: "vscode-terminal-api",
-				label: "VS Code terminal shell integration",
-				reason: "Visual Studio 2022 exposes a different terminal automation surface than VS Code.",
-			},
-			{
-				id: "vscode-editor-diff",
-				label: "VS Code native diff/checkpoint UI",
-				reason: "The VSIX must use Visual Studio editor and diff services instead of VS Code commands.",
-			},
-			{
-				id: "vscode-auth",
-				label: "VS Code authentication providers",
-				reason: "Visual Studio 2022 does not provide the same extension authentication provider API.",
-			},
-			{
-				id: "vscode-worktrees",
-				label: "VS Code worktree UI commands",
-				reason: "The upstream commands are VS Code command IDs and need Visual Studio-specific replacements.",
-			},
-			{
-				id: "webview-uri",
-				label: "VS Code webview URI helpers",
-				reason: "WebView2 assets and local resource loading are hosted through the VSIX package.",
-			},
-		],
+		...capabilityRegistry.coverage(),
 	}
 }
 
