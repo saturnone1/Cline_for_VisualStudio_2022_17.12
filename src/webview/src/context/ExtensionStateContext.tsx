@@ -5,16 +5,16 @@ import { DEFAULT_PLATFORM, type ClineMessage, type ExtensionState } from "@share
 import { DEFAULT_FOCUS_CHAIN_SETTINGS } from "@shared/FocusChainSettings"
 import { DEFAULT_MCP_DISPLAY_MODE } from "@shared/McpDisplayMode"
 import type { UserInfo } from "@shared/proto/cline/account"
-import { OnboardingModelGroup, type TerminalProfile } from "@shared/proto/cline/state"
 import type { ClineMessage as ProtoClineMessage } from "@shared/proto/cline/ui"
 import { convertProtoToClineMessage } from "@shared/protoConversions/clineMessage"
 import type React from "react"
 import { createContext, useCallback, useContext, useState } from "react"
 import { Environment } from "@shared/configTypes"
-import type { McpMarketplaceCatalog, McpServer } from "@shared/mcp"
 import { useExtensionSubscriptions } from "./ExtensionSubscriptions"
+import { useMcpState, type McpState } from "./McpState"
 import { useModelCatalogState, type ModelCatalogState } from "./ModelCatalogState"
 import { useNavigationState, type NavigationState } from "./NavigationState"
+import { useRuntimeViewState, type RuntimeViewState } from "./RuntimeViewState"
 
 export function mergeLivePartialMessages(prevState: ExtensionState, incomingState: ExtensionState): ExtensionState {
 	const currentTaskId = prevState.currentTaskItem?.id
@@ -81,24 +81,13 @@ function upsertMessageByTimestamp(messages: ClineMessage[], message: ClineMessag
 	return [...messages, message].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
 }
 
-export interface ExtensionStateContextType extends ExtensionState, NavigationState, ModelCatalogState {
+export interface ExtensionStateContextType extends ExtensionState, NavigationState, ModelCatalogState, McpState, RuntimeViewState {
 	didHydrateState: boolean
-	showWelcome: boolean
-	onboardingModels: OnboardingModelGroup | undefined
-	mcpServers: McpServer[]
-	mcpMarketplaceCatalog: McpMarketplaceCatalog
-	totalTasksSize: number | null
 	lastDismissedCliBannerVersion: number
 	dismissedBanners?: Array<{ bannerId: string; dismissedAt: number }>
 
-	availableTerminalProfiles: TerminalProfile[]
-
-	// View state
-	expandTaskHeader: boolean
-
 	// Setters
 	setShouldShowAnnouncement: (value: boolean) => void
-	setMcpServers: (value: McpServer[]) => void
 	setGlobalClineRulesToggles: (toggles: Record<string, boolean>) => void
 	setLocalClineRulesToggles: (toggles: Record<string, boolean>) => void
 	setLocalCursorRulesToggles: (toggles: Record<string, boolean>) => void
@@ -110,12 +99,6 @@ export interface ExtensionStateContextType extends ExtensionState, NavigationSta
 	setLocalSkillsToggles: (toggles: Record<string, boolean>) => void
 	setRemoteRulesToggles: (toggles: Record<string, boolean>) => void
 	setRemoteWorkflowToggles: (toggles: Record<string, boolean>) => void
-	setMcpMarketplaceCatalog: (value: McpMarketplaceCatalog) => void
-	setTotalTasksSize: (value: number | null) => void
-	setExpandTaskHeader: (value: boolean) => void
-	setShowWelcome: (value: boolean) => void
-	setOnboardingModels: (value: OnboardingModelGroup | undefined) => void
-
 	setUserInfo: (userInfo?: UserInfo) => void
 
 	// Event callbacks
@@ -226,15 +209,10 @@ export const ExtensionStateContextProvider: React.FC<{
 		enableParallelToolCalling: false,
 	})
 	const modelCatalog = useModelCatalogState(state.apiConfiguration)
-	const [expandTaskHeader, setExpandTaskHeader] = useState(true)
+	const mcpState = useMcpState()
+	const runtimeViewState = useRuntimeViewState()
+	const { setShowWelcome, setOnboardingModels, setAvailableTerminalProfiles } = runtimeViewState
 	const [didHydrateState, setDidHydrateState] = useState(false)
-
-	const [showWelcome, setShowWelcome] = useState(false)
-	const [onboardingModels, setOnboardingModels] = useState<OnboardingModelGroup | undefined>(undefined)
-	const [totalTasksSize, setTotalTasksSize] = useState<number | null>(null)
-	const [availableTerminalProfiles, setAvailableTerminalProfiles] = useState<TerminalProfile[]>([])
-	const [mcpServers, setMcpServers] = useState<McpServer[]>([])
-	const [mcpMarketplaceCatalog, setMcpMarketplaceCatalog] = useState<McpMarketplaceCatalog>({ items: [] })
 
 	const onStateJson = useCallback((stateJson: string) => {
 		try {
@@ -314,13 +292,9 @@ export const ExtensionStateContextProvider: React.FC<{
 	const contextValue: ExtensionStateContextType = {
 		...state,
 		...modelCatalog,
+		...mcpState,
+		...runtimeViewState,
 		didHydrateState,
-		showWelcome,
-		onboardingModels,
-		mcpServers,
-		mcpMarketplaceCatalog,
-		totalTasksSize,
-		availableTerminalProfiles,
 		showMcp,
 		mcpTab,
 		showSettings,
@@ -358,15 +332,11 @@ export const ExtensionStateContextProvider: React.FC<{
 		hideWorktrees,
 		hideAnnouncement,
 		setShowAnnouncement,
-		setShowWelcome,
-		setOnboardingModels,
 		setShouldShowAnnouncement: (value) =>
 			setState((prevState) => ({
 				...prevState,
 				shouldShowAnnouncement: value,
 			})),
-		setMcpServers,
-		setMcpMarketplaceCatalog,
 		setShowMcp,
 		closeMcpView,
 		setGlobalClineRulesToggles: (toggles) =>
@@ -425,11 +395,8 @@ export const ExtensionStateContextProvider: React.FC<{
 				remoteWorkflowToggles: toggles,
 			})),
 		setMcpTab,
-		setTotalTasksSize,
 		onRelinquishControl,
 		setUserInfo: (userInfo?: UserInfo) => setState((prevState) => ({ ...prevState, userInfo })),
-		expandTaskHeader,
-		setExpandTaskHeader,
 	}
 
 	return <ExtensionStateContext.Provider value={contextValue}>{children}</ExtensionStateContext.Provider>
