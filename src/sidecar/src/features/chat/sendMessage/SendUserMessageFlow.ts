@@ -1,6 +1,6 @@
 import type { SendMessageCommand } from "./SendMessageCommand"
 
-export type SendUserMessageInput = Readonly<{ requestId: string; prompt: string; transcriptText: string; images: string[]; files: string[]; delivery: "queue" | "steer"; mode: "plan" | "act"; activeSessionId: string; selectedSessionId: string }>
+export type SendUserMessageInput = Readonly<{ requestId: string; prompt: string; transcriptText: string; images: string[]; files: string[]; delivery?: "queue" | "steer"; mode: "plan" | "act"; activeSessionId: string; selectedSessionId: string }>
 type Callbacks = Readonly<{
 	hasPendingApproval: () => boolean
 	hasPendingQuestion: () => boolean

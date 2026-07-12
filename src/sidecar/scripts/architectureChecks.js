@@ -95,6 +95,9 @@ if (router.includes("private completeFromSdkResult") || router.includes("private
 if (!router.includes("ToolApprovalFlow") || !router.includes("ToolApprovalPromptProjector") || router.includes("preToolUseInputPatched\", {")) {
 	violations.push("VisualStudioWebviewBackend must delegate tool approval orchestration and prompt projection to the approvals slice.")
 }
+if (!router.includes("TaskPromptFlow") || router.includes("private async startNewTask") || router.includes("private async sendAskResponse")) {
+	violations.push("VisualStudioWebviewBackend must delegate task prompt normalization and routing to TaskPromptFlow.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -411,6 +414,7 @@ for (const requiredFile of [
 	"features/runtime/AgentRuntimeEventDispatcher.ts",
 	"features/runtime/AgentEventDispatcher.ts",
 	"features/approvals/ToolApprovalFlow.ts",
+	"features/chat/TaskPromptFlow.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
