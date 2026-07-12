@@ -12,6 +12,8 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
+& (Join-Path $PSScriptRoot "Test-MenuContract.ps1") -RepoRoot $repoRoot
+
 if (-not $MSBuildPath) {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path -LiteralPath $vswhere) {
@@ -67,6 +69,7 @@ $variants = @(
     @{ Target = "17.0"; Assembly = "VsClineAgent17.dll"; Vsix = "VsClineAgent17.vsix" },
     @{ Target = "17.12"; Assembly = "VsClineAgent.dll"; Vsix = "VsClineAgent.vsix" }
 )
+$builtVariants = @{}
 
 foreach ($variant in $variants) {
     $msbuildArguments = @(
@@ -86,6 +89,7 @@ foreach ($variant in $variants) {
 
     $item = Get-Item -LiteralPath $vsixPath
     $hash = Get-FileHash -LiteralPath $vsixPath -Algorithm SHA256
+    $builtVariants[$variant.Target] = $vsixPath
     [pscustomobject]@{
         Target = $variant.Target
         Path = $item.FullName
@@ -93,3 +97,7 @@ foreach ($variant in $variants) {
         SHA256 = $hash.Hash
     }
 }
+
+& (Join-Path $PSScriptRoot "Test-VsixRuntimeSmoke.ps1") `
+    -Vsix17Path $builtVariants["17.0"] `
+    -Vsix1712Path $builtVariants["17.12"]
