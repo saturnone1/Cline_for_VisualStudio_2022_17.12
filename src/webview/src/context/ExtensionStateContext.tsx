@@ -5,14 +5,14 @@ import { DEFAULT_PLATFORM, type ClineMessage, type ExtensionState } from "@share
 import { DEFAULT_FOCUS_CHAIN_SETTINGS } from "@shared/FocusChainSettings"
 import { DEFAULT_MCP_DISPLAY_MODE } from "@shared/McpDisplayMode"
 import type { UserInfo } from "@shared/proto/cline/account"
-import { EmptyRequest } from "@shared/proto/cline/common"
 import { OnboardingModelGroup, type TerminalProfile } from "@shared/proto/cline/state"
+import type { ClineMessage as ProtoClineMessage } from "@shared/proto/cline/ui"
 import { convertProtoToClineMessage } from "@shared/protoConversions/clineMessage"
 import type React from "react"
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useState } from "react"
 import { Environment } from "@shared/configTypes"
 import type { McpMarketplaceCatalog, McpServer } from "@shared/mcp"
-import { StateServiceClient, UiServiceClient } from "../services/grpcClient"
+import { useExtensionSubscriptions } from "./ExtensionSubscriptions"
 import { useModelCatalogState, type ModelCatalogState } from "./ModelCatalogState"
 import { useNavigationState, type NavigationState } from "./NavigationState"
 
@@ -236,310 +236,80 @@ export const ExtensionStateContextProvider: React.FC<{
 	const [mcpServers, setMcpServers] = useState<McpServer[]>([])
 	const [mcpMarketplaceCatalog, setMcpMarketplaceCatalog] = useState<McpMarketplaceCatalog>({ items: [] })
 
-	// References to store subscription cancellation functions
-	const stateSubscriptionRef = useRef<(() => void) | null>(null)
-	const stateSubscriptionGenerationRef = useRef(0)
-	const partialMessageSubscriptionGenerationRef = useRef(0)
+	const onStateJson = useCallback((stateJson: string) => {
+		try {
+			const stateData = JSON.parse(stateJson) as ExtensionState
+			setState((previousState) => {
+				const incomingVersion = stateData.autoApprovalSettings?.version ?? 1
+				const currentVersion = previousState.autoApprovalSettings?.version ?? 1
+				const mergedState = mergeLivePartialMessages(previousState, stateData)
+				const newState = {
+					...mergedState,
+					uiLanguage:
+						mergedState.uiLanguage === "en" || mergedState.uiLanguage === "ko"
+							? mergedState.uiLanguage
+							: mergedState.preferredLanguage === "English"
+								? "en"
+								: "ko",
+					autoApprovalSettings:
+						incomingVersion > currentVersion ? mergedState.autoApprovalSettings : previousState.autoApprovalSettings,
+				}
 
-	const mcpButtonUnsubscribeRef = useRef<(() => void) | null>(null)
-	const historyButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
-	const chatButtonUnsubscribeRef = useRef<(() => void) | null>(null)
-	const accountButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
-	const settingsButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
-	const worktreesButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
-	const partialMessageUnsubscribeRef = useRef<(() => void) | null>(null)
-	const workspaceUpdatesUnsubscribeRef = useRef<(() => void) | null>(null)
-	const relinquishControlUnsubscribeRef = useRef<(() => void) | null>(null)
-
-	// Add ref for callbacks
-	const relinquishControlCallbacks = useRef<Set<() => void>>(new Set())
-
-	// Create hook function
-	const onRelinquishControl = useCallback((callback: () => void) => {
-		relinquishControlCallbacks.current.add(callback)
-		return () => {
-			relinquishControlCallbacks.current.delete(callback)
+				const shouldShowWelcome = !newState.welcomeViewCompleted
+				setShowWelcome(shouldShowWelcome)
+				setOnboardingModels(shouldShowWelcome ? newState.onboardingModels : undefined)
+				setDidHydrateState(true)
+				return newState
+			})
+		} catch (error) {
+			console.error("Error parsing state JSON:", error)
 		}
 	}, [])
-	// Subscribe to state updates and UI events using the gRPC streaming API
-	useEffect(() => {
-		const stateGeneration = ++stateSubscriptionGenerationRef.current
-		const partialMessageGeneration = ++partialMessageSubscriptionGenerationRef.current
-		// Set up state subscription
-		stateSubscriptionRef.current = StateServiceClient.subscribeToState(EmptyRequest.create({}), {
-			onResponse: (response) => {
-				if (stateSubscriptionGenerationRef.current !== stateGeneration) {
-					return
-				}
-				if (response.stateJson) {
-					try {
-						const stateData = JSON.parse(response.stateJson) as ExtensionState
-						setState((prevState) => {
-							// Versioning logic for autoApprovalSettings
-							const incomingVersion = stateData.autoApprovalSettings?.version ?? 1
-							const currentVersion = prevState.autoApprovalSettings?.version ?? 1
-							const shouldUpdateAutoApproval = incomingVersion > currentVersion
 
-							const mergedState = mergeLivePartialMessages(prevState, stateData)
-							const newState = {
-								...mergedState,
-								uiLanguage:
-									mergedState.uiLanguage === "en" || mergedState.uiLanguage === "ko"
-										? mergedState.uiLanguage
-										: mergedState.preferredLanguage === "English"
-											? "en"
-											: "ko",
-								autoApprovalSettings: shouldUpdateAutoApproval
-									? mergedState.autoApprovalSettings
-									: prevState.autoApprovalSettings,
-							}
+	const onPartialMessage = useCallback((protoMessage: ProtoClineMessage) => {
+		try {
+			if (!protoMessage.ts || protoMessage.ts <= 0) {
+				console.error("Invalid timestamp in partial message:", protoMessage)
+				return
+			}
 
-							// Update welcome screen state based on API configuration if welcome view not in progress
-							if (!newState.welcomeViewCompleted && !showWelcome) {
-								setShowWelcome(true)
-								setOnboardingModels(newState.onboardingModels)
-							} else if (newState.welcomeViewCompleted) {
-								setShowWelcome(false)
-								setOnboardingModels(undefined)
-							}
-
-							setDidHydrateState(true)
-
-							return newState
-						})
-					} catch (error) {
-						console.error("Error parsing state JSON:", error)
+			const partialMessage = convertProtoToClineMessage(protoMessage)
+			setState((previousState) => {
+				const lastIndex = findLastIndex(previousState.clineMessages, (message) => message.ts === partialMessage.ts)
+				if (lastIndex === -1) {
+					return {
+						...previousState,
+						clineMessages: [...previousState.clineMessages, partialMessage].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)),
 					}
 				}
-			},
-			onError: (error) => {
-				console.error("Error in state subscription:", error)
-			},
-			onComplete: () => {
-				console.log("State subscription completed")
-			},
-		})
 
-		// Subscribe to MCP button clicked events with webview type
-		mcpButtonUnsubscribeRef.current = UiServiceClient.subscribeToMcpButtonClicked(
-			{},
-			{
-				onResponse: () => {
-					console.log("[DEBUG] Received mcpButtonClicked event from gRPC stream")
-					navigateToMcp()
-				},
-				onError: (error) => {
-					console.error("Error in mcpButtonClicked subscription:", error)
-				},
-				onComplete: () => {
-					console.log("mcpButtonClicked subscription completed")
-				},
-			},
-		)
-
-		// Set up history button clicked subscription with webview type
-		historyButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToHistoryButtonClicked(
-			{},
-			{
-				onResponse: () => {
-					// When history button is clicked, navigate to history view
-					console.log("[DEBUG] Received history button clicked event from gRPC stream")
-					navigateToHistory()
-				},
-				onError: (error) => {
-					console.error("Error in history button clicked subscription:", error)
-				},
-				onComplete: () => {
-					console.log("History button clicked subscription completed")
-				},
-			},
-		)
-
-		// Subscribe to chat button clicked events with webview type
-		chatButtonUnsubscribeRef.current = UiServiceClient.subscribeToChatButtonClicked(
-			{},
-			{
-				onResponse: () => {
-					// When chat button is clicked, navigate to chat
-					console.log("[DEBUG] Received chat button clicked event from gRPC stream")
-					navigateToChat()
-				},
-				onError: (error) => {
-					console.error("Error in chat button subscription:", error)
-				},
-				onComplete: () => {},
-			},
-		)
-
-		// Set up settings button clicked subscription
-		settingsButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToSettingsButtonClicked(EmptyRequest.create({}), {
-			onResponse: () => {
-				// When settings button is clicked, navigate to settings
-				navigateToSettings()
-			},
-			onError: (error) => {
-				console.error("Error in settings button clicked subscription:", error)
-			},
-			onComplete: () => {
-				console.log("Settings button clicked subscription completed")
-			},
-		})
-
-		// Set up worktrees button clicked subscription
-		worktreesButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToWorktreesButtonClicked(
-			EmptyRequest.create({}),
-			{
-				onResponse: () => {
-					// When worktrees button is clicked, navigate to worktrees
-					navigateToWorktrees()
-				},
-				onError: (error) => {
-					console.error("Error in worktrees button clicked subscription:", error)
-				},
-				onComplete: () => {
-					console.log("Worktrees button clicked subscription completed")
-				},
-			},
-		)
-
-		// Subscribe to partial message events
-		partialMessageUnsubscribeRef.current = UiServiceClient.subscribeToPartialMessage(EmptyRequest.create({}), {
-			onResponse: (protoMessage) => {
-				if (partialMessageSubscriptionGenerationRef.current !== partialMessageGeneration) {
-					return
+				const existingMessage = previousState.clineMessages[lastIndex]
+				const existingTextLength = existingMessage.text?.length ?? 0
+				const incomingTextLength = partialMessage.text?.length ?? 0
+				if (existingMessage.partial === true && partialMessage.partial === true && existingTextLength > incomingTextLength) {
+					return previousState
 				}
-				try {
-					// Validate critical fields
-					if (!protoMessage.ts || protoMessage.ts <= 0) {
-						console.error("Invalid timestamp in partial message:", protoMessage)
-						return
-					}
 
-					const partialMessage = convertProtoToClineMessage(protoMessage)
-					setState((prevState) => {
-						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
-						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === partialMessage.ts)
-						if (lastIndex !== -1) {
-							const existingMessage = prevState.clineMessages[lastIndex]
-							const existingTextLength = existingMessage.text?.length ?? 0
-							const incomingTextLength = partialMessage.text?.length ?? 0
-							if (existingMessage.partial === true && partialMessage.partial === true && existingTextLength > incomingTextLength) {
-								return prevState
-							}
-							const newClineMessages = [...prevState.clineMessages]
-							newClineMessages[lastIndex] = partialMessage
-							return { ...prevState, clineMessages: newClineMessages }
-						}
-						return {
-							...prevState,
-							clineMessages: [...prevState.clineMessages, partialMessage].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)),
-						}
-					})
-				} catch (error) {
-					console.error("Failed to process partial message:", error, protoMessage)
-				}
-			},
-			onError: (error) => {
-				console.error("Error in partialMessage subscription:", error)
-			},
-			onComplete: () => {
-				console.log("[DEBUG] partialMessage subscription completed")
-			},
-		})
-
-		// Initialize webview using gRPC
-		UiServiceClient.initializeWebview(EmptyRequest.create({}))
-			.then(() => {
-				console.log("[DEBUG] Webview initialization completed via gRPC")
+				const clineMessages = [...previousState.clineMessages]
+				clineMessages[lastIndex] = partialMessage
+				return { ...previousState, clineMessages }
 			})
-			.catch((error) => {
-				console.error("Failed to initialize webview via gRPC:", error)
-			})
-
-		// Set up account button clicked subscription
-		accountButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToAccountButtonClicked(EmptyRequest.create(), {
-			onResponse: () => {
-				// When account button is clicked, navigate to account view
-				console.log("[DEBUG] Received account button clicked event from gRPC stream")
-				navigateToAccount()
-			},
-			onError: (error) => {
-				console.error("Error in account button clicked subscription:", error)
-			},
-			onComplete: () => {
-				console.log("Account button clicked subscription completed")
-			},
-		})
-
-		// Fetch available terminal profiles on launch
-		StateServiceClient.getAvailableTerminalProfiles(EmptyRequest.create({}))
-			.then((response) => {
-				setAvailableTerminalProfiles(response.profiles)
-			})
-			.catch((error) => {
-				console.error("Failed to fetch available terminal profiles:", error)
-			})
-
-		// Subscribe to relinquish control events
-		relinquishControlUnsubscribeRef.current = UiServiceClient.subscribeToRelinquishControl(EmptyRequest.create({}), {
-			onResponse: () => {
-				// Call all registered callbacks
-				relinquishControlCallbacks.current.forEach((callback) => {
-					callback()
-				})
-			},
-			onError: (error) => {
-				console.error("Error in relinquishControl subscription:", error)
-			},
-			onComplete: () => {},
-		})
-
-		// Clean up subscriptions when component unmounts
-		return () => {
-			stateSubscriptionGenerationRef.current++
-			partialMessageSubscriptionGenerationRef.current++
-			if (stateSubscriptionRef.current) {
-				stateSubscriptionRef.current()
-				stateSubscriptionRef.current = null
-			}
-			if (mcpButtonUnsubscribeRef.current) {
-				mcpButtonUnsubscribeRef.current()
-				mcpButtonUnsubscribeRef.current = null
-			}
-			if (historyButtonClickedSubscriptionRef.current) {
-				historyButtonClickedSubscriptionRef.current()
-				historyButtonClickedSubscriptionRef.current = null
-			}
-			if (chatButtonUnsubscribeRef.current) {
-				chatButtonUnsubscribeRef.current()
-				chatButtonUnsubscribeRef.current = null
-			}
-			if (accountButtonClickedSubscriptionRef.current) {
-				accountButtonClickedSubscriptionRef.current()
-				accountButtonClickedSubscriptionRef.current = null
-			}
-			if (settingsButtonClickedSubscriptionRef.current) {
-				settingsButtonClickedSubscriptionRef.current()
-				settingsButtonClickedSubscriptionRef.current = null
-			}
-			if (worktreesButtonClickedSubscriptionRef.current) {
-				worktreesButtonClickedSubscriptionRef.current()
-				worktreesButtonClickedSubscriptionRef.current = null
-			}
-			if (partialMessageUnsubscribeRef.current) {
-				partialMessageUnsubscribeRef.current()
-				partialMessageUnsubscribeRef.current = null
-			}
-			if (workspaceUpdatesUnsubscribeRef.current) {
-				workspaceUpdatesUnsubscribeRef.current()
-				workspaceUpdatesUnsubscribeRef.current = null
-			}
-			if (relinquishControlUnsubscribeRef.current) {
-				relinquishControlUnsubscribeRef.current()
-				relinquishControlUnsubscribeRef.current = null
-			}
+		} catch (error) {
+			console.error("Failed to process partial message:", error, protoMessage)
 		}
 	}, [])
+
+	const { onRelinquishControl } = useExtensionSubscriptions({
+		onStateJson,
+		onPartialMessage,
+		onTerminalProfiles: setAvailableTerminalProfiles,
+		navigateToMcp,
+		navigateToHistory,
+		navigateToChat,
+		navigateToSettings,
+		navigateToWorktrees,
+		navigateToAccount,
+	})
 
 	const contextValue: ExtensionStateContextType = {
 		...state,
