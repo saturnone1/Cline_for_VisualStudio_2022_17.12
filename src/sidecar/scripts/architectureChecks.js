@@ -14,6 +14,19 @@ const layerRules = {
 }
 const violations = []
 
+const featuresRoot = path.join(sourceRoot, "features")
+for (const entry of fs.readdirSync(featuresRoot, { withFileTypes: true }).filter((item) => item.isDirectory())) {
+	const readmePath = path.join(featuresRoot, entry.name, "README.md")
+	if (!fs.existsSync(readmePath)) {
+		violations.push(`features/${entry.name}/README.md is required for AI-maintainable slice ownership.`)
+		continue
+	}
+	const readme = fs.readFileSync(readmePath, "utf8")
+	for (const marker of ["Inputs:", "Outputs:", "Owned state:", "Tests:"]) {
+		if (!readme.includes(marker)) violations.push(`features/${entry.name}/README.md is missing ${marker}`)
+	}
+}
+
 for (const filePath of walk(sourceRoot)) {
 	if (!filePath.endsWith(".ts") && !filePath.endsWith(".tsx")) continue
 	const relative = normalize(path.relative(sourceRoot, filePath))
