@@ -1,4 +1,4 @@
-import { WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
+import { WEBVIEW_RPC_PROTOCOL_VERSION, webviewRpcOperation } from "./generated/WebviewRpcContract"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
@@ -40,6 +40,18 @@ export type WebviewEnvelope =
 export type WebviewEnvelopeParseResult =
 	| { ok: true; value: WebviewEnvelope }
 	| { ok: false; reason: "invalid_webview_envelope" | "unsupported_webview_protocol_version" | "missing_grpc_service" | "missing_grpc_method" | "missing_grpc_request_id" | "missing_cancel_request_id" }
+
+export type GrpcRequestContractValidation =
+	| { ok: true }
+	| { ok: false; reason: "unknown_rpc_operation" | "unsupported_sidecar_operation" | "rpc_kind_mismatch" }
+
+export function validateGrpcRequestContract(request: GrpcRequest): GrpcRequestContractValidation {
+	const operation = webviewRpcOperation(request.service, request.method)
+	if (!operation) return { ok: false, reason: "unknown_rpc_operation" }
+	if (!operation.sidecar) return { ok: false, reason: "unsupported_sidecar_operation" }
+	if (request.isStreaming !== (operation.kind === "serverStream")) return { ok: false, reason: "rpc_kind_mismatch" }
+	return { ok: true }
+}
 
 export function parseHostSidecarWebviewRequest(value: unknown): HostSidecarWebviewRequestParseResult {
 	if (!isJsonObject(value)) {

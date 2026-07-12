@@ -11,7 +11,7 @@ import type { TaskSessionUseCase } from "../../application/useCases/TaskSessionU
 import type { McpHandler } from "../../features/mcp/McpHandler"
 import type { TaskLifecycleUseCase } from "../../application/useCases/TaskLifecycleUseCase"
 import type { StatePersistenceUseCase } from "../../application/useCases/StatePersistenceUseCase"
-import type { GrpcRequest, WebviewEnvelope } from "../../application/dto/WebviewRpc"
+import { validateGrpcRequestContract, type GrpcRequest, type WebviewEnvelope } from "../../application/dto/WebviewRpc"
 import {
 	createInitialState,
 	createMcpServersLazyResponse,
@@ -605,6 +605,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		const requestId = request.requestId
 		const isStreaming = request.isStreaming
 		const key = `${service}.${method}`
+		const contract = validateGrpcRequestContract(request)
+		if (!contract.ok) {
+			this.logger.log("webview->sidecar", "webviewRpcContractRejected", { key, reason: contract.reason, isStreaming })
+			return grpcHandled(grpcError(requestId, `${contract.reason}: ${key}`, isStreaming))
+		}
 
 		if (isStreaming) {
 			const result = await this.handleStreamingRequest(key, requestId)

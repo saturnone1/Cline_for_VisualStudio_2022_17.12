@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using VsClineAgent.Host.Generated;
 
@@ -11,12 +12,12 @@ namespace VsClineAgent.Host
             try
             {
                 var request = GetGrpcRequest(rawJson);
-                if (request == null || !IsStreaming(request))
+                if (request == null || !request.IsStreaming)
                     return false;
 
                 return WebviewRpcContract.IsPassiveFallback(
-                    request.Value<string>("service") ?? "",
-                    request.Value<string>("method") ?? "");
+                    request.Service,
+                    request.Method);
             }
             catch
             {
@@ -29,7 +30,7 @@ namespace VsClineAgent.Host
             try
             {
                 var request = GetGrpcRequest(rawJson);
-                var requestId = request?.Value<string>("request_id") ?? request?.Value<string>("requestId");
+                var requestId = request?.RequestId;
                 if (request == null || string.IsNullOrWhiteSpace(requestId))
                     return CreateGenericError(message);
 
@@ -41,7 +42,7 @@ namespace VsClineAgent.Host
                     {
                         ["request_id"] = requestId,
                         ["error"] = message,
-                        ["is_streaming"] = IsStreaming(request)
+                        ["is_streaming"] = request.IsStreaming
                     }
                 };
             }
@@ -51,22 +52,15 @@ namespace VsClineAgent.Host
             }
         }
 
-        private static JObject? GetGrpcRequest(string rawJson)
+        private static WebviewGrpcRequest? GetGrpcRequest(string rawJson)
         {
-            var envelope = JObject.Parse(rawJson);
-            var protocolVersion = envelope.Value<int?>("protocol_version") ??
-                                  envelope.Value<int?>("protocolVersion");
-            if (protocolVersion.HasValue && protocolVersion.Value != WebviewRpcContract.ProtocolVersion)
+            var envelope = JsonConvert.DeserializeObject<WebviewGrpcEnvelope>(rawJson);
+            if (envelope == null ||
+                (envelope.ProtocolVersion.HasValue && envelope.ProtocolVersion.Value != WebviewRpcContract.ProtocolVersion))
                 return null;
-            return string.Equals(envelope.Value<string>("type"), "grpc_request", StringComparison.Ordinal)
-                ? envelope["grpc_request"] as JObject
+            return string.Equals(envelope.Type, "grpc_request", StringComparison.Ordinal)
+                ? envelope.Request
                 : null;
-        }
-
-        private static bool IsStreaming(JObject request)
-        {
-            return request.Value<bool?>("is_streaming") == true ||
-                   request.Value<bool?>("isStreaming") == true;
         }
 
         private static JObject CreateGenericError(string message)

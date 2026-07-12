@@ -1,0 +1,2802 @@
+[
+  {
+    "operation": "AccountService.accountLoginClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "accountLoginClicked",
+        "request_id": "contract-1",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.accountLogoutClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "accountLogoutClicked",
+        "request_id": "contract-2",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.clearProviderCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "clearProviderCredential",
+        "request_id": "contract-3",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.clearProviderToken",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "clearProviderToken",
+        "request_id": "contract-4",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.completeOAuthCallback",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "completeOAuthCallback",
+        "request_id": "contract-5",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.deleteProviderCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "deleteProviderCredential",
+        "request_id": "contract-6",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getOAuthCallbackStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getOAuthCallbackStatus",
+        "request_id": "contract-7",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getOrganizationCredits",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getOrganizationCredits",
+        "request_id": "contract-8",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getProviderAuthRequirements",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getProviderAuthRequirements",
+        "request_id": "contract-9",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getProviderAuthStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getProviderAuthStatus",
+        "request_id": "contract-10",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getProviderConfigFields",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getProviderConfigFields",
+        "request_id": "contract-11",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getProviderCredentialStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getProviderCredentialStatus",
+        "request_id": "contract-12",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getProviderOAuthCallbackStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getProviderOAuthCallbackStatus",
+        "request_id": "contract-13",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getRedirectUrl",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getRedirectUrl",
+        "request_id": "contract-14",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getUserCredits",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getUserCredits",
+        "request_id": "contract-15",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.getUserOrganizations",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "getUserOrganizations",
+        "request_id": "contract-16",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.hicapAuthClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "hicapAuthClicked",
+        "request_id": "contract-17",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.openAiCodexSignIn",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "openAiCodexSignIn",
+        "request_id": "contract-18",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.openAiCodexSignOut",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "openAiCodexSignOut",
+        "request_id": "contract-19",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.openrouterAuthClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "openrouterAuthClicked",
+        "request_id": "contract-20",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.refreshOAuthCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "refreshOAuthCredential",
+        "request_id": "contract-21",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.refreshProviderCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "refreshProviderCredential",
+        "request_id": "contract-22",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.refreshProviderToken",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "refreshProviderToken",
+        "request_id": "contract-23",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.requestyAuthClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "requestyAuthClicked",
+        "request_id": "contract-24",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.saveOAuthCallback",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "saveOAuthCallback",
+        "request_id": "contract-25",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.saveProviderCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "saveProviderCredential",
+        "request_id": "contract-26",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.saveProviderToken",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "saveProviderToken",
+        "request_id": "contract-27",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.setUserOrganization",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "setUserOrganization",
+        "request_id": "contract-28",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.storeProviderCredential",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "storeProviderCredential",
+        "request_id": "contract-29",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.submitLimitIncreaseRequest",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "submitLimitIncreaseRequest",
+        "request_id": "contract-30",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.submitOAuthCallback",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "submitOAuthCallback",
+        "request_id": "contract-31",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AccountService.subscribeToAuthStatusUpdate",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AccountService",
+        "method": "subscribeToAuthStatusUpdate",
+        "request_id": "contract-32",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AutomationService.deleteScheduledAgent",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AutomationService",
+        "method": "deleteScheduledAgent",
+        "request_id": "contract-33",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AutomationService.listScheduledAgents",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AutomationService",
+        "method": "listScheduledAgents",
+        "request_id": "contract-34",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AutomationService.runScheduledAgent",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AutomationService",
+        "method": "runScheduledAgent",
+        "request_id": "contract-35",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "AutomationService.saveScheduledAgent",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "AutomationService",
+        "method": "saveScheduledAgent",
+        "request_id": "contract-36",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.captureScreenshot",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "captureScreenshot",
+        "request_id": "contract-37",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.discoverBrowser",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "discoverBrowser",
+        "request_id": "contract-38",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.executeBrowserAction",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "executeBrowserAction",
+        "request_id": "contract-39",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.getBrowserConnectionInfo",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "getBrowserConnectionInfo",
+        "request_id": "contract-40",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.getDetectedChromePath",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "getDetectedChromePath",
+        "request_id": "contract-41",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.listBrowserTabs",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "listBrowserTabs",
+        "request_id": "contract-42",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.performBrowserAction",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "performBrowserAction",
+        "request_id": "contract-43",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.relaunchChromeDebugMode",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "relaunchChromeDebugMode",
+        "request_id": "contract-44",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "BrowserService.testBrowserConnection",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "BrowserService",
+        "method": "testBrowserConnection",
+        "request_id": "contract-45",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "CheckpointsService.checkpointDiff",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "CheckpointsService",
+        "method": "checkpointDiff",
+        "request_id": "contract-46",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "CheckpointsService.checkpointRestore",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "CheckpointsService",
+        "method": "checkpointRestore",
+        "request_id": "contract-47",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.copyToClipboard",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "copyToClipboard",
+        "request_id": "contract-48",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.createHook",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "createHook",
+        "request_id": "contract-49",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.createRuleFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "createRuleFile",
+        "request_id": "contract-50",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.createSkillFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "createSkillFile",
+        "request_id": "contract-51",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.deleteHook",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "deleteHook",
+        "request_id": "contract-52",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.deleteRuleFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "deleteRuleFile",
+        "request_id": "contract-53",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.deleteSkillFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "deleteSkillFile",
+        "request_id": "contract-54",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.getRelativePaths",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "getRelativePaths",
+        "request_id": "contract-55",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.ifFileExistsRelativePath",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "ifFileExistsRelativePath",
+        "request_id": "contract-56",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openDiskConversationHistory",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openDiskConversationHistory",
+        "request_id": "contract-57",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openFile",
+        "request_id": "contract-58",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openFileRelativePath",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openFileRelativePath",
+        "request_id": "contract-59",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openFocusChainFile",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openFocusChainFile",
+        "request_id": "contract-60",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openImage",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openImage",
+        "request_id": "contract-61",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openMention",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openMention",
+        "request_id": "contract-62",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.openVsClineDiff",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "openVsClineDiff",
+        "request_id": "contract-63",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.refreshHooks",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "refreshHooks",
+        "request_id": "contract-64",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.refreshRules",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "refreshRules",
+        "request_id": "contract-65",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.refreshSkills",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "refreshSkills",
+        "request_id": "contract-66",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.revertVsClineChanges",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "revertVsClineChanges",
+        "request_id": "contract-67",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.searchCommits",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "searchCommits",
+        "request_id": "contract-68",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.searchFiles",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "searchFiles",
+        "request_id": "contract-69",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.selectFiles",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "selectFiles",
+        "request_id": "contract-70",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleAgentsRule",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleAgentsRule",
+        "request_id": "contract-71",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleClineRule",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleClineRule",
+        "request_id": "contract-72",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleCursorRule",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleCursorRule",
+        "request_id": "contract-73",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleHook",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleHook",
+        "request_id": "contract-74",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleSkill",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleSkill",
+        "request_id": "contract-75",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleWindsurfRule",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleWindsurfRule",
+        "request_id": "contract-76",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "FileService.toggleWorkflow",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "FileService",
+        "method": "toggleWorkflow",
+        "request_id": "contract-77",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.addRemoteMcpServer",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "addRemoteMcpServer",
+        "request_id": "contract-78",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.authenticateMcpServer",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "authenticateMcpServer",
+        "request_id": "contract-79",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.deleteMcpServer",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "deleteMcpServer",
+        "request_id": "contract-80",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.downloadMcp",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "downloadMcp",
+        "request_id": "contract-81",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.getLatestMcpServers",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "getLatestMcpServers",
+        "request_id": "contract-82",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.openMcpSettings",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "openMcpSettings",
+        "request_id": "contract-83",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.refreshMcpMarketplace",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "refreshMcpMarketplace",
+        "request_id": "contract-84",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.restartMcpServer",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "restartMcpServer",
+        "request_id": "contract-85",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.subscribeToMcpMarketplaceCatalog",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "subscribeToMcpMarketplaceCatalog",
+        "request_id": "contract-86",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.subscribeToMcpServers",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "subscribeToMcpServers",
+        "request_id": "contract-87",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.toggleMcpServer",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "toggleMcpServer",
+        "request_id": "contract-88",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.toggleToolAutoApprove",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "toggleToolAutoApprove",
+        "request_id": "contract-89",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "McpService.updateMcpTimeout",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "McpService",
+        "method": "updateMcpTimeout",
+        "request_id": "contract-90",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getAihubmixModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getAihubmixModels",
+        "request_id": "contract-91",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getAskSageModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getAskSageModels",
+        "request_id": "contract-92",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getLmStudioModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getLmStudioModels",
+        "request_id": "contract-93",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getOllamaModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getOllamaModels",
+        "request_id": "contract-94",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getOpenRouterKeyInfo",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getOpenRouterKeyInfo",
+        "request_id": "contract-95",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getSapAiCoreModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getSapAiCoreModels",
+        "request_id": "contract-96",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.getVsCodeLmModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "getVsCodeLmModels",
+        "request_id": "contract-97",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshBasetenModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshBasetenModelsRpc",
+        "request_id": "contract-98",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshClineModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshClineModelsRpc",
+        "request_id": "contract-99",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshClineRecommendedModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshClineRecommendedModelsRpc",
+        "request_id": "contract-100",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshGroqModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshGroqModelsRpc",
+        "request_id": "contract-101",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshHicapModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshHicapModels",
+        "request_id": "contract-102",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshHuggingFaceModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshHuggingFaceModels",
+        "request_id": "contract-103",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshLiteLlmModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshLiteLlmModelsRpc",
+        "request_id": "contract-104",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshOcaModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshOcaModels",
+        "request_id": "contract-105",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshOpenAiModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshOpenAiModels",
+        "request_id": "contract-106",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshOpenRouterModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshOpenRouterModelsRpc",
+        "request_id": "contract-107",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshRequestyModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshRequestyModels",
+        "request_id": "contract-108",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.refreshVercelAiGatewayModelsRpc",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "refreshVercelAiGatewayModelsRpc",
+        "request_id": "contract-109",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.subscribeToLiteLlmModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "subscribeToLiteLlmModels",
+        "request_id": "contract-110",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.subscribeToOpenRouterModels",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "subscribeToOpenRouterModels",
+        "request_id": "contract-111",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.updateApiConfiguration",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "updateApiConfiguration",
+        "request_id": "contract-112",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ModelsService.updateApiConfigurationProto",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ModelsService",
+        "method": "updateApiConfigurationProto",
+        "request_id": "contract-113",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "OcaAccountService.ocaAccountLoginClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "OcaAccountService",
+        "method": "ocaAccountLoginClicked",
+        "request_id": "contract-114",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "OcaAccountService.ocaAccountLogoutClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "OcaAccountService",
+        "method": "ocaAccountLogoutClicked",
+        "request_id": "contract-115",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "OcaAccountService.ocaSubscribeToAuthStatusUpdate",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "OcaAccountService",
+        "method": "ocaSubscribeToAuthStatusUpdate",
+        "request_id": "contract-116",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "PluginService.getPluginConfigStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "PluginService",
+        "method": "getPluginConfigStatus",
+        "request_id": "contract-117",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "PluginService.listPlugins",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "PluginService",
+        "method": "listPlugins",
+        "request_id": "contract-118",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "PluginsService.getPluginConfigStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "PluginsService",
+        "method": "getPluginConfigStatus",
+        "request_id": "contract-119",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "PluginsService.listPlugins",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "PluginsService",
+        "method": "listPlugins",
+        "request_id": "contract-120",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.createSpec",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "createSpec",
+        "request_id": "contract-121",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.deleteScheduledAgent",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "deleteScheduledAgent",
+        "request_id": "contract-122",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.deleteSpec",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "deleteSpec",
+        "request_id": "contract-123",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.listScheduledAgents",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "listScheduledAgents",
+        "request_id": "contract-124",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.listSpecs",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "listSpecs",
+        "request_id": "contract-125",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.runScheduledAgent",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "runScheduledAgent",
+        "request_id": "contract-126",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.runSpec",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "runSpec",
+        "request_id": "contract-127",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.saveSpec",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "saveSpec",
+        "request_id": "contract-128",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "ScheduledAgentsService.updateSpec",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "ScheduledAgentsService",
+        "method": "updateSpec",
+        "request_id": "contract-129",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "SlashService.condense",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "SlashService",
+        "method": "condense",
+        "request_id": "contract-130",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "SlashService.reportBug",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "SlashService",
+        "method": "reportBug",
+        "request_id": "contract-131",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.captureOnboardingProgress",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "captureOnboardingProgress",
+        "request_id": "contract-132",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.dismissBanner",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "dismissBanner",
+        "request_id": "contract-133",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.getAvailableTerminalProfiles",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "getAvailableTerminalProfiles",
+        "request_id": "contract-134",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.installClineCli",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "installClineCli",
+        "request_id": "contract-135",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.refreshRemoteConfig",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "refreshRemoteConfig",
+        "request_id": "contract-136",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.resetState",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "resetState",
+        "request_id": "contract-137",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.setWelcomeViewCompleted",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "setWelcomeViewCompleted",
+        "request_id": "contract-138",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.subscribeToState",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "subscribeToState",
+        "request_id": "contract-139",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.testOtelConnection",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "testOtelConnection",
+        "request_id": "contract-140",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.testPromptUploading",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "testPromptUploading",
+        "request_id": "contract-141",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.toggleFavoriteModel",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "toggleFavoriteModel",
+        "request_id": "contract-142",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.togglePlanActModeProto",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "togglePlanActModeProto",
+        "request_id": "contract-143",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateAutoApprovalSettings",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateAutoApprovalSettings",
+        "request_id": "contract-144",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateCliBannerVersion",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateCliBannerVersion",
+        "request_id": "contract-145",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateInfoBannerVersion",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateInfoBannerVersion",
+        "request_id": "contract-146",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateModelBannerVersion",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateModelBannerVersion",
+        "request_id": "contract-147",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateSettings",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateSettings",
+        "request_id": "contract-148",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateTelemetrySetting",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateTelemetrySetting",
+        "request_id": "contract-149",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "StateService.updateTerminalConnectionTimeout",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "StateService",
+        "method": "updateTerminalConnectionTimeout",
+        "request_id": "contract-150",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.askResponse",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "askResponse",
+        "request_id": "contract-151",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.cancelBackgroundCommand",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "cancelBackgroundCommand",
+        "request_id": "contract-152",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.cancelTask",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "cancelTask",
+        "request_id": "contract-153",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.clearTask",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "clearTask",
+        "request_id": "contract-154",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.deleteAllTaskHistory",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "deleteAllTaskHistory",
+        "request_id": "contract-155",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.deleteTasksWithIds",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "deleteTasksWithIds",
+        "request_id": "contract-156",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.explainChanges",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "explainChanges",
+        "request_id": "contract-157",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.exportTaskWithId",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "exportTaskWithId",
+        "request_id": "contract-158",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.getTaskHistory",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "getTaskHistory",
+        "request_id": "contract-159",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.getTotalTasksSize",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "getTotalTasksSize",
+        "request_id": "contract-160",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.newTask",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "newTask",
+        "request_id": "contract-161",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.showTaskWithId",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "showTaskWithId",
+        "request_id": "contract-162",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.taskCompletionViewChanges",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "taskCompletionViewChanges",
+        "request_id": "contract-163",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.taskFeedback",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "taskFeedback",
+        "request_id": "contract-164",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TaskService.toggleTaskFavorite",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TaskService",
+        "method": "toggleTaskFavorite",
+        "request_id": "contract-165",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TerminalService.attachTerminalCommand",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TerminalService",
+        "method": "attachTerminalCommand",
+        "request_id": "contract-166",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TerminalService.continueTerminalCommand",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TerminalService",
+        "method": "continueTerminalCommand",
+        "request_id": "contract-167",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "TerminalService.openTerminalPanel",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "TerminalService",
+        "method": "openTerminalPanel",
+        "request_id": "contract-168",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.attachTerminalCommand",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "attachTerminalCommand",
+        "request_id": "contract-169",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.continueTerminalCommand",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "continueTerminalCommand",
+        "request_id": "contract-170",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.initializeWebview",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "initializeWebview",
+        "request_id": "contract-171",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.onDidShowAnnouncement",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "onDidShowAnnouncement",
+        "request_id": "contract-172",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.openTerminalPanel",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "openTerminalPanel",
+        "request_id": "contract-173",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.openUrl",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "openUrl",
+        "request_id": "contract-174",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.openWalkthrough",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "openWalkthrough",
+        "request_id": "contract-175",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.setTerminalExecutionMode",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "setTerminalExecutionMode",
+        "request_id": "contract-176",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToAccountButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToAccountButtonClicked",
+        "request_id": "contract-177",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToAddToInput",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToAddToInput",
+        "request_id": "contract-178",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToChatButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToChatButtonClicked",
+        "request_id": "contract-179",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToHistoryButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToHistoryButtonClicked",
+        "request_id": "contract-180",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToMcpButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToMcpButtonClicked",
+        "request_id": "contract-181",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToPartialMessage",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToPartialMessage",
+        "request_id": "contract-182",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToRelinquishControl",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToRelinquishControl",
+        "request_id": "contract-183",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToSettingsButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToSettingsButtonClicked",
+        "request_id": "contract-184",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToShowWebview",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToShowWebview",
+        "request_id": "contract-185",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "UiService.subscribeToWorktreesButtonClicked",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "UiService",
+        "method": "subscribeToWorktreesButtonClicked",
+        "request_id": "contract-186",
+        "is_streaming": true,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WebService.checkIsImageUrl",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WebService",
+        "method": "checkIsImageUrl",
+        "request_id": "contract-187",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WebService.fetchOpenGraphData",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WebService",
+        "method": "fetchOpenGraphData",
+        "request_id": "contract-188",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WebService.openInBrowser",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WebService",
+        "method": "openInBrowser",
+        "request_id": "contract-189",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.createWorktree",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "createWorktree",
+        "request_id": "contract-190",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.createWorktreeInclude",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "createWorktreeInclude",
+        "request_id": "contract-191",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.deleteWorktree",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "deleteWorktree",
+        "request_id": "contract-192",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.getWorktreeDefaults",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "getWorktreeDefaults",
+        "request_id": "contract-193",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.getWorktreeIncludeStatus",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "getWorktreeIncludeStatus",
+        "request_id": "contract-194",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.listWorktrees",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "listWorktrees",
+        "request_id": "contract-195",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.mergeRecovery",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "mergeRecovery",
+        "request_id": "contract-196",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.mergeWorktree",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "mergeWorktree",
+        "request_id": "contract-197",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.recoverMerge",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "recoverMerge",
+        "request_id": "contract-198",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.switchWorktree",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "switchWorktree",
+        "request_id": "contract-199",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  },
+  {
+    "operation": "WorktreeService.trackWorktreeViewOpened",
+    "envelope": {
+      "protocol_version": 1,
+      "type": "grpc_request",
+      "grpc_request": {
+        "service": "WorktreeService",
+        "method": "trackWorktreeViewOpened",
+        "request_id": "contract-200",
+        "is_streaming": false,
+        "message": {}
+      }
+    }
+  }
+]
