@@ -11,6 +11,7 @@ import { normalizeAgentRuntimeEvent, translateToolApprovalRequest } from "./Clin
 import { ensureUsableHomeEnvironment, getLocalAppDataRoot, resolveWorkspacePath, sanitizePathPart } from "./SdkEnvironment"
 import { fetchWebContentForSdk, normalizeCommandResultForSdk, readPositiveIntEnv } from "./SdkToolSupport"
 import { callMcpListMethod, getArrayProperty, isToolAutoApproved, normalizeMcpPrompts, normalizeMcpResources, normalizeMcpResourceTemplates, toDisplayMcpConfig, toProtoMcpStatus } from "./McpProjection"
+import { buildSdkStartInput, normalizeAgentMode } from "./SdkSessionRequestBuilder"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -97,45 +98,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	async startSession(request: AgentStartRequest) {
 		const core = await this.getCore()
 		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const cwd = stringValue(request.cwd) || workspaceRoots[0] || process.cwd()
-		const config = asRecord(request.config)
-		const providerId = stringValue(config.providerId) || stringValue(request.providerId) || process.env.CLINE_PROVIDER_ID || "anthropic"
-		const modelId = stringValue(config.modelId) || stringValue(request.modelId) || process.env.CLINE_MODEL_ID || "claude-sonnet-4-6"
-		const apiKey = stringValue(config.apiKey) || stringValue(request.apiKey) || process.env.CLINE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
-
-		const systemPrompt =
-			stringValue(config.systemPrompt) ||
-			stringValue(request.systemPrompt) ||
-			"You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths."
-		const mode = agentMode(config.mode) || agentMode(request.mode) || "act"
-		const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
-		const userImages = stringArrayValue(request.userImages)
-		const userFiles = stringArrayValue(request.userFiles)
-		const initialMessages = sdkInitialMessages(request.initialMessages)
-		const startInput: any = {
-			config: {
-				...config,
-				...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
-				providerId,
-				modelId,
-				apiKey,
-				cwd,
-				workspaceRoot: stringValue(config.workspaceRoot) || cwd,
-				mode,
-				enableTools: config.enableTools !== false,
-				enableSpawnAgent: config.enableSpawnAgent === true,
-				enableAgentTeams: config.enableAgentTeams === true,
-				extraTools: await this.createMcpExtraToolsForSession(),
-				systemPrompt,
-			},
-			prompt: stringValue(request.prompt) || "",
-			interactive: request.interactive !== false,
-			sessionMetadata: asRecord(request.sessionMetadata),
-			toolPolicies: asRecord(request.toolPolicies),
-			userImages: userImages.length > 0 ? userImages : undefined,
-			userFiles: userFiles.length > 0 ? userFiles : undefined,
-			initialMessages: initialMessages.length > 0 ? initialMessages : undefined,
-		}
+		const { startInput, requestedSessionId } = buildSdkStartInput(request, workspaceRoots, await this.createMcpExtraToolsForSession())
 
 		if (requestedSessionId) {
 			this.activeSessionId = requestedSessionId
@@ -164,7 +127,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			return await core.send({
 				sessionId,
 				prompt: request.prompt,
-				mode: agentMode(request.mode),
+				mode: normalizeAgentMode(request.mode),
 				delivery: request.delivery === "queue" || request.delivery === "steer" ? request.delivery : undefined,
 				userImages: [...(request.userImages || [])],
 				userFiles: [...(request.userFiles || [])],
@@ -1102,23 +1065,6 @@ function writeFileAtomicSync(filePath: string, content: string) {
 
 function stringArrayValue(value: unknown) {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : []
-}
-
-function sdkInitialMessages(value: unknown) {
-	if (!Array.isArray(value)) {
-		return []
-	}
-
-	return value.flatMap((entry) => {
-		const message = asRecord(entry)
-		const role = message.role === "user" || message.role === "assistant" ? message.role : ""
-		const content = stringValue(message.content)
-		return role && content ? [{ role, content }] : []
-	})
-}
-
-function agentMode(value: unknown): "act" | "plan" | undefined {
-	return value === "act" || value === "plan" ? value : undefined
 }
 
 async function importClineSdk(): Promise<ClineSdkModule> {
