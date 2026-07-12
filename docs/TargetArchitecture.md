@@ -3,7 +3,7 @@
 ## Status
 
 This document is the shared migration target for the Visual Studio 2022 17.0 and 17.12 products.
-The common-source and dual-package prerequisite is complete. The architectural migration is active and is not complete while the legacy WebView backend still owns unrelated feature orchestration.
+The common-source prerequisite and architecture implementation are complete. The former legacy WebView backend is now a typed composition facade; final local tests and dual-VSIX verification remain before the migration can be declared complete.
 
 ## Decision
 
@@ -44,12 +44,13 @@ Verified progress includes:
 - WebView ingress and host/sidecar transport use versioned contracts, and shared WebView proto aliases no longer use `any`;
 - the presentation controller and WebView bridge are thin adapters, while the WebView remains a state renderer and typed-intent source.
 
-The principal remaining risks are:
+Implementation evidence at the verification gate:
 
-- `VisualStudioWebviewBackend.ts` has been reduced below 950 lines and no longer owns a raw unary RPC switch, runtime/session/state/cleanup policy, projector forwarding APIs, extracted-flow wrappers, feature orchestration, runtime model/tool policy, logging/RPC/error support, or host auto-approval notification formatting; its remaining role is typed RPC dispatch, collaborator composition, and external-adapter guards;
-- registered unary feature groups now normalize into discriminated commands at WebView boundary decoders; streaming subscription ownership and remaining internal callback payloads still need a final typed-boundary audit;
-- active, upstream-derived, generated, and obsolete source still needs a final source-hygiene audit;
-- architecture enforcement is local-script based and still needs an explicit CI gate if this branch becomes the integration branch.
+- `VisualStudioWebviewBackend.ts` is below 950 lines and is limited to typed RPC dispatch, collaborator composition, and external-adapter guards;
+- unary feature groups and streaming subscriptions normalize into discriminated commands at WebView boundary decoders;
+- active source, upstream baseline, generated packaging inputs, and read-only legacy source have explicit ownership and clean UTF-8 documentation;
+- `.github/workflows/architecture-and-variants.yml` enforces sidecar architecture/tests, passive WebView tests/contracts, and both VSIX profiles on Windows;
+- final local test and package output is still required before marking the target complete.
 
 The obsolete pre-sidecar C# agent and direct WebView bridge are isolated under
 `legacy/dotnet-agent`; they are not compiled and are retained only as read-only history.
@@ -78,23 +79,24 @@ normalized immediately by the sidecar presentation adapter.
 
 ```text
 src/
-├─ extension-host/
+├─ extension/                 # common Visual Studio host
 │  ├─ Bootstrap/
-│  ├─ WebView/
+│  ├─ Host/Adapters/
 │  ├─ Sidecar/
-│  ├─ Rpc/
-│  └─ Adapters/{Workspace,Editor,Terminal,Diff,Window,Environment}/
-├─ agent-worker/
-│  ├─ Runtime/
-│  ├─ Features/
-│  ├─ Integrations/ClineSdk/
-│  ├─ Adapters/
-│  └─ Bootstrap/
-├─ webview/{app,features,shared,transport}/
-└─ contracts/{agent,host,webview,schemas}/
-packaging/{vs2022-17.0,vs2022-17.12}/
-upstream/
-tests/{contract,integration,packaging}/
+│  └─ ToolWindows/
+├─ sidecar/src/
+│  ├─ domain/
+│  ├─ application/
+│  ├─ features/
+│  ├─ infrastructure/sdk/
+│  └─ presentation/
+├─ webview/                   # passive state renderer and typed intent source
+└─ shared/                    # shared boundary contracts
+packaging/
+├─ vs2022-17.0/
+└─ vs2022-17.12/
+legacy/                       # read-only historical implementation
+tests/                        # centralized contract/integration/packaging checks
 docs/
 ```
 
