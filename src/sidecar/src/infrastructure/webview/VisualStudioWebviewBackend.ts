@@ -44,6 +44,7 @@ import type { OAuthCallbackHandler } from "../../features/providers/OAuthCallbac
 import type { ProviderCredentialHandler } from "../../features/providers/ProviderCredentialHandler"
 import type { ProviderAuthActionHandler } from "../../features/providers/ProviderAuthActionHandler"
 import { ApprovalCoordinator } from "../../features/approvals/ApprovalCoordinator"
+import { ToolApprovalFlow } from "../../features/approvals/ToolApprovalFlow"
 import { rebindTaskHistoryId, upsertTaskHistoryItem } from "../../features/taskHistory/TaskHistoryCollection"
 import {
 	isOAuthTokenBlobProvider,
@@ -131,10 +132,10 @@ import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import { ConversationRuntimeProjector } from "../conversation/ConversationRuntimeProjector"
 import { ConversationCleanupCoordinator } from "../conversation/ConversationCleanupCoordinator"
+import { ToolApprovalPromptProjector } from "../conversation/ToolApprovalPromptProjector"
 import type { HookSettingsHandler } from "../../features/hooks/HookSettingsHandler"
 import type { HookExecutionHandler } from "../../features/hooks/HookExecutionHandler"
 import { HookLifecycleCoordinator } from "../../features/hooks/HookLifecycleCoordinator"
-import { applyPreToolUseInputPatch } from "../../features/hooks/HookPolicy"
 import {
 	normalizeOllamaRootBaseUrl,
 	inferModelInfo,
@@ -275,6 +276,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly foldedProgressProjector: FoldedProgressProjector
 	private readonly conversationRuntime: ConversationRuntimeProjector
 	private readonly conversationCleanup: ConversationCleanupCoordinator
+	private readonly toolApproval: ToolApprovalFlow
+	private readonly toolApprovalPrompts = new ToolApprovalPromptProjector()
 	private readonly taskSnapshots: TaskSnapshotStore
 	private readonly taskState: TaskStateCoordinator
 	private readonly taskHistorySync: TaskHistorySync
@@ -368,6 +371,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			rebindLatency: (previousTaskId, sessionId) => this.runtimeMonitoring.rebindLatency(previousTaskId, sessionId),
 			writeLifecycleStatus: (status) => { this.state.taskLifecycleStatus = status },
 		})
+		this.toolApproval = new ToolApprovalFlow({ mapToolName: (toolName) => mapToolName(toolName), isPlanModeBlocked: (mappedToolName) => this.state.mode === "plan" && isPlanModeBlockedTool(mappedToolName), blockedReason: () => this.toolApprovalPrompts.blockedReason(this.getUiLanguage()), addInfo: (text) => { this.addMessage({ type: "say", say: "info", text }) }, currentSessionId: () => this.getCurrentSessionId(), preToolUse: (context) => this.hookLifecycle.preToolUse(context), shouldAutoApprove: (toolName) => shouldAutoApproveTool(toolName, this.state.autoApprovalSettings), notifyAutoApproved: (mappedToolName, input) => this.notifyAutoApprovedTool(mappedToolName, input), buildPrompt: (mappedToolName, input, approvalRequest) => this.toolApprovalPrompts.build(mappedToolName, input, approvalRequest), beginApproval: () => { this.taskSession.transition("awaiting_user", "tool-approval"); this.taskSession.waitFor("tool_approval") }, addAsk: ({ ask, text }) => { this.addMessage({ type: "ask", ask, text }) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), requestApproval: () => this.approvals.request(), logRequest: (details) => this.logger.log("sdk->sidecar", "toolApproval.request", details), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.conversationMessages = new ConversationMessageStore({ read: () => this.state.clineMessages, write: (messages) => { this.state.clineMessages = messages }, persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.hookLifecycle = new HookLifecycleCoordinator({ execution: () => this.requireHookExecution(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enabled: () => this.state.hooksEnabled !== false, addMessage: (message) => this.conversationMessages.add(message), nextTimestamp: () => this.conversationMessages.nextTimestamp(), upsertMessage: (timestamp, updates) => this.conversationMessages.upsert(timestamp, updates), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState().catch((error) => { console.error(error) }) })
 		this.clearTaskHandler = new ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.taskSession.transition(status, source), advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""), markClosing: (sessionId) => { this.taskSession.markClosing(sessionId) }, rememberSnapshot: (sessionId) => { if (this.state.currentTaskItem && this.state.clineMessages.length > 0) { const taskId = String(this.state.currentTaskItem.id || sessionId); if (taskId) this.taskState.remember(taskId, this.state.currentTaskItem, this.state.clineMessages) } }, clearProjection: () => { this.conversationCleanup.clearProjection() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { this.taskSession.reset(source) }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
@@ -521,84 +525,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return policies
 	}
 
-	private isPlanModeToolBlocked(mappedToolName: string) {
-		if (this.state.mode !== "plan") {
-			return false
-		}
-		return isPlanModeBlockedTool(mappedToolName)
-	}
-
 	async requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult> {
-		this.logger.log("sdk->sidecar", "toolApproval.request", request)
-		const approvalRequest = request.raw as Record<string, unknown>
-		const toolName = request.toolName
-		const input = request.input as Record<string, unknown>
-		const mappedToolName = mapToolName(toolName)
-		if (this.isPlanModeToolBlocked(mappedToolName)) {
-			const language = this.getUiLanguage()
-			const reason =
-				language === "ko"
-					? "Plan 모드에서는 실행/수정/브라우저/MCP 도구를 실행하지 않습니다. Act 모드로 전환한 뒤 다시 시도해 주세요."
-					: "Plan mode does not run execution, edit, browser, or MCP tools. Switch to Act mode and try again."
-			this.addMessage({
-				type: "say",
-				say: "info",
-				text: reason,
-			})
-			this.taskState.update()
-			await this.broadcastState()
-			return { approved: false, reason }
-		}
-		const hookDecision = await this.hookLifecycle.preToolUse({
-			sessionId: this.clineSdk?.status.activeSessionId || String(this.state.currentTaskItem?.id || ""),
-			toolName,
-			mappedToolName,
-			input,
-			approvalRequest,
-		})
-		if (hookDecision.blocked) {
-			return { approved: false, reason: hookDecision.reason || "Blocked by PreToolUse hook." }
-		}
-		if (hookDecision.inputPatch && Object.keys(hookDecision.inputPatch).length > 0) {
-			applyPreToolUseInputPatch(input, approvalRequest, hookDecision)
-			this.logger.log("sidecar", "preToolUseInputPatched", {
-				toolName,
-				mappedToolName,
-				replaceInput: hookDecision.replaceInput === true,
-				keys: Object.keys(hookDecision.inputPatch),
-				reason: hookDecision.reason || undefined,
-			})
-		}
-		if (shouldAutoApproveTool(toolName, this.state.autoApprovalSettings)) {
-			await this.notifyAutoApprovedTool(mappedToolName, input)
-			return { approved: true, reason: "Auto-approved by Visual Studio settings." }
-		}
-		const ask = mappedToolName === "executeCommand" ? "command" : "tool"
-		const text =
-			ask === "command"
-				? JSON.stringify({
-						command: getCommandText(input),
-						description: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || "LIG VS가 이 명령을 실행하려고 합니다.",
-					})
-				: JSON.stringify({
-						tool: mappedToolName,
-						path:
-							mappedToolName === "searchFiles"
-								? getToolPath(input) || "/"
-								: getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input),
-						regex: mappedToolName === "searchFiles" ? getSearchQuery(input) : undefined,
-						filePattern: mappedToolName === "searchFiles" ? getSearchFilePattern(input) : undefined,
-						content: getString(approvalRequest, "description") || getString(approvalRequest, "reason") || summarizeToolInput(input),
-						...input,
-					})
-
-		this.taskSession.transition("awaiting_user", "tool-approval")
-		this.taskSession.waitFor("tool_approval")
-		this.addMessage({ type: "ask", ask, text })
-		this.taskState.update()
-		await this.broadcastState()
-
-		return this.approvals.request()
+		return this.toolApproval.execute(request)
 	}
 
 	private async notifyAutoApprovedTool(mappedToolName: string, input: Record<string, unknown>) {

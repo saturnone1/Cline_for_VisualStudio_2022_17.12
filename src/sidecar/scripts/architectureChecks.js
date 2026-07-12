@@ -92,6 +92,9 @@ if (!router.includes("ConversationCleanupCoordinator") || router.includes("priva
 if (router.includes("private completeFromSdkResult") || router.includes("private hydrateCurrentTaskFromSdk") || router.includes("private runLifecycleHooks")) {
 	violations.push("VisualStudioWebviewBackend must call extracted chat, transcript, and hook flows directly instead of restoring forwarding methods.")
 }
+if (!router.includes("ToolApprovalFlow") || !router.includes("ToolApprovalPromptProjector") || router.includes("preToolUseInputPatched\", {")) {
+	violations.push("VisualStudioWebviewBackend must delegate tool approval orchestration and prompt projection to the approvals slice.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -291,6 +294,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/TaskCompletionProjector.ts",
 	"infrastructure/conversation/ConversationRuntimeProjector.ts",
 	"infrastructure/conversation/ConversationCleanupCoordinator.ts",
+	"infrastructure/conversation/ToolApprovalPromptProjector.ts",
 	"infrastructure/conversation/RuntimeStatusEventProjector.ts",
 	"infrastructure/conversation/ConversationMessageStore.ts",
 	"features/taskHistory/TaskHistorySync.ts",
@@ -406,6 +410,7 @@ for (const requiredFile of [
 	"features/runtime/TaskSessionCoordinator.ts",
 	"features/runtime/AgentRuntimeEventDispatcher.ts",
 	"features/runtime/AgentEventDispatcher.ts",
+	"features/approvals/ToolApprovalFlow.ts",
 ]) {
 	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
 		violations.push(`Missing architecture component: ${requiredFile}`)
