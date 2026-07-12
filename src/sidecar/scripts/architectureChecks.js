@@ -83,6 +83,9 @@ if (!router.includes("TaskCompletionProjector") || router.includes("private fini
 if (router.includes("private finalizeActivePartialText") || router.includes("private upsertFoldedReasoningText") || router.includes("private startTerminalStatePolling")) {
 	violations.push("VisualStudioWebviewBackend must use conversation projectors and terminal activity adapters directly instead of restoring forwarding methods.")
 }
+if (!router.includes("ConversationRuntimeProjector") || router.includes("private upsertAssistantTextFromEvent") || router.includes("private recordToolActivity")) {
+	violations.push("VisualStudioWebviewBackend must delegate assistant classification and tool-activity grouping to ConversationRuntimeProjector.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -280,6 +283,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/AgentSnapshotEventProjector.ts",
 	"infrastructure/conversation/AgentChunkEventProjector.ts",
 	"infrastructure/conversation/TaskCompletionProjector.ts",
+	"infrastructure/conversation/ConversationRuntimeProjector.ts",
 	"infrastructure/conversation/RuntimeStatusEventProjector.ts",
 	"infrastructure/conversation/ConversationMessageStore.ts",
 	"features/taskHistory/TaskHistorySync.ts",
