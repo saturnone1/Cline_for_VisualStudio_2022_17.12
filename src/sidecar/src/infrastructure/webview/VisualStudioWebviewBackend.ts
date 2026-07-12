@@ -136,6 +136,7 @@ import { RuntimeModelContext } from "../models/RuntimeModelContext"
 import { AutoApprovalNotifier } from "../notifications/AutoApprovalNotifier"
 import { buildTaskInputWithAttachments, normalizeSdkImageInputs } from "../conversation/AttachmentNormalization"
 import { createHistoryItem, createId, sdkSessionToHistoryItem } from "../conversation/TaskHistoryProjection"
+import { extractCompletionTextFromResult } from "../conversation/CompletionExtraction"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
 import { FoldedProgressProjector } from "../conversation/FoldedProgressProjector"
 import { ConversationRuntimeProjector } from "../conversation/ConversationRuntimeProjector"
@@ -178,9 +179,6 @@ import {
 	sdkContentToVisibleAssistantText,
 	sdkContentToReasoningText,
 	sdkContentToToolActivityEntries,
-	extractCompletionTextFromResult,
-	completionCandidateToText,
-	completionContentBlocksToText,
 	agentChunkRecordToTerminalResult,
 	agentChunkStringToTranscriptText,
 	agentChunkStringToFoldedReasoningText,
@@ -192,13 +190,6 @@ import {
 	unknownAgentChunkTextToTranscriptText,
 	stripRawToolCallMarkup,
 	buildResumedConversationMessages,
-	clineMessageToResumedTranscriptEntry,
-	resumedTranscriptTextForMessage,
-	looksLikeTokenizedReasoning,
-	looksLikeReasoningNarration,
-	toolInputToText,
-	toolResultToText,
-	stringifyPretty,
 	mapToolName,
 	toolTranscriptToActivityEntries,
 	formatToolActivitySection,

@@ -11,6 +11,8 @@ const {
 } = require("../dist/infrastructure/conversation/AttachmentNormalization")
 const { normalizeUsageSnapshot } = require("../dist/infrastructure/conversation/UsageNormalization")
 const { createHistoryItem, removeDeletedHistoryItems, sdkSessionToHistoryItem } = require("../dist/infrastructure/conversation/TaskHistoryProjection")
+const { completionCandidateToText, extractCompletionTextFromResult } = require("../dist/infrastructure/conversation/CompletionExtraction")
+const { isToolTranscript, looksLikeReasoningNarration, looksLikeTokenizedReasoning, mergeTextDelta, normalizeTranscriptText } = require("../dist/infrastructure/conversation/TranscriptTextPolicy")
 
 test("attachment normalization keeps transcript summaries bounded", () => {
 	assert.equal(formatAttachmentSummaryValue("data:image/png;base64,AAAA"), "[attached image/png]")
@@ -57,4 +59,19 @@ test("task history projection owns SDK metadata and deleted-item filtering", () 
 	assert.equal(projected.tokensIn, 7)
 	assert.equal(projected.tokensOut, 3)
 	assert.deepEqual(removeDeletedHistoryItems([projected, createHistoryItem("session-2", "Other", "C:\\work", "model")], new Set(["session-1"])).map((item) => item.id), ["session-2"])
+})
+
+test("completion extraction prefers normalized final result fields and content blocks", () => {
+	assert.equal(extractCompletionTextFromResult({ finalResponse: "  completed  " }, { text: "fallback" }), "completed")
+	assert.equal(completionCandidateToText({ content: [{ type: "text", text: "first" }, { type: "tool_use", text: "hidden" }, "second"] }), "first\n\nsecond")
+	assert.equal(extractCompletionTextFromResult({}, { output: { answer: "event result" } }), "event result")
+})
+
+test("transcript text policy handles deltas, tools, reasoning, and Korean tokens", () => {
+	assert.equal(mergeTextDelta("hello", " world"), "hello world")
+	assert.equal(mergeTextDelta("hello world", " world"), "hello world")
+	assert.equal(normalizeTranscriptText(" hello\n  world "), "hello world")
+	assert.equal(isToolTranscript("Tool: read_file"), true)
+	assert.equal(looksLikeReasoningNarration("We need to inspect the runtime"), true)
+	assert.equal(looksLikeTokenizedReasoning(["사용자", "요청을", "먼저", "확인", "해야", "합니다"]), true)
 })

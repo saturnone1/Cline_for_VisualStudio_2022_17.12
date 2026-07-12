@@ -1,4 +1,5 @@
-import { normalizeAssistantTranscriptText, normalizeTranscriptText } from "./ConversationSupport"
+import { normalizeAssistantTranscriptText } from "./ConversationSupport"
+import { normalizeTranscriptText } from "./TranscriptTextPolicy"
 
 type Message = Record<string, unknown>
 type Callbacks = Readonly<{

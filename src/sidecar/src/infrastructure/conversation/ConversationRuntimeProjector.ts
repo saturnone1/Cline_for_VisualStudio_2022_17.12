@@ -1,13 +1,13 @@
 import type { ConversationProjectionState } from "../../features/conversation/ConversationProjectionState"
 import {
 	buildGroupedToolActivityText,
-	mergeTextDelta,
 	normalizeAssistantTranscriptText,
 	shouldDelayAssistantTextUntilClassified,
 	shouldFoldTextContentAsReasoning,
 	toolActivityEntriesFromMessage,
 	toolActivityEntryKey,
 } from "./ConversationSupport"
+import { mergeTextDelta } from "./TranscriptTextPolicy"
 import type { ConversationMessageStore } from "./ConversationMessageStore"
 import type { FoldedProgressProjector } from "./FoldedProgressProjector"
 import type { PartialTextProjector } from "./PartialTextProjector"
