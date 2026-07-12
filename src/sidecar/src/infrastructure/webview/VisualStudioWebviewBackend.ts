@@ -119,6 +119,8 @@ import { UiWebRpcHandler } from "../../features/web/UiWebRpcHandler"
 import { decodeUiWebRpcCommand } from "./UiWebRpcDecoder"
 import { PluginRpcHandler } from "../../features/plugins/PluginRpcHandler"
 import { decodePluginRpcCommand } from "./PluginRpcDecoder"
+import { StreamingRpcHandler } from "../../features/web/StreamingRpcHandler"
+import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -262,7 +264,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private browserHandler: BrowserHandler | null = null
 	private worktreeQueries: WorktreeQueryHandler | null = null
 	private worktreeMutations: WorktreeMutationHandler | null = null
-	private readonly mcpServerStreamRequestIds = new Set<string>()
 	private readonly state: ReturnType<typeof createInitialState>
 	private readonly approvals = new ApprovalCoordinator()
 	private pendingQuestion:
@@ -302,6 +303,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly instructionSettingsRpc: InstructionSettingsRpcHandler
 	private readonly uiWebRpc: UiWebRpcHandler
 	private readonly pluginRpc: PluginRpcHandler
+	private readonly streamingRpc: StreamingRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -325,21 +327,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private providerModelCatalogs: ProviderModelCatalogHandler | null = null
 	private streamPublisher: WebviewStreamPublisher | null = null
 	private sdkSettings: SdkSettingsHandler | null = null
-
-	private readonly inertStreams = new Set([
-		"UiService.subscribeToMcpButtonClicked",
-		"UiService.subscribeToHistoryButtonClicked",
-		"UiService.subscribeToChatButtonClicked",
-		"UiService.subscribeToSettingsButtonClicked",
-		"UiService.subscribeToWorktreesButtonClicked",
-		"UiService.subscribeToAccountButtonClicked",
-		"UiService.subscribeToRelinquishControl",
-		"UiService.subscribeToShowWebview",
-		"UiService.subscribeToAddToInput",
-		"McpService.subscribeToMcpMarketplaceCatalog",
-		"ModelsService.subscribeToOpenRouterModels",
-		"ModelsService.subscribeToLiteLlmModels",
-	])
 
 	constructor(
 		private readonly host: HostProviderPort,
@@ -384,6 +371,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.addMessage({ type: "say", say: "error", text }) } })
 		this.uiWebRpc = new UiWebRpcHandler({ openExternal: (url) => this.host.envClient.openExternal({ value: url }), checkImage: (url) => checkIsImageUrl(url), openGraph: (url) => fetchOpenGraphData(url) })
 		this.pluginRpc = new PluginRpcHandler({ workspaceRoot: () => this.getPrimaryWorkspaceRoot(), discover: (workspaceRoot) => discoverLocalPlugins(workspaceRoot) })
+		this.streamingRpc = new StreamingRpcHandler({ scheduleStateRefresh: () => this.scheduleStateStreamsRefresh(), subscribeState: (requestId) => this.requireStreamPublisher().subscribeState(requestId), subscribePartial: (requestId) => { this.requireStreamPublisher().subscribePartial(requestId) }, unauthenticatedAccount: () => createUnauthenticatedAccountState(), mcpServers: async () => (await this.mcpRpc.handle({ type: "list" })).payload, mcpMarketplace: async () => (await this.mcpRpc.handle({ type: "marketplace" })).payload })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -478,7 +466,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.terminalActivity?.dispose()
 		this.changeTracking?.dispose()
 		this.streamPublisher?.dispose()
-		this.mcpServerStreamRequestIds.clear()
+		this.streamingRpc.clear()
 		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
@@ -815,45 +803,13 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private async handleStreamingRequest(key: string, requestId: string) {
-		if (key === "StateService.subscribeToState") {
-			this.scheduleStateStreamsRefresh()
-			return grpcHandled(this.requireStreamPublisher().subscribeState(requestId))
-		}
-
-		if (key === "AccountService.subscribeToAuthStatusUpdate") {
-			return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), true))
-		}
-
-		if (key === "UiService.subscribeToPartialMessage") {
-			this.requireStreamPublisher().subscribePartial(requestId)
-			return grpcHandled()
-		}
-
-		if (key === "McpService.subscribeToMcpServers") {
-			this.mcpServerStreamRequestIds.add(requestId)
-			const result = await this.mcpRpc.handle({ type: "list" })
-			return grpcHandled(grpcResponse(requestId, result.payload, true))
-		}
-
-		if (key === "McpService.subscribeToMcpMarketplaceCatalog") {
-			const result = await this.mcpRpc.handle({ type: "marketplace" })
-			return grpcHandled(grpcResponse(requestId, result.payload, true))
-		}
-
-		if (key === "OcaAccountService.ocaSubscribeToAuthStatusUpdate") {
-			return grpcHandled(grpcResponse(requestId, createUnauthenticatedAccountState(), true))
-		}
-
-		if (this.inertStreams.has(key)) {
-			return {
-				handled: true,
-				owner: "sidecar",
-				reason: "registered_inert_stream",
-				webviewMessages: [],
-			}
-		}
-
-		return null
+		const command = decodeStreamingRpcCommand(key)
+		if (!command) return null
+		const result = await this.streamingRpc.handle(command, requestId)
+		if (result.kind === "direct") return grpcHandled(...result.messages)
+		if (result.kind === "payload") return grpcHandled(grpcResponse(requestId, result.payload, true))
+		if (result.kind === "empty") return grpcHandled()
+		return { handled: true, owner: "sidecar", reason: result.reason, webviewMessages: [] }
 	}
 
 	private async handleUnaryRequest(key: string, requestId: string, message: unknown) {
@@ -934,7 +890,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private disposeStreamRequest(requestId: string) {
-		return this.requireStreamPublisher().unsubscribe(requestId) || this.mcpServerStreamRequestIds.delete(requestId)
+		return this.requireStreamPublisher().unsubscribe(requestId) || this.streamingRpc.unsubscribeMcp(requestId)
 	}
 
 	private logSlowGrpcRequest(key: string, startedAt: number, streaming: boolean) {
@@ -974,9 +930,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private buildMcpServerStreamMessages(response: unknown) {
-		return [...this.mcpServerStreamRequestIds]
-			.filter((streamRequestId) => streamRequestId)
-			.map((streamRequestId) => grpcResponse(streamRequestId, response, true))
+		return this.streamingRpc.mcpMessages(response, (requestId, payload) => grpcResponse(requestId, payload, true))
 	}
 
 	private clearLiveInteractionState(reason: string) {

@@ -10,6 +10,8 @@ const webviewStatePath = path.join(root, "src", "infrastructure", "webview", "We
 const browserHandlerPath = path.join(root, "src", "features", "browser", "BrowserHandler.ts")
 const worktreeMutationHandlerPath = path.join(root, "src", "features", "worktrees", "WorktreeMutationHandler.ts")
 const webviewStreamPublisherPath = path.join(root, "src", "infrastructure", "webview", "WebviewStreamPublisher.ts")
+const streamingRpcDecoderPath = path.join(root, "src", "infrastructure", "webview", "StreamingRpcDecoder.ts")
+const streamingRpcHandlerPath = path.join(root, "src", "features", "web", "StreamingRpcHandler.ts")
 const scheduledAgentHandlerPath = path.join(root, "src", "features", "scheduledAgents", "ScheduledAgentHandler.ts")
 const scheduledAgentStorePath = path.join(root, "src", "infrastructure", "persistence", "LocalScheduledAgentStore.ts")
 const mainPath = path.join(root, "src", "main.ts")
@@ -26,6 +28,8 @@ const webviewState = fs.readFileSync(webviewStatePath, "utf8")
 const browserHandler = fs.readFileSync(browserHandlerPath, "utf8")
 const worktreeMutationHandler = fs.readFileSync(worktreeMutationHandlerPath, "utf8")
 const webviewStreamPublisher = fs.readFileSync(webviewStreamPublisherPath, "utf8")
+const streamingRpcDecoder = fs.readFileSync(streamingRpcDecoderPath, "utf8")
+const streamingRpcHandler = fs.readFileSync(streamingRpcHandlerPath, "utf8")
 const scheduledAgentHandler = fs.readFileSync(scheduledAgentHandlerPath, "utf8")
 const scheduledAgentStore = fs.readFileSync(scheduledAgentStorePath, "utf8")
 const paritySource = `${router}\n${conversation}\n${providerConfiguration}\n${webviewState}\n${browserHandler}\n${worktreeMutationHandler}\n${scheduledAgentHandler}\n${scheduledAgentStore}`
@@ -119,17 +123,21 @@ function requireMatch(label, source, pattern) {
 	}
 }
 
-const inertStreamingStart = router.indexOf("private readonly inertStreams")
-const inertStreamingEnd = router.indexOf("])", inertStreamingStart)
-const inertStreamingBlock = inertStreamingStart >= 0 && inertStreamingEnd >= 0 ? router.slice(inertStreamingStart, inertStreamingEnd) : ""
+const inertStreamingStart = streamingRpcDecoder.indexOf("const inertStreams")
+const inertStreamingEnd = streamingRpcDecoder.indexOf("])", inertStreamingStart)
+const inertStreamingBlock = inertStreamingStart >= 0 && inertStreamingEnd >= 0 ? streamingRpcDecoder.slice(inertStreamingStart, inertStreamingEnd) : ""
 if (inertStreamingBlock.includes("McpService.subscribeToMcpServers")) {
 	fail("MCP server subscription must not be handled as an inert lazy stream.")
 }
 
-requireSequence("MCP server subscription", router, [
+requireSequence("MCP server subscription decoding", streamingRpcDecoder, [
 	'if (key === "McpService.subscribeToMcpServers")',
-	"this.mcpServerStreamRequestIds.add(requestId)",
-	"await this.getMcpServersResponse()",
+	'{ type: "mcpServers" }',
+])
+requireSequence("MCP server subscription", streamingRpcHandler, [
+	'case "mcpServers"',
+	"this.mcpRequests.add(requestId)",
+	"await this.callbacks.mcpServers()",
 ])
 
 requireSequence("MCP server stream cancellation", router, [

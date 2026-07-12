@@ -58,6 +58,10 @@ const unaryHandler = router.match(/private async handleUnaryRequest[\s\S]*?\n\t}
 if (unaryHandler.includes("switch (key)")) {
 	violations.push("VisualStudioWebviewBackend must dispatch unary WebView RPC through typed boundary decoders instead of owning a raw switch table.")
 }
+const streamingHandler = router.match(/private async handleStreamingRequest[\s\S]*?\n\t}\n\n\tprivate async handleUnaryRequest/)?.[0] || ""
+if (streamingHandler.includes('key === "')) {
+	violations.push("VisualStudioWebviewBackend must dispatch streaming WebView RPC through the typed streaming decoder.")
+}
 if (router.includes("runBrowserActionViaDevTools") || router.includes("browserSessions")) {
 	violations.push("VisualStudioWebviewBackend must delegate browser execution and session ownership to BrowserHandler.")
 }
@@ -313,6 +317,7 @@ for (const requiredFile of [
 	"infrastructure/webview/FileRpcDecoder.ts",
 	"infrastructure/webview/InstructionSettingsRpcDecoder.ts",
 	"infrastructure/webview/UiWebRpcDecoder.ts",
+	"infrastructure/webview/StreamingRpcDecoder.ts",
 	"infrastructure/webview/PluginRpcDecoder.ts",
 	"infrastructure/transport/SidecarRpcServer.ts",
 	"bootstrap/SidecarConnectionFactory.ts",
@@ -339,6 +344,7 @@ for (const requiredFile of [
 	"features/settings/SdkSettingsHandler.ts",
 	"features/settings/InstructionSettingsRpcHandler.ts",
 	"features/web/UiWebRpcHandler.ts",
+	"features/web/StreamingRpcHandler.ts",
 	"features/plugins/PluginRpcHandler.ts",
 	"features/settings/SettingsRpcHandler.ts",
 	"features/worktrees/WorktreePolicy.ts",
