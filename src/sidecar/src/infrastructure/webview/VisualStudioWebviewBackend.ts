@@ -111,6 +111,8 @@ import { McpRpcHandler } from "../../features/mcp/McpRpcHandler"
 import { decodeMcpRpcCommand } from "./McpRpcDecoder"
 import { ModelCatalogRpcHandler } from "../../features/providers/ModelCatalogRpcHandler"
 import { decodeModelCatalogRpcCommand } from "./ModelCatalogRpcDecoder"
+import { FileRpcHandler } from "../../features/files/FileRpcHandler"
+import { decodeFileRpcCommand } from "./FileRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -291,6 +293,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly worktreeRpc: WorktreeRpcHandler
 	private readonly mcpRpc: McpRpcHandler
 	private readonly modelCatalogRpc: ModelCatalogRpcHandler
+	private readonly fileRpc: FileRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -369,6 +372,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.worktreeRpc = new WorktreeRpcHandler({ queries: () => this.requireWorktreeQueries(), mutations: () => this.requireWorktreeMutations(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), setFeatureEnabled: (enabled) => this.setWorktreesFeatureFlag(enabled) })
 		this.mcpRpc = new McpRpcHandler({ mcp: () => this.requireMcp(), openSettings: (filePath) => this.host.windowClient.openFile({ filePath }), markRuntimeChanged: () => { this.runtimeSettingsRevision++ } })
 		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
+		this.fileRpc = new FileRpcHandler({ host: this.host, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), resolvePath: (workspaceRoot, filePath) => path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath, baseName: (filePath) => path.basename(filePath), exists: (filePath) => fs.existsSync(filePath), revert: (request) => this.requireChangeTracking().revert(request) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -905,6 +909,11 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 		const modelCatalogCommand = decodeModelCatalogRpcCommand(key, message)
 		if (modelCatalogCommand) return grpcHandled(grpcResponse(requestId, await this.modelCatalogRpc.handle(modelCatalogCommand), false))
+		const fileCommand = decodeFileRpcCommand(key, message)
+		if (fileCommand) {
+			const fileResult = await this.fileRpc.handle(fileCommand)
+			return grpcHandled(grpcResponse(requestId, fileResult.payload, false), ...(fileResult.includeStateMessages ? this.buildStateMessages() : []))
+		}
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -965,93 +974,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			case "PluginsService.listPlugins":
 			case "PluginsService.getPluginConfigStatus":
 				return grpcHandled(grpcResponse(requestId, await this.getLocalPluginConfigStatus(), false))
-
-			case "FileService.createRuleFile":
-			case "FileService.deleteRuleFile":
-			case "FileService.createSkillFile":
-			case "FileService.deleteSkillFile":
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "FileService.openVsClineDiff": {
-				const leftPath = getString(message, "leftPath") || getString(message, "beforePath")
-				const rightPath = getString(message, "rightPath") || getString(message, "afterPath") || getString(message, "filePath")
-				const title = getString(message, "title") || (rightPath ? `LIG VS change: ${path.basename(rightPath)}` : "LIG VS change")
-				if (leftPath && rightPath) {
-					await this.host.diffClient.openDiff({ leftPath, rightPath, title })
-				} else if (rightPath) {
-					await this.host.windowClient.openFile({ filePath: rightPath })
-				}
-				return grpcHandled(grpcResponse(requestId, {}, false))
-			}
-
-			case "FileService.revertVsClineChanges":
-				return grpcHandled(grpcResponse(requestId, await this.revertVsClineChanges(message), false), ...this.buildStateMessages())
-
-			case "FileService.copyToClipboard":
-				await this.host.envClient.clipboardWriteText({
-					value: getString(message, "value") || getString(message, "text"),
-				})
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "FileService.ifFileExistsRelativePath": {
-				const relativePath = getString(message, "value") || getString(message, "path") || getString(message, "relativePath")
-				const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-				const fullPath = workspaceRoot && relativePath ? path.resolve(workspaceRoot, relativePath) : ""
-				const exists = fullPath ? fs.existsSync(fullPath) : false
-				return grpcHandled(grpcResponse(requestId, { value: exists }, false))
-			}
-
-			case "FileService.getRelativePaths":
-				return grpcHandled(grpcResponse(requestId, { values: [], paths: [] }, false))
-
-			case "FileService.searchFiles":
-			case "FileService.searchCommits":
-				return grpcHandled(grpcResponse(requestId, { results: [], values: [] }, false))
-
-			case "FileService.selectFiles": {
-				try {
-					const selected = asRecord(await host.workspaceClient.selectFiles({
-						allowImages: getBoolean(message, "value") || getBoolean(message, "allowImages"),
-					}))
-					return grpcHandled(
-						grpcResponse(
-							requestId,
-							{
-								values1: Array.isArray(selected.values1) ? selected.values1 : selected.images || [],
-								values2: Array.isArray(selected.values2) ? selected.values2 : selected.files || [],
-							},
-							false,
-						),
-					)
-				} catch (error) {
-					await host.windowClient.showMessage({
-						message: `LIG VS could not open the file picker: ${stringify(error)}`,
-						type: "warning",
-					})
-					return grpcHandled(grpcResponse(requestId, { values1: [], values2: [], error: stringify(error) }, false))
-				}
-			}
-
-			case "FileService.openMention":
-			case "FileService.openDiskConversationHistory":
-			case "FileService.openFocusChainFile":
-			case "FileService.openImage":
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "FileService.openFile":
-			case "FileService.openFileRelativePath": {
-				const filePath =
-					getString(message, "filePath") ||
-					getString(message, "path") ||
-					getString(message, "value") ||
-					getString(message, "relativePath")
-				const workspaceRoot = await this.getPrimaryWorkspaceRoot()
-				const fullPath = path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath
-				if (fullPath) {
-					await host.windowClient.openFile({ filePath: fullPath, line: getNumber(message, "line") })
-				}
-				return grpcHandled(grpcResponse(requestId, {}, false))
-			}
 
 			default:
 				return null
@@ -1509,8 +1431,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 
 
-
-	private async revertVsClineChanges(message: unknown) { return this.requireChangeTracking().revert(message) }
 
 	private wasRecentlyTracked(filePath: string) { return this.requireChangeTracking().wasRecentlyTracked(filePath) }
 
@@ -2042,12 +1962,6 @@ function getString(message: unknown, key: string): string {
 
 	const value = (message as Record<string, unknown>)[key]
 	return typeof value === "string" ? value : ""
-}
-
-function getBoolean(message: unknown, key: string): boolean | undefined {
-	const record = asRecord(message)
-	const value = record[key]
-	return typeof value === "boolean" ? value : undefined
 }
 
 function normalizePromptDelivery(value: string): "queue" | "steer" | undefined {

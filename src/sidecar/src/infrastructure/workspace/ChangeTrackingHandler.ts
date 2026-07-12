@@ -1,6 +1,7 @@
 import path from "node:path"
 import type { WorkspacePort } from "../../application/ports/HostProviderPort"
 import type { WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
+import type { RevertChangesRequest } from "../../features/files/FileRpcHandler"
 
 export type TrackedChangeSummary = { filePath: string; beforePath: string; afterPath: string; action: string; additions: number; deletions: number }
 
@@ -23,8 +24,8 @@ export class ChangeTrackingHandler {
 	wasRecentlyTracked(filePath: string) { this.prune(); return this.recentPaths.has(normalize(filePath)) }
 	hasRecentlyTrackedChange() { this.prune(); return this.recentPaths.size > 0 }
 
-	async revert(message: unknown) {
-		const request = asRecord(message), files = (Array.isArray(request.files) ? request.files : []).map(asRecord).filter((file) => readString(file.filePath))
+	async revert(request: RevertChangesRequest) {
+		const files = request.files.filter((file) => file.filePath)
 		const reverted: string[] = [], skipped: Array<{ filePath: string; reason: string }> = []
 		for (const file of files) {
 			const filePath = readString(file.filePath), beforePath = readString(file.beforePath), action = readString(file.action) || "modified"
