@@ -114,8 +114,8 @@ import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRef
 import { shouldLogSdkEventForInteraction, summarizeAgentChunkForLog, summarizeClineMessageForLog, summarizeSdkEventForLog } from "./WebviewInteractionLogSupport"
 import { grpcError, grpcHandled, grpcResponse } from "./WebviewGrpcSupport"
 import { formatEmptyModelResponseForUi, formatProviderErrorForTranscript, formatSdkErrorForUi, isSessionNotFoundError, stringify } from "./RuntimeErrorFormatter"
-import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { WebviewUnaryRpcRouter } from "./WebviewUnaryRpcRouter"
+import { WebviewStreamingRpcRouter } from "./WebviewStreamingRpcRouter"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { RuntimeModelContext } from "../models/RuntimeModelContext"
@@ -281,6 +281,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly uiWebRpc: UiWebRpcHandler
 	private readonly pluginRpc: PluginRpcHandler
 	private readonly streamingRpc: StreamingRpcHandler
+	private readonly streamingRpcRouter: WebviewStreamingRpcRouter
 	private readonly unaryRpcRouter: WebviewUnaryRpcRouter
 	private readonly stateStreamRefresh: StateStreamRefreshCoordinator
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
@@ -386,6 +387,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.unaryRpcRouter = new WebviewUnaryRpcRouter({ settings: this.settingsRpc, account: this.accountRpc, browser: this.browserRpc, terminal: this.terminalRpc, task: this.taskRpc, checkpoint: this.checkpointRpc, hook: this.hookRpc, scheduledAgent: this.scheduledAgentRpc, worktree: this.worktreeRpc, mcp: this.mcpRpc, modelCatalog: this.modelCatalogRpc, file: this.fileRpc, instructionSettings: this.instructionSettingsRpc, uiWeb: this.uiWebRpc, plugin: this.pluginRpc, stateMessages: () => this.buildStateMessages(), mcpStreamMessages: (payload) => this.buildMcpServerStreamMessages(payload) })
 		this.stateStreamRefresh = new StateStreamRefreshCoordinator({ logger: this.logger, delayMs: () => readPositiveIntEnv("VSCLINE_STATE_REFRESH_DELAY_MS", 2500), shouldSkipScheduledRefresh: () => Boolean(this.state.currentTaskItem && this.clineSdk?.status.activeSessionId), refreshHistory: () => this.taskHistorySync.refresh(), refreshSelectedTask: () => this.taskTranscriptHydrator.refreshSelected(), broadcast: () => this.broadcastState(), formatError: (error) => stringify(error) })
 		this.streamingRpc = new StreamingRpcHandler({ scheduleStateRefresh: () => this.stateStreamRefresh.schedule(), subscribeState: (requestId) => this.requireStreamPublisher().subscribeState(requestId), subscribePartial: (requestId) => { this.requireStreamPublisher().subscribePartial(requestId) }, unauthenticatedAccount: () => createUnauthenticatedAccountState(), mcpServers: async () => (await this.mcpRpc.handle({ type: "list" })).payload, mcpMarketplace: async () => (await this.mcpRpc.handle({ type: "marketplace" })).payload })
+		this.streamingRpcRouter = new WebviewStreamingRpcRouter({ handler: this.streamingRpc, unsubscribeTransport: (requestId) => this.requireStreamPublisher().unsubscribe(requestId) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -483,7 +485,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.terminalActivity?.dispose()
 		this.changeTracking?.dispose()
 		this.streamPublisher?.dispose()
-		this.streamingRpc.clear()
+		this.streamingRpcRouter.clear()
 		this.stateStreamRefresh.dispose()
 		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
 		this.pendingQuestion?.resolve("")
@@ -545,7 +547,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 		if (envelope.type === "grpc_request_cancel") {
 			const requestId = envelope.requestId
-			if (this.disposeStreamRequest(requestId)) {
+			if (this.streamingRpcRouter.unsubscribe(requestId)) {
 				this.logger.log("webview->sidecar", "grpc_request_cancel.streamDisposed", { requestId })
 				return {
 					handled: true,
@@ -583,7 +585,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		}
 
 		if (isStreaming) {
-			const result = await this.handleStreamingRequest(key, requestId)
+			const result = await this.streamingRpcRouter.handle(key, requestId)
 			this.logSlowGrpcRequest(key, startedAt, true)
 			return result
 		}
@@ -600,20 +602,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			await this.broadcastState()
 			return grpcHandled(grpcError(requestId, message, false))
 		}
-	}
-
-	private async handleStreamingRequest(key: string, requestId: string) {
-		const command = decodeStreamingRpcCommand(key)
-		if (!command) return null
-		const result = await this.streamingRpc.handle(command, requestId)
-		if (result.kind === "direct") return grpcHandled(...result.messages)
-		if (result.kind === "payload") return grpcHandled(grpcResponse(requestId, result.payload, true))
-		if (result.kind === "empty") return grpcHandled()
-		return { handled: true, owner: "sidecar", reason: result.reason, webviewMessages: [] }
-	}
-
-	private disposeStreamRequest(requestId: string) {
-		return this.requireStreamPublisher().unsubscribe(requestId) || this.streamingRpc.unsubscribeMcp(requestId)
 	}
 
 	private logSlowGrpcRequest(key: string, startedAt: number, streaming: boolean) {
@@ -653,7 +641,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	}
 
 	private buildMcpServerStreamMessages(response: unknown) {
-		return this.streamingRpc.mcpMessages(response, (requestId, payload) => grpcResponse(requestId, payload, true))
+		return this.streamingRpcRouter.mcpMessages(response)
 	}
 
 	private getBrowserSettings(): BrowserSettings {
