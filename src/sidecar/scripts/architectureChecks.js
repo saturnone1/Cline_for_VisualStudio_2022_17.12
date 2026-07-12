@@ -80,6 +80,9 @@ if (!router.includes("TaskStateCoordinator") || router.includes("private updateC
 if (!router.includes("TaskCompletionProjector") || router.includes("private finishSdkTask") || router.includes("private hasCompletionResultAfterLastUserMessage")) {
 	violations.push("VisualStudioWebviewBackend must use TaskCompletionProjector directly instead of restoring completion forwarding methods.")
 }
+if (router.includes("private finalizeActivePartialText") || router.includes("private upsertFoldedReasoningText") || router.includes("private startTerminalStatePolling")) {
+	violations.push("VisualStudioWebviewBackend must use conversation projectors and terminal activity adapters directly instead of restoring forwarding methods.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
