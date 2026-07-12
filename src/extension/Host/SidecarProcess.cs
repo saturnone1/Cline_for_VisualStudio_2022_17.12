@@ -169,7 +169,11 @@ namespace VsClineAgent.Host
             try
             {
                 var pipeStopwatch = Stopwatch.StartNew();
-                await ConnectWithRetryAsync(_client, _process, cancellationToken).ConfigureAwait(false);
+                await SidecarStartupConnector.ConnectWithRetryAsync(
+                    () => _process.HasExited,
+                    () => SafeExitCode(_process),
+                    (timeout, token) => _client.ConnectAsync(timeout, token),
+                    cancellationToken).ConfigureAwait(false);
                 pipeStopwatch.Stop();
                 pipeConnectMs = pipeStopwatch.ElapsedMilliseconds;
 
@@ -267,36 +271,6 @@ namespace VsClineAgent.Host
                 {
                 }
             }
-        }
-
-        private static async Task ConnectWithRetryAsync(
-            NamedPipeJsonRpcClient client,
-            Process process,
-            CancellationToken cancellationToken)
-        {
-            Exception? lastError = null;
-
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (process.HasExited)
-                    throw new InvalidOperationException(
-                        "Cline sidecar exited before the pipe connection was established. Exit code: " +
-                        SafeExitCode(process));
-
-                try
-                {
-                    await client.ConnectAsync(500, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
-                {
-                    lastError = ex;
-                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-                }
-            }
-
-            throw new TimeoutException("Timed out while connecting to the Cline sidecar pipe.", lastError);
         }
 
         private sealed class SidecarRuntimePreparation
