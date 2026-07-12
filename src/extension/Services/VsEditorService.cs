@@ -5,6 +5,7 @@ using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using VsClineAgent.Host;
 
 namespace VsClineAgent.Services
 {
@@ -17,7 +18,7 @@ namespace VsClineAgent.Services
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 return GetDte()?.ActiveDocument?.FullName;
             }
-            catch { return null; }
+            catch (Exception ex) { LogFailure("editor.activeFile.failed", ex); return null; }
         }
 
         public async Task<string?> GetSolutionRootAsync()
@@ -30,7 +31,7 @@ namespace VsClineAgent.Services
                     ? null
                     : System.IO.Path.GetDirectoryName(solutionPath);
             }
-            catch { return null; }
+            catch (Exception ex) { LogFailure("editor.solutionRoot.failed", ex); return null; }
         }
 
         public async Task OpenSolutionAsync(string solutionPath)
@@ -56,10 +57,11 @@ namespace VsClineAgent.Services
                 if (dte?.Documents == null) return result;
                 foreach (Document doc in dte.Documents)
                 {
-                    try { result.Add(doc.FullName); } catch { }
+                    try { result.Add(doc.FullName); }
+                    catch (Exception ex) { LogFailure("editor.openDocumentEntry.failed", ex); }
                 }
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.openDocuments.failed", ex); }
             return result;
         }
 
@@ -78,7 +80,7 @@ namespace VsClineAgent.Services
                     doc.Selection.MoveToPoint(pt);
                 }
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.openFile.failed", ex, filePath); }
         }
 
         public async Task<bool> SaveDocumentIfDirtyAsync(string filePath)
@@ -101,10 +103,10 @@ namespace VsClineAgent.Services
 
                         return true;
                     }
-                    catch { }
+                    catch (Exception ex) { LogFailure("editor.saveDocumentEntry.failed", ex, filePath); }
                 }
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.saveDocument.failed", ex, filePath); }
 
             return false;
         }
@@ -123,7 +125,7 @@ namespace VsClineAgent.Services
                 else
                     dte.ExecuteCommand(commandName, arguments);
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.executeCommand.failed", ex, commandName); }
         }
 
         public async Task ReloadFileAsync(string filePath)
@@ -143,10 +145,10 @@ namespace VsClineAgent.Services
                             break;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { LogFailure("editor.reloadFileEntry.failed", ex, filePath); }
                 }
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.reloadFile.failed", ex, filePath); }
         }
 
         public async Task<List<DiagnosticItem>> GetDiagnosticsAsync()
@@ -173,10 +175,10 @@ namespace VsClineAgent.Services
                                      : "Info"
                         });
                     }
-                    catch { }
+                    catch (Exception ex) { LogFailure("editor.diagnosticEntry.failed", ex, i.ToString()); }
                 }
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.diagnostics.failed", ex); }
             return result;
         }
 
@@ -188,13 +190,23 @@ namespace VsClineAgent.Services
                 var bar = Package.GetGlobalService(typeof(SVsStatusbar)) as IVsStatusbar;
                 bar?.SetText(message);
             }
-            catch { }
+            catch (Exception ex) { LogFailure("editor.statusBar.failed", ex); }
         }
 
         private static DTE2? GetDte()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             return Package.GetGlobalService(typeof(SDTE)) as DTE2;
+        }
+
+        private static void LogFailure(string eventName, Exception exception, string? target = null)
+        {
+            InteractionLog.Write("host", eventName, new
+            {
+                target,
+                error = exception.Message,
+                exceptionType = exception.GetType().FullName
+            });
         }
     }
 

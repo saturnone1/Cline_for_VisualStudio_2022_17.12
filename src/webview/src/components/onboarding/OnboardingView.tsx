@@ -332,14 +332,14 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 					setStepNumber(stepNumber + 1)
 					setIsActionLoading(true)
 					await AccountServiceClient.accountLoginClicked({})
-						.catch(() => {})
+						.catch((error) => console.error("Failed to start account signup:", error))
 						.finally(() => setIsActionLoading(false))
 					await finishOnboarding(true, stepNumber + 1)
 					break
 				case "signin":
 					setIsActionLoading(true)
 					await AccountServiceClient.accountLoginClicked({})
-						.catch(() => {})
+						.catch((error) => console.error("Failed to start account sign-in:", error))
 						.finally(() => setIsActionLoading(false))
 					await finishOnboarding(true, stepNumber + 1)
 					break
@@ -352,7 +352,9 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 					setStepNumber(stepNumber - 1)
 					break
 				case "done":
-					await StateServiceClient.setWelcomeViewCompleted({ value: true }).catch(() => {})
+					await StateServiceClient.setWelcomeViewCompleted({ value: true }).catch((error) =>
+						console.error("Failed to persist onboarding completion:", error),
+					)
 					setShowWelcome(false)
 					await finishOnboarding(false, stepNumber)
 					break

@@ -317,7 +317,12 @@ namespace VsClineAgent.ToolWindows
             Directory.CreateDirectory(userDataFolder);
             var options = new CoreWebView2EnvironmentOptions
             {
-                AdditionalBrowserArguments = "--disable-gpu"
+                AdditionalBrowserArguments = string.Equals(
+                    Environment.GetEnvironmentVariable("VSCLINE_WEBVIEW2_DISABLE_GPU"),
+                    "1",
+                    StringComparison.Ordinal)
+                    ? "--disable-gpu"
+                    : null
             };
 
             var env = await CoreWebView2Environment.CreateAsync(browserExecutableFolder, userDataFolder, options);
@@ -665,7 +670,10 @@ namespace VsClineAgent.ToolWindows
                 InteractionLog.Write("host->webview", "webview.postMessage", json);
                 _webviewMessages.Enqueue(json);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                InteractionLog.Write("host", "webview.message.enqueueFailed", new { error = ex.Message });
+            }
 
             return Task.CompletedTask;
         }

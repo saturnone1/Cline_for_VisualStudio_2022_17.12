@@ -28,7 +28,7 @@ const DebugSection = ({ onResetState, renderSectionHeader }: DebugSectionProps) 
 				<Button
 					onClick={async () =>
 						await StateServiceClient.setWelcomeViewCompleted({ value: false })
-							.catch(() => {})
+							.catch((error) => console.error("Failed to reset onboarding state:", error))
 							.finally(() => setShowWelcome(true))
 					}
 					variant="secondary">

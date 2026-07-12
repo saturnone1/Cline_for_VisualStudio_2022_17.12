@@ -62,9 +62,10 @@ namespace VsClineAgent.Host
             {
                 _dispatcher.BeginInvoke(new Action(Flush), DispatcherPriority.Background);
             }
-            catch
+            catch (Exception ex)
             {
                 lock (_gate) _flushScheduled = false;
+                InteractionLog.Write("host", "webview.queue.scheduleFailed", new { error = ex.Message });
             }
         }
 
@@ -109,10 +110,29 @@ namespace VsClineAgent.Host
                 _pending.Clear();
             }
 
+            var failed = new List<string>();
             foreach (var json in messages)
             {
                 try { webview.PostWebMessageAsJson(json); }
-                catch { }
+                catch (Exception ex)
+                {
+                    failed.Add(json);
+                    InteractionLog.Write("host->webview", "webview.queue.postFailed", new
+                    {
+                        error = ex.Message,
+                        messageLength = json.Length
+                    });
+                }
+            }
+
+            if (failed.Count > 0)
+            {
+                lock (_gate)
+                {
+                    foreach (var json in failed)
+                        _pending.Enqueue(json);
+                    TrimPendingMessages();
+                }
             }
         }
 
