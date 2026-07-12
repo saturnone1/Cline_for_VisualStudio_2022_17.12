@@ -1,11 +1,9 @@
 import { COMMAND_OUTPUT_STRING } from "@shared/combineCommandSequences"
 import {
 	ClineApiReqInfo,
-	ClineAskQuestion,
 	ClineAskUseMcpServer,
 	ClineMessage,
 	ClineSayGenerateExplanationComment,
-	ClinePlanModeResponse,
 	ClineSayGenerateExplanation,
 	ClineSayTool,
 	COMPLETION_RESULT_CHANGES_FLAG,
@@ -21,7 +19,6 @@ import {
 	ChevronRightIcon,
 	CircleSlashIcon,
 	CircleXIcon,
-	FilePlus2Icon,
 	LightbulbIcon,
 	LoaderCircleIcon,
 	RefreshCwIcon,
@@ -32,7 +29,6 @@ import {
 } from "lucide-react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSize } from "react-use"
-import { OptionsButtons } from "@/components/chat/OptionsButtons"
 import { CheckmarkControl } from "@/components/common/CheckmarkControl"
 import { WithCopyButton } from "@/components/common/CopyButton"
 import McpResponseDisplay from "@/components/mcp/chatDisplay/McpResponseDisplay"
@@ -44,16 +40,14 @@ import { cn } from "@/lib/utils"
 import { UiServiceClient } from "@/services/grpcClient"
 import { findMatchingResourceOrTemplate, getMcpServerDisplayName } from "@/utils/mcp"
 import CodeAccordian, { cleanPathPrefix } from "../common/CodeAccordian"
+import { AskMessageRenderer } from "./AskMessageRenderer"
 import { CommandOutputContent, CommandOutputRow } from "./CommandOutputRow"
 import { CompletionOutputRow } from "./CompletionOutputRow"
 import ErrorRow from "./ErrorRow"
 import { FeatureTip } from "./FeatureTip"
 import HookMessage from "./HookMessage"
 import { MarkdownRow } from "./MarkdownRow"
-import NewTaskPreview from "./NewTaskPreview"
-import PlanCompletionOutputRow from "./PlanCompletionOutputRow"
 import QuoteButton from "./QuoteButton"
-import ReportBugPreview from "./ReportBugPreview"
 import { RequestStartRow } from "./RequestStartRow"
 import SubagentStatusRow from "./SubagentStatusRow"
 import { ThinkingRow } from "./ThinkingRow"
@@ -825,149 +819,24 @@ export const ChatRowContent = memo(
 						)
 				}
 			case "ask":
-				switch (message.ask) {
-					case "mistake_limit_reached":
-						return <ErrorRow errorType="mistake_limit_reached" message={message} />
-					case "completion_result":
-						if (message.text) {
-							const hasChanges = message.text.endsWith(COMPLETION_RESULT_CHANGES_FLAG) ?? false
-							const text = hasChanges ? message.text.slice(0, -COMPLETION_RESULT_CHANGES_FLAG.length) : message.text
-							if (!hasChanges) {
-								return <div className="text-sm text-description py-0.5">{text || t("task.done")}</div>
-							}
-							return (
-								<CompletionOutputRow
-									explainChangesDisabled={explainChangesDisabled}
-									handleQuoteClick={handleQuoteClick}
-									headClassNames={HEADER_CLASSNAMES}
-									messageTs={message.ts}
-									quoteButtonState={quoteButtonState}
-									seeNewChangesDisabled={seeNewChangesDisabled}
-									setExplainChangesDisabled={setExplainChangesDisabled}
-									setSeeNewChangesDisabled={setSeeNewChangesDisabled}
-									showActionRow={message.partial !== true && hasChanges}
-									text={text || ""}
-								/>
-							)
-						}
-						// Virtuoso cannot handle zero-height items; render a spacer instead of null
-						return <InvisibleSpacer />
-					case "followup":
-						let question: string | undefined
-						let options: string[] | undefined
-						let selected: string | undefined
-						try {
-							const parsedMessage = JSON.parse(message.text || "{}") as ClineAskQuestion
-							question = parsedMessage.question
-							options = parsedMessage.options
-							selected = parsedMessage.selected
-						} catch (_e) {
-							// legacy messages would pass question directly
-							question = message.text
-						}
-
-						return (
-							<div>
-								{title && (
-									<div className={HEADER_CLASSNAMES}>
-										{icon}
-										{title}
-									</div>
-								)}
-								<WithCopyButton
-									className="pt-1"
-									onMouseUp={handleMouseUp}
-									position="bottom-right"
-									ref={contentRef}
-									textToCopy={question}>
-									<MarkdownRow markdown={question} />
-									{quoteButtonState.visible && (
-										<QuoteButton
-											left={quoteButtonState.left}
-											onClick={() => {
-												handleQuoteClick()
-											}}
-											top={quoteButtonState.top}
-										/>
-									)}
-								</WithCopyButton>
-								<div className="pt-3">
-									<OptionsButtons
-										inputValue={inputValue}
-										isActive={
-											(isLast && lastModifiedMessage?.ask === "followup") ||
-											(!selected && options && options.length > 0)
-										}
-										options={options}
-										selected={selected}
-									/>
-								</div>
-							</div>
-						)
-					case "new_task":
-						return (
-							<div>
-								<div className={HEADER_CLASSNAMES}>
-									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS가 새 작업을 시작하려고 합니다:</span>
-								</div>
-								<NewTaskPreview context={message.text || ""} />
-							</div>
-						)
-					case "condense":
-						return (
-							<div>
-								<div className={HEADER_CLASSNAMES}>
-									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS가 대화를 압축하려고 합니다:</span>
-								</div>
-								<NewTaskPreview context={message.text || ""} />
-							</div>
-						)
-					case "report_bug":
-						return (
-							<div>
-								<div className={HEADER_CLASSNAMES}>
-									<FilePlus2Icon className="size-2" />
-									<span className="text-foreground font-bold">LIG VS가 GitHub 이슈를 만들려고 합니다:</span>
-								</div>
-								<ReportBugPreview data={message.text || ""} />
-							</div>
-						)
-					case "plan_mode_respond": {
-						let response: string | undefined
-						let options: string[] | undefined
-						let selected: string | undefined
-						try {
-							const parsedMessage = JSON.parse(message.text || "{}") as ClinePlanModeResponse
-							response = parsedMessage.response
-							options = parsedMessage.options
-							selected = parsedMessage.selected
-						} catch (_e) {
-							// legacy messages would pass response directly
-							response = message.text
-						}
-						return (
-							<div>
-								<PlanCompletionOutputRow
-									headClassNames={HEADER_CLASSNAMES}
-									text={response || message.text || ""}
-								/>
-								<OptionsButtons
-									inputValue={inputValue}
-									isActive={
-										(isLast && lastModifiedMessage?.ask === "plan_mode_respond") ||
-										(!selected && options && options.length > 0)
-									}
-									options={options}
-									selected={selected}
-								/>
-							</div>
-						)
-					}
-					default:
-						return <InvisibleSpacer />
-				}
+				return (
+					<AskMessageRenderer
+						contentRef={contentRef}
+						explainChangesDisabled={explainChangesDisabled}
+						handleMouseUp={handleMouseUp}
+						handleQuoteClick={handleQuoteClick}
+						icon={icon}
+						inputValue={inputValue}
+						isLast={isLast}
+						lastModifiedMessage={lastModifiedMessage}
+						message={message}
+						quoteButtonState={quoteButtonState}
+						seeNewChangesDisabled={seeNewChangesDisabled}
+						setExplainChangesDisabled={setExplainChangesDisabled}
+						setSeeNewChangesDisabled={setSeeNewChangesDisabled}
+						title={title}
+					/>
+				)
 		}
 	},
 )
