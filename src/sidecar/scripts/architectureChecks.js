@@ -77,6 +77,9 @@ if (!router.includes("StateStreamRefreshCoordinator") || router.includes("stateH
 if (!router.includes("TaskStateCoordinator") || router.includes("private updateCurrentTaskItem") || router.includes("private rememberTaskSnapshot")) {
 	violations.push("VisualStudioWebviewBackend must delegate task metadata, history, snapshot, and persistence coordination to TaskStateCoordinator.")
 }
+if (!router.includes("TaskCompletionProjector") || router.includes("private finishSdkTask") || router.includes("private hasCompletionResultAfterLastUserMessage")) {
+	violations.push("VisualStudioWebviewBackend must use TaskCompletionProjector directly instead of restoring completion forwarding methods.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
