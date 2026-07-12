@@ -110,6 +110,9 @@ if (router.includes("private handleFileChangedEvent") || router.includes("privat
 if (!router.includes("RuntimeModelContext") || router.includes("private getModelId") || router.includes("private getResumedConversationCharBudget")) {
 	violations.push("VisualStudioWebviewBackend must delegate runtime model selection and transcript budget policy to RuntimeModelContext.")
 }
+if (!router.includes("ToolRuntimePolicy") || router.includes("private createCurrentToolPolicies") || router.includes("private refreshWebToolFeatureState")) {
+	violations.push("VisualStudioWebviewBackend must delegate tool policy and Web feature-state projection to ToolRuntimePolicy.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -332,6 +335,7 @@ for (const requiredFile of [
 	"infrastructure/configuration/ProviderConfiguration.ts",
 	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
 	"infrastructure/configuration/SettingsMutationHandler.ts",
+	"infrastructure/configuration/ToolRuntimePolicy.ts",
 	"infrastructure/configuration/AgentSdkConfigBuilder.ts",
 	"infrastructure/models/EffectiveModelResolver.ts",
 	"infrastructure/auth/ProviderAuthSupport.ts",
