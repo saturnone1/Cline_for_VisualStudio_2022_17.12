@@ -128,7 +128,7 @@
   </ItemGroup>
 
   <Target Name="ValidateVsPackagingProfile" BeforeTargets="PrepareForBuild"
-          Condition="!Exists('$(VsProfilePath)') Or '$(VsAssemblyName)' == '' Or '$(VsixManifestPath)' == ''">
+          Condition="!Exists('$(VsProfilePath)') Or '$(VsAssemblyName)' == '' Or '$(VsixManifestPath)' == '' Or !Exists('$(VsPkgDefPath)')">
     <Error Text="Unknown or incomplete VsTarget '$(VsTarget)'. Expected a profile at $(VsProfilePath)." />
   </Target>
 
@@ -154,7 +154,8 @@
       <Link>source.extension.vsixmanifest</Link>
       <SubType>Designer</SubType>
     </None>
-    <Content Include="VsClineAgent.pkgdef">
+    <Content Include="$(VsPkgDefPath)">
+      <Link>VsClineAgent.pkgdef</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>

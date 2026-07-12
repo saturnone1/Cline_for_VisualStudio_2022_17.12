@@ -25,6 +25,7 @@ try {
         "extension.vsixmanifest",
         "manifest.json",
         "catalog.json",
+        "VsClineAgent.pkgdef",
         $ExpectedAssembly,
         "Newtonsoft.Json.dll",
         "WebApp/assets/index.css",
@@ -81,6 +82,14 @@ try {
         if (-not $zip.GetEntry($entryName)) {
             Fail "Missing required entry: $entryName"
         }
+    }
+
+    $pkgDefEntry = $zip.GetEntry("VsClineAgent.pkgdef")
+    $reader = [System.IO.StreamReader]::new($pkgDefEntry.Open())
+    $pkgDefText = $reader.ReadToEnd()
+    $reader.Dispose()
+    if ($pkgDefText -notmatch [regex]::Escape('"CodeBase"="$PackageFolder$\' + $ExpectedAssembly + '"')) {
+        Fail "VsClineAgent.pkgdef does not register the expected assembly CodeBase: $ExpectedAssembly"
     }
 
     $nodeEntries = @($zip.Entries | Where-Object { $_.FullName -like "*node.exe" })

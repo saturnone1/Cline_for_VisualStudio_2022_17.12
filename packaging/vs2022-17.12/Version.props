@@ -6,6 +6,7 @@
     <VsSdkPackageVersion>17.6.36389</VsSdkPackageVersion>
     <VsSdkBuildToolsPackageVersion>17.6.2164</VsSdkBuildToolsPackageVersion>
     <VsixManifestPath>$(MSBuildThisFileDirectory)source.extension.vsixmanifest</VsixManifestPath>
+    <VsPkgDefPath>$(MSBuildThisFileDirectory)VsClineAgent.pkgdef</VsPkgDefPath>
     <VsVersionInfoPath>$(MSBuildThisFileDirectory)VisualStudioVersionInfo.cs</VsVersionInfoPath>
   </PropertyGroup>
 </Project>
