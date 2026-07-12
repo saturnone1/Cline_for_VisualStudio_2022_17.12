@@ -1,17 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
-using Newtonsoft.Json.Linq;
 
 namespace VsClineAgent.Host
 {
     internal sealed class WebviewMessageQueue : IDisposable
     {
-        private const int MaxPendingMessages = 1000;
         private readonly object _gate = new object();
-        private readonly Queue<string> _pending = new Queue<string>();
+        private readonly PendingWebviewMessageBuffer _pending = new PendingWebviewMessageBuffer();
         private readonly Dispatcher _dispatcher;
         private readonly Func<CoreWebView2?> _getWebview;
         private bool _flushScheduled;
@@ -48,7 +45,6 @@ namespace VsClineAgent.Host
                 if (_disposed)
                     return;
                 _pending.Enqueue(json);
-                TrimPendingMessages();
                 if (_flushScheduled)
                     return;
                 _flushScheduled = true;
@@ -106,8 +102,7 @@ namespace VsClineAgent.Host
                 if (!_ready || webview == null)
                     return;
 
-                messages = _pending.ToArray();
-                _pending.Clear();
+                messages = _pending.TakeAll();
             }
 
             var failed = new List<string>();
@@ -129,67 +124,8 @@ namespace VsClineAgent.Host
             {
                 lock (_gate)
                 {
-                    foreach (var json in failed)
-                        _pending.Enqueue(json);
-                    TrimPendingMessages();
+                    _pending.ReturnFailed(failed);
                 }
-            }
-        }
-
-        private void TrimPendingMessages()
-        {
-            if (_pending.Count <= MaxPendingMessages)
-                return;
-
-            CoalescePendingStateMessages();
-            while (_pending.Count > MaxPendingMessages)
-                _pending.Dequeue();
-        }
-
-        private void CoalescePendingStateMessages()
-        {
-            var latestStateByRequest = new Dictionary<string, string>(StringComparer.Ordinal);
-            var ordered = _pending.ToList();
-            foreach (var message in ordered)
-            {
-                var requestId = TryGetStateResponseRequestId(message);
-                if (!string.IsNullOrWhiteSpace(requestId))
-                    latestStateByRequest[requestId!] = message;
-            }
-            if (latestStateByRequest.Count == 0)
-                return;
-
-            _pending.Clear();
-            var emitted = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var message in ordered)
-            {
-                var requestId = TryGetStateResponseRequestId(message);
-                if (string.IsNullOrWhiteSpace(requestId))
-                {
-                    _pending.Enqueue(message);
-                    continue;
-                }
-                if (emitted.Contains(requestId!))
-                    continue;
-                var latest = latestStateByRequest[requestId!];
-                if (string.Equals(message, latest, StringComparison.Ordinal))
-                {
-                    _pending.Enqueue(latest);
-                    emitted.Add(requestId!);
-                }
-            }
-        }
-
-        private static string? TryGetStateResponseRequestId(string json)
-        {
-            try
-            {
-                var response = (JObject.Parse(json)["grpc_response"] as JObject);
-                return response?["message"]?["stateJson"] == null ? null : response.Value<string>("request_id");
-            }
-            catch
-            {
-                return null;
             }
         }
     }

@@ -19,5 +19,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\extension\Host\WebviewGrpcFallback.cs" Link="Host\WebviewGrpcFallback.cs" />
     <Compile Include="..\..\src\extension\Host\InteractionLogSanitizer.cs" Link="Host\InteractionLogSanitizer.cs" />
+    <Compile Include="..\..\src\extension\Host\PendingWebviewMessageBuffer.cs" Link="Host\PendingWebviewMessageBuffer.cs" />
+    <Compile Include="..\..\src\extension\Host\SidecarRuntimeFingerprint.cs" Link="Host\SidecarRuntimeFingerprint.cs" />
   </ItemGroup>
 </Project>

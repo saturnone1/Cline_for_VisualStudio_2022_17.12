@@ -6,7 +6,6 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -328,9 +327,9 @@ namespace VsClineAgent.Host
             var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
-            var expectedStamp = GetArchiveStamp(nodeModulesZip);
+            var expectedStamp = SidecarRuntimeFingerprint.FromArchive(nodeModulesZip);
             var runtimeStampStopwatch = Stopwatch.StartNew();
-            var expectedRuntimeStamp = GetRuntimeStamp(runtimeSourceDirectory);
+            var expectedRuntimeStamp = SidecarRuntimeFingerprint.FromRuntimeDirectory(runtimeSourceDirectory);
             runtimeStampStopwatch.Stop();
 
             var preparation = new SidecarRuntimePreparation
@@ -485,37 +484,6 @@ namespace VsClineAgent.Host
             }
         }
 
-        private static string GetRuntimeStamp(string sourceDirectory)
-        {
-            if (!Directory.Exists(sourceDirectory))
-                return "missing";
-
-            var builder = new StringBuilder();
-            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                var relativePath = file.Substring(sourceDirectory.Length)
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-                if (relativePath.StartsWith("node_modules", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(relativePath, "node.exe", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(relativePath, "node_modules.zip", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var info = new FileInfo(file);
-                builder.Append(relativePath.Replace('\\', '/'))
-                    .Append('|')
-                    .Append(info.Length)
-                    .Append('|')
-                    .Append(info.LastWriteTimeUtc.Ticks)
-                    .AppendLine();
-            }
-
-            return builder.ToString();
-        }
-
         private static void CopyRuntimeFiles(string sourceDirectory, string targetDirectory)
         {
             Directory.CreateDirectory(targetDirectory);
@@ -538,20 +506,6 @@ namespace VsClineAgent.Host
                     Directory.CreateDirectory(targetParent);
 
                 File.Copy(file, targetPath, true);
-            }
-        }
-
-        private static string GetArchiveStamp(string archivePath)
-        {
-            if (!File.Exists(archivePath))
-                return "missing";
-
-            var info = new FileInfo(archivePath);
-            using (var stream = File.OpenRead(archivePath))
-            using (var sha256 = SHA256.Create())
-            {
-                var hash = sha256.ComputeHash(stream);
-                return info.Length + ":sha256:" + BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
             }
         }
 
