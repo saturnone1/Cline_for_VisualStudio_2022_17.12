@@ -124,6 +124,7 @@ import { decodeUiWebRpcCommand } from "./UiWebRpcDecoder"
 import { PluginRpcHandler } from "../../features/plugins/PluginRpcHandler"
 import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { StreamingRpcHandler } from "../../features/web/StreamingRpcHandler"
+import { StateStreamRefreshCoordinator } from "../../features/web/StateStreamRefreshCoordinator"
 import { decodeStreamingRpcCommand } from "./StreamingRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
@@ -313,9 +314,9 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly uiWebRpc: UiWebRpcHandler
 	private readonly pluginRpc: PluginRpcHandler
 	private readonly streamingRpc: StreamingRpcHandler
+	private readonly stateStreamRefresh: StateStreamRefreshCoordinator
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
-	private stateHydrationRefreshInFlight = false
 	private sdkRunGeneration = 0
 	private runtimeSettingsRevision = 0
 	private activeSessionRuntimeSettingsRevision = 0
@@ -404,7 +405,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.addMessage({ type: "say", say: "error", text }) } })
 		this.uiWebRpc = new UiWebRpcHandler({ openExternal: (url) => this.host.envClient.openExternal({ value: url }), checkImage: (url) => checkIsImageUrl(url), openGraph: (url) => fetchOpenGraphData(url) })
 		this.pluginRpc = new PluginRpcHandler({ workspaceRoot: () => this.getPrimaryWorkspaceRoot(), discover: (workspaceRoot) => discoverLocalPlugins(workspaceRoot) })
-		this.streamingRpc = new StreamingRpcHandler({ scheduleStateRefresh: () => this.scheduleStateStreamsRefresh(), subscribeState: (requestId) => this.requireStreamPublisher().subscribeState(requestId), subscribePartial: (requestId) => { this.requireStreamPublisher().subscribePartial(requestId) }, unauthenticatedAccount: () => createUnauthenticatedAccountState(), mcpServers: async () => (await this.mcpRpc.handle({ type: "list" })).payload, mcpMarketplace: async () => (await this.mcpRpc.handle({ type: "marketplace" })).payload })
+		this.stateStreamRefresh = new StateStreamRefreshCoordinator({ logger: this.logger, delayMs: () => readPositiveIntEnv("VSCLINE_STATE_REFRESH_DELAY_MS", 2500), shouldSkipScheduledRefresh: () => Boolean(this.state.currentTaskItem && this.clineSdk?.status.activeSessionId), refreshHistory: () => this.taskHistorySync.refresh(), refreshSelectedTask: () => this.refreshSelectedTaskFromSdk(), broadcast: () => this.broadcastState(), formatError: (error) => stringify(error) })
+		this.streamingRpc = new StreamingRpcHandler({ scheduleStateRefresh: () => this.stateStreamRefresh.schedule(), subscribeState: (requestId) => this.requireStreamPublisher().subscribeState(requestId), subscribePartial: (requestId) => { this.requireStreamPublisher().subscribePartial(requestId) }, unauthenticatedAccount: () => createUnauthenticatedAccountState(), mcpServers: async () => (await this.mcpRpc.handle({ type: "list" })).payload, mcpMarketplace: async () => (await this.mcpRpc.handle({ type: "marketplace" })).payload })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -500,6 +502,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.changeTracking?.dispose()
 		this.streamPublisher?.dispose()
 		this.streamingRpc.clear()
+		this.stateStreamRefresh.dispose()
 		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
 		this.pendingQuestion?.resolve("")
 		this.pendingQuestion = null
@@ -1461,33 +1464,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private sendPartialMessage(message: Record<string, unknown> | undefined) { this.requireStreamPublisher().sendPartial(message) }
 
-	private refreshStateStreamsInBackground() {
-		if (this.stateHydrationRefreshInFlight) {
-			return
-		}
-		this.stateHydrationRefreshInFlight = true
-		void (async () => {
-			try {
-				await this.taskHistorySync.refresh()
-				await this.refreshSelectedTaskFromSdk()
-				await this.broadcastState()
-			} catch (error) {
-				this.logger.log("sidecar", "stateHydrationRefreshFailed", { error: stringify(error) })
-			} finally {
-				this.stateHydrationRefreshInFlight = false
-			}
-		})()
-	}
-
-	private scheduleStateStreamsRefresh() {
-		const delayMs = readPositiveIntEnv("VSCLINE_STATE_REFRESH_DELAY_MS", 2500)
-		setTimeout(() => {
-			if (this.state.currentTaskItem && this.clineSdk?.status.activeSessionId) {
-				return
-			}
-			this.refreshStateStreamsInBackground()
-		}, delayMs).unref?.()
-	}
 }
 
 function shouldLogSdkEventForInteraction(event: unknown) {

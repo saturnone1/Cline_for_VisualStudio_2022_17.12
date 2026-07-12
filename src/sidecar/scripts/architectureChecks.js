@@ -71,6 +71,9 @@ if (!router.includes("RuntimeMonitoringCoordinator") || router.includes("isTermi
 if (!router.includes("TaskSessionCoordinator") || router.includes("closingSessionIds") || router.includes("private transitionTask") || router.includes("private shouldIgnoreSdkEvent")) {
 	violations.push("VisualStudioWebviewBackend must delegate task/session ownership and lifecycle policy to TaskSessionCoordinator.")
 }
+if (!router.includes("StateStreamRefreshCoordinator") || router.includes("stateHydrationRefreshInFlight") || router.includes("private scheduleStateStreamsRefresh")) {
+	violations.push("VisualStudioWebviewBackend must delegate delayed state hydration refresh policy to StateStreamRefreshCoordinator.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -352,6 +355,7 @@ for (const requiredFile of [
 	"features/settings/InstructionSettingsRpcHandler.ts",
 	"features/web/UiWebRpcHandler.ts",
 	"features/web/StreamingRpcHandler.ts",
+	"features/web/StateStreamRefreshCoordinator.ts",
 	"features/plugins/PluginRpcHandler.ts",
 	"features/settings/SettingsRpcHandler.ts",
 	"features/worktrees/WorktreePolicy.ts",
