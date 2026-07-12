@@ -86,6 +86,7 @@ import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEven
 import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
 import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
 import { TaskCompletionProjector } from "../conversation/TaskCompletionProjector"
+import { RuntimeStatusEventProjector } from "../conversation/RuntimeStatusEventProjector"
 import { ConversationMessageStore } from "../conversation/ConversationMessageStore"
 import { ApiConfigurationProfileManager } from "../configuration/ApiConfigurationProfileManager"
 import { SettingsMutationHandler } from "../configuration/SettingsMutationHandler"
@@ -286,6 +287,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly agentSnapshotEvents: AgentSnapshotEventProjector
 	private readonly agentChunkEvents: AgentChunkEventProjector
 	private readonly taskCompletion: TaskCompletionProjector
+	private readonly runtimeStatusEvents: RuntimeStatusEventProjector
 	private readonly apiConfigurationProfiles: ApiConfigurationProfileManager
 	private readonly settingsMutations: SettingsMutationHandler
 	private readonly settingsRpc: SettingsRpcHandler
@@ -396,6 +398,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.schedulePartialIdleWatchdog(), () => this.clearPartialIdleWatchdog(), () => this.clearPartialStateBroadcastTimer(), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.upsertMessage(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.broadcastPartialStateNow(), () => this.schedulePartialStateBroadcast(), () => this.stopTerminalStatePolling(), () => this.getUiLanguage())
 		this.taskCompletion = new TaskCompletionProjector({ messages: () => this.state.clineMessages, transition: (status, source) => { this.transitionTask(status, source) }, clearFinishStatus: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.clearReasoningStatus() }, finishProgress: () => { this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, prepareAssistant: () => { this.clearTaskIdleWatchdog(); this.clearPartialIdleWatchdog(); this.finalizeActivePartialText(); this.finishActiveToolActivity(); this.finishFoldedReasoningText() }, activeText: () => this.getActivePartialText(), addMessage: (message) => { this.addMessage(message) }, markAssistantLatency: (length) => this.markSendLatencyFirstAssistant(this.getCurrentSessionId(), length), finalizeOpenPartial: () => this.finalizeOpenPartialMessages(), lastActivityReason: () => this.taskActivity?.reason || "", runCompleteHook: (context) => { void this.runLifecycleHooks("TaskComplete", context) }, persist: () => this.stateStore.save(createPersistedStateSnapshot(this.state)), language: () => this.getUiLanguage(), recentToolSummaries: () => this.conversationProjection.recentToolSummaries(5), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.runtimeStatusEvents = new RuntimeStatusEventProjector({ shouldIgnore: (sessionId) => this.shouldIgnoreSdkEvent(sessionId), markFirstEvent: (sessionId, eventType) => this.markSendLatencyFirstSdkEvent(sessionId, eventType), activeText: () => this.getActivePartialText(), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateTask: () => this.updateCurrentTaskItem(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, transitionStreaming: (source) => { this.transitionTask("streaming", source) }, noteActivity: (reason) => this.noteTaskActivity(reason), schedulePartial: () => this.schedulePartialStateBroadcast(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentTextEvents = new AgentTextEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), recordReasoning: (text) => this.handleReasoningDelta(text), foldReasoning: (text) => this.upsertFoldedReasoningText(text), upsertAssistant: (accumulated, delta) => this.upsertAssistantTextFromEvent(accumulated, delta), completeAssistant: (text) => this.completeAssistantText(text), activeAssistantText: () => this.conversationProjection.activeAssistantTextBuffer })
 		this.agentToolEvents = new AgentToolEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), clearPartial: () => { this.clearPartialIdleWatchdog(); this.conversationProjection.activePartialTextTs = null }, recordActivity: (tool, text) => this.recordToolActivity(tool, text), startTerminal: () => this.startTerminalStatePolling(), stopTerminal: () => this.stopTerminalStatePolling(), finalPollTerminal: () => { this.pollTerminalState().catch((error) => this.logger.log("sidecar", "terminalStateFinalPollFailed", { message: stringify(error) })) }, postToolUse: (event) => { void this.runLifecycleHooks("PostToolUse", { sessionId: event.sessionId, toolName: event.toolName, input: event.input, output: event.output, error: event.error, iteration: event.iteration }) }, handleBrowser: (tool, input, error) => { void this.handleBrowserToolEvent(tool, input, error) }, shouldSuppressTrackedEdit: (tool, path) => (tool === "editor" || tool === "edit") && (this.hasRecentlyTrackedChange() || Boolean(path && this.wasRecentlyTracked(path))), rememberSummary: (tool, text) => this.rememberToolSummary(tool, text), appendTerminal: (text) => this.appendTerminalActivityText(text), moveProgressToEnd: () => this.foldedProgressProjector.moveActiveToEnd(), language: () => this.getUiLanguage() })
 		this.agentLifecycleEvents = new AgentLifecycleEventProjector({ noteActivity: (reason) => this.noteTaskActivity(reason), clearReasoning: () => this.clearReasoningStatus(), finishToolActivity: () => this.finishActiveToolActivity(), finishProgress: () => this.finishFoldedReasoningText(), finalizePartial: () => this.finalizeActivePartialText(), addText: (text) => this.addMessage({ type: "say", say: "text", text }), addError: (text) => this.addMessage({ type: "say", say: "error", text }), finishTask: (sessionId, status, text) => this.finishSdkTask(sessionId, status, text), updateUsage: (usage) => this.updateCurrentTaskItem(usage), hasCompletion: () => this.hasCompletionResultAfterLastUserMessage(), activePartialText: () => this.getActivePartialText(), hasAssistantAfterUser: () => this.hasAssistantTextAfterLastUserMessage(), log: (event, details) => this.logger.log("sidecar", event, details), formatError: (error) => formatProviderErrorForTranscript(error, this.getUiLanguage()), markErrorLatency: (sessionId, error) => this.markSendLatencyError(sessionId, error) })
@@ -699,43 +702,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			return
 		}
 
-		if (event.type === "status") {
-			const status = event.status
-			const sessionId = event.sessionId
-			if (this.shouldIgnoreSdkEvent(sessionId)) {
-				return
-			}
-			this.markSendLatencyFirstSdkEvent(sessionId, `status:${status}`)
-			if (status === "idle") {
-				this.logger.log("sidecar", "sdkStatusIdle", { sessionId })
-				this.finishSdkTask(sessionId, "completed", this.getActivePartialText())
-				this.updateCurrentTaskItem()
-				this.broadcastState().catch((error) => console.error(error))
-				return
-			}
-			if (isTerminalTaskStatus(status)) {
-				const activeText = this.getActivePartialText()
-				this.finishSdkTask(sessionId, status, activeText)
-				this.updateCurrentTaskItem()
-				this.broadcastState().catch((error) => console.error(error))
-				return
-			}
-			this.transitionTask("streaming", `sdk-status:${status || "unknown"}`)
-			this.noteTaskActivity(status || type)
-			this.schedulePartialStateBroadcast()
-			return
-		}
-
-		if (event.type === "ended") {
-			const sessionId = event.sessionId
-			if (this.shouldIgnoreSdkEvent(sessionId)) {
-				return
-			}
-			const activeText = this.getActivePartialText()
-			this.finishSdkTask(sessionId, event.reason || "ended", activeText)
-			this.updateCurrentTaskItem()
-			this.broadcastState().catch((error) => console.error(error))
-		}
+		if (event.type === "status" || event.type === "ended") this.runtimeStatusEvents.handle(event)
 	}
 
 	async handle(envelope: WebviewEnvelope) {

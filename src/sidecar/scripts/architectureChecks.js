@@ -262,6 +262,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/AgentSnapshotEventProjector.ts",
 	"infrastructure/conversation/AgentChunkEventProjector.ts",
 	"infrastructure/conversation/TaskCompletionProjector.ts",
+	"infrastructure/conversation/RuntimeStatusEventProjector.ts",
 	"infrastructure/conversation/ConversationMessageStore.ts",
 	"features/taskHistory/TaskHistorySync.ts",
 	"features/taskHistory/TaskHistoryCommands.ts",
