@@ -2,7 +2,6 @@ import { mentionRegex, mentionRegexGlobal } from "@shared/contextMentions"
 import { StringRequest } from "@shared/proto/cline/common"
 import { FileSearchRequest, FileSearchType } from "@shared/proto/cline/file"
 import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state"
-import { type SlashCommand } from "@shared/slashCommands"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import { AtSignIcon, PlusIcon, Settings } from "lucide-react"
@@ -32,19 +31,12 @@ import {
 } from "@/utils/contextMentions"
 import { useMetaKeyDetection, useShortcut } from "@/utils/hooks"
 import { isSafari } from "@/utils/platformUtils"
-import {
-	getMatchingSlashCommands,
-	insertSlashCommand,
-	removeSlashCommand,
-	shouldShowSlashCommandsMenu,
-	slashCommandDeleteRegex,
-	slashCommandRegexGlobal,
-	validateSlashCommand,
-} from "@/utils/slashCommands"
+import { removeSlashCommand, slashCommandDeleteRegex, slashCommandRegexGlobal, validateSlashCommand } from "@/utils/slashCommands"
 import ClineRulesToggleModal from "../clineRules/ClineRulesToggleModal"
 import ServersToggleModal from "./ServersToggleModal"
 import { useChatDrop } from "./useChatDrop"
 import { useChatPaste } from "./useChatPaste"
+import { useSlashCommandMenu } from "./useSlashCommandMenu"
 
 // Set to "File" option by default
 const DEFAULT_CONTEXT_MENU_OPTION = getContextMenuOptionIndex(ContextMenuOptionType.File)
@@ -192,9 +184,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const modelSupportsImages = selectedModelInfo.supportsImages || false
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
 		const [gitCommits, setGitCommits] = useState<GitCommit[]>([])
-		const [showSlashCommandsMenu, setShowSlashCommandsMenu] = useState(false)
-		const [selectedSlashCommandsIndex, setSelectedSlashCommandsIndex] = useState(0)
-		const [slashCommandsQuery, setSlashCommandsQuery] = useState("")
 		const slashCommandsMenuContainerRef = useRef<HTMLDivElement>(null)
 
 		const [thumbnailsHeight, setThumbnailsHeight] = useState(0)
@@ -221,6 +210,29 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const [fileSearchResults, setFileSearchResults] = useState<SearchResult[]>([])
 		const [searchLoading, setSearchLoading] = useState(false)
 		const [, metaKeyChar] = useMetaKeyDetection(platform)
+		const {
+			showSlashCommandsMenu,
+			selectedSlashCommandsIndex,
+			setSelectedSlashCommandsIndex,
+			slashCommandsQuery,
+			handleSlashCommandsSelect,
+			handleSlashMenuKeyDown,
+			updateSlashCommandsMenu,
+			closeSlashCommandsMenu,
+		} = useSlashCommandMenu({
+			inputValue,
+			cursorPosition,
+			setInputValue,
+			setCursorPosition,
+			setIntendedCursorPosition,
+			textAreaRef,
+			menuContainerRef: slashCommandsMenuContainerRef,
+			localWorkflowToggles,
+			globalWorkflowToggles,
+			remoteWorkflowToggles,
+			remoteGlobalWorkflows: remoteConfigSettings?.remoteGlobalWorkflows,
+			mcpServers,
+		})
 
 		// Fetch git commits when Git is selected or when typing a hash
 		useEffect(() => {
@@ -268,25 +280,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				document.removeEventListener("mousedown", handleClickOutside)
 			}
 		}, [showContextMenu, setShowContextMenu])
-
-		useEffect(() => {
-			const handleClickOutsideSlashMenu = (event: MouseEvent) => {
-				if (
-					slashCommandsMenuContainerRef.current &&
-					!slashCommandsMenuContainerRef.current.contains(event.target as Node)
-				) {
-					setShowSlashCommandsMenu(false)
-				}
-			}
-
-			if (showSlashCommandsMenu) {
-				document.addEventListener("mousedown", handleClickOutsideSlashMenu)
-			}
-
-			return () => {
-				document.removeEventListener("mousedown", handleClickOutsideSlashMenu)
-			}
-		}, [showSlashCommandsMenu])
 
 		const handleMentionSelect = useCallback(
 			(type: ContextMenuOptionType, value?: string) => {
@@ -389,35 +382,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[setInputValue, cursorPosition, searchQuery],
 		)
 
-		const handleSlashCommandsSelect = useCallback(
-			(command: SlashCommand) => {
-				setShowSlashCommandsMenu(false)
-				const queryLength = slashCommandsQuery.length
-				setSlashCommandsQuery("")
-
-				if (textAreaRef.current) {
-					const { newValue, commandIndex } = insertSlashCommand(
-						textAreaRef.current.value,
-						command.name,
-						queryLength,
-						cursorPosition,
-					)
-					const newCursorPosition = newValue.indexOf(" ", commandIndex + 1 + command.name.length) + 1
-
-					setInputValue(newValue)
-					setCursorPosition(newCursorPosition)
-					setIntendedCursorPosition(newCursorPosition)
-
-					setTimeout(() => {
-						if (textAreaRef.current) {
-							textAreaRef.current.blur()
-							textAreaRef.current.focus()
-						}
-					}, 0)
-				}
-			},
-			[setInputValue, slashCommandsQuery, cursorPosition],
-		)
 		const handleKeyDown = useCallback(
 			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
 				const isSelectAllShortcut =
@@ -431,56 +395,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					return
 				}
 
-				if (showSlashCommandsMenu) {
-					if (event.key === "Escape") {
-						setShowSlashCommandsMenu(false)
-						setSlashCommandsQuery("")
-						return
-					}
-
-					if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-						event.preventDefault()
-						setSelectedSlashCommandsIndex((prevIndex) => {
-							const direction = event.key === "ArrowUp" ? -1 : 1
-							// Get commands with workflow toggles
-							const allCommands = getMatchingSlashCommands(
-								slashCommandsQuery,
-								localWorkflowToggles,
-								globalWorkflowToggles,
-								remoteWorkflowToggles,
-								remoteConfigSettings?.remoteGlobalWorkflows,
-								mcpServers,
-							)
-
-							if (allCommands.length === 0) {
-								return prevIndex
-							}
-
-							// Calculate total command count
-							const totalCommandCount = allCommands.length
-
-							// Create wraparound navigation - moves from last item to first and vice versa
-							const newIndex = (prevIndex + direction + totalCommandCount) % totalCommandCount
-							return newIndex
-						})
-						return
-					}
-
-					if ((event.key === "Enter" || event.key === "Tab") && selectedSlashCommandsIndex !== -1) {
-						event.preventDefault()
-						const commands = getMatchingSlashCommands(
-							slashCommandsQuery,
-							localWorkflowToggles,
-							globalWorkflowToggles,
-							remoteWorkflowToggles,
-							remoteConfigSettings?.remoteGlobalWorkflows,
-							mcpServers,
-						)
-						if (commands.length > 0) {
-							handleSlashCommandsSelect(commands[selectedSlashCommandsIndex])
-						}
-						return
-					}
+				if (handleSlashMenuKeyDown(event)) {
+					return
 				}
 				if (showContextMenu) {
 					if (event.key === "Escape") {
@@ -607,7 +523,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							setIntendedCursorPosition(newPosition)
 						}
 						setJustDeletedSpaceAfterSlashCommand(false)
-						setShowSlashCommandsMenu(false)
+						closeSlashCommandsMenu()
 					}
 					// Default case - reset flags if none of the above apply
 					else {
@@ -627,12 +543,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				cursorPosition,
 				setInputValue,
 				justDeletedSpaceAfterMention,
+				justDeletedSpaceAfterSlashCommand,
 				queryItems,
 				fileSearchResults,
-				showSlashCommandsMenu,
-				selectedSlashCommandsIndex,
-				slashCommandsQuery,
-				handleSlashCommandsSelect,
+				handleSlashMenuKeyDown,
+				closeSlashCommandsMenu,
 				sendingDisabled,
 			],
 		)
@@ -683,28 +598,15 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				setInputValue(newValue)
 				setCursorPosition(newCursorPosition)
 				let showMenu = shouldShowContextMenu(newValue, newCursorPosition)
-				const showSlashCommandsMenu = shouldShowSlashCommandsMenu(newValue, newCursorPosition)
+				const shouldShowSlashMenu = updateSlashCommandsMenu(newValue, newCursorPosition)
 
 				// we do not allow both menus to be shown at the same time
 				// the slash commands menu has precedence bc its a narrower component
-				if (showSlashCommandsMenu) {
+				if (shouldShowSlashMenu) {
 					showMenu = false
 				}
 
-				setShowSlashCommandsMenu(showSlashCommandsMenu)
 				setShowContextMenu(showMenu)
-
-				if (showSlashCommandsMenu) {
-					// Find the slash nearest to cursor (before cursor position)
-					const beforeCursor = newValue.slice(0, newCursorPosition)
-					const slashIndex = beforeCursor.lastIndexOf("/")
-					const query = newValue.slice(slashIndex + 1, newCursorPosition)
-					setSlashCommandsQuery(query)
-					setSelectedSlashCommandsIndex(0)
-				} else {
-					setSlashCommandsQuery("")
-					setSelectedSlashCommandsIndex(0)
-				}
 
 				if (showMenu) {
 					const lastAtIndex = newValue.lastIndexOf("@", newCursorPosition - 1)
@@ -774,7 +676,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([])
 				}
 			},
-			[setInputValue, setFileSearchResults, selectedType],
+			[setInputValue, setFileSearchResults, selectedType, updateSlashCommandsMenu],
 		)
 
 		useEffect(() => {
@@ -787,11 +689,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			// Only hide the context menu if the user didn't click on it
 			if (!isMouseDownOnMenu) {
 				setShowContextMenu(false)
-				setShowSlashCommandsMenu(false)
+				closeSlashCommandsMenu()
 			}
 			setIsTextAreaFocused(false)
 			onFocusChange?.(false) // Call prop on blur
-		}, [isMouseDownOnMenu, onFocusChange])
+		}, [isMouseDownOnMenu, onFocusChange, closeSlashCommandsMenu])
 
 		const showDimensionErrorMessage = useCallback(() => {
 			setShowDimensionError(true)
