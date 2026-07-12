@@ -46,7 +46,7 @@ Verified progress includes:
 
 The principal remaining risks are:
 
-- `VisualStudioWebviewBackend.ts` has been reduced below 1,550 lines and no longer owns a raw unary RPC switch, runtime monitoring policy, task/session lifecycle policy, delayed state-stream hydration policy, task history/snapshot update policy, projector forwarding APIs, assistant-text classification, or tool-activity grouping, but remains a transitional composition facade for the final conversation cleanup and host adapter wiring;
+- `VisualStudioWebviewBackend.ts` has been reduced below 1,525 lines and no longer owns a raw unary RPC switch, runtime monitoring policy, task/session lifecycle policy, delayed state-stream hydration policy, task history/snapshot update policy, projector forwarding APIs, assistant/tool projection, or conversation cleanup ordering, but remains a transitional composition facade for host adapter wiring and a final set of feature callbacks;
 - registered unary feature groups now normalize into discriminated commands at WebView boundary decoders; streaming subscription ownership and remaining internal callback payloads still need a final typed-boundary audit;
 - active, upstream-derived, generated, and obsolete source still needs a final source-hygiene audit;
 - architecture enforcement is local-script based and still needs an explicit CI gate if this branch becomes the integration branch.
