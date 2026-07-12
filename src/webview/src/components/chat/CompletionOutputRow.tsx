@@ -6,7 +6,7 @@ import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { TaskServiceClient } from "@/services/grpcClient"
 import SuccessButton from "../common/SuccessButton"
-import { QuoteButtonState } from "./ChatRow"
+import type { QuoteButtonState } from "./useQuoteSelection"
 import QuoteButton from "./QuoteButton"
 
 interface CompletionOutputRowProps {
