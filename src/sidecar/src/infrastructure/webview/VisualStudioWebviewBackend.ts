@@ -109,6 +109,8 @@ import { WorktreeRpcHandler } from "../../features/worktrees/WorktreeRpcHandler"
 import { decodeWorktreeRpcCommand } from "./WorktreeRpcDecoder"
 import { McpRpcHandler } from "../../features/mcp/McpRpcHandler"
 import { decodeMcpRpcCommand } from "./McpRpcDecoder"
+import { ModelCatalogRpcHandler } from "../../features/providers/ModelCatalogRpcHandler"
+import { decodeModelCatalogRpcCommand } from "./ModelCatalogRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -127,7 +129,6 @@ import {
 	booleanField,
 	modelInfoFromRemoteMetadata,
 	parseModelPrice,
-	getOllamaModels,
 } from "../models/ModelCatalog"
 import {
 	RESUMED_CONVERSATION_MAX_CHARS,
@@ -289,6 +290,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly scheduledAgentRpc: ScheduledAgentRpcHandler
 	private readonly worktreeRpc: WorktreeRpcHandler
 	private readonly mcpRpc: McpRpcHandler
+	private readonly modelCatalogRpc: ModelCatalogRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -366,6 +368,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.scheduledAgentRpc = new ScheduledAgentRpcHandler({ agents: () => this.requireScheduledAgents(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), launch: async (request) => { await this.startNewTask(request, { broadcast: false }) } })
 		this.worktreeRpc = new WorktreeRpcHandler({ queries: () => this.requireWorktreeQueries(), mutations: () => this.requireWorktreeMutations(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), setFeatureEnabled: (enabled) => this.setWorktreesFeatureFlag(enabled) })
 		this.mcpRpc = new McpRpcHandler({ mcp: () => this.requireMcp(), openSettings: (filePath) => this.host.windowClient.openFile({ filePath }), markRuntimeChanged: () => { this.runtimeSettingsRevision++ } })
+		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -900,6 +903,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			if (mcpResult.error) return grpcHandled(grpcError(requestId, mcpResult.error, false))
 			return grpcHandled(grpcResponse(requestId, mcpResult.payload, false), ...(mcpResult.publishToStreams ? this.buildMcpServerStreamMessages(mcpResult.payload) : []))
 		}
+		const modelCatalogCommand = decodeModelCatalogRpcCommand(key, message)
+		if (modelCatalogCommand) return grpcHandled(grpcResponse(requestId, await this.modelCatalogRpc.handle(modelCatalogCommand), false))
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -1047,64 +1052,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				}
 				return grpcHandled(grpcResponse(requestId, {}, false))
 			}
-
-			case "ModelsService.getOllamaModels": {
-				const values = await getOllamaModels(getString(message, "value"))
-				if (values.length > 0) {
-					this.applyDefaultOllamaModel(values[0])
-				}
-				return grpcHandled(grpcResponse(requestId, { values }, false))
-			}
-
-			case "ModelsService.getLmStudioModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("lmstudio", asRecord(message)), false))
-
-			case "ModelsService.getAskSageModels":
-				return grpcHandled(grpcResponse(requestId, await this.requireProviderModelCatalogs().askSageModels(getString(message, "baseUrl")), false))
-
-			case "ModelsService.getOpenRouterKeyInfo":
-				return grpcHandled(grpcResponse(requestId, await this.requireProviderModelCatalogs().openRouterKeyInfo(getString(message, "apiKey")), false))
-
-			case "ModelsService.refreshOpenAiModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("openai-compatible", asRecord(message)), false))
-
-			case "ModelsService.refreshLiteLlmModelsRpc":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("litellm", asRecord(message)), false))
-
-			case "ModelsService.refreshOpenRouterModelsRpc":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("openrouter", asRecord(message)), false))
-
-			case "ModelsService.refreshRequestyModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("requesty", asRecord(message)), false))
-
-			case "ModelsService.refreshGroqModelsRpc":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("groq", asRecord(message)), false))
-
-			case "ModelsService.refreshVercelAiGatewayModelsRpc":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("vercel-ai-gateway", asRecord(message)), false))
-
-			case "ModelsService.refreshHicapModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("hicap", asRecord(message)), false))
-
-			case "ModelsService.getAihubmixModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("aihubmix", asRecord(message)), false))
-
-			case "ModelsService.refreshOcaModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("oca", asRecord(message)), false))
-
-			case "ModelsService.refreshBasetenModelsRpc":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("baseten", asRecord(message)), false))
-
-			case "ModelsService.refreshHuggingFaceModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("huggingface", asRecord(message)), false))
-
-			case "ModelsService.getSapAiCoreModels":
-				return grpcHandled(grpcResponse(requestId, await this.createProviderModelCatalog("sapaicore", asRecord(message)), false))
-
-			case "ModelsService.getVsCodeLmModels":
-			case "ModelsService.refreshClineModelsRpc":
-			case "ModelsService.refreshClineRecommendedModelsRpc":
-				return grpcHandled(grpcResponse(requestId, this.createUnsupportedModelCatalog(key), false))
 
 			default:
 				return null
@@ -1953,14 +1900,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	private flushPersistedStateSave() {
 		this.stateStore.flush(() => createPersistedStateSnapshot(this.state))
-	}
-
-	private async createProviderModelCatalog(providerId: string, request: Record<string, unknown>) {
-		return this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId())
-	}
-
-	private createUnsupportedModelCatalog(key: string) {
-		return this.requireProviderModelCatalogs().unsupported(key)
 	}
 
 	private async broadcastState() { await this.requireStreamPublisher().broadcastState() }

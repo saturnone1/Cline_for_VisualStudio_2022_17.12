@@ -1,5 +1,6 @@
 import { normalizeProviderId, providerAuthLabel } from "../../application/services/ProviderIdentity"
-import { compactApiConfiguration, describeOAuthCredentialState, extractApiConfigurationUpdate, resolveApiKey, resolveBaseUrl, resolveOAuthCredentials } from "../configuration/ProviderConfiguration"
+import { compactApiConfiguration, describeOAuthCredentialState, resolveApiKey, resolveBaseUrl, resolveOAuthCredentials } from "../configuration/ProviderConfiguration"
+import type { ProviderCatalogRequest } from "../../features/providers/ModelCatalogRpcHandler"
 import { resolveModelId } from "../../features/providers/ProviderSelection"
 import { createCatalogDiagnostics, createModelCatalog, defaultOpenAiCompatibleCatalogBaseUrl, getOllamaModels, getOpenAiCompatibleModels, isOpenAiCompatibleCatalogProvider, normalizeOllamaRootBaseUrl, normalizeOpenAiCompatibleBaseUrl } from "./ModelCatalog"
 
@@ -11,12 +12,12 @@ export class ProviderModelCatalogHandler {
 		return createModelCatalog([modelId], { providerId: normalizeProviderId(readString(configuration[`${modePrefix}ApiProvider`])), selectedId: modelId, reduced: true, message: "Using the configured model because this provider catalog cannot be refreshed locally." })
 	}
 
-	async refresh(providerId: string, request: Record<string, unknown>, configuration: Record<string, unknown>, mode: "plan" | "act", fallbackModelId: string) {
-		const provider = normalizeProviderId(providerId), apiConfig = { ...configuration, ...compactApiConfiguration(extractApiConfigurationUpdate(request)) }
+	async refresh(providerId: string, request: ProviderCatalogRequest, configuration: Record<string, unknown>, mode: "plan" | "act", fallbackModelId: string) {
+		const provider = normalizeProviderId(providerId), apiConfig = { ...configuration, ...compactApiConfiguration(request.apiConfigurationUpdate) }
 		const modePrefix = mode === "plan" ? "planMode" : "actMode", selectedId = resolveModelId(apiConfig, provider, modePrefix) || fallbackModelId
 		const oauthCredentials = resolveOAuthCredentials(apiConfig, provider), oauthState = describeOAuthCredentialState(oauthCredentials)
 		const apiKey = resolveApiKey(apiConfig, provider) || readString(oauthCredentials.accessToken) || readString(oauthCredentials.access_token)
-		const requestedBaseUrl = readString(request.baseUrl) || readString(request.baseURL) || readString(request.url) || readString(request.value)
+		const requestedBaseUrl = request.baseUrl
 		const configuredBaseUrl = requestedBaseUrl || resolveBaseUrl(apiConfig, provider)
 		const baseUrl = provider === "lmstudio" && !configuredBaseUrl ? "http://localhost:1234/v1" : configuredBaseUrl || defaultOpenAiCompatibleCatalogBaseUrl(provider, apiKey)
 
@@ -31,6 +32,12 @@ export class ProviderModelCatalogHandler {
 
 		const result = await getOpenAiCompatibleModels(baseUrl, apiKey)
 		return createModelCatalog(result.ids, { providerId: provider, selectedId: selectedId || result.ids[0], source: `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`, supported: true, reduced: result.ids.length === 0, message: result.error || (result.ids.length ? "" : "The model endpoint returned no models."), error: result.error, modelInfoById: result.modelInfoById, diagnostics: createCatalogDiagnostics(provider, "openai-compatible:/models", { baseUrl: normalizeOpenAiCompatibleBaseUrl(baseUrl), authenticated: Boolean(apiKey), oauthRefreshStatus: oauthState.refreshStatus, modelCount: result.ids.length, error: result.error }) })
+	}
+
+	async ollamaValues(baseUrl: string) {
+		const values = await getOllamaModels(baseUrl)
+		if (values.length) this.applyDefaultOllamaModel(values[0])
+		return { values }
 	}
 
 	async askSageModels(baseUrl: string) {
@@ -61,6 +68,7 @@ export class ProviderModelCatalogHandler {
 		return createModelCatalog([], { providerId, supported: false, reduced: true, message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`, diagnostics: createCatalogDiagnostics(providerId, "unsupported", { authenticated: false, reason: "air_gap_provider_catalog_not_implemented" }) })
 	}
 }
+
 
 function readString(value: unknown) { return typeof value === "string" ? value : "" }
 function readNumber(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : 0 }
