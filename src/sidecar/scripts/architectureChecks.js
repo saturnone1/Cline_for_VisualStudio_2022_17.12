@@ -101,6 +101,12 @@ if (!router.includes("TaskPromptFlow") || router.includes("private async startNe
 if (!router.includes("BrowserToolEventFlow") || router.includes("private async handleBrowserToolEvent")) {
 	violations.push("VisualStudioWebviewBackend must delegate browser tool execution transcript projection to BrowserToolEventFlow.")
 }
+if (!router.includes("ConversationActivityProjector") || router.includes("private handleReasoningDelta") || router.includes("private rememberToolSummary")) {
+	violations.push("VisualStudioWebviewBackend must delegate reasoning status and tool-summary projection to ConversationActivityProjector.")
+}
+if (router.includes("private handleFileChangedEvent") || router.includes("private wasRecentlyTracked")) {
+	violations.push("VisualStudioWebviewBackend must use ChangeTrackingHandler directly instead of restoring forwarding methods.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -301,6 +307,7 @@ for (const requiredFile of [
 	"infrastructure/conversation/ConversationRuntimeProjector.ts",
 	"infrastructure/conversation/ConversationCleanupCoordinator.ts",
 	"infrastructure/conversation/ToolApprovalPromptProjector.ts",
+	"infrastructure/conversation/ConversationActivityProjector.ts",
 	"infrastructure/conversation/RuntimeStatusEventProjector.ts",
 	"infrastructure/conversation/ConversationMessageStore.ts",
 	"features/taskHistory/TaskHistorySync.ts",
