@@ -20,6 +20,7 @@
     <Compile Include="..\..\src\extension\Host\WebviewGrpcFallback.cs" Link="Host\WebviewGrpcFallback.cs" />
     <Compile Include="..\..\src\extension\Host\Generated\WebviewRpcContract.cs" Link="Host\Generated\WebviewRpcContract.cs" />
     <Compile Include="..\..\src\extension\Host\InteractionLogSanitizer.cs" Link="Host\InteractionLogSanitizer.cs" />
+    <Compile Include="..\..\src\extension\Host\InteractionCorrelation.cs" Link="Host\InteractionCorrelation.cs" />
     <Compile Include="..\..\src\extension\Host\PendingWebviewMessageBuffer.cs" Link="Host\PendingWebviewMessageBuffer.cs" />
     <Compile Include="..\..\src\extension\Host\SidecarRuntimeFingerprint.cs" Link="Host\SidecarRuntimeFingerprint.cs" />
     <Compile Include="..\..\src\extension\Host\SidecarStartupConnector.cs" Link="Host\SidecarStartupConnector.cs" />

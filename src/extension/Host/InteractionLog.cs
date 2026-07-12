@@ -19,14 +19,18 @@ namespace VsClineAgent.Host
                 if (ShouldSkipDefaultLog(eventName, payload))
                     return;
 
+                var compactPayload = CompactPayload(eventName, payload);
                 var entry = new JObject
                 {
                     ["at"] = DateTimeOffset.Now.ToString("O"),
                     ["source"] = "vsix-host",
                     ["direction"] = direction,
                     ["event"] = eventName,
-                    ["payload"] = InteractionLogSanitizer.Sanitize(CompactPayload(eventName, payload))
+                    ["payload"] = InteractionLogSanitizer.Sanitize(compactPayload)
                 };
+                var correlationId = InteractionCorrelation.FromPayload(compactPayload);
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                    entry["correlationId"] = correlationId;
 
                 var line = entry.ToString(Formatting.None);
                 if (line.Length > MaxLineChars)

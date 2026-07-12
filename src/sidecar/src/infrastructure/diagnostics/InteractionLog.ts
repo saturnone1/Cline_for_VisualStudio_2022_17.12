@@ -36,12 +36,14 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 		if (shouldSkipDefaultLog(direction, event, payload)) {
 			return
 		}
+		const compacted = compactPayload(direction, event, payload)
 		const entry = {
 			at: new Date().toISOString(),
 			source: "sidecar",
 			direction,
 			event,
-			payload: sanitize(compactPayload(direction, event, payload), 0),
+			...(correlationIdFromPayload(compacted) ? { correlationId: correlationIdFromPayload(compacted) } : {}),
+			payload: sanitize(compacted, 0),
 		}
 		let line = JSON.stringify(entry)
 		if (line.length > MAX_LINE_CHARS) {
@@ -51,6 +53,38 @@ export function logInteraction(direction: string, event: string, payload?: unkno
 	} catch {
 		// Diagnostics must never interfere with the extension.
 	}
+}
+
+export function correlationIdFromPayload(payload: unknown): string {
+	return findCorrelationId(payload, 0, new Set())
+}
+
+function findCorrelationId(value: unknown, depth: number, seen: Set<object>): string {
+	if (depth > 6 || value === null || value === undefined) return ""
+	if (typeof value === "string") {
+		const parsed = tryParseJson(value)
+		return parsed === undefined ? "" : findCorrelationId(parsed, depth + 1, seen)
+	}
+	if (typeof value !== "object") return ""
+	if (seen.has(value)) return ""
+	seen.add(value)
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const found = findCorrelationId(item, depth + 1, seen)
+			if (found) return found
+		}
+		return ""
+	}
+	const record = value as Record<string, unknown>
+	for (const key of ["correlationId", "correlation_id", "requestId", "request_id", "sessionId", "session_id", "id"]) {
+		const candidate = record[key]
+		if ((typeof candidate === "string" || typeof candidate === "number") && String(candidate).trim()) return String(candidate)
+	}
+	for (const key of ["request", "grpc_request", "grpc_response", "payload", "params", "result", "event", "message"]) {
+		const found = findCorrelationId(record[key], depth + 1, seen)
+		if (found) return found
+	}
+	return ""
 }
 
 export const interactionLogger: InteractionLoggerPort = {
