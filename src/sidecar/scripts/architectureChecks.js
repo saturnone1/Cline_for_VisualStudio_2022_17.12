@@ -122,6 +122,12 @@ if (!router.includes("WebviewGrpcSupport") || router.includes("function grpcResp
 if (!router.includes("RuntimeErrorFormatter") || router.includes("function formatSdkErrorForUi") || router.includes("function stringify")) {
 	violations.push("VisualStudioWebviewBackend must delegate runtime and provider error formatting to RuntimeErrorFormatter.")
 }
+if (!router.includes("AutoApprovalNotifier") || router.includes("private async notifyAutoApprovedTool")) {
+	violations.push("VisualStudioWebviewBackend must delegate host auto-approval notifications to AutoApprovalNotifier.")
+}
+if (router.includes("private addMessage") || router.includes("private getCurrentSessionId")) {
+	violations.push("VisualStudioWebviewBackend must use conversation and task-session collaborators directly instead of restoring forwarding methods.")
+}
 if (router.includes("parseGitWorktreePorcelain") || router.includes("execFile(\"git\"")) {
 	violations.push("VisualStudioWebviewBackend must delegate worktree queries and Git process execution to the worktree feature boundary.")
 }
@@ -359,6 +365,7 @@ for (const requiredFile of [
 	"infrastructure/models/ModelCatalog.ts",
 	"infrastructure/models/ProviderModelCatalogHandler.ts",
 	"infrastructure/models/RuntimeModelContext.ts",
+	"infrastructure/notifications/AutoApprovalNotifier.ts",
 	"features/providers/ModelCatalogRpcHandler.ts",
 	"infrastructure/persistence/LocalAutomationStore.ts",
 	"infrastructure/worktree/WorktreeSupport.ts",

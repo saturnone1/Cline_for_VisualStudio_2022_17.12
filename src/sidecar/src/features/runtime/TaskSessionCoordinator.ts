@@ -24,6 +24,7 @@ export class TaskSessionCoordinator {
 	constructor(private readonly dependencies: TaskSessionDependencies) {}
 
 	get status() { return this.dependencies.lifecycle.status }
+	get currentSessionId() { return this.dependencies.activeSessionId() || String(this.dependencies.currentTask()?.id || "") }
 
 	initialize(status: TaskLifecycleStatus) {
 		this.dependencies.lifecycle.initialize(status)
