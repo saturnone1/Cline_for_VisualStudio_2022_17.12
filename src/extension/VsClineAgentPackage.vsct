@@ -17,6 +17,7 @@
       <Button guid="guidVsClineAgentCmdSet" id="cmdOpenChatWindow" priority="0x0100" type="Button">
         <Parent guid="guidVsClineAgentCmdSet" id="grpAIAgentMenu" />
         <Icon guid="ImageCatalogGuid" id="MessageBubble" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>LIG VS</ButtonText>
           <CommandName>View.LIGVS</CommandName>
