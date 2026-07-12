@@ -14,14 +14,15 @@ export class SdkSettingsHandler {
 		return { globalSkills, localSkills, globalSkillsToggles: Object.fromEntries(globalSkills.map((skill) => [skill.path, skill.enabled])), localSkillsToggles: Object.fromEntries(localSkills.map((skill) => [skill.path, skill.enabled])) }
 	}
 
-	async toggle(type: "rules" | "workflows" | "skills", message: unknown, cwd: string) {
-		const request = asRecord(message), path = readString(request.rulePath) || readString(request.workflowPath) || readString(request.skillPath) || readString(request.path)
-		try { await this.agentEngine.toggleSetting({ type, path, enabled: request.enabled === true, cwd, workspaceRoot: cwd }); return { success: true } }
+	async toggle(type: "rules" | "workflows" | "skills", request: SdkSettingToggleRequest, cwd: string): Promise<{ success: true } | { success: false; error: string }> {
+		try { await this.agentEngine.toggleSetting({ type, path: request.path, enabled: request.enabled, cwd, workspaceRoot: cwd }); return { success: true } }
 		catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
 	}
 
 	private async snapshot(cwd: string) { try { return asRecord(await this.agentEngine.listSettings({ cwd, workspaceRoot: cwd })) } catch { return {} } }
 }
+
+export type SdkSettingToggleRequest = Readonly<{ path: string; enabled: boolean }>
 
 function records(value: unknown) { return Array.isArray(value) ? value.map(asRecord) : [] }
 function toggleMap(items: Record<string, unknown>[], scope: "global" | "local") { return Object.fromEntries(items.filter((item) => scope === "global" ? isGlobal(item) : !isGlobal(item)).map((item) => [key(item), item.enabled !== false])) }

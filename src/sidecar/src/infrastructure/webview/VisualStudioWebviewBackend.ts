@@ -113,6 +113,8 @@ import { ModelCatalogRpcHandler } from "../../features/providers/ModelCatalogRpc
 import { decodeModelCatalogRpcCommand } from "./ModelCatalogRpcDecoder"
 import { FileRpcHandler } from "../../features/files/FileRpcHandler"
 import { decodeFileRpcCommand } from "./FileRpcDecoder"
+import { InstructionSettingsRpcHandler } from "../../features/settings/InstructionSettingsRpcHandler"
+import { decodeInstructionSettingsRpcCommand } from "./InstructionSettingsRpcDecoder"
 import { AgentSdkConfigBuilder } from "../configuration/AgentSdkConfigBuilder"
 import { resolveEffectiveModelId } from "../models/EffectiveModelResolver"
 import { PartialTextProjector } from "../conversation/PartialTextProjector"
@@ -294,6 +296,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	private readonly mcpRpc: McpRpcHandler
 	private readonly modelCatalogRpc: ModelCatalogRpcHandler
 	private readonly fileRpc: FileRpcHandler
+	private readonly instructionSettingsRpc: InstructionSettingsRpcHandler
 	private readonly sdkConfigBuilder: AgentSdkConfigBuilder
 	private readonly hookLifecycle: HookLifecycleCoordinator
 	private stateHydrationRefreshInFlight = false
@@ -373,6 +376,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		this.mcpRpc = new McpRpcHandler({ mcp: () => this.requireMcp(), openSettings: (filePath) => this.host.windowClient.openFile({ filePath }), markRuntimeChanged: () => { this.runtimeSettingsRevision++ } })
 		this.modelCatalogRpc = new ModelCatalogRpcHandler({ ollamaValues: (baseUrl) => this.requireProviderModelCatalogs().ollamaValues(baseUrl), refresh: (providerId, request) => this.requireProviderModelCatalogs().refresh(providerId, request, asRecord(this.state.apiConfiguration), this.state.mode, this.getModelId()), askSage: (baseUrl) => this.requireProviderModelCatalogs().askSageModels(baseUrl), openRouterKeyInfo: (apiKey) => this.requireProviderModelCatalogs().openRouterKeyInfo(apiKey), unsupported: (key) => this.requireProviderModelCatalogs().unsupported(key) })
 		this.fileRpc = new FileRpcHandler({ host: this.host, workspaceRoot: () => this.getPrimaryWorkspaceRoot(), resolvePath: (workspaceRoot, filePath) => path.isAbsolute(filePath) ? filePath : workspaceRoot ? path.resolve(workspaceRoot, filePath) : filePath, baseName: (filePath) => path.basename(filePath), exists: (filePath) => fs.existsSync(filePath), revert: (request) => this.requireChangeTracking().revert(request) })
+		this.instructionSettingsRpc = new InstructionSettingsRpcHandler({ sdkSettings: () => this.requireSdkSettings(), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), writeInstructions: ({ globalRules, localRules, globalWorkflows, localWorkflows }) => { this.state.globalClineRulesToggles = globalRules; this.state.localClineRulesToggles = localRules; this.state.globalWorkflowToggles = globalWorkflows; this.state.localWorkflowToggles = localWorkflows }, legacyRuleToggles: () => ({ cursor: this.state.localCursorRulesToggles, windsurf: this.state.localWindsurfRulesToggles, agents: this.state.localAgentsRulesToggles }), writeSkills: ({ global, local }) => { this.state.globalSkillsToggles = global; this.state.localSkillsToggles = local }, addError: (text) => { this.addMessage({ type: "say", say: "error", text }) } })
 		this.taskTranscriptHydrator = new TaskTranscriptHydrator({
 			isAvailable: () => Boolean(this.clineSdk && this.taskSessions),
 			readCurrentTask: () => this.state.currentTaskItem,
@@ -914,6 +918,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			const fileResult = await this.fileRpc.handle(fileCommand)
 			return grpcHandled(grpcResponse(requestId, fileResult.payload, false), ...(fileResult.includeStateMessages ? this.buildStateMessages() : []))
 		}
+		const instructionSettingsCommand = decodeInstructionSettingsRpcCommand(key, message)
+		if (instructionSettingsCommand) return grpcHandled(grpcResponse(requestId, await this.instructionSettingsRpc.handle(instructionSettingsCommand), false))
 
 		switch (key) {
 			case "UiService.initializeWebview":
@@ -945,29 +951,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 				Object.assign(this.state, createInitialState())
 				await this.clearTask()
 				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "FileService.refreshRules":
-				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
-
-			case "FileService.refreshSkills":
-				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
-
-			case "FileService.toggleClineRule":
-				await this.toggleSdkSetting("rules", message)
-				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
-
-			case "FileService.toggleCursorRule":
-			case "FileService.toggleWindsurfRule":
-			case "FileService.toggleAgentsRule":
-				return grpcHandled(grpcResponse(requestId, {}, false))
-
-			case "FileService.toggleWorkflow":
-				await this.toggleSdkSetting("workflows", message)
-				return grpcHandled(grpcResponse(requestId, await this.refreshSdkInstructionSettings(), false))
-
-			case "FileService.toggleSkill":
-				await this.toggleSdkSetting("skills", message)
-				return grpcHandled(grpcResponse(requestId, await this.refreshSdkSkills(), false))
 
 			case "PluginService.listPlugins":
 			case "PluginService.getPluginConfigStatus":
@@ -1154,26 +1137,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 		return this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, force)
 	}
 
-	private async refreshSdkInstructionSettings() {
-		const result = await this.requireSdkSettings().instructions(await this.getPrimaryWorkspaceRoot())
-		const { globalClineRulesToggles, localClineRulesToggles, globalWorkflowToggles, localWorkflowToggles } = result
-
-		this.state.globalClineRulesToggles = globalClineRulesToggles
-		this.state.localClineRulesToggles = localClineRulesToggles
-		this.state.globalWorkflowToggles = globalWorkflowToggles
-		this.state.localWorkflowToggles = localWorkflowToggles
-
-		return {
-			globalClineRulesToggles: { toggles: globalClineRulesToggles },
-			localClineRulesToggles: { toggles: localClineRulesToggles },
-			localCursorRulesToggles: { toggles: this.state.localCursorRulesToggles },
-			localWindsurfRulesToggles: { toggles: this.state.localWindsurfRulesToggles },
-			localAgentsRulesToggles: { toggles: this.state.localAgentsRulesToggles },
-			globalWorkflowToggles: { toggles: globalWorkflowToggles },
-			localWorkflowToggles: { toggles: localWorkflowToggles },
-		}
-	}
-
 	private async getLocalPluginConfigStatus() {
 		const workspaceRoot = await this.getPrimaryWorkspaceRoot().catch(() => "")
 		const plugins = discoverLocalPlugins(workspaceRoot)
@@ -1188,19 +1151,6 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 			marketplaceInstallSupported: false,
 			marketplaceDisabledReason: "Air-gap Visual Studio mode only discovers local plugin configuration; online marketplace install is intentionally disabled.",
 		}
-	}
-
-	private async refreshSdkSkills() {
-		const { globalSkills, localSkills, globalSkillsToggles, localSkillsToggles } = await this.requireSdkSettings().skills(await this.getPrimaryWorkspaceRoot())
-
-		this.state.globalSkillsToggles = globalSkillsToggles
-		this.state.localSkillsToggles = localSkillsToggles
-		return { globalSkills, localSkills, globalSkillsToggles, localSkillsToggles }
-	}
-
-	private async toggleSdkSetting(type: "rules" | "workflows" | "skills", message: unknown) {
-		const result = await this.requireSdkSettings().toggle(type, message, await this.getPrimaryWorkspaceRoot())
-		if (!result.success) this.addMessage({ type: "say", say: "error", text: result.error })
 	}
 
 	private async runLifecycleHooks(hookName: HookLifecycleName, context: Record<string, unknown> = {}) {
