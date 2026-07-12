@@ -6,8 +6,7 @@
  * import is safe and ensures the methods work consistently regardless of React context.
  */
 import { PLATFORM_CONFIG } from "../config/platform.config"
-
-const WEBVIEW_RPC_PROTOCOL_VERSION = 1 as const
+import { WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
 
 export interface Callbacks<TResponse> {
 	onResponse: (response: TResponse) => void

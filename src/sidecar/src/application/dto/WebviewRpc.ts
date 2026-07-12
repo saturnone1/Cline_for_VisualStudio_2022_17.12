@@ -1,8 +1,10 @@
+import { WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
+
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 export type JsonObject = { [key: string]: JsonValue }
 
-export const HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION = 1 as const
+export const HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION = WEBVIEW_RPC_PROTOCOL_VERSION
 
 export type HostSidecarWebviewRequest = {
 	protocolVersion: typeof HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION

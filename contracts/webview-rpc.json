@@ -1,0 +1,1421 @@
+{
+  "$schema": "./webview-rpc.schema.json",
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "operations": [
+    {
+      "service": "AccountService",
+      "method": "accountLoginClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "accountLogoutClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "clearProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "clearProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "completeOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "deleteProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getOAuthCallbackStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getOrganizationCredits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderAuthRequirements",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderAuthStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderConfigFields",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderCredentialStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderOAuthCallbackStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getRedirectUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getUserCredits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "getUserOrganizations",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "hicapAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "openAiCodexSignIn",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "openAiCodexSignOut",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "openrouterAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshOAuthCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "requestyAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "saveOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "saveProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "saveProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "setUserOrganization",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "storeProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "submitLimitIncreaseRequest",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "submitOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AccountService",
+      "method": "subscribeToAuthStatusUpdate",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "AutomationService",
+      "method": "deleteScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AutomationService",
+      "method": "listScheduledAgents",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AutomationService",
+      "method": "runScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "AutomationService",
+      "method": "saveScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "captureScreenshot",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "discoverBrowser",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "executeBrowserAction",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "getBrowserConnectionInfo",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "getDetectedChromePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "listBrowserTabs",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "performBrowserAction",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "relaunchChromeDebugMode",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "BrowserService",
+      "method": "testBrowserConnection",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "CheckpointsService",
+      "method": "checkpointDiff",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "CheckpointsService",
+      "method": "checkpointRestore",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "copyToClipboard",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "createHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "createRuleFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "createSkillFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "deleteHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "deleteRuleFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "deleteSkillFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "getRelativePaths",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "ifFileExistsRelativePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openDiskConversationHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openFileRelativePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openFocusChainFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openImage",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openMention",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "openVsClineDiff",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "refreshHooks",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "refreshRules",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "refreshSkills",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "revertVsClineChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "searchCommits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "searchFiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "selectFiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleAgentsRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleClineRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleCursorRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleSkill",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleWindsurfRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "FileService",
+      "method": "toggleWorkflow",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "addRemoteMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "authenticateMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "deleteMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "downloadMcp",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "getLatestMcpServers",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "openMcpSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "refreshMcpMarketplace",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "restartMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "subscribeToMcpMarketplaceCatalog",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "McpService",
+      "method": "subscribeToMcpServers",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "McpService",
+      "method": "toggleMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "toggleToolAutoApprove",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "McpService",
+      "method": "updateMcpTimeout",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getAihubmixModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getAskSageModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getLmStudioModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getOllamaModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getOpenRouterKeyInfo",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getSapAiCoreModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "getVsCodeLmModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshBasetenModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshClineModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshClineRecommendedModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshGroqModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshHicapModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshHuggingFaceModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshLiteLlmModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOcaModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOpenAiModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOpenRouterModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshRequestyModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshVercelAiGatewayModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "subscribeToLiteLlmModels",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "ModelsService",
+      "method": "subscribeToOpenRouterModels",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "ModelsService",
+      "method": "updateApiConfiguration",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "ModelsService",
+      "method": "updateApiConfigurationProto",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaAccountLoginClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaAccountLogoutClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaSubscribeToAuthStatusUpdate",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "PluginService",
+      "method": "getPluginConfigStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "PluginService",
+      "method": "listPlugins",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "PluginsService",
+      "method": "getPluginConfigStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "PluginsService",
+      "method": "listPlugins",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "createSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "deleteScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "deleteSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "listScheduledAgents",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "listSpecs",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "runScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "runSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "saveSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "updateSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "SlashService",
+      "method": "condense",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "SlashService",
+      "method": "reportBug",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "StateService",
+      "method": "captureOnboardingProgress",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "dismissBanner",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "getAvailableTerminalProfiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "installClineCli",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "refreshRemoteConfig",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "resetState",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "setWelcomeViewCompleted",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "subscribeToState",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "testOtelConnection",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "testPromptUploading",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "toggleFavoriteModel",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "togglePlanActModeProto",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateAutoApprovalSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateCliBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateInfoBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateModelBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateTelemetrySetting",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "StateService",
+      "method": "updateTerminalConnectionTimeout",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "askResponse",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "cancelBackgroundCommand",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "TaskService",
+      "method": "cancelTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "clearTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "deleteAllTaskHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "deleteTasksWithIds",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "explainChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "TaskService",
+      "method": "exportTaskWithId",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "TaskService",
+      "method": "getTaskHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "getTotalTasksSize",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "newTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "showTaskWithId",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TaskService",
+      "method": "taskCompletionViewChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "TaskService",
+      "method": "taskFeedback",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false
+    },
+    {
+      "service": "TaskService",
+      "method": "toggleTaskFavorite",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "TerminalService",
+      "method": "attachTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "TerminalService",
+      "method": "continueTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "TerminalService",
+      "method": "openTerminalPanel",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "attachTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "continueTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "initializeWebview",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "onDidShowAnnouncement",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "openTerminalPanel",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "openUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "openWalkthrough",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "setTerminalExecutionMode",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToAccountButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToAddToInput",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToChatButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToHistoryButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToMcpButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToPartialMessage",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToRelinquishControl",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToSettingsButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToShowWebview",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToWorktreesButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive"
+    },
+    {
+      "service": "WebService",
+      "method": "checkIsImageUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WebService",
+      "method": "fetchOpenGraphData",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WebService",
+      "method": "openInBrowser",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "createWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "createWorktreeInclude",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "deleteWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "getWorktreeDefaults",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "getWorktreeIncludeStatus",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "listWorktrees",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "mergeRecovery",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "mergeWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "recoverMerge",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "switchWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    },
+    {
+      "service": "WorktreeService",
+      "method": "trackWorktreeViewOpened",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true
+    }
+  ]
+}

@@ -1,12 +1,11 @@
 using System;
 using Newtonsoft.Json.Linq;
+using VsClineAgent.Host.Generated;
 
 namespace VsClineAgent.Host
 {
     internal static class WebviewGrpcFallback
     {
-        private const int ProtocolVersion = 1;
-
         public static bool IsPassiveStreamingSubscription(string rawJson)
         {
             try
@@ -15,28 +14,9 @@ namespace VsClineAgent.Host
                 if (request == null || !IsStreaming(request))
                     return false;
 
-                var key = (request.Value<string>("service") ?? "") + "." +
-                          (request.Value<string>("method") ?? "");
-                switch (key)
-                {
-                    case "UiService.subscribeToMcpButtonClicked":
-                    case "UiService.subscribeToHistoryButtonClicked":
-                    case "UiService.subscribeToChatButtonClicked":
-                    case "UiService.subscribeToSettingsButtonClicked":
-                    case "UiService.subscribeToWorktreesButtonClicked":
-                    case "UiService.subscribeToAccountButtonClicked":
-                    case "UiService.subscribeToRelinquishControl":
-                    case "UiService.subscribeToShowWebview":
-                    case "UiService.subscribeToAddToInput":
-                    case "UiService.subscribeToPartialMessage":
-                    case "McpService.subscribeToMcpMarketplaceCatalog":
-                    case "McpService.subscribeToMcpServers":
-                    case "ModelsService.subscribeToOpenRouterModels":
-                    case "ModelsService.subscribeToLiteLlmModels":
-                        return true;
-                    default:
-                        return false;
-                }
+                return WebviewRpcContract.IsPassiveFallback(
+                    request.Value<string>("service") ?? "",
+                    request.Value<string>("method") ?? "");
             }
             catch
             {
@@ -55,7 +35,7 @@ namespace VsClineAgent.Host
 
                 return new JObject
                 {
-                    ["protocol_version"] = ProtocolVersion,
+                    ["protocol_version"] = WebviewRpcContract.ProtocolVersion,
                     ["type"] = "grpc_response",
                     ["grpc_response"] = new JObject
                     {
@@ -76,7 +56,7 @@ namespace VsClineAgent.Host
             var envelope = JObject.Parse(rawJson);
             var protocolVersion = envelope.Value<int?>("protocol_version") ??
                                   envelope.Value<int?>("protocolVersion");
-            if (protocolVersion.HasValue && protocolVersion.Value != ProtocolVersion)
+            if (protocolVersion.HasValue && protocolVersion.Value != WebviewRpcContract.ProtocolVersion)
                 return null;
             return string.Equals(envelope.Value<string>("type"), "grpc_request", StringComparison.Ordinal)
                 ? envelope["grpc_request"] as JObject
@@ -93,7 +73,7 @@ namespace VsClineAgent.Host
         {
             return new JObject
             {
-                ["protocol_version"] = ProtocolVersion,
+                ["protocol_version"] = WebviewRpcContract.ProtocolVersion,
                 ["type"] = "error",
                 ["message"] = message
             };

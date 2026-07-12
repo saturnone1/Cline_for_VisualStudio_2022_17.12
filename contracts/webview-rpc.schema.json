@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lig-vs.local/contracts/webview-rpc.schema.json",
+  "title": "LIG VS WebView RPC operation registry",
+  "type": "object",
+  "required": ["schemaVersion", "protocolVersion", "operations"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "protocolVersion": { "type": "integer", "minimum": 1 },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["service", "method", "kind", "client", "sidecar"],
+        "properties": {
+          "service": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*Service$" },
+          "method": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "kind": { "enum": ["unary", "serverStream"] },
+          "client": { "type": "boolean" },
+          "sidecar": { "type": "boolean" },
+          "fallback": { "enum": ["passive"] }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

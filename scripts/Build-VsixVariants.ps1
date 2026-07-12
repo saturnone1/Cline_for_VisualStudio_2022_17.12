@@ -13,6 +13,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
 & (Join-Path $PSScriptRoot "Test-MenuContract.ps1") -RepoRoot $repoRoot
+& node (Join-Path $PSScriptRoot "generate-webview-rpc-contracts.mjs") --check
+if ($LASTEXITCODE -ne 0) { throw "WebView RPC contract check failed with exit code $LASTEXITCODE" }
 
 if (-not $MSBuildPath) {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -66,8 +68,8 @@ if (-not $SkipFrontend) {
 }
 
 $variants = @(
-    @{ Target = "17.0"; Assembly = "VsClineAgent17.dll"; Vsix = "VsClineAgent17.vsix" },
-    @{ Target = "17.12"; Assembly = "VsClineAgent.dll"; Vsix = "VsClineAgent.vsix" }
+    @{ Target = "17.0"; Assembly = "VsClineAgent17.dll"; Vsix = "VsClineAgent17.vsix"; Manifest = "packaging\vs2022-17.0\source.extension.vsixmanifest" },
+    @{ Target = "17.12"; Assembly = "VsClineAgent.dll"; Vsix = "VsClineAgent.vsix"; Manifest = "packaging\vs2022-17.12\source.extension.vsixmanifest" }
 )
 $builtVariants = @{}
 
@@ -85,7 +87,9 @@ foreach ($variant in $variants) {
     Invoke-Checked $MSBuildPath $msbuildArguments $repoRoot
 
     $vsixPath = Join-Path $repoRoot "src\extension\bin\$($variant.Target)\$Configuration\$($variant.Vsix)"
-    & (Join-Path $PSScriptRoot "Test-VsixPackage.ps1") -VsixPath $vsixPath -ExpectedVersion "2.0.0" -ExpectedAssembly $variant.Assembly
+    $manifest = [xml](Get-Content -LiteralPath (Join-Path $repoRoot $variant.Manifest))
+    $expectedVersion = [string]$manifest.PackageManifest.Metadata.Identity.Version
+    & (Join-Path $PSScriptRoot "Test-VsixPackage.ps1") -VsixPath $vsixPath -ExpectedVersion $expectedVersion -ExpectedAssembly $variant.Assembly
 
     $item = Get-Item -LiteralPath $vsixPath
     $hash = Get-FileHash -LiteralPath $vsixPath -Algorithm SHA256

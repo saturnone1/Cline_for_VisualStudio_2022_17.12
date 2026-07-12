@@ -11,13 +11,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using VsClineAgent.Host.Adapters;
+using VsClineAgent.Host.Generated;
 using VsClineAgent.Services;
 
 namespace VsClineAgent.Host
 {
     internal sealed class SidecarProcess : IDisposable
     {
-        private const int WebviewProtocolVersion = 1;
         private readonly string _assemblyDirectory;
         private readonly HostRpcRouter _hostRpcRouter;
         private Process? _process;
@@ -65,7 +65,7 @@ namespace VsClineAgent.Host
                 "webview.message",
                 new
                 {
-                    protocolVersion = WebviewProtocolVersion,
+                    protocolVersion = WebviewRpcContract.ProtocolVersion,
                     rawJson
                 },
                 cancellationToken).ConfigureAwait(false) as JObject;
@@ -81,11 +81,11 @@ namespace VsClineAgent.Host
                 return false;
 
             var responseProtocolVersion = result.Value<int?>("protocolVersion");
-            if (responseProtocolVersion != WebviewProtocolVersion)
+            if (responseProtocolVersion != WebviewRpcContract.ProtocolVersion)
             {
                 throw new InvalidOperationException(
                     "Unsupported sidecar WebView protocol version. Expected " +
-                    WebviewProtocolVersion + ", received " +
+                    WebviewRpcContract.ProtocolVersion + ", received " +
                     (responseProtocolVersion?.ToString() ?? "missing") + ".");
             }
 

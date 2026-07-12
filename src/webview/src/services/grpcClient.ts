@@ -1,5 +1,6 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
+import { webviewRpcOperation } from "./generated/WebviewRpcContract"
 import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
@@ -396,10 +397,13 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 			}
 
 			return (request: unknown = {}, callbacks?: Callbacks<unknown>) => {
+				const operation = webviewRpcOperation(serviceName, property)
+				if (!operation?.client) throw new Error(`Unknown WebView RPC client operation: ${serviceName}.${property}`)
 				if (isStreamingCallbacks(callbacks)) {
+					if (operation.kind !== "serverStream") throw new Error(`RPC operation is not streaming: ${serviceName}.${property}`)
 					return target.makeStreamingRequest(property, request, encodeMessage, decodeMessage, callbacks)
 				}
-
+				if (operation.kind !== "unary") throw new Error(`RPC operation requires streaming callbacks: ${serviceName}.${property}`)
 				return target.makeUnaryRequest(property, request, encodeMessage, decodeMessage)
 			}
 		},

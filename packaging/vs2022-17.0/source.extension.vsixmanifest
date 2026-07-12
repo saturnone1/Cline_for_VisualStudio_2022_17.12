@@ -2,7 +2,7 @@
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011"
                  xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="VsClineAgent17.ADCC53D2-7B09-4F8D-8534-1FF693AED219" Language="en-US" Version="2.0.0" Publisher="Developer" />
+    <Identity Id="VsClineAgent17.ADCC53D2-7B09-4F8D-8534-1FF693AED219" Language="en-US" Version="2.0.1" Publisher="Developer" />
     <DisplayName>LIG VS (VS 2022 17.0)</DisplayName>
     <Description xml:space="preserve">AI coding agent for Visual Studio 2022 17.0, powered by local/offline runtimes</Description>
     <Icon>Assets\lig-ci-white.png</Icon>
