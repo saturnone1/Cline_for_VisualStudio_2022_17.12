@@ -1,13 +1,50 @@
 import fs from "node:fs"
 import path from "node:path"
+import { spawn } from "node:child_process"
 import type { BrowserAutomationPort } from "../../application/ports/BrowserAutomationPort"
 import { normalizeBrowserActionName, normalizeBrowserDebugHost, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
 
 export class BrowserDevToolsAdapter implements BrowserAutomationPort {
 	resolveExecutablePath(configuredPath = "") { return resolveBrowserExecutablePath(configuredPath) }
+	ensureAvailable(host: string, executablePath: string) { return ensureBrowserDebugHost(host, executablePath) }
 	fetchDebugInfo(host: string) { return fetchBrowserDebugInfo(host) }
 	listTabs(host: string) { return listDevToolsTabs(host) }
 	runAction(host: string, request: BrowserAction) { return runBrowserActionViaDevTools(host, request) }
+}
+
+export async function ensureBrowserDebugHost(host: string, executablePath: string) {
+	const existing = await fetchBrowserDebugInfo(host)
+	if (existing.success) return existing
+	if (!executablePath || !fs.existsSync(executablePath)) {
+		return { success: false, host, error: "Chrome or Edge executable could not be found." }
+	}
+
+	const normalized = new URL(normalizeBrowserDebugHost(host))
+	const profileRoot = path.join(process.env.LOCALAPPDATA || process.cwd(), "VsClineAgent", "browser-profile")
+	fs.mkdirSync(profileRoot, { recursive: true })
+	let launchError = ""
+	try {
+		const child = spawn(executablePath, [
+			`--remote-debugging-port=${normalized.port || "9222"}`,
+			`--user-data-dir=${profileRoot}`,
+			"--no-first-run",
+			"--no-default-browser-check",
+			"about:blank",
+		], { detached: true, stdio: "ignore", windowsHide: false })
+		child.once("error", (error) => { launchError = stringify(error) })
+		child.unref()
+	} catch (error) {
+		return { success: false, host, error: `Browser could not be launched: ${stringify(error)}` }
+	}
+
+	const timeoutAt = Date.now() + readPositiveIntEnv("VSCLINE_BROWSER_LAUNCH_TIMEOUT_MS", 10_000)
+	while (Date.now() < timeoutAt) {
+		await new Promise((resolve) => setTimeout(resolve, 250))
+		if (launchError) return { success: false, host, error: `Browser could not be launched: ${launchError}` }
+		const info = await fetchBrowserDebugInfo(host)
+		if (info.success) return info
+	}
+	return { success: false, host, error: "Browser launched but its DevTools endpoint did not become ready." }
 }
 
 export function resolveBrowserExecutablePath(configuredPath = "") {
@@ -183,6 +220,11 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 			request.onPhase?.({ phase: "typing", action, tabId: tab.id })
 			await client.send("Input.insertText", { text: request.text || "" })
 			await waitForDevToolsSettle(150)
+		} else if (action === "press_enter") {
+			request.onPhase?.({ phase: "pressing_enter", action, tabId: tab.id })
+			await client.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+			await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+			await waitForDevToolsSettle(500)
 		} else if (action === "scroll_down" || action === "scroll_up") {
 			request.onPhase?.({ phase: "scrolling", action, tabId: tab.id })
 			await client.send("Input.dispatchMouseEvent", {
@@ -211,7 +253,7 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 
 		request.onPhase?.({ phase: "capturing", action, tabId: tab.id })
 		const state = await readDevToolsPageState(client)
-		const screenshot = await captureDevToolsScreenshot(client)
+		const screenshot = action === "screenshot" ? await captureDevToolsScreenshot(client) : ""
 		return {
 			success: true,
 			status: "ok",
@@ -222,6 +264,8 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 			url: state.url || tab.url,
 			title: state.title || tab.title,
 			currentUrl: state.url || tab.url,
+			pageText: state.pageText,
+			elements: state.elements,
 			screenshot,
 		}
 	} finally {
@@ -380,7 +424,24 @@ function connectDevTools(webSocketDebuggerUrl: string) {
 
 async function readDevToolsPageState(client: Awaited<ReturnType<typeof connectDevTools>>) {
 	const result = asRecord(await client.send("Runtime.evaluate", {
-		expression: "({ url: location.href, title: document.title })",
+		expression: `(() => {
+			const text = (document.body?.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 12000)
+			const selectors = "a,button,input,textarea,select,[role=button],[contenteditable=true]"
+			const elements = Array.from(document.querySelectorAll(selectors)).slice(0, 80).map((element, index) => {
+				const rect = element.getBoundingClientRect()
+				const input = element
+				return {
+					index,
+					tag: element.tagName.toLowerCase(),
+					type: input.type || "",
+					label: (element.getAttribute("aria-label") || input.placeholder || element.textContent || input.value || "").replace(/\\s+/g, " ").trim().slice(0, 160),
+					x: Math.round(rect.left + rect.width / 2),
+					y: Math.round(rect.top + rect.height / 2),
+					visible: rect.width > 0 && rect.height > 0,
+				}
+			})
+			return { url: location.href, title: document.title, pageText: text, elements }
+		})()`,
 		returnByValue: true,
 	}))
 	return asRecord(asRecord(asRecord(result.result).value))

@@ -18,16 +18,22 @@ export function normalizeBrowserActionName(value: string) {
 		case "browser_action_launch": case "launch_browser": case "launch": return "launch"
 		case "open": case "goto": case "go_to": case "navigate": return "navigate"
 		case "screenshot": case "capture_screenshot": return "screenshot"
-		case "scroll_down": case "scroll_up": case "click": case "type": case "close": return normalized
+		case "scroll_down": case "scroll_up": case "click": case "type": case "press_enter": case "close": return normalized
 		default: return normalized || "navigate"
 	}
 }
 
 export function browserActionResultForTranscript(result: Record<string, unknown>) {
-	return { screenshot: readString(result.screenshot), screenshotBytes: numberValue(result.screenshotBytes) || screenshotByteLength(readString(result.screenshot)), currentUrl: readString(result.currentUrl) || readString(result.url), logs: readString(result.error) || (result.success === false ? "Browser action failed." : ""), currentMousePosition: readString(result.currentMousePosition), browserSessionId: readString(result.browserSessionId), tabId: readString(result.tabId), url: readString(result.url), title: readString(result.title), action: readString(result.action), status: readString(result.status), error: readString(result.error) }
+	return { screenshot: readString(result.screenshot), screenshotBytes: numberValue(result.screenshotBytes) || screenshotByteLength(readString(result.screenshot)), currentUrl: readString(result.currentUrl) || readString(result.url), pageText: readString(result.pageText), elements: Array.isArray(result.elements) ? result.elements.slice(0, 80) : [], logs: readString(result.error) || (result.success === false ? "Browser action failed." : ""), currentMousePosition: readString(result.currentMousePosition), browserSessionId: readString(result.browserSessionId), tabId: readString(result.tabId), url: readString(result.url), title: readString(result.title), action: readString(result.action), status: readString(result.status), error: readString(result.error) }
 }
 
-export function screenshotByteLength(value: string) { const index = value.indexOf("base64,"); return index < 0 ? 0 : Math.floor((value.slice(index + 7).length * 3) / 4) }
+export function screenshotByteLength(value: string) {
+	const index = value.indexOf("base64,")
+	if (index < 0) return 0
+	const payload = value.slice(index + 7).replace(/\s/g, "")
+	const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0
+	return Math.max(0, Math.floor((payload.length * 3) / 4) - padding)
+}
 export function isBrowserToolName(toolName: string) { return ["browser", "browser_action", "browseraction", "browser_action_launch", "browser_action_result"].includes(toolName.trim().toLowerCase()) }
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }

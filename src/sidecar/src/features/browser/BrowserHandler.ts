@@ -111,6 +111,11 @@ export class BrowserHandler {
 	async performAction(params: unknown, settings: BrowserSettings) {
 		const config = adapterConfig(settings)
 		if (config.disabled) return { success: false, status: "error", error: disabledMessage }
+		if (!settings.remoteBrowserEnabled) {
+			const executablePath = this.automation.resolveExecutablePath(settings.chromeExecutablePath)
+			const availability = await this.automation.ensureAvailable(config.host, executablePath)
+			if (!availability.success) return { success: false, status: "error", error: availability.error || "Browser is unavailable." }
+		}
 		const input = asRecord(params)
 		return this.runWithSession(config.host, {
 			action: normalizeBrowserActionName(getString(input, "action") || getString(input, "name") || "navigate"),

@@ -1,10 +1,11 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
-import { createToolPolicies, isPlanModeBlockedTool, isWebFetchEnabled, webFetchDisabledReason } from "./ProviderConfiguration"
+import { createToolPolicies, isStrictPlanModeBlockedTool, isWebFetchEnabled, webFetchDisabledReason } from "./ProviderConfiguration"
 
 type ToolRuntimePolicyDependencies = {
 	autoApprovalSettings: () => unknown
 	browserSettings: () => unknown
 	mode: () => "plan" | "act"
+	strictPlanModeEnabled: () => boolean
 	writeWebToolState: (state: Record<string, unknown>) => void
 	logger: InteractionLoggerPort
 }
@@ -14,13 +15,14 @@ export class ToolRuntimePolicy {
 
 	currentPolicies() {
 		const mode = this.dependencies.mode()
-		const policies = createToolPolicies(this.dependencies.autoApprovalSettings(), this.dependencies.browserSettings(), mode)
-		if (mode === "plan") this.dependencies.logger.log("sidecar", "sdkModePolicy.plan", {})
+		const strictPlanModeEnabled = this.dependencies.strictPlanModeEnabled()
+		const policies = createToolPolicies(this.dependencies.autoApprovalSettings(), this.dependencies.browserSettings(), mode, strictPlanModeEnabled)
+		if (mode === "plan") this.dependencies.logger.log("sidecar", "sdkModePolicy.plan", { strictPlanModeEnabled })
 		return policies
 	}
 
 	isBlockedInCurrentMode(mappedToolName: string) {
-		return this.dependencies.mode() === "plan" && isPlanModeBlockedTool(mappedToolName)
+		return this.dependencies.mode() === "plan" && this.dependencies.strictPlanModeEnabled() && isStrictPlanModeBlockedTool(mappedToolName)
 	}
 
 	refreshWebToolState() {

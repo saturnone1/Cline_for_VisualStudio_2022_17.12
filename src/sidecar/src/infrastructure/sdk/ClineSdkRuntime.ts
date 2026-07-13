@@ -34,6 +34,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>,
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
+		private readonly createHostExtraTools?: () => readonly unknown[],
 	) {
 		this.mcp = new ClineSdkMcpAdapter(host, () => this.readSdkVersion(), (level, message, metadata) => this.logSdkMessage(level, message, metadata))
 		this.sessions = new ClineSdkSessionAdapter({
@@ -42,7 +43,12 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			getActiveSessionId: () => this.activeSessionId,
 			setActiveSessionId: (sessionId) => { this.activeSessionId = sessionId },
 			getWorkspacePaths: () => this.host.workspaceClient.getWorkspacePaths({}),
-			createExtraTools: () => this.mcp.createExtraToolsForSession(),
+			createExtraTools: async () => {
+				const mcpTools = await this.mcp.createExtraToolsForSession()
+				const hostTools = [...(this.createHostExtraTools?.() || [])]
+				const combined = [...(Array.isArray(mcpTools) ? mcpTools : []), ...hostTools]
+				return combined.length > 0 ? combined : undefined
+			},
 			getStatus: () => this.status,
 		})
 	}

@@ -30,6 +30,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	setStartTaskHandler(value: WebviewFeatures["startTask"]) { this.composition.attachFeature("startTask", value) }
 	setCancelTaskHandler(value: WebviewFeatures["cancelTask"]) { this.composition.attachFeature("cancelTask", value) }
 	setBrowserHandler(value: WebviewFeatures["browser"]) { this.composition.attachFeature("browser", value) }
+	getBrowserSettings() { return this.composition.getBrowserSettings() }
 	setWorktreeQueryHandler(value: WebviewFeatures["worktreeQueries"]) { this.composition.attachFeature("worktreeQueries", value) }
 	setWorktreeMutationHandler(value: WebviewFeatures["worktreeMutations"]) { this.composition.attachFeature("worktreeMutations", value) }
 	setOAuthCallbackServices(authorization: WebviewFeatures["oauthAuthorization"], callback: WebviewFeatures["oauthCallback"]) { this.composition.attachFeature("oauthAuthorization", authorization); this.composition.attachFeature("oauthCallback", callback) }

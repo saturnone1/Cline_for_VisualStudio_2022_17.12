@@ -12,7 +12,7 @@ type Callbacks = Readonly<{
 	stopTerminal: () => void
 	finalPollTerminal: () => void
 	postToolUse: (event: Extract<AgentEvent, { type: "ToolCallCompleted" }>) => void
-	handleBrowser: (toolName: string, input: Record<string, unknown>, error: string) => void
+	handleBrowser: (toolName: string, input: Record<string, unknown>, error: string, output: unknown) => void
 	shouldSuppressTrackedEdit: (toolName: string, trackedPath: string) => boolean
 	rememberSummary: (tool: string, text: string) => void
 	appendTerminal: (text: string) => void
@@ -51,7 +51,7 @@ export class AgentToolEventProjector {
 		this.callbacks.noteActivity("content_end:tool"); this.callbacks.clearReasoning(); this.callbacks.postToolUse(event)
 		const input = asRecord(event.input), command = isCommand(event.toolName)
 		if (command) { this.callbacks.stopTerminal(); this.callbacks.finalPollTerminal() }
-		if (isBrowserToolName(event.toolName)) { this.callbacks.handleBrowser(event.toolName, input, event.error); return { handled: true, broadcast: false } }
+		if (isBrowserToolName(event.toolName)) { this.callbacks.handleBrowser(event.toolName, input, event.error, event.output); return { handled: true, broadcast: false } }
 		const mapped = mapToolName(event.toolName)
 		const trackedPath = mapped === "editedExistingFile" ? getPatchPathsFromUnknown(input) || getToolPathFromUnknown(input) || getToolPathFromUnknown(event.output) : ""
 		if (this.callbacks.shouldSuppressTrackedEdit(event.toolName, trackedPath)) return { handled: true, broadcast: false }

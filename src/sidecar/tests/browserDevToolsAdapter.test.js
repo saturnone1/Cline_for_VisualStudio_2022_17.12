@@ -23,6 +23,8 @@ test("browser adapter creates a stable transcript DTO", () => {
 		screenshot: "data:image/png;base64,AAAA",
 		screenshotBytes: 3,
 		currentUrl: "https://example.com",
+		pageText: "",
+		elements: [],
 		logs: "",
 		currentMousePosition: "",
 		browserSessionId: "",

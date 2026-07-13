@@ -20,7 +20,7 @@ const requiredCapabilities = [
 	["provider catalog diagnostics", "createCatalogDiagnostics"],
 	["send latency diagnostics", "sendLatency.firstSdkEvent"],
 	["targeted Plan/Act toggle", "resolveRequestedPlanActMode"],
-	["plan-mode tool policy", "isPlanModeBlockedTool"],
+	["strict Plan-mode tool policy", "isStrictPlanModeBlockedTool"],
 	["completion payload fallback", "extractCompletionTextFromResult"],
 	["restored transcript transport", "buildResumedConversationMessages"],
 	["persisted task snapshots", "taskSnapshots: state.taskSnapshots"],

@@ -339,7 +339,7 @@ export function isAutoApprovalSettingsLike(record: Record<string, unknown>) {
 	return "actions" in record || "enabled" in record || "maxRequests" in record || "favorites" in record
 }
 
-export function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}, mode: unknown = "act") {
+export function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}, mode: unknown = "act", strictPlanModeEnabled = false) {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
 	const autoApproveAll = settings.enabled === true
@@ -348,6 +348,7 @@ export function createToolPolicies(autoApprovalSettings: unknown, browserSetting
 	const editAuto = autoApproveAll && actions.editFiles === true
 	const commandAuto = autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
 	const mcpAuto = autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
+	const browserAuto = autoApproveAll && actions.useBrowser === true
 
 	const policy = {
 		readFile: { enabled: true, autoApprove: readAuto },
@@ -371,16 +372,18 @@ export function createToolPolicies(autoApprovalSettings: unknown, browserSetting
 		run_command: { enabled: true, autoApprove: commandAuto },
 		run_commands: { enabled: true, autoApprove: commandAuto },
 		fetch_web_content: { enabled: webFetchEnabled, autoApprove: false },
+		browser_action: { enabled: webFetchEnabled, autoApprove: browserAuto },
+		browser: { enabled: webFetchEnabled, autoApprove: browserAuto },
 		skills: { enabled: true, autoApprove: false },
 		useMcpServer: { enabled: true, autoApprove: mcpAuto },
 		use_mcp_server: { enabled: true, autoApprove: mcpAuto },
 		ask_question: { enabled: true, autoApprove: true },
 		submit_and_exit: { enabled: true, autoApprove: true },
 	}
-	if (mode === "plan") {
+	if (mode === "plan" && strictPlanModeEnabled) {
 		const blockedTools: string[] = []
 		for (const key of Object.keys(policy) as Array<keyof typeof policy>) {
-			if (isPlanModeBlockedTool(key)) {
+			if (isStrictPlanModeBlockedTool(key)) {
 				policy[key] = { enabled: false, autoApprove: false }
 				blockedTools.push(String(key))
 			}
@@ -389,15 +392,8 @@ export function createToolPolicies(autoApprovalSettings: unknown, browserSetting
 	return policy
 }
 
-export function isPlanModeBlockedTool(toolName: string) {
-	const mapped = mapToolName(toolName)
-	return mapped === "executeCommand" ||
-		mapped === "editedExistingFile" ||
-		mapped === "useMcpServer" ||
-		mapped === "fetch_web_content" ||
-		mapped === "browser_action_launch" ||
-		mapped === "browser" ||
-		mapped === "skills"
+export function isStrictPlanModeBlockedTool(toolName: string) {
+	return mapToolName(toolName) === "editedExistingFile"
 }
 
 export function isWebFetchEnabled(browserSettings: unknown) {

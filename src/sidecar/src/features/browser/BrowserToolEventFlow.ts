@@ -12,7 +12,7 @@ type BrowserToolEventDependencies = {
 export class BrowserToolEventFlow {
 	constructor(private readonly dependencies: BrowserToolEventDependencies) {}
 
-	async execute(toolName: string, input: Record<string, unknown>, error: string) {
+	async execute(toolName: string, input: Record<string, unknown>, error: string, completedOutput?: unknown) {
 		const action = normalizeBrowserActionName(stringValue(input.action) || stringValue(input.name) || toolName)
 		const url = stringValue(input.url) || stringValue(input.value)
 		if (action === "launch" || action === "navigate") {
@@ -25,9 +25,12 @@ export class BrowserToolEventFlow {
 			})
 		}
 
+		const output = asRecord(completedOutput)
 		const result: Record<string, unknown> = error
 			? { success: false, status: "error", error }
-			: asRecord(await this.dependencies.browser().performAction({ ...input, action }, this.dependencies.settings()))
+			: Object.keys(output).length > 0
+				? output
+				: asRecord(await this.dependencies.browser().performAction({ ...input, action }, this.dependencies.settings()))
 		for (const phase of arrayOfRecords(result.phases)) {
 			this.dependencies.addMessage({
 				type: "say",

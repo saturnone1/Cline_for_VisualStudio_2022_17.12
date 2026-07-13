@@ -15,6 +15,7 @@ import { SendMessageHandler } from "../features/chat/sendMessage/SendMessageHand
 import { StartTaskHandler } from "../features/chat/startTask/StartTaskHandler"
 import { CancelTaskHandler } from "../features/chat/cancelTask/CancelTaskHandler"
 import { BrowserHandler } from "../features/browser/BrowserHandler"
+import { createBrowserAgentTool } from "../features/browser/BrowserAgentTool"
 import { BrowserDevToolsAdapter } from "../infrastructure/browser/BrowserDevToolsAdapter"
 import { NodeWorktreeOperationsAdapter } from "../infrastructure/worktree/NodeWorktreeOperationsAdapter"
 import { WorktreeQueryHandler } from "../features/worktrees/WorktreeQueryHandler"
@@ -50,9 +51,13 @@ export function createSidecarConnectionScope(connection: JsonRpcConnection, stat
 	const host = VisualStudioHostProvider.create(connection), transport = new JsonRpcWebviewTransport(connection)
 	const backend = new VisualStudioWebviewBackend(host, transport, interactionLogger, new StatePersistenceUseCase(stateStore, readPositiveIntEnv("VSCLINE_STATE_SAVE_DEBOUNCE_MS", 250)), new TaskLifecycleUseCase())
 	const webview = new VisualStudioWebviewController(backend)
-	const runtime = new ClineSdkRuntime(host, __dirname, (event) => webview.handleSdkEvent(event), (request) => webview.requestToolApproval(request), (question, options) => webview.requestQuestion(question, options), () => webview.isScheduledAgentsEnabled())
+	const browser = new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000))
+	const runtime = new ClineSdkRuntime(host, __dirname, (event) => webview.handleSdkEvent(event), (request) => webview.requestToolApproval(request), (question, options) => webview.requestQuestion(question, options), () => webview.isScheduledAgentsEnabled(), () => {
+		const tool = createBrowserAgentTool(browser, () => backend.getBrowserSettings())
+		return tool ? [tool] : []
+	})
 	backend.setAgentEngine(runtime); backend.setTaskSessionUseCase(new TaskSessionUseCase(runtime)); backend.setMcpHandler(new McpHandler(runtime)); backend.setSendMessageHandler(new SendMessageHandler(runtime)); backend.setStartTaskHandler(new StartTaskHandler(runtime)); backend.setCancelTaskHandler(new CancelTaskHandler(runtime))
-	backend.setBrowserHandler(new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000)))
+	backend.setBrowserHandler(browser)
 	const worktrees = new NodeWorktreeOperationsAdapter(host), worktreeQueries = new WorktreeQueryHandler(worktrees, interactionLogger)
 	backend.setWorktreeQueryHandler(worktreeQueries); backend.setWorktreeMutationHandler(new WorktreeMutationHandler(worktrees, worktreeQueries, interactionLogger))
 	const tokenExchange = new FetchOAuthTokenExchangeAdapter(), oauthTokens = new OAuthTokenHandler(tokenExchange, interactionLogger), credentials = new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), tokenExchange, runtime)

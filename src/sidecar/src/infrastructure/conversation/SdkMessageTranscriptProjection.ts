@@ -85,17 +85,6 @@ export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<s
 			const outputTokens = getNumber(metrics, "outputTokens")
 			const cacheReads = getNumber(metrics, "cacheReadTokens")
 			const cacheWrites = getNumber(metrics, "cacheWriteTokens")
-			if ((inputTokens || 0) + (outputTokens || 0) + (cacheReads || 0) + (cacheWrites || 0) > 0) {
-				result.push({
-					ts: ts + partOffset++,
-					type: "say",
-					say: "api_req_started",
-					text: JSON.stringify({ request: "", tokensIn: inputTokens || 0, tokensOut: outputTokens || 0, cacheReads: cacheReads || 0, cacheWrites: cacheWrites || 0, cost: getNumber(metrics, "cost") || 0, usageReliable: true }),
-					partial: false,
-					isCollapsed: true,
-					isExpanded: false,
-				})
-			}
 			const entries = sdkContentToToolActivityEntries(record.content)
 			if (entries.length > 0) {
 				toolEntries.push(...entries)
@@ -109,6 +98,17 @@ export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<s
 				flushToolEntries(ts + partOffset++)
 				flushReasoning(ts + partOffset++)
 				result.push({ ts: ts + partOffset++, type: "say", say: "text", text })
+			}
+			if ((inputTokens || 0) + (outputTokens || 0) + (cacheReads || 0) + (cacheWrites || 0) > 0) {
+				result.push({
+					ts: ts + partOffset++,
+					type: "say",
+					say: "api_req_started",
+					text: JSON.stringify({ request: "", tokensIn: inputTokens || 0, tokensOut: outputTokens || 0, cacheReads: cacheReads || 0, cacheWrites: cacheWrites || 0, cost: getNumber(metrics, "cost") || 0, usageReliable: true }),
+					partial: false,
+					isCollapsed: true,
+					isExpanded: false,
+				})
 			}
 		}
 
