@@ -13,7 +13,8 @@ import type { ExtensionState } from "@shared/ExtensionMessage"
 import { EmptyRequest } from "@shared/proto/cline/common"
 import type { OpenRouterCompatibleModelInfo } from "@shared/proto/cline/models"
 import { fromProtobufModels } from "@shared/protoConversions/models/typeConversion"
-import { useCallback, useEffect, useState } from "react"
+import type React from "react"
+import { createContext, createElement, useCallback, useContext, useEffect, useState } from "react"
 import { ModelsServiceClient } from "../services/grpcClient"
 
 export interface ModelCatalogState {
@@ -166,4 +167,25 @@ export function useModelCatalogState(apiConfiguration: ApiConfiguration): ModelC
 		refreshHicapModels,
 		refreshLiteLlmModels,
 	}
+}
+
+const ModelCatalogStateContext = createContext<ModelCatalogState | undefined>(undefined)
+
+interface ModelCatalogStateProviderProps {
+	apiConfiguration: ApiConfiguration
+	children: React.ReactNode | ((value: ModelCatalogState) => React.ReactNode)
+}
+
+export function ModelCatalogStateProvider({ apiConfiguration, children }: ModelCatalogStateProviderProps) {
+	const value = useModelCatalogState(apiConfiguration)
+	const content = typeof children === "function" ? children(value) : children
+	return createElement(ModelCatalogStateContext.Provider, { value }, content)
+}
+
+export function useModelCatalogStateContext(): ModelCatalogState {
+	const context = useContext(ModelCatalogStateContext)
+	if (!context) {
+		throw new Error("useModelCatalogStateContext must be used within ModelCatalogStateProvider")
+	}
+	return context
 }

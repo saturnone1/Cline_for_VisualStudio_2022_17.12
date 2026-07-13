@@ -427,16 +427,17 @@ function waitForDevToolsSettle(ms = 500) {
 export async function checkIsImageUrl(url: string) {
 	const normalized = normalizeHttpUrl(url)
 	if (!normalized) {
-		return { value: false, success: false }
+		return { isImage: false, value: false, success: false }
 	}
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 5000))
 	try {
 		const response = await fetch(normalized, { method: "HEAD", signal: controller.signal })
 		const contentType = response.headers.get("content-type") || ""
-		return { value: response.ok && contentType.toLowerCase().startsWith("image/"), contentType, success: response.ok }
+		const isImage = response.ok && contentType.toLowerCase().startsWith("image/")
+		return { isImage, value: isImage, contentType, success: response.ok }
 	} catch (error) {
-		return { value: false, success: false, error: stringify(error) }
+		return { isImage: false, value: false, success: false, error: stringify(error) }
 	} finally {
 		clearTimeout(timeout)
 	}

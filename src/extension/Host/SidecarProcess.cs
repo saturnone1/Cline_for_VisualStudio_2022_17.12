@@ -1,11 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +18,7 @@ namespace VsClineAgent.Host
     {
         private readonly string _assemblyDirectory;
         private readonly HostRpcRouter _hostRpcRouter;
+		private readonly SidecarRuntimeInstaller _runtimeInstaller = new SidecarRuntimeInstaller();
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
         private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
@@ -110,14 +109,25 @@ namespace VsClineAgent.Host
             var stopwatch = Stopwatch.StartNew();
             var pipeName = @"\\.\pipe\VsClineAgent-" + Guid.NewGuid().ToString("N");
             var sidecarDirectory = Path.Combine(_assemblyDirectory, "Sidecar");
-            var runtimePreparation = PrepareSidecarRuntime(sidecarDirectory);
+            var runtimePreparation = _runtimeInstaller.Prepare(sidecarDirectory);
+			WriteSlowTrace("sidecar.runtime.prepare.slow", runtimePreparation.TotalMs, new JObject
+			{
+				["runtime"] = runtimePreparation.RuntimeDirectory,
+				["runtimeStampMs"] = runtimePreparation.RuntimeStampMs,
+				["runtimeCopied"] = runtimePreparation.RuntimeCopied,
+				["runtimeCopyMs"] = runtimePreparation.RuntimeCopyMs,
+				["runtimeCopyReason"] = runtimePreparation.RuntimeCopyReason,
+				["nodeModulesExtracted"] = runtimePreparation.NodeModulesExtracted,
+				["nodeModulesExtractMs"] = runtimePreparation.NodeModulesExtractMs,
+				["nodeModulesExtractReason"] = runtimePreparation.NodeModulesExtractReason
+			});
             var runtimeDirectory = runtimePreparation.RuntimeDirectory;
             var scriptPath = Path.Combine(runtimeDirectory, "cline-sidecar.js");
-            var nodePath = ResolveBundledNodePath(sidecarDirectory);
+            var nodePath = SidecarRuntimeInstaller.ResolveBundledNodePath(sidecarDirectory);
             _logFilePath = GetSidecarLogPath();
 
             if (!File.Exists(scriptPath))
-                throw new FileNotFoundException(BuildMissingEntrypointDiagnostic(sidecarDirectory, runtimeDirectory), scriptPath);
+                throw new FileNotFoundException(SidecarRuntimeInstaller.BuildMissingEntrypointDiagnostic(sidecarDirectory, runtimeDirectory), scriptPath);
 
             CaptureSidecarLine("sidecar:start", "node=" + nodePath);
             CaptureSidecarLine("sidecar:start", "script=" + scriptPath);
@@ -270,216 +280,6 @@ namespace VsClineAgent.Host
                 catch
                 {
                 }
-            }
-        }
-
-        private sealed class SidecarRuntimePreparation
-        {
-            public string RuntimeDirectory { get; set; } = "";
-            public long TotalMs { get; set; }
-            public long RuntimeStampMs { get; set; }
-            public bool RuntimeCopied { get; set; }
-            public long RuntimeCopyMs { get; set; }
-            public string RuntimeCopyReason { get; set; } = "";
-            public bool NodeModulesExtracted { get; set; }
-            public long NodeModulesExtractMs { get; set; }
-            public string NodeModulesExtractReason { get; set; } = "";
-        }
-
-        private static SidecarRuntimePreparation PrepareSidecarRuntime(string packagedSidecarDirectory)
-        {
-            var totalStopwatch = Stopwatch.StartNew();
-            var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
-            var runtimeSourceDirectory = ResolvePackagedRuntimeDirectory(packagedSidecarDirectory);
-            var runtimeVersion = GetRuntimeCacheVersion();
-            var cacheRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VsClineAgent",
-                "Sidecar",
-                runtimeVersion);
-            CleanupVersionedCacheDirectory(Path.GetDirectoryName(cacheRoot), runtimeVersion, 2);
-            var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
-            var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
-            var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
-            var expectedStamp = SidecarRuntimeFingerprint.FromArchive(nodeModulesZip);
-            var runtimeStampStopwatch = Stopwatch.StartNew();
-            var expectedRuntimeStamp = SidecarRuntimeFingerprint.FromRuntimeDirectory(runtimeSourceDirectory);
-            runtimeStampStopwatch.Stop();
-
-            var preparation = new SidecarRuntimePreparation
-            {
-                RuntimeDirectory = cacheRoot,
-                RuntimeStampMs = runtimeStampStopwatch.ElapsedMilliseconds
-            };
-
-            var runtimeCopyReason = !File.Exists(runtimeStampPath)
-                ? "missing_runtime_stamp"
-                : !string.Equals(File.ReadAllText(runtimeStampPath), expectedRuntimeStamp, StringComparison.Ordinal)
-                    ? "runtime_stamp_mismatch"
-                    : "";
-            if (!string.IsNullOrEmpty(runtimeCopyReason))
-            {
-                var runtimeCopyStopwatch = Stopwatch.StartNew();
-                CopyRuntimeFiles(runtimeSourceDirectory, cacheRoot);
-                runtimeCopyStopwatch.Stop();
-                preparation.RuntimeCopied = true;
-                preparation.RuntimeCopyMs = runtimeCopyStopwatch.ElapsedMilliseconds;
-                preparation.RuntimeCopyReason = runtimeCopyReason;
-                File.WriteAllText(runtimeStampPath, expectedRuntimeStamp);
-            }
-
-            var nodeModulesExtractReason = !Directory.Exists(nodeModulesDirectory)
-                ? "missing_node_modules_directory"
-                : !File.Exists(stampPath)
-                    ? "missing_node_modules_stamp"
-                    : !string.Equals(File.ReadAllText(stampPath), expectedStamp, StringComparison.Ordinal)
-                        ? "node_modules_stamp_mismatch"
-                        : "";
-            if (!string.IsNullOrEmpty(nodeModulesExtractReason))
-            {
-                if (!File.Exists(nodeModulesZip))
-                    throw new FileNotFoundException("Cline SDK dependency archive was not found.", nodeModulesZip);
-
-                Directory.CreateDirectory(cacheRoot);
-                if (Directory.Exists(nodeModulesDirectory))
-                    Directory.Delete(nodeModulesDirectory, true);
-
-                var extractStopwatch = Stopwatch.StartNew();
-                ZipFile.ExtractToDirectory(nodeModulesZip, nodeModulesDirectory);
-                extractStopwatch.Stop();
-                preparation.NodeModulesExtracted = true;
-                preparation.NodeModulesExtractMs = extractStopwatch.ElapsedMilliseconds;
-                preparation.NodeModulesExtractReason = nodeModulesExtractReason;
-                File.WriteAllText(stampPath, expectedStamp);
-            }
-
-            totalStopwatch.Stop();
-            preparation.TotalMs = totalStopwatch.ElapsedMilliseconds;
-            WriteSlowTrace("sidecar.runtime.prepare.slow", preparation.TotalMs, new JObject
-            {
-                ["runtime"] = preparation.RuntimeDirectory,
-                ["runtimeStampMs"] = preparation.RuntimeStampMs,
-                ["runtimeCopied"] = preparation.RuntimeCopied,
-                ["runtimeCopyMs"] = preparation.RuntimeCopyMs,
-                ["runtimeCopyReason"] = preparation.RuntimeCopyReason,
-                ["nodeModulesExtracted"] = preparation.NodeModulesExtracted,
-                ["nodeModulesExtractMs"] = preparation.NodeModulesExtractMs,
-                ["nodeModulesExtractReason"] = preparation.NodeModulesExtractReason
-            });
-            return preparation;
-        }
-
-        private static string ResolvePackagedRuntimeDirectory(string packagedSidecarDirectory)
-        {
-            var rootEntrypoint = Path.Combine(packagedSidecarDirectory, "cline-sidecar.js");
-            if (File.Exists(rootEntrypoint))
-                return packagedSidecarDirectory;
-
-            var nestedRuntimeDirectory = Path.Combine(packagedSidecarDirectory, "runtime");
-            var nestedEntrypoint = Path.Combine(nestedRuntimeDirectory, "cline-sidecar.js");
-            return File.Exists(nestedEntrypoint) ? nestedRuntimeDirectory : packagedSidecarDirectory;
-        }
-
-        private static string ResolveBundledNodePath(string packagedSidecarDirectory)
-        {
-            var rootNodePath = Path.Combine(packagedSidecarDirectory, "node.exe");
-            if (File.Exists(rootNodePath))
-                return rootNodePath;
-
-            var runtimeNodePath = Path.Combine(packagedSidecarDirectory, "runtime", "node.exe");
-            return File.Exists(runtimeNodePath) ? runtimeNodePath : "node";
-        }
-
-        private static string BuildMissingEntrypointDiagnostic(string packagedSidecarDirectory, string runtimeDirectory)
-        {
-            var packagedEntrypoint = Path.Combine(packagedSidecarDirectory, "cline-sidecar.js");
-            var packagedRuntimeEntrypoint = Path.Combine(packagedSidecarDirectory, "runtime", "cline-sidecar.js");
-            var cachedEntrypoint = Path.Combine(runtimeDirectory, "cline-sidecar.js");
-            return "Cline sidecar entrypoint was not found. Checked: "
-                + packagedEntrypoint
-                + "; "
-                + packagedRuntimeEntrypoint
-                + "; "
-                + cachedEntrypoint;
-        }
-
-        private static string GetRuntimeCacheVersion()
-        {
-            var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_CACHE_KEY");
-            string cacheVersion = string.IsNullOrWhiteSpace(configured)
-                ? GetDefaultRuntimeCacheVersion()
-                : configured!;
-
-            foreach (var invalidChar in Path.GetInvalidFileNameChars())
-                cacheVersion = cacheVersion.Replace(invalidChar, '_');
-
-            return cacheVersion.Replace(' ', '_');
-        }
-
-        private static string GetDefaultRuntimeCacheVersion()
-        {
-            var assemblyName = Assembly.GetExecutingAssembly().GetName();
-            var name = string.IsNullOrWhiteSpace(assemblyName.Name) ? "VsClineAgent" : assemblyName.Name!;
-            var version = assemblyName.Version?.ToString() ?? "unknown";
-            return name + "-" + version;
-        }
-
-        private static void CleanupVersionedCacheDirectory(string? cacheRoot, string currentVersion, int keepRecentCount)
-        {
-            if (string.IsNullOrWhiteSpace(cacheRoot) || !Directory.Exists(cacheRoot))
-                return;
-
-            var root = Path.GetFullPath(cacheRoot);
-            var candidates = Directory.EnumerateDirectories(root)
-                .Select(path => new DirectoryInfo(path))
-                .Where(info => !string.Equals(info.Name, currentVersion, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(info => info.LastWriteTimeUtc)
-                .Skip(Math.Max(0, keepRecentCount))
-                .ToList();
-
-            foreach (var candidate in candidates)
-                TryDeleteDirectoryUnderRoot(candidate.FullName, root);
-        }
-
-        private static void TryDeleteDirectoryUnderRoot(string path, string root)
-        {
-            try
-            {
-                var resolved = Path.GetFullPath(path);
-                var resolvedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    + Path.DirectorySeparatorChar;
-                if (!resolved.StartsWith(resolvedRoot, StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                Directory.Delete(resolved, true);
-            }
-            catch
-            {
-            }
-        }
-
-        private static void CopyRuntimeFiles(string sourceDirectory, string targetDirectory)
-        {
-            Directory.CreateDirectory(targetDirectory);
-
-            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-            {
-                var relativePath = file.Substring(sourceDirectory.Length)
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-                if (relativePath.StartsWith("node_modules", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(relativePath, "node.exe", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(relativePath, "node_modules.zip", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var targetPath = Path.Combine(targetDirectory, relativePath);
-                var targetParent = Path.GetDirectoryName(targetPath);
-                if (!string.IsNullOrWhiteSpace(targetParent))
-                    Directory.CreateDirectory(targetParent);
-
-                File.Copy(file, targetPath, true);
             }
         }
 

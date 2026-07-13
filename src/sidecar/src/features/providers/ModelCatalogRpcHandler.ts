@@ -2,6 +2,7 @@ export type ProviderCatalogRequest = Readonly<{ baseUrl: string; apiConfiguratio
 
 export type ModelCatalogCommand =
 	| Readonly<{ type: "ollamaValues"; baseUrl: string }>
+	| Readonly<{ type: "lmStudioValues"; baseUrl: string }>
 	| Readonly<{ type: "refresh"; providerId: string; request: ProviderCatalogRequest }>
 	| Readonly<{ type: "askSage"; baseUrl: string }>
 	| Readonly<{ type: "openRouterKeyInfo"; apiKey: string }>
@@ -9,6 +10,7 @@ export type ModelCatalogCommand =
 
 type Callbacks = Readonly<{
 	ollamaValues: (baseUrl: string) => Promise<unknown>
+	lmStudioValues: (baseUrl: string) => Promise<unknown>
 	refresh: (providerId: string, request: ProviderCatalogRequest) => Promise<unknown>
 	askSage: (baseUrl: string) => Promise<unknown>
 	openRouterKeyInfo: (apiKey: string) => Promise<unknown>
@@ -21,6 +23,7 @@ export class ModelCatalogRpcHandler {
 	handle(command: ModelCatalogCommand): unknown | Promise<unknown> {
 		switch (command.type) {
 			case "ollamaValues": return this.callbacks.ollamaValues(command.baseUrl)
+			case "lmStudioValues": return this.callbacks.lmStudioValues(command.baseUrl)
 			case "refresh": return this.callbacks.refresh(command.providerId, command.request)
 			case "askSage": return this.callbacks.askSage(command.baseUrl)
 			case "openRouterKeyInfo": return this.callbacks.openRouterKeyInfo(command.apiKey)

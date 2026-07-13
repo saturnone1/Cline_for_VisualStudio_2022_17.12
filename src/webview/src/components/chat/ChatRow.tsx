@@ -20,9 +20,8 @@ import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { findMatchingResourceOrTemplate, getMcpServerDisplayName } from "@/utils/mcp"
 import CodeAccordian from "../common/CodeAccordian"
-import { AskMessageRenderer } from "./AskMessageRenderer"
+import { ChatMessageRendererRegistry } from "./ChatMessageRendererRegistry"
 import { CommandOutputRow } from "./CommandOutputRow"
-import { SayMessageRenderer } from "./SayMessageRenderer"
 import SubagentStatusRow from "./SubagentStatusRow"
 import { ToolMessageRenderer } from "./ToolMessageRenderer"
 import { useQuoteSelection } from "./useQuoteSelection"
@@ -394,53 +393,48 @@ export const ChatRowContent = memo(
 			)
 		}
 
-		switch (message.type) {
-			case "say":
-				return (
-					<SayMessageRenderer
-						apiReqStreamingFailedMessage={apiReqStreamingFailedMessage}
-						apiRequestFailedMessage={apiRequestFailedMessage}
-						contentRef={contentRef}
-						cost={cost}
-						explainChangesDisabled={explainChangesDisabled}
-						handleMouseUp={handleMouseUp}
-						handleQuoteClick={handleQuoteClick}
-						handleToggle={handleToggle}
-						icon={icon}
-						isExpanded={isExpanded}
-						isLast={isLast}
-						lastModifiedMessage={lastModifiedMessage}
-						message={message}
-						mode={mode}
-						quoteButtonState={quoteButtonState}
-						seeNewChangesDisabled={seeNewChangesDisabled}
-						sendMessageFromChatRow={sendMessageFromChatRow}
-						setExplainChangesDisabled={setExplainChangesDisabled}
-						setSeeNewChangesDisabled={setSeeNewChangesDisabled}
-						showFeatureTips={showFeatureTips}
-						title={title}
-						vscodeTerminalExecutionMode={vscodeTerminalExecutionMode}
-					/>
-				)
-			case "ask":
-				return (
-					<AskMessageRenderer
-						contentRef={contentRef}
-						explainChangesDisabled={explainChangesDisabled}
-						handleMouseUp={handleMouseUp}
-						handleQuoteClick={handleQuoteClick}
-						icon={icon}
-						inputValue={inputValue}
-						isLast={isLast}
-						lastModifiedMessage={lastModifiedMessage}
-						message={message}
-						quoteButtonState={quoteButtonState}
-						seeNewChangesDisabled={seeNewChangesDisabled}
-						setExplainChangesDisabled={setExplainChangesDisabled}
-						setSeeNewChangesDisabled={setSeeNewChangesDisabled}
-						title={title}
-					/>
-				)
-		}
+		return (
+			<ChatMessageRendererRegistry
+				message={message}
+				sayProps={{
+					apiReqStreamingFailedMessage,
+					apiRequestFailedMessage,
+					contentRef,
+					cost,
+					explainChangesDisabled,
+					handleMouseUp,
+					handleQuoteClick,
+					handleToggle,
+					icon,
+					isExpanded,
+					isLast,
+					lastModifiedMessage,
+					mode,
+					quoteButtonState,
+					seeNewChangesDisabled,
+					sendMessageFromChatRow,
+					setExplainChangesDisabled,
+					setSeeNewChangesDisabled,
+					showFeatureTips,
+					title,
+					vscodeTerminalExecutionMode,
+				}}
+				askProps={{
+					contentRef,
+					explainChangesDisabled,
+					handleMouseUp,
+					handleQuoteClick,
+					icon,
+					inputValue,
+					isLast,
+					lastModifiedMessage,
+					quoteButtonState,
+					seeNewChangesDisabled,
+					setExplainChangesDisabled,
+					setSeeNewChangesDisabled,
+					title,
+				}}
+			/>
+		)
 	},
 )

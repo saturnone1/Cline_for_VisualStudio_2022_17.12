@@ -1,44 +1,23 @@
 import { mentionRegex, mentionRegexGlobal } from "@shared/contextMentions"
-import { StringRequest } from "@shared/proto/cline/common"
-import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state"
-import { Mode } from "@shared/storage/types"
-import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import { AtSignIcon, PlusIcon, Settings } from "lucide-react"
 import type React from "react"
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import DynamicTextArea from "react-textarea-autosize"
-import styled from "styled-components"
 import ContextMenu from "@/components/chat/ContextMenu"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu"
 import Thumbnails from "@/components/common/Thumbnails"
-import { getModeSpecificFields, normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { usePlatform } from "@/context/PlatformContext"
 import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
-import { FileServiceClient, StateServiceClient } from "@/services/grpcClient"
-import {
-	ContextMenuOptionType,
-	getContextMenuOptionIndex,
-	getContextMenuOptions,
-	insertMention,
-	insertMentionDirectly,
-	removeMention,
-	shouldShowContextMenu,
-} from "@/utils/contextMentions"
-import { useMetaKeyDetection, useShortcut } from "@/utils/hooks"
+import { insertMentionDirectly, removeMention } from "@/utils/contextMentions"
 import { isSafari } from "@/utils/platformUtils"
 import { removeSlashCommand, slashCommandDeleteRegex, slashCommandRegexGlobal, validateSlashCommand } from "@/utils/slashCommands"
-import ClineRulesToggleModal from "../clineRules/ClineRulesToggleModal"
-import ServersToggleModal from "./ServersToggleModal"
+import ChatInputToolbar from "./ChatInputToolbar"
 import { useChatDrop } from "./useChatDrop"
+import { useChatInputSubmit } from "./useChatInputSubmit"
 import { useChatPaste } from "./useChatPaste"
-import { useMentionSearch } from "./useMentionSearch"
+import { useContextMentionMenu } from "./useContextMentionMenu"
 import { useSlashCommandMenu } from "./useSlashCommandMenu"
-
-// Set to "File" option by default
-const DEFAULT_CONTEXT_MENU_OPTION = getContextMenuOptionIndex(ContextMenuOptionType.File)
 
 interface ChatTextAreaProps {
 	inputValue: string
@@ -58,92 +37,6 @@ interface ChatTextAreaProps {
 	onHeightChange?: (height: number) => void
 	onFocusChange?: (isFocused: boolean) => void
 }
-
-interface GitCommit {
-	type: ContextMenuOptionType.Git
-	value: string
-	label: string
-	description: string
-}
-
-const SwitchContainer = styled.div<{ disabled: boolean }>`
-	display: flex;
-	align-items: center;
-	background-color: transparent;
-	border: 1px solid var(--vscode-input-border);
-	border-radius: 12px;
-	overflow: hidden;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	opacity: ${(props) => (props.disabled ? 0.5 : 1)};
-	transform: scale(1);
-	transform-origin: right center;
-	margin-left: 0;
-	user-select: none; // Prevent text selection
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
-`
-
-const Slider = styled.div.withConfig({
-	shouldForwardProp: (prop) => prop !== "isAct",
-})<{ isAct: boolean }>`
-	position: absolute;
-	height: 100%;
-	width: 50%;
-	background-color: var(--lig-mode-active-background);
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent);
-	transition: transform 0.2s ease;
-	transform: translateX(${(props) => (props.isAct ? "100%" : "0%")});
-`
-
-const ButtonGroup = styled.div`
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	flex: 1;
-	min-width: 0;
-`
-
-const ButtonContainer = styled.div`
-	display: flex;
-	align-items: center;
-	gap: 3px;
-	font-size: 10px;
-	white-space: nowrap;
-	min-width: 0;
-	width: 100%;
-`
-
-const ModelContainer = styled.div`
-	position: relative;
-	display: flex;
-	flex: 1;
-	min-width: 0;
-`
-
-const ModelTextWrapper = styled.div`
-	display: inline-flex; // Make it shrink to content
-	min-width: 0; // Allow shrinking
-	max-width: 100%; // Don't overflow parent
-`
-
-const ModelDisplayText = styled.span`
-	padding: 0px 0px;
-	height: 20px;
-	width: 100%;
-	min-width: 0;
-	color: var(--vscode-descriptionForeground);
-	display: flex;
-	align-items: center;
-	font-size: 10px;
-	user-select: none;
-`
-
-const ModelButtonContent = styled.div`
-	width: 100%;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-`
 
 const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 	(
@@ -169,51 +62,47 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const {
 			mode,
 			apiConfiguration,
-			openRouterModels,
-			platform,
 			localWorkflowToggles,
 			globalWorkflowToggles,
 			remoteWorkflowToggles,
 			remoteConfigSettings,
-			navigateToSettings,
 			mcpServers,
 		} = useExtensionState()
 		const { t } = useI18n()
 		const { selectedModelInfo } = useMemo(() => normalizeApiConfiguration(apiConfiguration, mode), [apiConfiguration, mode])
 		const modelSupportsImages = selectedModelInfo.supportsImages || false
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
-		const [gitCommits, setGitCommits] = useState<GitCommit[]>([])
 		const slashCommandsMenuContainerRef = useRef<HTMLDivElement>(null)
 
 		const [thumbnailsHeight, setThumbnailsHeight] = useState(0)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
-		const [showContextMenu, setShowContextMenu] = useState(false)
 		const [cursorPosition, setCursorPosition] = useState(0)
-		const [searchQuery, setSearchQuery] = useState("")
 		const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
 		const [isMouseDownOnMenu, setIsMouseDownOnMenu] = useState(false)
 		const highlightLayerRef = useRef<HTMLDivElement>(null)
-		const [selectedMenuIndex, setSelectedMenuIndex] = useState(-1)
-		const [selectedType, setSelectedType] = useState<ContextMenuOptionType | null>(null)
 		const [justDeletedSpaceAfterMention, setJustDeletedSpaceAfterMention] = useState(false)
 		const [justDeletedSpaceAfterSlashCommand, setJustDeletedSpaceAfterSlashCommand] = useState(false)
 		const [intendedCursorPosition, setIntendedCursorPosition] = useState<number | null>(null)
-		const contextMenuContainerRef = useRef<HTMLDivElement>(null)
 
-		const [shownTooltipMode, setShownTooltipMode] = useState<Mode | null>(null)
 		const [pendingInsertions, setPendingInsertions] = useState<string[]>([])
 		const _shiftHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
 		const [showDimensionError, setShowDimensionError] = useState(false)
 		const dimensionErrorTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-		const {
-			fileSearchResults,
-			searchLoading,
-			runMentionSearch,
-			scheduleMentionSearch,
-			clearMentionSearch,
-		} = useMentionSearch()
-		const [, metaKeyChar] = useMetaKeyDetection(platform)
+		const mentionMenu = useContextMentionMenu({
+			cursorPosition,
+			setCursorPosition,
+			setInputValue,
+			setIntendedCursorPosition,
+			textAreaRef,
+		})
+		const submit = useChatInputSubmit({
+			sendingDisabled,
+			requestPending,
+			onSend,
+			onCancelRequest,
+			setIsTextAreaFocused,
+		})
 		const {
 			showSlashCommandsMenu,
 			selectedSlashCommandsIndex,
@@ -238,120 +127,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			mcpServers,
 		})
 
-		// Fetch git commits when Git is selected or when typing a hash
-		useEffect(() => {
-			if (selectedType === ContextMenuOptionType.Git || /^[a-f0-9]+$/i.test(searchQuery)) {
-				FileServiceClient.searchCommits(StringRequest.create({ value: searchQuery || "" }))
-					.then((response) => {
-						if (response.commits) {
-							const commits: GitCommit[] = response.commits.map(
-								(commit: { hash: string; shortHash: string; subject: string; author: string; date: string }) => ({
-									type: ContextMenuOptionType.Git,
-									value: commit.hash,
-									label: commit.subject,
-									description: `${commit.shortHash} by ${commit.author} on ${commit.date}`,
-								}),
-							)
-							setGitCommits(commits)
-						}
-					})
-					.catch((error) => {
-						console.error("Error searching commits:", error)
-					})
-			}
-		}, [selectedType, searchQuery])
-
-		const queryItems = useMemo(() => {
-			return [
-				{ type: ContextMenuOptionType.Problems, value: "problems" },
-				{ type: ContextMenuOptionType.Terminal, value: "terminal" },
-				...gitCommits,
-			]
-		}, [gitCommits])
-
-		useEffect(() => {
-			const handleClickOutside = (event: MouseEvent) => {
-				if (contextMenuContainerRef.current && !contextMenuContainerRef.current.contains(event.target as Node)) {
-					setShowContextMenu(false)
-				}
-			}
-
-			if (showContextMenu) {
-				document.addEventListener("mousedown", handleClickOutside)
-			}
-
-			return () => {
-				document.removeEventListener("mousedown", handleClickOutside)
-			}
-		}, [showContextMenu, setShowContextMenu])
-
-		const handleMentionSelect = useCallback(
-			(type: ContextMenuOptionType, value?: string) => {
-				if (type === ContextMenuOptionType.NoResults) {
-					return
-				}
-
-				if (
-					type === ContextMenuOptionType.File ||
-					type === ContextMenuOptionType.Folder ||
-					type === ContextMenuOptionType.Git
-				) {
-					if (!value) {
-						setSelectedType(type)
-						setSearchQuery("")
-						setSelectedMenuIndex(0)
-
-						if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder) {
-							void runMentionSearch("", type)
-						}
-						return
-					}
-				}
-
-				setShowContextMenu(false)
-				setSelectedType(null)
-				const queryLength = searchQuery.length
-				setSearchQuery("")
-
-				if (textAreaRef.current) {
-					let insertValue = value || ""
-					if (type === ContextMenuOptionType.URL) {
-						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder) {
-						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.Problems) {
-						insertValue = "problems"
-					} else if (type === ContextMenuOptionType.Terminal) {
-						insertValue = "terminal"
-					} else if (type === ContextMenuOptionType.Git) {
-						insertValue = value || ""
-					}
-
-					const { newValue, mentionIndex } = insertMention(
-						textAreaRef.current.value,
-						cursorPosition,
-						insertValue,
-						queryLength,
-					)
-
-					setInputValue(newValue)
-					const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
-					setCursorPosition(newCursorPosition)
-					setIntendedCursorPosition(newCursorPosition)
-					// textAreaRef.current.focus()
-
-					// scroll to cursor
-					setTimeout(() => {
-						if (textAreaRef.current) {
-							textAreaRef.current.blur()
-							textAreaRef.current.focus()
-						}
-					}, 0)
-				}
-			},
-			[setInputValue, cursorPosition, searchQuery, runMentionSearch],
-		)
-
 		const handleKeyDown = useCallback(
 			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
 				const isSelectAllShortcut =
@@ -368,63 +143,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				if (handleSlashMenuKeyDown(event)) {
 					return
 				}
-				if (showContextMenu) {
-					if (event.key === "Escape") {
-						setShowContextMenu(false)
-						setSelectedType(null)
-						setSelectedMenuIndex(DEFAULT_CONTEXT_MENU_OPTION)
-						setSearchQuery("")
-						return
-					}
-
-					if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-						event.preventDefault()
-						setSelectedMenuIndex((prevIndex) => {
-							const direction = event.key === "ArrowUp" ? -1 : 1
-							const options = getContextMenuOptions(searchQuery, selectedType, queryItems, fileSearchResults)
-							const optionsLength = options.length
-
-							if (optionsLength === 0) {
-								return prevIndex
-							}
-
-							// Find selectable options (non-URL types)
-							const selectableOptions = options.filter(
-								(option) =>
-									option.type !== ContextMenuOptionType.URL && option.type !== ContextMenuOptionType.NoResults,
-							)
-
-							if (selectableOptions.length === 0) {
-								return -1 // No selectable options
-							}
-
-							// Find the index of the next selectable option
-							const currentSelectableIndex = selectableOptions.indexOf(options[prevIndex])
-
-							const newSelectableIndex =
-								(currentSelectableIndex + direction + selectableOptions.length) % selectableOptions.length
-
-							// Find the index of the selected option in the original options array
-							return options.indexOf(selectableOptions[newSelectableIndex])
-						})
-						return
-					}
-					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
-						event.preventDefault()
-						const selectedOption = getContextMenuOptions(searchQuery, selectedType, queryItems, fileSearchResults)[
-							selectedMenuIndex
-						]
-						if (
-							selectedOption &&
-							selectedOption.type !== ContextMenuOptionType.URL &&
-							selectedOption.type !== ContextMenuOptionType.NoResults
-						) {
-							// Use label if it contains workspace prefix, otherwise use value
-							const mentionValue = selectedOption.label?.includes(":") ? selectedOption.label : selectedOption.value
-							handleMentionSelect(selectedOption.type, mentionValue)
-						}
-						return
-					}
+				if (mentionMenu.handleMentionMenuKeyDown(event)) {
+					return
 				}
 
 				// Safari does not support InputEvent.isComposing (always false), so we need to fallback to keyCode === 229 for it
@@ -432,10 +152,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				if (event.key === "Enter" && !event.shiftKey && !isComposing) {
 					event.preventDefault()
 
-					if (!sendingDisabled) {
-						setIsTextAreaFocused(false)
-						onSend()
-					}
+					submit.send()
 				}
 
 				if (event.key === "Backspace" && !isComposing) {
@@ -483,7 +200,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							setIntendedCursorPosition(newPosition)
 						}
 						setJustDeletedSpaceAfterMention(false)
-						setShowContextMenu(false)
+						mentionMenu.closeMentionMenu()
 					} else if (justDeletedSpaceAfterSlashCommand) {
 						// New slash command deletion
 						const { newText, newPosition } = removeSlashCommand(inputValue, cursorPosition)
@@ -503,22 +220,16 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				}
 			},
 			[
-				onSend,
-				showContextMenu,
-				searchQuery,
-				selectedMenuIndex,
-				handleMentionSelect,
-				selectedType,
 				inputValue,
 				cursorPosition,
 				setInputValue,
 				justDeletedSpaceAfterMention,
 				justDeletedSpaceAfterSlashCommand,
-				queryItems,
-				fileSearchResults,
 				handleSlashMenuKeyDown,
 				closeSlashCommandsMenu,
-				sendingDisabled,
+				submit.send,
+				mentionMenu.closeMentionMenu,
+				mentionMenu.handleMentionMenuKeyDown,
 			],
 		)
 
@@ -558,54 +269,21 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				const newCursorPosition = e.target.selectionStart
 				setInputValue(newValue)
 				setCursorPosition(newCursorPosition)
-				let showMenu = shouldShowContextMenu(newValue, newCursorPosition)
 				const shouldShowSlashMenu = updateSlashCommandsMenu(newValue, newCursorPosition)
-
-				// we do not allow both menus to be shown at the same time
-				// the slash commands menu has precedence bc its a narrower component
-				if (shouldShowSlashMenu) {
-					showMenu = false
-				}
-
-				setShowContextMenu(showMenu)
-
-				if (showMenu) {
-					const lastAtIndex = newValue.lastIndexOf("@", newCursorPosition - 1)
-					const query = newValue.slice(lastAtIndex + 1, newCursorPosition)
-					setSearchQuery(query)
-
-					if (query.length > 0) {
-						setSelectedMenuIndex(0)
-						scheduleMentionSearch(query, selectedType)
-					} else {
-						setSelectedMenuIndex(DEFAULT_CONTEXT_MENU_OPTION)
-						clearMentionSearch()
-					}
-				} else {
-					setSearchQuery("")
-					setSelectedMenuIndex(-1)
-					clearMentionSearch()
-				}
+				mentionMenu.updateMentionMenu(newValue, newCursorPosition, shouldShowSlashMenu)
 			},
-			[setInputValue, selectedType, updateSlashCommandsMenu, scheduleMentionSearch, clearMentionSearch],
+			[mentionMenu.updateMentionMenu, setInputValue, updateSlashCommandsMenu],
 		)
-
-		useEffect(() => {
-			if (!showContextMenu) {
-				setSelectedType(null)
-				clearMentionSearch()
-			}
-		}, [showContextMenu, clearMentionSearch])
 
 		const handleBlur = useCallback(() => {
 			// Only hide the context menu if the user didn't click on it
 			if (!isMouseDownOnMenu) {
-				setShowContextMenu(false)
+				mentionMenu.closeMentionMenu()
 				closeSlashCommandsMenu()
 			}
 			setIsTextAreaFocused(false)
 			onFocusChange?.(false) // Call prop on blur
-		}, [isMouseDownOnMenu, onFocusChange, closeSlashCommandsMenu])
+		}, [isMouseDownOnMenu, onFocusChange, closeSlashCommandsMenu, mentionMenu.closeMentionMenu])
 
 		const showDimensionErrorMessage = useCallback(() => {
 			setShowDimensionError(true)
@@ -641,7 +319,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setInputValue,
 			setCursorPosition,
 			setIntendedCursorPosition,
-			setShowContextMenu,
+			setShowContextMenu: mentionMenu.setShowContextMenu,
 			textAreaRef,
 			modelSupportsImages,
 			shouldDisableFilesAndImages,
@@ -730,38 +408,9 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[updateCursorPosition],
 		)
 
-		const onModeToggle = useCallback(() => {
-			void (async () => {
-				const convertedProtoMode = mode === "plan" ? PlanActMode.ACT : PlanActMode.PLAN
-				const response = await StateServiceClient.togglePlanActModeProto(
-					TogglePlanActModeRequest.create({
-						mode: convertedProtoMode,
-						chatContent: {
-							message: inputValue.trim() ? inputValue : undefined,
-							images: selectedImages,
-							files: selectedFiles,
-						},
-					}),
-				)
-				// Focus the textarea after mode toggle with slight delay
-				setTimeout(() => {
-					if (response.value) {
-						setInputValue("")
-					}
-					textAreaRef.current?.focus()
-				}, 100)
-			})()
-		}, [mode, inputValue, selectedImages, selectedFiles, setInputValue])
-
-		useShortcut(usePlatform().togglePlanActKeys, onModeToggle, { disableTextInputs: false }) // important that we don't disable the text input here
-
 		const handleContextButtonClick = useCallback(() => {
 			// Focus the textarea first
 			textAreaRef.current?.focus()
-			const openContextMenu = () => {
-				setSelectedType(null)
-				setShowContextMenu(true)
-			}
 
 			// If input is empty, just insert @
 			if (!inputValue.trim()) {
@@ -773,7 +422,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				} as React.ChangeEvent<HTMLTextAreaElement>
 				handleInputChange(event)
 				updateHighlights()
-				openContextMenu()
+				mentionMenu.openMentionMenu()
 				return
 			}
 
@@ -787,7 +436,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				} as React.ChangeEvent<HTMLTextAreaElement>
 				handleInputChange(event)
 				updateHighlights()
-				openContextMenu()
+				mentionMenu.openMentionMenu()
 				return
 			}
 
@@ -800,56 +449,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			} as React.ChangeEvent<HTMLTextAreaElement>
 			handleInputChange(event)
 			updateHighlights()
-			openContextMenu()
-		}, [inputValue, handleInputChange, updateHighlights])
-
-		// Get model display name
-		const modelDisplayName = useMemo(() => {
-			const { selectedProvider, selectedModelId } = normalizeApiConfiguration(apiConfiguration, mode)
-			const {
-				vsCodeLmModelSelector,
-				togetherModelId,
-				lmStudioModelId,
-				ollamaModelId,
-				liteLlmModelId,
-				requestyModelId,
-				vercelAiGatewayModelId,
-			} = getModeSpecificFields(apiConfiguration, mode)
-			const unknownModel = "unknown"
-
-			if (!apiConfiguration) {
-				return unknownModel
-			}
-			switch (selectedProvider) {
-				case "cline":
-					return `${selectedProvider}:${selectedModelId}`
-				case "openai":
-					return `openai-compat:${selectedModelId}`
-				case "vscode-lm":
-					return `vscode-lm:${vsCodeLmModelSelector ? `${vsCodeLmModelSelector.vendor ?? ""}/${vsCodeLmModelSelector.family ?? ""}` : unknownModel}`
-				case "together":
-					return `${selectedProvider}:${togetherModelId}`
-				case "lmstudio":
-					return `${selectedProvider}:${lmStudioModelId}`
-				case "ollama":
-					return `${selectedProvider}:${ollamaModelId}`
-				case "litellm":
-					return `${selectedProvider}:${liteLlmModelId}`
-				case "requesty":
-					return `${selectedProvider}:${requestyModelId}`
-				case "vercel-ai-gateway":
-					return `${selectedProvider}:${vercelAiGatewayModelId || selectedModelId}`
-				case "anthropic":
-				case "openrouter":
-				default:
-					return `${selectedProvider}:${selectedModelId}`
-			}
-		}, [apiConfiguration, mode])
-
-		// Replace Meta with the platform specific key and uppercase the command letter.
-		const togglePlanActKeys = usePlatform()
-			.togglePlanActKeys.replace("Meta", metaKeyChar)
-			.replace(/.$/, (match) => match.toUpperCase())
+			mentionMenu.openMentionMenu()
+		}, [inputValue, handleInputChange, updateHighlights, mentionMenu.openMentionMenu])
 
 		return (
 			<div className="lig-input-section">
@@ -886,18 +487,18 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						</div>
 					)}
 
-					{showContextMenu && (
-						<div ref={contextMenuContainerRef}>
+					{mentionMenu.showContextMenu && (
+						<div ref={mentionMenu.contextMenuContainerRef}>
 							<ContextMenu
-								dynamicSearchResults={fileSearchResults}
-								isLoading={searchLoading}
+								dynamicSearchResults={mentionMenu.fileSearchResults}
+								isLoading={mentionMenu.searchLoading}
 								onMouseDown={handleMenuMouseDown}
-								onSelect={handleMentionSelect}
-								queryItems={queryItems}
-								searchQuery={searchQuery}
-								selectedIndex={selectedMenuIndex}
-								selectedType={selectedType}
-								setSelectedIndex={setSelectedMenuIndex}
+								onSelect={mentionMenu.handleMentionSelect}
+								queryItems={mentionMenu.queryItems}
+								searchQuery={mentionMenu.searchQuery}
+								selectedIndex={mentionMenu.selectedMenuIndex}
+								selectedType={mentionMenu.selectedType}
+								setSelectedIndex={mentionMenu.setSelectedMenuIndex}
 							/>
 						</div>
 					)}
@@ -1032,127 +633,23 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									requestPending ? "codicon-debug-stop" : "codicon-send",
 								)}
 								data-testid={requestPending ? "cancel-send-button" : "send-button"}
-								onClick={() => {
-									if (requestPending) {
-										onCancelRequest?.()
-										return
-									}
-									if (!sendingDisabled) {
-										setIsTextAreaFocused(false)
-										onSend()
-									}
-								}}
+								onClick={submit.submitOrCancel}
 								role="button"
 								title={requestPending ? t("common.cancel") : t("chat.send")}
 							/>
 						</div>
 					</div>
 				</div>
-				<div className="lig-input-toolbar flex justify-between items-center mt-1.5">
-					{/* Always render both components, but control visibility with CSS */}
-					<div className="relative flex-1 min-w-0 h-5">
-						{/* ButtonGroup - always in DOM but visibility controlled */}
-						<ButtonGroup className="absolute top-0 left-0 right-0 ease-in-out w-full h-5 z-10 flex items-center">
-							<Tooltip>
-								<TooltipContent>{t("chat.addContext")}</TooltipContent>
-								<TooltipTrigger>
-									<VSCodeButton
-										appearance="icon"
-										aria-label={t("chat.addContext")}
-										className="p-0 m-0 flex items-center"
-										data-testid="context-button"
-										onClick={handleContextButtonClick}>
-										<ButtonContainer>
-											<AtSignIcon size={12} />
-										</ButtonContainer>
-									</VSCodeButton>
-								</TooltipTrigger>
-							</Tooltip>
-
-							<Tooltip>
-								<TooltipContent>{t("chat.addFilesImages")}</TooltipContent>
-								<TooltipTrigger>
-									<VSCodeButton
-										appearance="icon"
-										aria-label={t("chat.addFilesImages")}
-										className="p-0 m-0 flex items-center"
-										data-testid="files-button"
-										disabled={shouldDisableFilesAndImages}
-										onClick={() => {
-											if (!shouldDisableFilesAndImages) {
-												onSelectFilesAndImages()
-											}
-										}}>
-										<ButtonContainer>
-											<PlusIcon size={13} />
-										</ButtonContainer>
-									</VSCodeButton>
-								</TooltipTrigger>
-							</Tooltip>
-
-							<ServersToggleModal />
-
-							<ClineRulesToggleModal />
-
-							<ModelContainer>
-								<ModelTextWrapper>
-									<ModelDisplayText title={modelDisplayName}>
-										<ModelButtonContent className="text-xs">{modelDisplayName}</ModelButtonContent>
-									</ModelDisplayText>
-								</ModelTextWrapper>
-							</ModelContainer>
-						</ButtonGroup>
-					</div>
-					<Tooltip>
-						<TooltipContent>{t("common.settings")}</TooltipContent>
-						<TooltipTrigger>
-							<VSCodeButton
-								appearance="icon"
-								aria-label={t("common.settings")}
-								className="p-0 m-0 mr-1 shrink-0 flex items-center"
-								onClick={() => navigateToSettings()}
-								data-testid="settings-button">
-								<ButtonContainer>
-									<Settings size={13} />
-								</ButtonContainer>
-							</VSCodeButton>
-						</TooltipTrigger>
-					</Tooltip>
-					{/* Tooltip for Plan/Act toggle remains outside the conditional rendering */}
-					<Tooltip>
-						<TooltipContent
-							className="text-xs px-2 flex flex-col gap-1"
-							hidden={shownTooltipMode === null}
-							side="top">
-							{shownTooltipMode === "act" ? t("chat.actModeTooltip") : t("chat.planModeTooltip")}
-							<p className="text-description/80 text-xs mb-0">
-								{t("chat.toggleWith", { keys: "" })}
-								<kbd className="text-muted-foreground mx-1">{togglePlanActKeys}</kbd>
-							</p>
-						</TooltipContent>
-						<TooltipTrigger>
-							<SwitchContainer data-testid="mode-switch" disabled={false} onClick={onModeToggle}>
-								<Slider isAct={mode === "act"} />
-								{(["plan", "act"] as const).map((m) => (
-									<div
-										aria-checked={mode === m}
-										aria-label={t(mode === m ? "chat.modeActive" : "chat.modeInactive", {
-											mode: m === "plan" ? t("chat.plan") : t("chat.act"),
-										})}
-										className={cn(
-											"pt-0.5 pb-px px-2 z-10 text-xs w-1/2 text-center bg-transparent transition-colors",
-										mode === m ? "text-(--lig-mode-active-foreground) font-semibold" : "text-input-foreground",
-										)}
-										onMouseLeave={() => setShownTooltipMode(null)}
-										onMouseOver={() => setShownTooltipMode(m)}
-										role="switch">
-										{m === "plan" ? t("chat.plan") : t("chat.act")}
-									</div>
-								))}
-							</SwitchContainer>
-						</TooltipTrigger>
-					</Tooltip>
-				</div>
+				<ChatInputToolbar
+					inputValue={inputValue}
+					onAddContext={handleContextButtonClick}
+					onSelectFilesAndImages={onSelectFilesAndImages}
+					selectedFiles={selectedFiles}
+					selectedImages={selectedImages}
+					setInputValue={setInputValue}
+					shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+					textAreaRef={textAreaRef}
+				/>
 			</div>
 		)
 	},

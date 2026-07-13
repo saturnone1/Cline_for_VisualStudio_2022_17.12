@@ -122,7 +122,7 @@ describe("getLastApiReqTotalTokens", () => {
 		assert.equal(total, 23)
 	})
 
-	it("skips unreliable placeholder payloads when finding the latest usage", () => {
+	it("falls back instead of reusing stale usage when the latest request is unreliable", () => {
 		const messages: ClineMessage[] = [
 			{
 				ts: 1,
@@ -146,7 +146,33 @@ describe("getLastApiReqTotalTokens", () => {
 		]
 
 		const total = getLastApiReqTotalTokens(messages)
-		assert.equal(total, 18)
+		assert.equal(total, 0)
+	})
+
+	it("includes separately reported cache input tokens", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({ tokensOut: 7, cacheWrites: 2, cacheReads: 3 }),
+			},
+		]
+
+		assert.equal(getLastApiReqTotalTokens(messages), 12)
+	})
+
+	it("recognizes common provider token field aliases", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({ promptTokens: 21, completionTokens: 5 }),
+			},
+		]
+
+		assert.equal(getLastApiReqTotalTokens(messages), 26)
 	})
 })
 
@@ -241,5 +267,20 @@ describe("getContextWindowUsage", () => {
 
 		assert.equal(currentContextMessages.length, messages.length)
 		assert.equal(usage?.used, estimateConversationTokens(messages))
+	})
+
+	it("does not cap long CJK messages at 8k tokens", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "text", text: "가".repeat(12_000) },
+		]
+
+		assert.ok(estimateConversationTokens(messages) > 12_000)
+	})
+
+	it("accounts for punctuation-heavy tool payloads", () => {
+		const plain: ClineMessage[] = [{ ts: 1, type: "say", say: "text", text: "a".repeat(400) }]
+		const structured: ClineMessage[] = [{ ts: 1, type: "say", say: "text", text: "{}[],:;()<>".repeat(40) }]
+
+		assert.ok(estimateConversationTokens(structured) > estimateConversationTokens(plain))
 	})
 })

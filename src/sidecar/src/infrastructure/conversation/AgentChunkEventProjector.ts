@@ -1,5 +1,5 @@
 import type { AgentChunkRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { agentChunkToFoldedReasoningText, agentChunkToTerminalResult, agentChunkToTranscriptText } from "./ConversationSupport"
+import { agentChunkToFoldedReasoningText, agentChunkToTerminalResult, agentChunkToTranscriptText } from "./AgentChunkTranscriptConversion"
 import { isToolTranscript, normalizeTranscriptText } from "./TranscriptTextPolicy"
 
 type Callbacks = Readonly<{

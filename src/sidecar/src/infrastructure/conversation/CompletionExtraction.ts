@@ -1,4 +1,4 @@
-import { normalizeAssistantTranscriptText } from "./ConversationSupport"
+import { normalizeAssistantTranscriptText } from "./TranscriptNormalization"
 
 export function extractCompletionTextFromResult(result: Record<string, unknown>, event: unknown): string {
 	const eventRecord = asRecord(event)

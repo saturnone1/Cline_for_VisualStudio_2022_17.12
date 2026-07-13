@@ -20,7 +20,8 @@ export class SendLatencyMonitor {
 		if (!sessionId) return
 		const trace = { requestId, kind, sessionId, startedAt: Date.now(), textLength }
 		this.traces.set(sessionId, trace)
-		this.logger.log("sidecar", "sendLatency.received", { requestId, kind, sessionId, textLength })
+		this.trimOldestTraces()
+		this.logger.log("sidecar", "sendLatency.received", { correlationId: requestId, requestId, kind, sessionId, textLength })
 	}
 
 	markSdkSend(sessionId: string) { const trace = this.traces.get(sessionId); if (!trace || trace.sdkSendAt) return; trace.sdkSendAt = Date.now(); this.logger.log("sidecar", "sendLatency.sdkSend", payload(trace)) }
@@ -28,9 +29,18 @@ export class SendLatencyMonitor {
 	markFirstAssistant(sessionId: string, textLength: number) { const trace = this.traces.get(sessionId); if (!trace || trace.firstAssistantAt) return; trace.firstAssistantAt = Date.now(); this.logger.log("sidecar", "sendLatency.firstAssistant", { ...payload(trace), assistantTextLength: textLength }) }
 	markError(sessionId: string, error: unknown) { const trace = this.traces.get(sessionId); if (!trace || trace.errorAt) return; trace.errorAt = Date.now(); this.logger.log("sidecar", "sendLatency.error", { ...payload(trace), error: error instanceof Error ? error.message : String(error) }) }
 	rebind(previousSessionId: string, nextSessionId: string) { const trace = this.traces.get(previousSessionId); if (!trace || !nextSessionId || previousSessionId === nextSessionId) return; this.traces.delete(previousSessionId); trace.sessionId = nextSessionId; this.traces.set(nextSessionId, trace) }
+	correlationId(sessionId: string) { return this.traces.get(sessionId)?.requestId || "" }
+
+	private trimOldestTraces() {
+		while (this.traces.size > 100) {
+			const oldest = this.traces.keys().next().value
+			if (typeof oldest !== "string") return
+			this.traces.delete(oldest)
+		}
+	}
 }
 
 function payload(trace: SendLatencyTrace) {
 	const now = Date.now()
-	return { requestId: trace.requestId, kind: trace.kind, sessionId: trace.sessionId, textLength: trace.textLength, toSdkSendMs: trace.sdkSendAt ? trace.sdkSendAt - trace.startedAt : undefined, toFirstSdkEventMs: trace.firstSdkEventAt ? trace.firstSdkEventAt - trace.startedAt : undefined, toFirstAssistantMs: trace.firstAssistantAt ? trace.firstAssistantAt - trace.startedAt : undefined, toErrorMs: trace.errorAt ? trace.errorAt - trace.startedAt : undefined, elapsedMs: now - trace.startedAt }
+	return { correlationId: trace.requestId, requestId: trace.requestId, kind: trace.kind, sessionId: trace.sessionId, textLength: trace.textLength, toSdkSendMs: trace.sdkSendAt ? trace.sdkSendAt - trace.startedAt : undefined, toFirstSdkEventMs: trace.firstSdkEventAt ? trace.firstSdkEventAt - trace.startedAt : undefined, toFirstAssistantMs: trace.firstAssistantAt ? trace.firstAssistantAt - trace.startedAt : undefined, toErrorMs: trace.errorAt ? trace.errorAt - trace.startedAt : undefined, elapsedMs: now - trace.startedAt }
 }

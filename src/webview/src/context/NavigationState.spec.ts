@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
-import { useNavigationState } from "./NavigationState"
+import { createElement, type ReactNode } from "react"
+import { NavigationStateProvider, useNavigationState, useNavigationStateContext } from "./NavigationState"
 
 describe("useNavigationState", () => {
 	it("keeps primary views mutually exclusive", () => {
@@ -38,5 +39,16 @@ describe("useNavigationState", () => {
 		expect(result.current.showSettings).toBe(false)
 		expect(result.current.settingsTargetSection).toBeUndefined()
 		expect(result.current.settingsInitialModelTab).toBeUndefined()
+	})
+
+	it("provides the navigation slice independently", () => {
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(NavigationStateProvider, null, children)
+		const { result } = renderHook(() => useNavigationStateContext(), { wrapper })
+
+		act(() => result.current.navigateToAccount())
+
+		expect(result.current.showAccount).toBe(true)
+		expect(result.current.showSettings).toBe(false)
 	})
 })

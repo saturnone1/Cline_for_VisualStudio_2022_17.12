@@ -101,6 +101,7 @@
     <Compile Include="Host\InteractionLogSanitizer.cs" />
     <Compile Include="Host\PendingWebviewMessageBuffer.cs" />
     <Compile Include="Host\SidecarRuntimeFingerprint.cs" />
+	<Compile Include="Host\SidecarRuntimeInstaller.cs" />
     <Compile Include="Host\SidecarStartupConnector.cs" />
     <Compile Include="Host\HostRpcRouter.cs" />
     <Compile Include="Host\HostDiagnosticReport.cs" />
@@ -108,6 +109,10 @@
     <Compile Include="Host\Generated\WebviewRpcContract.cs" />
     <Compile Include="Host\WebviewBootstrapScript.cs" />
     <Compile Include="Host\WebviewMessageQueue.cs" />
+	<Compile Include="Host\WebViewNavigationPolicy.cs" />
+	<Compile Include="Host\UiThemePreferenceStore.cs" />
+    <Compile Include="Host\VisualStudioUiThread.cs" />
+    <Compile Include="Host\VisualStudioOutputPaneWriter.cs" />
     <Compile Include="Host\WebView2RuntimeResolver.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
@@ -124,6 +129,9 @@
       <Link>Host\VisualStudioVersionInfo.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Services\CommandExecutionModels.cs" />
+    <Compile Include="Services\ICommandOutputWriter.cs" />
+    <Compile Include="Services\TerminalCommandPolicy.cs" />
     <Compile Include="Services\VsCommandExecutionService.cs" />
     <Compile Include="Services\VsEditorService.cs" />
     <Compile Include="ToolWindows\ChatToolWindow.cs" />
@@ -184,8 +192,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
-    <Content Include="$(ArtifactsRoot)\Sidecar\**" Exclude="$(ArtifactsRoot)\Sidecar\node_modules\**;$(ArtifactsRoot)\Sidecar\runtime\**">
-      <Link>Sidecar\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    <Content Include="$(ArtifactsRoot)\Sidecar\node_modules.zip">
+      <Link>Sidecar\node_modules.zip</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>

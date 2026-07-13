@@ -6,6 +6,17 @@ namespace VsClineAgent.Host.Tests
 {
     public sealed class WebviewGrpcContractDtoTests
     {
+        [Fact]
+        public void GeneratedRegistryExposesOperationOwnershipAndKind()
+        {
+            Assert.True(WebviewRpcContract.IsKnownOperation("TaskService", "newTask"));
+            Assert.True(WebviewRpcContract.IsSidecarOperation("TaskService", "newTask"));
+            Assert.False(WebviewRpcContract.IsStreamingOperation("TaskService", "newTask"));
+            Assert.True(WebviewRpcContract.IsStreamingOperation("StateService", "subscribeToState"));
+            Assert.False(WebviewRpcContract.IsSidecarOperation("TaskService", "taskFeedback"));
+            Assert.False(WebviewRpcContract.IsKnownOperation("MissingService", "missing"));
+        }
+
         [Theory]
         [InlineData("{\"protocol_version\":1,\"type\":\"grpc_request\",\"grpc_request\":{\"service\":\"StateService\",\"method\":\"subscribeToState\",\"request_id\":\"snake\",\"is_streaming\":true}}", "snake")]
         [InlineData("{\"protocolVersion\":1,\"type\":\"grpc_request\",\"grpc_request\":{\"service\":\"StateService\",\"method\":\"subscribeToState\",\"requestId\":\"camel\",\"isStreaming\":true}}", "camel")]

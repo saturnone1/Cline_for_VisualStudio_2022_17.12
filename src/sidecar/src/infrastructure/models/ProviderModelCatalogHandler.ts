@@ -40,6 +40,17 @@ export class ProviderModelCatalogHandler {
 		return { values }
 	}
 
+	async lmStudioValues(baseUrl: string) {
+		const result = await getOpenAiCompatibleModels(baseUrl || "http://localhost:1234/v1", "")
+		return {
+			values: result.ids.map((id) => {
+				const info = result.modelInfoById[id] || {}
+				return JSON.stringify({ id, ...info, max_context_length: readNumber(info.max_context_length) || readNumber(info.contextWindow) || 128_000 })
+			}),
+			error: result.error,
+		}
+	}
+
 	async askSageModels(baseUrl: string) {
 		try {
 			const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/get-models`)
@@ -64,6 +75,9 @@ export class ProviderModelCatalogHandler {
 	}
 
 	unsupported(key: string) {
+		if (key === "ModelsService.getVsCodeLmModels") return { models: [], supported: false, message: "VS Code language models are not available in the Visual Studio host." }
+		if (key === "ModelsService.getSapAiCoreModels") return { deployments: [], orchestrationAvailable: false, supported: false, message: "SAP AI Core discovery is not implemented in the Visual Studio host." }
+		if (key === "ModelsService.refreshClineRecommendedModelsRpc") return { recommended: [], free: [], supported: false, message: "Online Cline recommendations are unavailable in air-gap Visual Studio mode." }
 		const providerId = key.replace(/^ModelsService\./, "").replace(/Rpc$/, "")
 		return createModelCatalog([], { providerId, supported: false, reduced: true, message: `${key} is not implemented in the air-gap Visual Studio port. Configure a local Ollama, LM Studio, LiteLLM, or OpenAI-compatible endpoint instead.`, diagnostics: createCatalogDiagnostics(providerId, "unsupported", { authenticated: false, reason: "air_gap_provider_catalog_not_implemented" }) })
 	}

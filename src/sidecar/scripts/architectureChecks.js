@@ -14,6 +14,21 @@ const layerRules = {
 }
 const violations = []
 
+const sourceFiles = walk(sourceRoot).filter((filePath) => /\.(ts|tsx)$/.test(filePath) && !filePath.endsWith(".d.ts"))
+const importGraph = new Map(sourceFiles.map((filePath) => [filePath, new Set()]))
+for (const filePath of sourceFiles) {
+	const source = fs.readFileSync(filePath, "utf8")
+	for (const specifier of importSpecifiers(filePath, source)) {
+		if (!specifier.startsWith(".")) continue
+		const target = resolveTypeScriptModule(filePath, specifier)
+		if (target && importGraph.has(target)) importGraph.get(filePath).add(target)
+	}
+}
+for (const component of stronglyConnectedComponents(importGraph).filter((items) => items.length > 1)) {
+	const members = component.map((filePath) => normalize(path.relative(sourceRoot, filePath))).sort()
+	violations.push(`Circular TypeScript dependency: ${members.join(" -> ")}`)
+}
+
 const featuresRoot = path.join(sourceRoot, "features")
 for (const entry of fs.readdirSync(featuresRoot, { withFileTypes: true }).filter((item) => item.isDirectory())) {
 	const readmePath = path.join(featuresRoot, entry.name, "README.md")
@@ -59,8 +74,22 @@ for (const filePath of walk(sourceRoot)) {
 	}
 }
 
-const routerPath = path.join(sourceRoot, "infrastructure", "webview", "VisualStudioWebviewBackend.ts")
+const facadePath = path.join(sourceRoot, "infrastructure", "webview", "VisualStudioWebviewBackend.ts")
+const facade = fs.readFileSync(facadePath, "utf8")
+if (facade.split(/\r?\n/).length > 200 || !facade.includes("WebviewBackendComposition")) {
+	violations.push("VisualStudioWebviewBackend must remain a thin composition/dispatch facade (200 lines maximum).")
+}
+if (facade.includes("createInitialState(") || facade.includes("new WebviewUnaryRpcRouter") || facade.includes("new AgentRuntimeEventDispatcher")) {
+	violations.push("VisualStudioWebviewBackend must not rebuild state, RPC routing, or runtime event composition.")
+}
+const routerPath = path.join(sourceRoot, "infrastructure", "webview", "WebviewBackendComposition.ts")
 const router = fs.readFileSync(routerPath, "utf8")
+if (router.split(/\r?\n/).length > 750) {
+	violations.push("WebviewBackendComposition must remain bounded while state/session slices are extracted (750 lines maximum).")
+}
+for (const collaborator of ["WebviewFeatureRegistry", "WebviewRpcIngress", "WebviewRuntimeEventIngress", "WebviewStreamPublisher", "StateStreamRefreshCoordinator"]) {
+	if (!router.includes(collaborator)) violations.push(`WebviewBackendComposition must delegate to ${collaborator}.`)
+}
 const unaryRouter = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewUnaryRpcRouter.ts"), "utf8")
 for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPort", "InteractionLoggerPort"]) {
 	if (!router.includes(marker)) violations.push(`VisualStudioWebviewBackend is missing application port: ${marker}`)
@@ -130,8 +159,12 @@ if (!router.includes("ToolRuntimePolicy") || router.includes("private createCurr
 if (!router.includes("WebviewInteractionLogSupport") || router.includes("function summarizeSdkEventForLog") || router.includes("function summarizeAgentChunkForLog")) {
 	violations.push("VisualStudioWebviewBackend must delegate SDK interaction log projection to WebviewInteractionLogSupport.")
 }
-if (!router.includes("WebviewGrpcSupport") || router.includes("function grpcResponse") || router.includes("HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
-	violations.push("VisualStudioWebviewBackend must delegate gRPC envelope construction to WebviewGrpcSupport.")
+const rpcIngress = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewRpcIngress.ts"), "utf8")
+if (!rpcIngress.includes("WebviewGrpcSupport") || rpcIngress.includes("function grpcResponse") || rpcIngress.includes("HOST_SIDECAR_WEBVIEW_PROTOCOL_VERSION")) {
+	violations.push("WebviewRpcIngress must delegate gRPC envelope construction to WebviewGrpcSupport.")
+}
+if (router.includes("validateGrpcRequestContract") || router.includes("grpcError(") || router.includes("grpcHandled(")) {
+	violations.push("VisualStudioWebviewBackend must delegate gRPC validation and error envelopes to WebviewRpcIngress.")
 }
 if (!router.includes("RuntimeErrorFormatter") || router.includes("function formatSdkErrorForUi") || router.includes("function stringify")) {
 	violations.push("VisualStudioWebviewBackend must delegate runtime and provider error formatting to RuntimeErrorFormatter.")
@@ -175,7 +208,7 @@ if (router.includes("executeHookScript") || router.includes("hookDecisionFromRes
 if (router.includes("findCheckpointRunCount") || router.includes("resolveCheckpointRestoreScope")) {
 	violations.push("VisualStudioWebviewBackend must delegate checkpoint target and restore orchestration to CheckpointHandler.")
 }
-if (!unaryRouter.includes("WorktreeRpcHandler") || !unaryRouter.includes("d.worktree.handle(worktree)")) {
+if (!unaryRouter.includes("WorktreeRpcHandler") || !/d\.worktree\.handle\((?:worktree|command)\)/.test(unaryRouter)) {
 	violations.push("Worktree RPC routes must be delegated through WorktreeRpcHandler.")
 }
 
@@ -227,6 +260,20 @@ if (!themeHostSource.includes('message["protocolVersion"]') || !themeHostSource.
 	violations.push("The Visual Studio theme bridge must reject unsupported message versions.")
 }
 const webviewSourceRoot = path.join(productSourceRoot, "webview", "src")
+const webviewSourceFiles = walk(webviewSourceRoot).filter((filePath) => /\.(ts|tsx)$/.test(filePath) && !filePath.endsWith(".d.ts"))
+const webviewImportGraph = new Map(webviewSourceFiles.map((filePath) => [filePath, new Set()]))
+for (const filePath of webviewSourceFiles) {
+	const source = fs.readFileSync(filePath, "utf8")
+	for (const specifier of importSpecifiers(filePath, source)) {
+		if (!specifier.startsWith(".") && !specifier.startsWith("@/")) continue
+		const target = resolveTypeScriptModule(filePath, specifier, webviewSourceRoot)
+		if (target && webviewImportGraph.has(target)) webviewImportGraph.get(filePath).add(target)
+	}
+}
+for (const component of stronglyConnectedComponents(webviewImportGraph).filter((items) => items.length > 1)) {
+	const members = component.map((filePath) => normalize(path.relative(webviewSourceRoot, filePath))).sort()
+	violations.push(`Circular WebView dependency: ${members.join(" -> ")}`)
+}
 const grpcClientBase = fs.readFileSync(path.join(webviewSourceRoot, "services", "grpcClientBase.ts"), "utf8")
 if (!grpcClientBase.includes("WEBVIEW_RPC_PROTOCOL_VERSION") || !grpcClientBase.includes("protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION")) {
 	violations.push("WebView gRPC request envelopes must carry an explicit protocol version.")
@@ -253,9 +300,42 @@ for (const filePath of walk(webviewSourceRoot)) {
 	if (/from\s+["']@cline\/sdk(?:[\/"'])/.test(source)) violations.push(`${relative} imports the Cline SDK; SDK access belongs to the sidecar adapter.`)
 	if (relative.startsWith("components/settings/providers/") && /\blocalStorage\b/.test(source)) violations.push(`${relative} persists provider state in the WebView; provider persistence belongs to the sidecar.`)
 }
+for (const [relative, maxLines, requiredDelegates] of [
+	["context/ExtensionStateContext.tsx", 300, ["ModelCatalogStateProvider", "NavigationStateProvider", "McpStateProvider", "RuntimeViewStateProvider", "TaskStreamStateProvider"]],
+	["context/TaskStreamState.tsx", 300, ["ExtensionSubscriptions", "useNavigationStateContext", "useRuntimeViewStateContext"]],
+	["components/chat/ChatRow.tsx", 500, ["ChatMessageRendererRegistry", "ToolMessageRenderer"]],
+	["components/chat/ChatMessageRendererRegistry.tsx", 100, ["AskMessageRenderer", "SayMessageRenderer", "rendererRegistry"]],
+	["components/chat/ChatTextArea.tsx", 750, ["ChatInputToolbar", "useContextMentionMenu", "useChatDrop", "useChatPaste", "useChatInputSubmit", "useSlashCommandMenu"]],
+]) {
+	const source = fs.readFileSync(path.join(webviewSourceRoot, relative), "utf8")
+	if (source.split(/\r?\n/).length > maxLines) {
+		violations.push(`${relative} exceeds its ${maxLines}-line WebView responsibility boundary.`)
+	}
+	for (const delegate of requiredDelegates) {
+		if (!source.includes(delegate)) violations.push(`${relative} must delegate to ${delegate}.`)
+	}
+}
 const sdkRuntime = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkRuntime.ts"), "utf8")
-if (!sdkRuntime.includes("normalizeAgentRuntimeEvent(event)")) {
-	violations.push("ClineSdkRuntime must normalize SDK events before publishing them internally.")
+const sdkEventSubscription = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", "ClineSdkEventSubscription.ts"), "utf8")
+if (!sdkEventSubscription.includes("core.subscribe") || !sdkEventSubscription.includes("normalizeAgentRuntimeEvent(event)")) {
+	violations.push("ClineSdkEventSubscription must normalize SDK events before publishing them internally.")
+}
+if (sdkRuntime.split(/\r?\n/).length > 250) {
+	violations.push("ClineSdkRuntime must remain a thin AgentEnginePort adapter (250 lines maximum).")
+}
+for (const [relative, maxLines] of Object.entries({
+	"ClineSdkCoreFactory.ts": 120,
+	"ClineSdkEventSubscription.ts": 50,
+	"ClineSdkMcpAdapter.ts": 500,
+	"ClineSdkMcpSettingsStore.ts": 160,
+	"ClineSdkProviderAdapter.ts": 50,
+	"ClineSdkSessionAdapter.ts": 250,
+	"ClineSdkToolExecutorFactory.ts": 250,
+})) {
+	const source = fs.readFileSync(path.join(sourceRoot, "infrastructure", "sdk", relative), "utf8")
+	if (source.split(/\r?\n/).length > maxLines) {
+		violations.push(`${relative} exceeds its ${maxLines}-line SDK responsibility boundary.`)
+	}
 }
 if (router.includes("handleAgentEvent(event.event.raw")) {
 	violations.push("VisualStudioWebviewBackend must consume the semantic AgentEvent instead of reparsing raw SDK events at ingress.")
@@ -292,7 +372,25 @@ if (router.includes("function connectDevTools") || router.includes("function fet
 	violations.push("VisualStudioWebviewBackend must delegate browser protocol details to BrowserDevToolsAdapter.")
 }
 if (router.includes("function sdkMessagesToClineMessages") || router.includes("function buildResumedConversationMessages")) {
-	violations.push("VisualStudioWebviewBackend must delegate transcript conversion to ConversationSupport.")
+	violations.push("VisualStudioWebviewBackend must delegate transcript conversion to the conversation projection modules.")
+}
+
+const conversationSupport = fs.readFileSync(path.join(sourceRoot, "infrastructure", "conversation", "ConversationSupport.ts"), "utf8")
+if (conversationSupport.split(/\r?\n/).length > 50) {
+	violations.push("ConversationSupport must remain a compatibility barrel (50 lines maximum).")
+}
+for (const relative of [
+	"infrastructure/conversation/AgentChunkTranscriptConversion.ts",
+	"infrastructure/conversation/ConversationMessageProjection.ts",
+	"infrastructure/conversation/ResumedConversationProjection.ts",
+	"infrastructure/conversation/SdkContentConversion.ts",
+	"infrastructure/conversation/SdkMessageTranscriptProjection.ts",
+	"infrastructure/conversation/ToolActivityFormatting.ts",
+	"infrastructure/conversation/ToolCommandFormatting.ts",
+	"infrastructure/conversation/TranscriptNormalization.ts",
+]) {
+	const source = fs.readFileSync(path.join(sourceRoot, relative), "utf8")
+	if (source.split(/\r?\n/).length > 450) violations.push(`${relative} exceeds the 450-line conversation module boundary.`)
 }
 if (router.includes("function normalizeApiConfiguration") || router.includes("function createToolPolicies")) {
 	violations.push("VisualStudioWebviewBackend must delegate provider policy to ProviderConfiguration.")
@@ -330,6 +428,16 @@ for (const requiredFile of [
 	"infrastructure/persistence/LocalScheduledAgentStore.ts",
 	"infrastructure/browser/BrowserDevToolsAdapter.ts",
 	"infrastructure/conversation/ConversationSupport.ts",
+	"infrastructure/conversation/AgentChunkTranscriptConversion.ts",
+	"infrastructure/conversation/ConversationMessageProjection.ts",
+	"infrastructure/conversation/ResumedConversationProjection.ts",
+	"infrastructure/conversation/SdkContentConversion.ts",
+	"infrastructure/conversation/SdkMessageTranscriptProjection.ts",
+	"infrastructure/conversation/SettingsItemProjection.ts",
+	"infrastructure/conversation/ToolActivityFormatting.ts",
+	"infrastructure/conversation/ToolCommandFormatting.ts",
+	"infrastructure/conversation/TranscriptConversion.ts",
+	"infrastructure/conversation/TranscriptNormalization.ts",
 	"infrastructure/conversation/TerminalActivityMonitor.ts",
 	"infrastructure/conversation/PartialTextProjector.ts",
 	"infrastructure/conversation/FoldedProgressProjector.ts",
@@ -508,6 +616,57 @@ function importSpecifiers(filePath, source) {
 			}
 		}
 		ts.forEachChild(node, visit)
+	}
+}
+
+function resolveTypeScriptModule(importerPath, specifier, aliasRoot) {
+	const base = specifier.startsWith("@/") && aliasRoot
+		? path.resolve(aliasRoot, specifier.slice(2))
+		: path.resolve(path.dirname(importerPath), specifier)
+	for (const candidate of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts"), path.join(base, "index.tsx")]) {
+		if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return path.normalize(candidate)
+	}
+	return undefined
+}
+
+function stronglyConnectedComponents(graph) {
+	let nextIndex = 0
+	const indexes = new Map()
+	const lowLinks = new Map()
+	const stack = []
+	const onStack = new Set()
+	const components = []
+
+	for (const node of graph.keys()) {
+		if (!indexes.has(node)) visit(node)
+	}
+	return components
+
+	function visit(node) {
+		indexes.set(node, nextIndex)
+		lowLinks.set(node, nextIndex)
+		nextIndex++
+		stack.push(node)
+		onStack.add(node)
+
+		for (const target of graph.get(node) || []) {
+			if (!indexes.has(target)) {
+				visit(target)
+				lowLinks.set(node, Math.min(lowLinks.get(node), lowLinks.get(target)))
+			} else if (onStack.has(target)) {
+				lowLinks.set(node, Math.min(lowLinks.get(node), indexes.get(target)))
+			}
+		}
+
+		if (lowLinks.get(node) !== indexes.get(node)) return
+		const component = []
+		let member
+		do {
+			member = stack.pop()
+			onStack.delete(member)
+			component.push(member)
+		} while (member !== node)
+		components.push(component)
 	}
 }
 

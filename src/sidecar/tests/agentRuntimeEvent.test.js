@@ -46,6 +46,47 @@ test("Cline content events translate to product text and tool events", () => {
 	)
 })
 
+test("Cline usage events preserve per-call tokens separately from accumulated totals", () => {
+	assert.deepEqual(
+		translateClineAgentEvent({
+			type: "usage",
+			inputTokens: 120,
+			outputTokens: 30,
+			cacheReadTokens: 40,
+			cacheWriteTokens: 10,
+			cost: 0.01,
+			totalInputTokens: 900,
+			totalOutputTokens: 200,
+			totalCacheReadTokens: 300,
+			totalCacheWriteTokens: 50,
+			totalCost: 0.09,
+		}, "session-usage"),
+		{
+			type: "UsageUpdated",
+			sessionId: "session-usage",
+			usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 40, cacheWriteTokens: 10, cost: 0.01 },
+			totalInputTokens: 900,
+			totalOutputTokens: 200,
+			totalCacheReadTokens: 300,
+			totalCacheWriteTokens: 50,
+			totalCost: 0.09,
+			raw: {
+				type: "usage",
+				inputTokens: 120,
+				outputTokens: 30,
+				cacheReadTokens: 40,
+				cacheWriteTokens: 10,
+				cost: 0.01,
+				totalInputTokens: 900,
+				totalOutputTokens: 200,
+				totalCacheReadTokens: 300,
+				totalCacheWriteTokens: 50,
+				totalCost: 0.09,
+			},
+		},
+	)
+})
+
 test("agent runtime events preserve unknown SDK events without leaking an untyped envelope", () => {
 	assert.deepEqual(
 		normalizeAgentRuntimeEvent({ type: "future_event", payload: { value: 1 } }),

@@ -3,7 +3,7 @@
 ## Status
 
 This document is the shared migration target for the Visual Studio 2022 17.0 and 17.12 products.
-The common-source prerequisite and architecture implementation are complete. The former legacy WebView backend is now a typed composition facade; final local tests and dual-VSIX verification remain before the migration can be declared complete.
+The common-source migration and architecture implementation are complete. The former legacy WebView backend is now a thin typed facade, and the shared test, contract, package, and dual-VSIX runtime smoke gates verify both products from one source tree.
 
 ## Decision
 
@@ -46,11 +46,11 @@ Verified progress includes:
 
 Implementation evidence at the verification gate:
 
-- `VisualStudioWebviewBackend.ts` is below 950 lines and is limited to typed RPC dispatch, collaborator composition, and external-adapter guards;
+- `VisualStudioWebviewBackend.ts` is kept below 200 lines by an architecture gate and delegates composition, typed RPC dispatch, runtime event ingress, and stream coordination to focused collaborators;
 - unary feature groups and streaming subscriptions normalize into discriminated commands at WebView boundary decoders;
 - active source, upstream baseline, generated packaging inputs, and read-only legacy source have explicit ownership and clean UTF-8 documentation;
 - `.github/workflows/architecture-and-variants.yml` enforces sidecar architecture/tests, passive WebView tests/contracts, and both VSIX profiles on Windows;
-- final local test and package output is still required before marking the target complete.
+- Sidecar, WebView, and .NET host tests pass together with AST dependency/cycle checks, RPC generation/audits, package validation, common-payload parity, and dual runtime smoke checks.
 
 The obsolete pre-sidecar C# agent and direct WebView bridge are isolated under
 `legacy/dotnet-agent`; they are not compiled and are retained only as read-only history.
@@ -167,7 +167,7 @@ Repository consolidation is a prerequisite for architectural refactoring. Until 
 
 ## Source hygiene
 
-- WebView bundles, sidecar dist, bin, obj, and VSIX files are generated outputs.
+- WebView bundles, sidecar dist, bin, obj, and VSIX files are generated outputs. `artifacts/WebApp/` is the documented exception tracked as an offline VSIX packaging snapshot; it is regenerated from `src/webview/` and never edited by hand.
 - Air-gap binary inputs belong in a clearly named vendor or release-input area.
 - Upstream/generated Cline contracts are isolated and marked read-only.
 - Obsolete C# agent and bridge implementations are removed or archived outside active source after replacement is proven.

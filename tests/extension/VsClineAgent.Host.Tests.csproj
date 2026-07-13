@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
@@ -23,6 +24,11 @@
     <Compile Include="..\..\src\extension\Host\InteractionCorrelation.cs" Link="Host\InteractionCorrelation.cs" />
     <Compile Include="..\..\src\extension\Host\PendingWebviewMessageBuffer.cs" Link="Host\PendingWebviewMessageBuffer.cs" />
     <Compile Include="..\..\src\extension\Host\SidecarRuntimeFingerprint.cs" Link="Host\SidecarRuntimeFingerprint.cs" />
+	<Compile Include="..\..\src\extension\Host\SidecarRuntimeInstaller.cs" Link="Host\SidecarRuntimeInstaller.cs" />
     <Compile Include="..\..\src\extension\Host\SidecarStartupConnector.cs" Link="Host\SidecarStartupConnector.cs" />
+    <Compile Include="..\..\src\extension\Host\UiThemePreferenceStore.cs" Link="Host\UiThemePreferenceStore.cs" />
+    <Compile Include="..\..\src\extension\Host\WebViewNavigationPolicy.cs" Link="Host\WebViewNavigationPolicy.cs" />
+    <Compile Include="..\..\src\extension\Host\WebView2RuntimeResolver.cs" Link="Host\WebView2RuntimeResolver.cs" />
+    <Compile Include="..\..\src\extension\Services\TerminalCommandPolicy.cs" Link="Services\TerminalCommandPolicy.cs" />
   </ItemGroup>
 </Project>

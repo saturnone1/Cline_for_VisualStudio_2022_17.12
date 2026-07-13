@@ -9,7 +9,8 @@ export type FileCommand =
 	| Readonly<{ type: "copy"; text: string }>
 	| Readonly<{ type: "exists"; relativePath: string }>
 	| Readonly<{ type: "relativePaths" }>
-	| Readonly<{ type: "search" }>
+	| Readonly<{ type: "searchFiles" }>
+	| Readonly<{ type: "searchCommits" }>
 	| Readonly<{ type: "select"; allowImages: boolean }>
 	| Readonly<{ type: "openFile"; filePath: string; line?: number }>
 
@@ -44,7 +45,8 @@ export class FileRpcHandler {
 				return { payload: { value: fullPath ? this.callbacks.exists(fullPath) : false } }
 			}
 			case "relativePaths": return { payload: { values: [], paths: [] } }
-			case "search": return { payload: { results: [], values: [] } }
+			case "searchFiles": return { payload: { results: [], values: [] } }
+			case "searchCommits": return { payload: { commits: [], values: [] } }
 			case "select": return this.select(command.allowImages)
 			case "openFile": {
 				const root = await this.callbacks.workspaceRoot(), fullPath = command.filePath ? this.callbacks.resolvePath(root, command.filePath) : ""

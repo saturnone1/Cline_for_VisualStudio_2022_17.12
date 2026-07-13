@@ -19,7 +19,20 @@
               "type": "object",
               "required": ["type"],
               "properties": {
-                "type": { "enum": ["string", "number", "boolean", "stringArray", "unknown"] },
+                "type": {
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "object",
+                    "array",
+                    "stringArray",
+                    "numberArray",
+                    "booleanArray",
+                    "objectArray",
+                    "unknown"
+                  ]
+                },
                 "required": { "type": "boolean" }
               },
               "additionalProperties": false
@@ -34,7 +47,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["service", "method", "kind", "client", "sidecar"],
+        "required": ["service", "method", "kind", "client", "sidecar", "requestShape", "responseShape"],
         "properties": {
           "service": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*Service$" },
           "method": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
@@ -42,9 +55,23 @@
           "client": { "type": "boolean" },
           "sidecar": { "type": "boolean" },
           "fallback": { "enum": ["passive"] },
+          "route": {
+            "enum": [
+              "settings", "account", "browser", "terminal", "task", "checkpoint", "hook",
+              "scheduledAgent", "worktree", "mcp", "modelCatalog", "file", "instructionSettings",
+              "uiWeb", "plugin", "stream"
+            ]
+          },
           "requestShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
           "responseShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
         },
+        "allOf": [
+          {
+            "if": { "properties": { "sidecar": { "const": true } }, "required": ["sidecar"] },
+            "then": { "required": ["route"] },
+            "else": { "not": { "required": ["route"] } }
+          }
+        ],
         "additionalProperties": false
       }
     }

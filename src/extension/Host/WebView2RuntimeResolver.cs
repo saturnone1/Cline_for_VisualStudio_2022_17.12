@@ -53,44 +53,22 @@ namespace VsClineAgent.Host
 
             var packagedRuntime = FindRuntimeFolder(Path.Combine(assemblyDirectory, "WebView2Runtime"));
             if (!string.IsNullOrEmpty(packagedRuntime))
-            {
-                var localRuntime = CopyWebView2RuntimeToLocalCache(packagedRuntime!);
-                if (!string.IsNullOrEmpty(localRuntime))
-                    candidates.Add(new WebView2RuntimeCandidate("Bundled Fixed", localRuntime));
-            }
+                candidates.Add(new WebView2RuntimeCandidate("Bundled Fixed", packagedRuntime));
 
-            var existingBundledRuntime = FindBundledWebView2Runtime(assemblyDirectory);
-            if (!string.IsNullOrEmpty(existingBundledRuntime) &&
-                !candidates.Any(candidate => string.Equals(candidate.BrowserExecutableFolder, existingBundledRuntime, StringComparison.OrdinalIgnoreCase)))
+            var localRuntime = FindRuntimeFolder(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VsClineAgent",
+                "WebView2Runtime"));
+            if (!string.IsNullOrEmpty(localRuntime) &&
+                !candidates.Any(candidate => string.Equals(candidate.BrowserExecutableFolder, localRuntime, StringComparison.OrdinalIgnoreCase)))
             {
-                candidates.Add(new WebView2RuntimeCandidate("Bundled Fixed", existingBundledRuntime));
+                candidates.Add(new WebView2RuntimeCandidate("Cached Fixed", localRuntime));
             }
 
             if (candidates.Count == 0)
                 candidates.Add(new WebView2RuntimeCandidate("System Evergreen", null));
 
             return candidates;
-        }
-
-        private static string? FindBundledWebView2Runtime(string assemblyDirectory)
-        {
-            foreach (var candidateRoot in GetWebView2RuntimeCandidateRoots(assemblyDirectory))
-            {
-                var runtimeFolder = FindRuntimeFolder(candidateRoot);
-                if (!string.IsNullOrEmpty(runtimeFolder))
-                    return runtimeFolder;
-            }
-
-            return null;
-        }
-
-        private static IEnumerable<string> GetWebView2RuntimeCandidateRoots(string assemblyDirectory)
-        {
-            yield return Path.Combine(assemblyDirectory, "WebView2Runtime");
-            yield return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VsClineAgent",
-                "WebView2Runtime");
         }
 
         private static string? FindRuntimeFolder(string candidateRoot)
@@ -161,36 +139,6 @@ namespace VsClineAgent.Host
             return value.Replace(' ', '_');
         }
 
-        private static string? CopyWebView2RuntimeToLocalCache(string sourceRuntimeFolder)
-        {
-            var version = Path.GetFileName(sourceRuntimeFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            if (string.IsNullOrWhiteSpace(version))
-                return null;
-
-            var targetRuntimeFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VsClineAgent",
-                "WebView2Runtime",
-                version);
-            var stampPath = Path.Combine(targetRuntimeFolder, ".runtime.stamp");
-            var expectedStamp = GetRuntimeStamp(sourceRuntimeFolder);
-
-            if (File.Exists(Path.Combine(targetRuntimeFolder, "msedgewebview2.exe")) &&
-                File.Exists(stampPath) &&
-                string.Equals(File.ReadAllText(stampPath), expectedStamp, StringComparison.Ordinal))
-            {
-                return targetRuntimeFolder;
-            }
-
-            if (Directory.Exists(targetRuntimeFolder))
-                Directory.Delete(targetRuntimeFolder, true);
-
-            CopyDirectory(sourceRuntimeFolder, targetRuntimeFolder);
-            File.WriteAllText(stampPath, expectedStamp);
-            CleanupVersionedCacheDirectory(Path.GetDirectoryName(targetRuntimeFolder), version, 1);
-            return targetRuntimeFolder;
-        }
-
         private static void CleanupVersionedCacheDirectory(string? cacheRoot, string currentVersion, int keepRecentCount)
         {
             if (string.IsNullOrWhiteSpace(cacheRoot) || !Directory.Exists(cacheRoot))
@@ -223,49 +171,6 @@ namespace VsClineAgent.Host
             catch
             {
             }
-        }
-
-        private static void CopyDirectory(string sourceDirectory, string targetDirectory)
-        {
-            Directory.CreateDirectory(targetDirectory);
-
-            foreach (var directory in Directory.EnumerateDirectories(sourceDirectory, "*", SearchOption.AllDirectories))
-            {
-                var relativeDirectory = directory.Substring(sourceDirectory.Length)
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                Directory.CreateDirectory(Path.Combine(targetDirectory, relativeDirectory));
-            }
-
-            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-            {
-                var relativeFile = file.Substring(sourceDirectory.Length)
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                var targetFile = Path.Combine(targetDirectory, relativeFile);
-                var targetParent = Path.GetDirectoryName(targetFile);
-                if (!string.IsNullOrWhiteSpace(targetParent))
-                    Directory.CreateDirectory(targetParent);
-
-                File.Copy(file, targetFile, true);
-            }
-        }
-
-        private static string GetRuntimeStamp(string runtimeFolder)
-        {
-            var exePath = Path.Combine(runtimeFolder, "msedgewebview2.exe");
-            var info = new FileInfo(exePath);
-            if (!info.Exists)
-                return "missing";
-
-            var fileCount = 0;
-            long totalBytes = 0;
-            foreach (var file in Directory.EnumerateFiles(runtimeFolder, "*", SearchOption.AllDirectories))
-            {
-                var fileInfo = new FileInfo(file);
-                fileCount++;
-                totalBytes += fileInfo.Length;
-            }
-
-            return info.Length + ":" + info.LastWriteTimeUtc.Ticks + ":" + fileCount + ":" + totalBytes;
         }
 
         internal static void EnsureWebView2RuntimeAvailable(string? browserExecutableFolder)

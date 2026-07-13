@@ -14,6 +14,31 @@ function Fail($Message) {
     throw "[VSIX validation failed] $Message"
 }
 
+function Assert-EmbeddedMenu($Zip, [string]$AssemblyEntryName) {
+	$assemblyEntry = $Zip.GetEntry($AssemblyEntryName)
+	$memory = [System.IO.MemoryStream]::new()
+	$assemblyStream = $assemblyEntry.Open()
+	try { $assemblyStream.CopyTo($memory) }
+	finally { $assemblyStream.Dispose() }
+
+	$assembly = [System.Reflection.Assembly]::Load($memory.ToArray())
+	foreach ($resourceName in $assembly.GetManifestResourceNames()) {
+		if (-not $resourceName.EndsWith(".resources", [StringComparison]::OrdinalIgnoreCase)) { continue }
+		$resourceStream = $assembly.GetManifestResourceStream($resourceName)
+		$reader = [System.Resources.ResourceReader]::new($resourceStream)
+		try {
+			$entries = $reader.GetEnumerator()
+			while ($entries.MoveNext()) {
+				if ([string]$entries.Key -eq "Menus.ctmenu" -and $entries.Value -is [byte[]] -and $entries.Value.Length -ge 32) {
+					return
+				}
+			}
+		}
+		finally { $reader.Dispose(); $resourceStream.Dispose() }
+	}
+	Fail "$AssemblyEntryName does not contain a valid embedded Menus.ctmenu resource."
+}
+
 $resolvedVsix = Resolve-Path -LiteralPath $VsixPath
 $vsixItem = Get-Item -LiteralPath $resolvedVsix
 
@@ -85,6 +110,8 @@ try {
         }
     }
 
+	Assert-EmbeddedMenu $zip $ExpectedAssembly
+
     $pkgDefEntry = $zip.GetEntry("VsClineAgent.pkgdef")
     $reader = [System.IO.StreamReader]::new($pkgDefEntry.Open())
     $pkgDefText = $reader.ReadToEnd()
@@ -94,8 +121,21 @@ try {
     }
 
     $nodeEntries = @($zip.Entries | Where-Object { $_.FullName -like "*node.exe" })
-    if ($nodeEntries.Count -gt 2) {
-        Fail "Unexpected duplicate node.exe payloads: $($nodeEntries.Count)"
+    if ($nodeEntries.Count -ne 1 -or $nodeEntries[0].FullName -ne "Sidecar/runtime/node.exe") {
+        Fail "VSIX must contain exactly one bundled Node runtime under Sidecar/runtime. Found: $($nodeEntries.FullName -join ', ')"
+    }
+
+    $duplicateSidecarRoots = @($zip.Entries | Where-Object {
+        $_.FullName -eq "Sidecar/cline-sidecar.js" -or
+        $_.FullName -like "Sidecar/application/*" -or
+        $_.FullName -like "Sidecar/bootstrap/*" -or
+        $_.FullName -like "Sidecar/domain/*" -or
+        $_.FullName -like "Sidecar/features/*" -or
+        $_.FullName -like "Sidecar/infrastructure/*" -or
+        $_.FullName -like "Sidecar/presentation/*"
+    })
+    if ($duplicateSidecarRoots.Count -gt 0) {
+        Fail "Sidecar runtime files were duplicated outside Sidecar/runtime: $($duplicateSidecarRoots[0].FullName)"
     }
 
     $nestedWebView2Entries = @($zip.Entries | Where-Object { $_.FullName -like "Sidecar/runtime/Microsoft.WebView2*" })
@@ -103,7 +143,14 @@ try {
         Fail "WebView2 runtime was duplicated under Sidecar/runtime."
     }
 
-    if ($vsixItem.Length -gt 700MB) {
+    $fixedRuntimeExecutables = @($zip.Entries | Where-Object {
+        $_.FullName -like "WebView2Runtime/Microsoft.WebView2.FixedVersionRuntime.*.x64/msedgewebview2.exe"
+    })
+    if ($fixedRuntimeExecutables.Count -ne 1 -or $fixedRuntimeExecutables[0].Length -le 0) {
+        Fail "VSIX must contain one usable x64 WebView2 Fixed Version Runtime."
+    }
+
+    if ($vsixItem.Length -gt 550MB) {
         Fail "VSIX is unexpectedly large: $($vsixItem.Length) bytes"
     }
 
@@ -153,9 +200,16 @@ try {
         }
     }
 
-    if ($catalogPayloadSize -ne $vsixItem.Length) {
-        Write-Warning "catalog.json payload size ($catalogPayloadSize) does not match VSIX size ($($vsixItem.Length))."
-    }
+	if ($catalogPayloadSize -le 0) {
+		Fail "catalog.json contains an invalid payload size: $catalogPayloadSize"
+	}
+	$catalogSizeDelta = [Math]::Abs($catalogPayloadSize - $vsixItem.Length)
+	if ($catalogSizeDelta -gt 1MB) {
+		Fail "catalog.json payload size differs from the final VSIX by $catalogSizeDelta bytes."
+	}
+	if ($catalogSizeDelta -gt 0) {
+		Write-Host "Catalog payload size is within packaging tolerance (delta: $catalogSizeDelta bytes)."
+	}
 
     Write-Host "VSIX validation passed: $($resolvedVsix.Path)"
     Write-Host "Version: $ExpectedVersion"

@@ -31,13 +31,13 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 	const handleCompactTask = useCallback(async () => {
 		setSendingDisabled(true)
 		setEnableButtons(false)
-		await SlashServiceClient.condense(StringRequest.create({ value: lastMessage?.text })).catch((err) => {
+		await SlashServiceClient.condense(EmptyRequest.create({})).catch((err) => {
 			console.error(err)
 			setSendingDisabled(false)
 			setEnableButtons(true)
 			throw err
 		})
-	}, [lastMessage?.text, setEnableButtons, setSendingDisabled])
+	}, [setEnableButtons, setSendingDisabled])
 
 	// Handle sending a message
 	const handleSendMessage = useCallback(

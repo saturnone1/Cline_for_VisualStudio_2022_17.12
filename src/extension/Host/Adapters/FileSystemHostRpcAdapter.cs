@@ -444,7 +444,7 @@ namespace VsClineAgent.Host.Adapters
             if (dispatcher == null || dispatcher.CheckAccess())
                 return action();
 
-            return dispatcher.Invoke(action);
+            return VisualStudioUiThread.Invoke(action);
         }
 
         private static int? GetInt(JToken? parameters, string name)

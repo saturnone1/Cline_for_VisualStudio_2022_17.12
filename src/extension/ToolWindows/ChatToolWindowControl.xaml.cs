@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -47,19 +46,22 @@ namespace VsClineAgent.ToolWindows
         private string? _assemblyDirectory;
         private string? _lastWebMessageJson;
         private readonly WebviewMessageQueue _webviewMessages;
+        private readonly UiThemePreferenceStore _themePreferences;
         private bool _loaded;
         private bool _disposed;
         private CancellationTokenSource? _pendingUnloadDispose;
-		private const string LightTheme = "light";
-		private const string DarkTheme = "dark";
 
         public ChatToolWindowControl()
         {
             InitializeComponent();
-			_webviewMessages = new WebviewMessageQueue(Dispatcher, () => webView.CoreWebView2);
-			ApplyLoadingTheme(ReadPersistedTheme());
+			_themePreferences = new UiThemePreferenceStore();
+			_webviewMessages = new WebviewMessageQueue(() => webView.CoreWebView2);
+			ApplyLoadingTheme(_themePreferences.Read());
             InitializeLoadingLogo();
-            _sidecar = new SidecarLifecycle(new VsEditorService(), new VsCommandExecutionService(), SetStatus);
+            _sidecar = new SidecarLifecycle(
+                new VsEditorService(),
+                new VsCommandExecutionService(new VisualStudioOutputPaneWriter()),
+                SetStatus);
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
         }
@@ -87,39 +89,6 @@ namespace VsClineAgent.ToolWindows
             }
         }
 
-		private static string GetThemePreferencePath()
-		{
-			var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-			return Path.Combine(localAppData, "VsClineAgent", "ui-theme.txt");
-		}
-
-		private static string ReadPersistedTheme()
-		{
-			try
-			{
-				return string.Equals(File.ReadAllText(GetThemePreferencePath()).Trim(), LightTheme, StringComparison.OrdinalIgnoreCase)
-					? LightTheme
-					: DarkTheme;
-			}
-			catch
-			{
-				return DarkTheme;
-			}
-		}
-
-		private static void PersistTheme(string theme)
-		{
-			try
-			{
-				var themePath = GetThemePreferencePath();
-				Directory.CreateDirectory(Path.GetDirectoryName(themePath)!);
-				File.WriteAllText(themePath, theme == LightTheme ? LightTheme : DarkTheme);
-			}
-			catch
-			{
-			}
-		}
-
 		private static SolidColorBrush ThemeBrush(string color)
 		{
 			var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
@@ -131,7 +100,7 @@ namespace VsClineAgent.ToolWindows
 		{
 			void Apply()
 			{
-				var isLight = string.Equals(theme, LightTheme, StringComparison.OrdinalIgnoreCase);
+				var isLight = string.Equals(theme, UiThemePreferenceStore.LightTheme, StringComparison.OrdinalIgnoreCase);
 				Background = ThemeBrush(isLight ? "#F7F8FA" : "#1E1E1E");
 				loadingTitleText.Foreground = ThemeBrush(isLight ? "#172033" : "#CCCCCC");
 				loadingBrandText.Foreground = ThemeBrush(isLight ? "#4B5563" : "#888888");
@@ -146,7 +115,7 @@ namespace VsClineAgent.ToolWindows
 			if (Dispatcher.CheckAccess())
 				Apply();
 			else
-				Dispatcher.BeginInvoke(new Action(Apply));
+				VisualStudioUiThread.Post(Apply);
 		}
 
 		private bool TryHandleThemePreference(string webMessageAsJson)
@@ -159,10 +128,8 @@ namespace VsClineAgent.ToolWindows
 				if ((int?)message["protocolVersion"] != 1)
 					return false;
 
-				var theme = string.Equals((string?)message["theme"], LightTheme, StringComparison.OrdinalIgnoreCase)
-					? LightTheme
-					: DarkTheme;
-				PersistTheme(theme);
+				var theme = UiThemePreferenceStore.Normalize((string?)message["theme"]);
+				_themePreferences.Write(theme);
 				ApplyLoadingTheme(theme);
 				return true;
 			}
@@ -346,10 +313,10 @@ namespace VsClineAgent.ToolWindows
 
         private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
-            if (ShouldOpenOutsideWebView(e.Uri))
+            if (WebViewNavigationPolicy.ShouldOpenExternally(e.Uri))
             {
                 e.Cancel = true;
-                OpenExternalBrowser(e.Uri);
+                WebViewNavigationPolicy.TryOpenExternally(e.Uri);
                 return;
             }
 
@@ -358,49 +325,10 @@ namespace VsClineAgent.ToolWindows
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
-            if (ShouldOpenOutsideWebView(e.Uri))
+            if (WebViewNavigationPolicy.ShouldOpenExternally(e.Uri))
             {
                 e.Handled = true;
-                OpenExternalBrowser(e.Uri);
-            }
-        }
-
-        private static bool ShouldOpenOutsideWebView(string? uri)
-        {
-            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
-                return false;
-
-            if (string.Equals(parsed.Host, "vscline.local", StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            return IsExternalBrowserScheme(parsed.Scheme);
-        }
-
-        private static bool IsExternalBrowserScheme(string scheme)
-        {
-            return string.Equals(scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(scheme, Uri.UriSchemeMailto, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void OpenExternalBrowser(string uri)
-        {
-            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) ||
-                !IsExternalBrowserScheme(parsed.Scheme))
-            {
-                return;
-            }
-
-            try
-            {
-                Process.Start(new ProcessStartInfo(parsed.AbsoluteUri)
-                {
-                    UseShellExecute = true
-                });
-            }
-            catch
-            {
-                // Keep the embedded app in place even when Windows cannot resolve the external URL.
+                WebViewNavigationPolicy.TryOpenExternally(e.Uri);
             }
         }
 
@@ -430,7 +358,7 @@ namespace VsClineAgent.ToolWindows
                 }
                 else
                 {
-                    await Dispatcher.InvokeAsync(() =>
+                    await VisualStudioUiThread.InvokeAsync(() =>
                     {
                         loadingPanel.Visibility = Visibility.Collapsed;
                         webView.Visibility = Visibility.Visible;
@@ -549,7 +477,7 @@ namespace VsClineAgent.ToolWindows
                     if (unloadDispose.IsCancellationRequested)
                         return;
 
-                    await Dispatcher.InvokeAsync(() =>
+                    await VisualStudioUiThread.InvokeAsync(() =>
                     {
                         if (!IsLoaded)
                             _webviewMessages.ScheduleFlush();
@@ -686,7 +614,7 @@ namespace VsClineAgent.ToolWindows
                 return;
             }
 
-            Dispatcher.BeginInvoke(new Action(() => statusText.Text = message));
+            VisualStudioUiThread.Post(() => statusText.Text = message);
         }
 
         private void ShowError(string message)
@@ -706,7 +634,7 @@ namespace VsClineAgent.ToolWindows
             if (Dispatcher.CheckAccess())
                 ApplyError();
             else
-                Dispatcher.BeginInvoke(new Action(ApplyError));
+                VisualStudioUiThread.Post(ApplyError);
         }
 
         private HostDiagnosticContext CreateDiagnosticContext()

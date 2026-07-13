@@ -1,5 +1,6 @@
 import { OnboardingModelGroup, type TerminalProfile } from "@shared/proto/cline/state"
-import { useState } from "react"
+import type React from "react"
+import { createContext, createElement, useContext, useState } from "react"
 
 export interface RuntimeViewState {
 	showWelcome: boolean
@@ -33,4 +34,19 @@ export function useRuntimeViewState(): RuntimeViewState {
 		setAvailableTerminalProfiles,
 		setExpandTaskHeader,
 	}
+}
+
+const RuntimeViewStateContext = createContext<RuntimeViewState | undefined>(undefined)
+
+export function RuntimeViewStateProvider({ children }: { children: React.ReactNode }) {
+	const value = useRuntimeViewState()
+	return createElement(RuntimeViewStateContext.Provider, { value }, children)
+}
+
+export function useRuntimeViewStateContext(): RuntimeViewState {
+	const context = useContext(RuntimeViewStateContext)
+	if (!context) {
+		throw new Error("useRuntimeViewStateContext must be used within RuntimeViewStateProvider")
+	}
+	return context
 }

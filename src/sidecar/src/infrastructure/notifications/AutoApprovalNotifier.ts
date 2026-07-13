@@ -1,6 +1,6 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { WindowPort } from "../../application/ports/HostProviderPort"
-import { getCommandText, getPatchPathsFromUnknown, getSearchQuery, getToolPathFromUnknown } from "../conversation/ConversationSupport"
+import { getCommandText, getPatchPathsFromUnknown, getSearchQuery, getToolPathFromUnknown } from "../conversation/ToolCommandFormatting"
 import { stringify } from "../webview/RuntimeErrorFormatter"
 
 export class AutoApprovalNotifier {

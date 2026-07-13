@@ -34,7 +34,7 @@ src/sidecar/src/
 └── main.ts          # composition root
 ```
 
-`VisualStudioWebviewController` parses raw WebView messages and invokes `WebviewApplicationPort`. `VisualStudioWebviewBackend` remains a legacy application facade while feature behavior is moved into focused use cases. Concrete implementations are wired only in `main.ts`.
+`VisualStudioWebviewController` parses raw WebView messages and invokes `WebviewApplicationPort`. `VisualStudioWebviewBackend` is a thin compatibility facade over `WebviewBackendComposition`; feature behavior lives in focused use cases, handlers, projectors, and adapters. Concrete implementations are wired only in the bootstrap composition root.
 
 Current extracted use cases:
 
@@ -56,17 +56,16 @@ Additional feature boundaries extracted from the legacy backend:
 
 Run `npm test` in `src/sidecar` to enforce the dependency direction. The architecture check rejects inward layers importing outward layers and rejects concrete infrastructure imports from the WebView router.
 
-## Incremental Migration
+## Ongoing Guardrails
 
-The current router remains large, so migration continues by behavior rather than by arbitrary file size:
+The migration is protected by executable constraints rather than file-placement convention alone:
 
-1. Continue extracting conversation orchestration from the legacy backend into focused application use cases.
-2. Extract worktree and browser orchestration into dedicated application use cases and infrastructure adapters.
-3. Replace remaining broad `unknown` RPC payloads with service-specific DTOs.
+1. Keep conversation, worktree, browser, provider, MCP, and task behavior in their owning slices.
+2. Define every cross-runtime operation and payload shape in `contracts/webview-rpc.json`, then regenerate TypeScript and C# artifacts.
+3. Retain broad compatibility payloads only at explicitly identified external boundaries and normalize them immediately.
 4. Keep SDK, filesystem, network, process, and Visual Studio calls in infrastructure adapters.
-5. Keep React components free of host implementations and access RPC through presentation gateways.
-
-A move is complete only when tests pass and the architecture check proves the dependency direction.
+5. Keep React components free of host implementations and access RPC through typed presentation gateways.
+6. Require tests, AST dependency/cycle checks, contract audits, and both VSIX smoke gates for structural changes.
 
 ## References
 

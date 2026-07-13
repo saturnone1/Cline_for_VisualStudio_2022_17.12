@@ -8,9 +8,6 @@ using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
 
 namespace VsClineAgent.Services
 {
@@ -26,16 +23,19 @@ namespace VsClineAgent.Services
         private static readonly Regex CurrentDirectoryMarkerRegex = new Regex(
             @"(?:^|>)__VSCLINE_COMMAND_CWD__(?<id>cmd-\d{6})__(?<cwd>.*)$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
-        private static readonly Guid OutputPaneGuid = new Guid("A95D2F78-1D66-4E7D-B3B0-7E7193E129F1");
+        private readonly ICommandOutputWriter _outputWriter;
         private readonly ConcurrentDictionary<string, RunningCommandInfo> _activeCommands = new ConcurrentDictionary<string, RunningCommandInfo>();
         private readonly ConcurrentQueue<CommandOutputLine> _outputHistory = new ConcurrentQueue<CommandOutputLine>();
         private readonly ConcurrentQueue<CompletedCommandInfo> _commandHistory = new ConcurrentQueue<CompletedCommandInfo>();
         private readonly ConcurrentDictionary<string, List<TerminalShellSession>> _sessionsByCwd = new ConcurrentDictionary<string, List<TerminalShellSession>>(StringComparer.OrdinalIgnoreCase);
-        private readonly object _outputPaneLock = new object();
         private long _commandSequence;
         private long _outputSequence;
-        private IVsOutputWindowPane? _outputPane;
         private bool _disposed;
+
+        public VsCommandExecutionService(ICommandOutputWriter? outputWriter = null)
+        {
+            _outputWriter = outputWriter ?? new NullCommandOutputWriter();
+        }
 
         public async Task<CommandExecutionResult> ExecuteCommandAsync(
             string command,
@@ -60,7 +60,7 @@ namespace VsClineAgent.Services
                 StartedAt = startedAt,
                 Status = "running",
                 IsReusableShell = true,
-                IsHot = IsLikelyHotCommand(command),
+                IsHot = TerminalCommandPolicy.IsLikelyLongRunning(command),
                 Shell = "cmd.exe",
             };
             var stdOut = new StringBuilder();
@@ -69,9 +69,9 @@ namespace VsClineAgent.Services
             runningInfo.StdErrBuffer = stdErr;
             var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            await WriteLineAsync($"> [{commandId}] {command}");
-            await WriteLineAsync($"  Terminal: {terminalId}");
-            await WriteLineAsync($"  Working directory: {cwd}");
+            await _outputWriter.WriteLineAsync($"> [{commandId}] {command}");
+            await _outputWriter.WriteLineAsync($"  Terminal: {terminalId}");
+            await _outputWriter.WriteLineAsync($"  Working directory: {cwd}");
 
             session.ActiveCommand = runningInfo;
             session.ActiveCompletion = tcs;
@@ -105,7 +105,7 @@ namespace VsClineAgent.Services
                         runningInfo.Status = "timedOut";
                     }
                     stopwatch.Stop();
-                    await WriteLineAsync(cancelled
+                    await _outputWriter.WriteLineAsync(cancelled
                         ? "  Command cancelled."
                         : runningInfo.Background
                             ? $"  Command is still running in background after {timeoutSeconds}s."
@@ -138,7 +138,7 @@ namespace VsClineAgent.Services
                     ? "cancelled"
                     : exitCode == 0 ? "completed" : "failed";
                 stopwatch.Stop();
-                await WriteLineAsync($"  Exit code: {exitCode}");
+                await _outputWriter.WriteLineAsync($"  Exit code: {exitCode}");
                 var completedResult = new CommandExecutionResult
                 {
                     CommandId = commandId,
@@ -218,7 +218,7 @@ namespace VsClineAgent.Services
                 RecentOutput = recentOutput,
                 OutputSequence = Interlocked.Read(ref _outputSequence),
                 Shell = "cmd.exe",
-                ShellState = BuildShellState(sessions),
+                ShellState = TerminalCommandPolicy.BuildShellState(sessions.Count, sessions.Count(session => session.Busy)),
                 ReuseMode = "reusable-cmd-session",
                 CurrentDirectory = currentDirectory,
                 UnretrievedOutputAvailable = recentOutput.Count > 0,
@@ -254,7 +254,7 @@ namespace VsClineAgent.Services
                         command.Status = "cancelled";
                         cancelled++;
                         AppendCommandOutput(command, "stderr", "Command cancelled by user.", new StringBuilder());
-                        await WriteLineAsync($"  Command cancelled: {command.Command}");
+                        await _outputWriter.WriteLineAsync($"  Command cancelled: {command.Command}");
                     }
                 }
                 catch
@@ -299,7 +299,7 @@ namespace VsClineAgent.Services
 
         private TerminalShellSession CreateShellSession(string cwd, int ordinal)
         {
-            var terminalId = BuildTerminalId(cwd, ordinal);
+            var terminalId = TerminalCommandPolicy.BuildTerminalId(cwd, ordinal);
             var psi = new ProcessStartInfo
             {
                 FileName = "cmd.exe",
@@ -401,7 +401,7 @@ namespace VsClineAgent.Services
             }
 
             AppendCommandOutput(active, stream, text, stream == "stderr" ? active.StdErrBuffer ?? new StringBuilder() : active.StdOutBuffer ?? new StringBuilder());
-            _ = WriteLineAsync(text);
+            _ = _outputWriter.WriteLineAsync(text);
         }
 
         private void CompleteBackgroundCommand(TerminalShellSession session, int exitCode, string status)
@@ -581,185 +581,6 @@ namespace VsClineAgent.Services
             }).Where(session => !session.IsDisposed && !session.Process.HasExited).ToList();
         }
 
-        private static string BuildShellState(IReadOnlyCollection<TerminalShellSession> sessions)
-        {
-            if (sessions.Count == 0)
-                return "idle";
-
-            var busy = sessions.Count(session => session.Busy);
-            return busy == 0 ? $"idle ({sessions.Count} reusable session{(sessions.Count == 1 ? "" : "s")})" : $"busy ({busy}/{sessions.Count} reusable sessions)";
-        }
-
-        private static bool IsLikelyHotCommand(string command)
-        {
-            var text = command.ToLowerInvariant();
-            return text.Contains(" dotnet watch") ||
-                   text.StartsWith("dotnet watch", StringComparison.Ordinal) ||
-                   text.Contains(" npm run dev") ||
-                   text.StartsWith("npm run dev", StringComparison.Ordinal) ||
-                   text.Contains(" npm start") ||
-                   text.StartsWith("npm start", StringComparison.Ordinal) ||
-                   text.Contains(" vite") ||
-                   text.Contains(" webpack serve") ||
-                   text.Contains("ng serve") ||
-                   text.Contains("yarn dev") ||
-                   text.Contains("pnpm dev");
-        }
-
-        private static string BuildTerminalId(string cwd, int ordinal)
-        {
-            var name = string.IsNullOrWhiteSpace(cwd) ? "workspace" : cwd.TrimEnd('\\', '/').Split('\\', '/').LastOrDefault();
-            return "vs-command-host:" + (string.IsNullOrWhiteSpace(name) ? "workspace" : name) + ":" + ordinal;
-        }
-
-        private async Task WriteLineAsync(string text)
-        {
-            try
-            {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var pane = await GetOrCreatePaneAsync();
-                pane?.OutputStringThreadSafe(text + Environment.NewLine);
-            }
-            catch
-            {
-            }
-        }
-
-        private async Task<IVsOutputWindowPane?> GetOrCreatePaneAsync()
-        {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            lock (_outputPaneLock)
-            {
-                if (_outputPane != null)
-                    return _outputPane;
-            }
-
-            var outputPaneGuid = OutputPaneGuid;
-            var outputWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
-            if (outputWindow == null)
-                return null;
-
-            outputWindow.CreatePane(ref outputPaneGuid, "VsCline Agent", 1, 1);
-            outputWindow.GetPane(ref outputPaneGuid, out var pane);
-            pane?.Activate();
-
-            lock (_outputPaneLock)
-            {
-                _outputPane = pane;
-            }
-
-            return pane;
-        }
     }
 
-    internal sealed class TerminalProfileInfo
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-    }
-
-    internal sealed class RunningCommandInfo
-    {
-        public string CommandId { get; set; } = string.Empty;
-        public string TerminalId { get; set; } = string.Empty;
-        public int ProcessId { get; set; }
-        public Process? Process { get; set; }
-        public string Command { get; set; } = string.Empty;
-        public string WorkingDirectory { get; set; } = string.Empty;
-        public string CurrentDirectory { get; set; } = string.Empty;
-        public DateTimeOffset StartedAt { get; set; }
-        public DateTimeOffset? LastOutputAt { get; set; }
-        public string Status { get; set; } = string.Empty;
-        public bool StdOutTruncated { get; set; }
-        public bool StdErrTruncated { get; set; }
-        public bool IsReusableShell { get; set; }
-        public bool IsHot { get; set; }
-        public bool Background { get; set; }
-        public bool Attachable => Background || string.Equals(Status, "running", StringComparison.OrdinalIgnoreCase);
-        public bool ProceedWhileRunningAvailable => Background || IsHot;
-        public string Shell { get; set; } = string.Empty;
-        internal StringBuilder? StdOutBuffer { get; set; }
-        internal StringBuilder? StdErrBuffer { get; set; }
-        internal object OutputLock { get; } = new object();
-    }
-
-    internal sealed class CommandExecutionResult
-    {
-        public string CommandId { get; set; } = string.Empty;
-        public string TerminalId { get; set; } = string.Empty;
-        public string Status { get; set; } = string.Empty;
-        public int ExitCode { get; set; }
-        public bool TimedOut { get; set; }
-        public bool Cancelled { get; set; }
-        public bool Background { get; set; }
-        public bool IsHot { get; set; }
-        public long DurationMs { get; set; }
-        public string CurrentDirectory { get; set; } = string.Empty;
-        public string StdOut { get; set; } = string.Empty;
-        public string StdErr { get; set; } = string.Empty;
-        public bool StdOutTruncated { get; set; }
-        public bool StdErrTruncated { get; set; }
-    }
-
-    internal sealed class TerminalStateInfo
-    {
-        public IReadOnlyList<RunningCommandInfo> ActiveCommands { get; set; } = Array.Empty<RunningCommandInfo>();
-        public IReadOnlyList<RunningCommandInfo> BackgroundCommands { get; set; } = Array.Empty<RunningCommandInfo>();
-        public IReadOnlyList<CompletedCommandInfo> RecentCommands { get; set; } = Array.Empty<CompletedCommandInfo>();
-        public IReadOnlyList<CommandOutputLine> RecentOutput { get; set; } = Array.Empty<CommandOutputLine>();
-        public long OutputSequence { get; set; }
-        public string Shell { get; set; } = string.Empty;
-        public string ShellState { get; set; } = string.Empty;
-        public string ReuseMode { get; set; } = string.Empty;
-        public string CurrentDirectory { get; set; } = string.Empty;
-        public bool UnretrievedOutputAvailable { get; set; }
-        public bool Attachable { get; set; }
-        public bool ProceedWhileRunningAvailable { get; set; }
-    }
-
-    internal sealed class CompletedCommandInfo
-    {
-        public string CommandId { get; set; } = string.Empty;
-        public string TerminalId { get; set; } = string.Empty;
-        public int ProcessId { get; set; }
-        public string Command { get; set; } = string.Empty;
-        public string WorkingDirectory { get; set; } = string.Empty;
-        public string CurrentDirectory { get; set; } = string.Empty;
-        public DateTimeOffset StartedAt { get; set; }
-        public DateTimeOffset CompletedAt { get; set; }
-        public DateTimeOffset? LastOutputAt { get; set; }
-        public string Status { get; set; } = string.Empty;
-        public int ExitCode { get; set; }
-        public bool TimedOut { get; set; }
-        public bool Cancelled { get; set; }
-        public bool Background { get; set; }
-        public bool IsHot { get; set; }
-        public long DurationMs { get; set; }
-        public bool StdOutTruncated { get; set; }
-        public bool StdErrTruncated { get; set; }
-    }
-
-    internal sealed class CommandOutputLine
-    {
-        public long Sequence { get; set; }
-        public string CommandId { get; set; } = string.Empty;
-        public string TerminalId { get; set; } = string.Empty;
-        public string Stream { get; set; } = string.Empty;
-        public string Text { get; set; } = string.Empty;
-        public DateTimeOffset At { get; set; }
-    }
-
-    internal sealed class TerminalShellSession
-    {
-        public string TerminalId { get; set; } = string.Empty;
-        public string WorkingDirectory { get; set; } = string.Empty;
-        public string CurrentDirectory { get; set; } = string.Empty;
-        public Process Process { get; set; } = null!;
-        public bool Busy { get; set; }
-        public bool IsDisposed { get; set; }
-        public RunningCommandInfo? ActiveCommand { get; set; }
-        public TaskCompletionSource<int>? ActiveCompletion { get; set; }
-        public SemaphoreSlim InputLock { get; } = new SemaphoreSlim(1, 1);
-    }
 }

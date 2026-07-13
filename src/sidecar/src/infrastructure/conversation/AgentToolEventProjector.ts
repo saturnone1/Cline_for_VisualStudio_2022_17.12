@@ -1,6 +1,7 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { isBrowserToolName } from "../../features/browser/BrowserPolicy"
-import { formatCompletedCommandActivity, getCommandText, getPatchPathsFromUnknown, getSearchFilePattern, getSearchQuery, getToolPath, getToolPathFromUnknown, mapToolName, summarizeCommandOutput, summarizeToolOutput } from "./ConversationSupport"
+import { getCommandText, getPatchPathsFromUnknown, getSearchFilePattern, getSearchQuery, getToolPath, getToolPathFromUnknown, mapToolName, summarizeCommandOutput, summarizeToolOutput } from "./ToolCommandFormatting"
+import { formatCompletedCommandActivity } from "./ToolActivityFormatting"
 
 type Callbacks = Readonly<{
 	noteActivity: (reason: string) => void

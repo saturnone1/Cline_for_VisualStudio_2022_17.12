@@ -1,5 +1,6 @@
 import type { McpViewTab } from "@shared/mcp"
-import { useCallback, useState } from "react"
+import type React from "react"
+import { createContext, createElement, useCallback, useContext, useState } from "react"
 
 export interface NavigationState {
 	showMcp: boolean
@@ -139,4 +140,19 @@ export function useNavigationState(): NavigationState {
 		hideAnnouncement,
 		closeMcpView,
 	}
+}
+
+const NavigationStateContext = createContext<NavigationState | undefined>(undefined)
+
+export function NavigationStateProvider({ children }: { children: React.ReactNode }) {
+	const value = useNavigationState()
+	return createElement(NavigationStateContext.Provider, { value }, children)
+}
+
+export function useNavigationStateContext(): NavigationState {
+	const context = useContext(NavigationStateContext)
+	if (!context) {
+		throw new Error("useNavigationStateContext must be used within NavigationStateProvider")
+	}
+	return context
 }

@@ -16,8 +16,8 @@ export function decodeFileRpcCommand(key: string, message: unknown): FileCommand
 		case "FileService.copyToClipboard": return { type: "copy", text: readString(request.value) || readString(request.text) }
 		case "FileService.ifFileExistsRelativePath": return { type: "exists", relativePath: readString(request.value) || readString(request.path) || readString(request.relativePath) }
 		case "FileService.getRelativePaths": return { type: "relativePaths" }
-		case "FileService.searchFiles":
-		case "FileService.searchCommits": return { type: "search" }
+		case "FileService.searchFiles": return { type: "searchFiles" }
+		case "FileService.searchCommits": return { type: "searchCommits" }
 		case "FileService.selectFiles": return { type: "select", allowImages: request.value === true || request.allowImages === true }
 		case "FileService.openFile":
 		case "FileService.openFileRelativePath": return { type: "openFile", filePath: readString(request.filePath) || readString(request.path) || readString(request.value) || readString(request.relativePath), line: optionalNumber(request.line) }

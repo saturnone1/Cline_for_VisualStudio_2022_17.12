@@ -6,7 +6,7 @@ import {
 	getToolPath,
 	getToolPathFromUnknown,
 	summarizeToolInput,
-} from "./ConversationSupport"
+} from "./ToolCommandFormatting"
 
 type ApprovalPrompt = Readonly<{ ask: "command" | "tool"; text: string }>
 

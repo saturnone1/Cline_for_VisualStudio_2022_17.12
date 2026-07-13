@@ -24,6 +24,7 @@ export class RuntimeMonitoringCoordinator {
 	markFirstAssistant(sessionId: string, textLength: number) { this.dependencies.sendLatency().markFirstAssistant(sessionId, textLength) }
 	markError(sessionId: string, error: unknown) { this.dependencies.sendLatency().markError(sessionId, error) }
 	rebindLatency(previousSessionId: string, nextSessionId: string) { this.dependencies.sendLatency().rebind(previousSessionId, nextSessionId) }
+	correlationId(sessionId: string) { return this.dependencies.sendLatency().correlationId(sessionId) }
 
 	schedulePartialIdle() { this.dependencies.partialState().scheduleIdle() }
 	clearPartialIdle() { this.dependencies.optionalPartialState()?.clearIdle() }

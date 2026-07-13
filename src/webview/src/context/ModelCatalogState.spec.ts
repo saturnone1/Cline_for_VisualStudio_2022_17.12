@@ -1,9 +1,10 @@
 import { openRouterDefaultModelId, requestyDefaultModelId } from "@shared/api"
 import type { ExtensionState } from "@shared/ExtensionMessage"
 import { act, renderHook } from "@testing-library/react"
+import { createElement, type ReactNode } from "react"
 import { beforeEach, vi } from "vitest"
 import { ModelsServiceClient } from "../services/grpcClient"
-import { useModelCatalogState } from "./ModelCatalogState"
+import { ModelCatalogStateProvider, useModelCatalogState, useModelCatalogStateContext } from "./ModelCatalogState"
 
 vi.mock("../services/grpcClient", () => {
 	const pending = () => new Promise(() => undefined)
@@ -46,5 +47,14 @@ describe("useModelCatalogState", () => {
 
 		act(() => result.current.setHuggingFaceModels({ custom: { contextWindow: 8192 } }))
 		expect(result.current.huggingFaceModels.custom.contextWindow).toBe(8192)
+	})
+
+	it("exposes model catalogs through their dedicated provider", () => {
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(ModelCatalogStateProvider, { apiConfiguration: undefined }, children)
+		const { result } = renderHook(() => useModelCatalogStateContext(), { wrapper })
+
+		expect(result.current.openRouterModels[openRouterDefaultModelId]).toBeDefined()
+		expect(ModelsServiceClient.refreshOpenRouterModelsRpc).not.toHaveBeenCalled()
 	})
 })

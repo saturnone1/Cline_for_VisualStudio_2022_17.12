@@ -24,11 +24,13 @@ Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로�
 ├─ src/webview/             # React/Vite 기반 WebView UI
 ├─ packaging/               # VS 17.0/17.12 전용 SDK, manifest, compatibility profile
 ├─ assets/                  # 소스에서 사용하는 이미지와 정적 자산
-├─ artifacts/               # 빌드가 생성하는 WebApp/Sidecar 패키지 산출물
+├─ artifacts/               # 생성 산출물; WebApp만 오프라인 패키징 스냅샷으로 추적
 ├─ docs/                    # 아키텍처, 호환성, 폐쇄망 문서
 ├─ scripts/                 # 빌드와 배포 보조 스크립트
 └─ vendor/                  # 로컬 NuGet과 선택적 WebView2 런타임
 ```
+
+`artifacts/WebApp/`은 생성물이지만 두 VSIX의 검토된 오프라인 패키징 입력으로 추적하는 예외입니다. 직접 편집하지 않으며 자세한 규칙은 [Generated artifact policy](docs/GeneratedArtifacts.md)를 따릅니다.
 
 ## 빌드 준비
 

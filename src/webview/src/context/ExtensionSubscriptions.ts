@@ -3,7 +3,7 @@ import type { ClineMessage as ProtoClineMessage } from "@shared/proto/cline/ui"
 import { useCallback, useEffect, useRef } from "react"
 import { StateServiceClient, UiServiceClient } from "../services/grpcClient"
 
-interface ExtensionSubscriptionCallbacks {
+export interface ExtensionSubscriptionCallbacks {
 	onStateJson: (stateJson: string) => void
 	onPartialMessage: (message: ProtoClineMessage) => void
 	onTerminalProfiles: (profiles: Awaited<ReturnType<typeof StateServiceClient.getAvailableTerminalProfiles>>["profiles"]) => void

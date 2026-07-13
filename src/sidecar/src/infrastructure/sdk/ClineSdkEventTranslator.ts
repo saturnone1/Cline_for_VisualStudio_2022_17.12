@@ -93,7 +93,27 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 	if (type === "assistant-message") return { type: "AssistantMessageReceived", sessionId, message: asRecord(raw.message), raw }
 	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), completion: completionFields(raw), raw }
 	if (type === "run-failed") return { type: "RunFailed", sessionId, reason: readString(raw.reason) || "failed", raw }
-	if (type === "usage") return { type: "UsageUpdated", sessionId, usage: asRecord(raw.usage), totalInputTokens: readNumber(raw.totalInputTokens), totalOutputTokens: readNumber(raw.totalOutputTokens), totalCacheReadTokens: readNumber(raw.totalCacheReadTokens), totalCacheWriteTokens: readNumber(raw.totalCacheWriteTokens), totalCost: readNumber(raw.totalCost), raw }
+	if (type === "usage") {
+		const nestedUsage = asRecord(raw.usage)
+		return {
+			type: "UsageUpdated",
+			sessionId,
+			usage: {
+				...nestedUsage,
+				inputTokens: readNumber(raw.inputTokens) ?? readNumber(nestedUsage.inputTokens),
+				outputTokens: readNumber(raw.outputTokens) ?? readNumber(nestedUsage.outputTokens),
+				cacheReadTokens: readNumber(raw.cacheReadTokens) ?? readNumber(nestedUsage.cacheReadTokens),
+				cacheWriteTokens: readNumber(raw.cacheWriteTokens) ?? readNumber(nestedUsage.cacheWriteTokens),
+				cost: readNumber(raw.cost) ?? readNumber(nestedUsage.cost),
+			},
+			totalInputTokens: readNumber(raw.totalInputTokens),
+			totalOutputTokens: readNumber(raw.totalOutputTokens),
+			totalCacheReadTokens: readNumber(raw.totalCacheReadTokens),
+			totalCacheWriteTokens: readNumber(raw.totalCacheWriteTokens),
+			totalCost: readNumber(raw.totalCost),
+			raw,
+		}
+	}
 	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), completion: completionFields(raw), raw }
 	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, raw }
 	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }

@@ -1,5 +1,5 @@
 import type { TaskCommand, TaskPromptRequest } from "../../features/chat/TaskRpcHandler"
-import { getAskResponseText } from "../conversation/ConversationSupport"
+import { getAskResponseText } from "../conversation/ToolCommandFormatting"
 
 export function decodeTaskRpcCommand(key: string, message: unknown): TaskCommand | undefined {
 	const request = asRecord(message)

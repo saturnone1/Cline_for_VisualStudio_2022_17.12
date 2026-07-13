@@ -1,4 +1,4 @@
-import { tryParseJson } from "../conversation/ConversationSupport"
+import { tryParseJson } from "../conversation/ToolCommandFormatting"
 
 export function shouldLogSdkEventForInteraction(event: unknown) {
 	const record = asRecord(event)

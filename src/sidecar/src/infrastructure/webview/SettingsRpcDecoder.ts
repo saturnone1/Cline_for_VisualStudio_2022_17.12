@@ -13,7 +13,7 @@ export function decodeSettingsRpcCommand(key: string, message: unknown): Setting
 		case "StateService.updateInfoBannerVersion": return { type: "setBannerVersion", banner: "info", version: readNumber(request.value) || readNumber(request.version) }
 		case "StateService.updateModelBannerVersion": return { type: "setBannerVersion", banner: "model", version: readNumber(request.value) || readNumber(request.version) }
 		case "StateService.updateCliBannerVersion": return { type: "setBannerVersion", banner: "cli", version: readNumber(request.value) || readNumber(request.version) }
-		case "StateService.updateTerminalConnectionTimeout": return { type: "setTerminalTimeout", timeout: readNumber(request.value) || readNumber(request.timeout) }
+		case "StateService.updateTerminalConnectionTimeout": return { type: "setTerminalTimeout", timeout: readNumber(request.value) || readNumber(request.timeout) || readNumber(request.timeoutMs) }
 		case "StateService.setWelcomeViewCompleted": return { type: "completeWelcome" }
 		case "StateService.captureOnboardingProgress":
 		case "StateService.refreshRemoteConfig":

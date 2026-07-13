@@ -1,5 +1,5 @@
 import type { UiWebCommand } from "../../features/web/UiWebRpcHandler"
-import { getExternalUrlValue } from "../conversation/ConversationSupport"
+import { getExternalUrlValue } from "../conversation/ConversationMessageProjection"
 
 export function decodeUiWebRpcCommand(key: string, message: unknown): UiWebCommand | undefined {
 	const request = asRecord(message)

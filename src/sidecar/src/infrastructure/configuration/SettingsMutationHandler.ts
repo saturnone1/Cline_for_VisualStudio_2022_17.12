@@ -1,4 +1,4 @@
-import { normalizeMcpDisplayMode } from "../conversation/ConversationSupport"
+import { normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
 import { compactApiConfiguration, extractApiConfigurationUpdate, extractAutoApprovalSettingsUpdate, isRuntimeSettingsKey, normalizeApiConfiguration, normalizeApiConfigurationProfiles } from "./ProviderConfiguration"
 import type { ApiConfigurationProfileManager } from "./ApiConfigurationProfileManager"
 

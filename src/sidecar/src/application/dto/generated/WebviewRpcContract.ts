@@ -4,6 +4,22 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 	"Empty": {
 		"fields": {}
 	},
+	"TaskHistoryQueryRequest": {
+		"fields": {
+			"favoritesOnly": {
+				"type": "boolean"
+			},
+			"searchQuery": {
+				"type": "string"
+			},
+			"sortBy": {
+				"type": "string"
+			},
+			"currentWorkspaceOnly": {
+				"type": "boolean"
+			}
+		}
+	},
 	"TaskPromptRequest": {
 		"fields": {
 			"text": {
@@ -69,7 +85,7 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 	"TaskHistoryResponse": {
 		"fields": {
 			"tasks": {
-				"type": "unknown",
+				"type": "objectArray",
 				"required": true
 			}
 		},
@@ -83,779 +99,2543 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 			}
 		},
 		"allowAdditionalFields": true
+	},
+	"FlexibleObject": {
+		"fields": {},
+		"allowAdditionalFields": true
+	},
+	"BooleanValueResponse": {
+		"fields": {
+			"value": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"StringValueRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"text": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			},
+			"filePath": {
+				"type": "string"
+			},
+			"relativePath": {
+				"type": "string"
+			},
+			"line": {
+				"type": "number"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BooleanValueRequest": {
+		"fields": {
+			"value": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"NumberValueRequest": {
+		"fields": {
+			"value": {
+				"type": "number"
+			},
+			"version": {
+				"type": "number"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"RelativePathsResponse": {
+		"fields": {
+			"values": {
+				"type": "stringArray"
+			},
+			"paths": {
+				"type": "stringArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"FileSelectionResponse": {
+		"fields": {
+			"values1": {
+				"type": "stringArray",
+				"required": true
+			},
+			"values2": {
+				"type": "stringArray",
+				"required": true
+			},
+			"error": {
+				"type": "string"
+			}
+		}
+	},
+	"FileSearchResponse": {
+		"fields": {
+			"results": {
+				"type": "objectArray",
+				"required": true
+			},
+			"values": {
+				"type": "stringArray"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"FileCommitSearchResponse": {
+		"fields": {
+			"commits": {
+				"type": "objectArray",
+				"required": true
+			},
+			"values": {
+				"type": "stringArray"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"FileDiffRequest": {
+		"fields": {
+			"leftPath": {
+				"type": "string"
+			},
+			"rightPath": {
+				"type": "string"
+			},
+			"beforePath": {
+				"type": "string"
+			},
+			"afterPath": {
+				"type": "string"
+			},
+			"filePath": {
+				"type": "string"
+			},
+			"title": {
+				"type": "string"
+			}
+		}
+	},
+	"FileRevertRequest": {
+		"fields": {
+			"files": {
+				"type": "objectArray",
+				"required": true
+			}
+		}
+	},
+	"FileSelectRequest": {
+		"fields": {
+			"value": {
+				"type": "boolean"
+			},
+			"allowImages": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"RelativePathsRequest": {
+		"fields": {
+			"uris": {
+				"type": "stringArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"TerminalTargetRequest": {
+		"fields": {
+			"terminalId": {
+				"type": "string"
+			},
+			"commandId": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"TerminalProfilesResponse": {
+		"fields": {
+			"profiles": {
+				"type": "objectArray",
+				"required": true
+			}
+		}
+	},
+	"McpAddServerRequest": {
+		"fields": {
+			"serverName": {
+				"type": "string",
+				"required": true
+			},
+			"serverUrl": {
+				"type": "string",
+				"required": true
+			},
+			"transportType": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"McpTargetRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"name": {
+				"type": "string"
+			},
+			"serverName": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"McpTimeoutRequest": {
+		"fields": {
+			"serverName": {
+				"type": "string",
+				"required": true
+			},
+			"timeout": {
+				"type": "number",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"McpToolApprovalRequest": {
+		"fields": {
+			"serverName": {
+				"type": "string",
+				"required": true
+			},
+			"toolNames": {
+				"type": "stringArray",
+				"required": true
+			},
+			"autoApprove": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"McpToggleRequest": {
+		"fields": {
+			"serverName": {
+				"type": "string",
+				"required": true
+			},
+			"disabled": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"McpServersResponse": {
+		"fields": {
+			"mcpServers": {
+				"type": "objectArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ModeRequest": {
+		"fields": {
+			"mode": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ModeResponse": {
+		"fields": {
+			"value": {
+				"type": "boolean",
+				"required": true
+			},
+			"mode": {
+				"type": "string",
+				"required": true
+			}
+		}
+	},
+	"TelemetryRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"telemetrySetting": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BannerRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"banner": {
+				"type": "string"
+			},
+			"id": {
+				"type": "string"
+			},
+			"version": {
+				"type": "number"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"TerminalTimeoutRequest": {
+		"fields": {
+			"value": {
+				"type": "number"
+			},
+			"timeout": {
+				"type": "number"
+			},
+			"timeoutMs": {
+				"type": "number"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ResetStateRequest": {
+		"fields": {
+			"global": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"StateStreamResponse": {
+		"fields": {
+			"stateJson": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ProviderAuthRequest": {
+		"fields": {
+			"provider": {
+				"type": "string"
+			},
+			"providerId": {
+				"type": "string"
+			},
+			"apiProvider": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			},
+			"token": {
+				"type": "string"
+			},
+			"apiKey": {
+				"type": "string"
+			},
+			"credential": {
+				"type": "string"
+			},
+			"baseUrl": {
+				"type": "string"
+			},
+			"baseURL": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			},
+			"endpoint": {
+				"type": "string"
+			},
+			"code": {
+				"type": "string"
+			},
+			"state": {
+				"type": "string"
+			},
+			"callbackUrl": {
+				"type": "string"
+			},
+			"redirectUrl": {
+				"type": "string"
+			},
+			"organizationId": {
+				"type": "string"
+			},
+			"clearBaseUrl": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"OrganizationRequest": {
+		"fields": {
+			"organizationId": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"OrganizationsResponse": {
+		"fields": {
+			"organizations": {
+				"type": "objectArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"AccountCreditsResponse": {
+		"fields": {
+			"credits": {
+				"type": "number",
+				"required": true
+			},
+			"balance": {
+				"type": "object",
+				"required": true
+			},
+			"value": {
+				"type": "number",
+				"required": true
+			},
+			"usageTransactions": {
+				"type": "objectArray",
+				"required": true
+			},
+			"paymentTransactions": {
+				"type": "objectArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"AccountAuthResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean"
+			},
+			"supported": {
+				"type": "boolean"
+			},
+			"provider": {
+				"type": "string"
+			},
+			"message": {
+				"type": "string"
+			},
+			"authStatus": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			},
+			"redirectUrl": {
+				"type": "string"
+			},
+			"isAuthenticated": {
+				"type": "boolean"
+			},
+			"hasCredential": {
+				"type": "boolean"
+			},
+			"fields": {
+				"type": "object"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"AccountAuthStateResponse": {
+		"fields": {
+			"loggedIn": {
+				"type": "boolean"
+			},
+			"user": {
+				"type": "unknown"
+			},
+			"organizations": {
+				"type": "objectArray"
+			},
+			"activeOrganization": {
+				"type": "unknown"
+			},
+			"isAuthenticated": {
+				"type": "boolean"
+			},
+			"openAiCodexIsAuthenticated": {
+				"type": "boolean"
+			},
+			"authStatus": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserHostRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"host": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserActionRequest": {
+		"fields": {
+			"action": {
+				"type": "string"
+			},
+			"name": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			},
+			"tabId": {
+				"type": "string"
+			},
+			"browserSessionId": {
+				"type": "string"
+			},
+			"coordinate": {
+				"type": "string"
+			},
+			"text": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserPathResponse": {
+		"fields": {
+			"path": {
+				"type": "string",
+				"required": true
+			},
+			"isBundled": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserConnectionResponse": {
+		"fields": {
+			"isConnected": {
+				"type": "boolean",
+				"required": true
+			},
+			"isRemote": {
+				"type": "boolean",
+				"required": true
+			},
+			"host": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			},
+			"browser": {
+				"type": "string"
+			},
+			"protocolVersion": {
+				"type": "string"
+			},
+			"tabCount": {
+				"type": "number"
+			},
+			"activeTabTitle": {
+				"type": "string"
+			},
+			"activeTabUrl": {
+				"type": "string"
+			},
+			"error": {
+				"type": "string"
+			},
+			"webFetchEnabled": {
+				"type": "boolean"
+			},
+			"webFetchDisabledReason": {
+				"type": "string"
+			},
+			"browserToolUseDisabled": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserProbeResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"message": {
+				"type": "string"
+			},
+			"host": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserRelaunchResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"value": {
+				"type": "string",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserTabsResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean"
+			},
+			"tabs": {
+				"type": "objectArray",
+				"required": true
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"BrowserActionResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean"
+			},
+			"status": {
+				"type": "string"
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"CheckpointTargetRequest": {
+		"fields": {
+			"checkpointRunCount": {
+				"type": "number"
+			},
+			"runCount": {
+				"type": "number"
+			},
+			"messageTs": {
+				"type": "number"
+			},
+			"value": {
+				"type": "number"
+			},
+			"number": {
+				"type": "number"
+			},
+			"restoreType": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"CheckpointDiffResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"supported": {
+				"type": "boolean",
+				"required": true
+			},
+			"message": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ModelCatalogRequest": {
+		"fields": {
+			"baseUrl": {
+				"type": "string"
+			},
+			"baseURL": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			},
+			"apiKey": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ModelCatalogResponse": {
+		"fields": {
+			"models": {
+				"type": "object",
+				"required": true
+			},
+			"values": {
+				"type": "objectArray",
+				"required": true
+			},
+			"items": {
+				"type": "objectArray",
+				"required": true
+			},
+			"modelIds": {
+				"type": "stringArray",
+				"required": true
+			},
+			"selectedId": {
+				"type": "string",
+				"required": true
+			},
+			"providerId": {
+				"type": "string",
+				"required": true
+			},
+			"source": {
+				"type": "string",
+				"required": true
+			},
+			"supported": {
+				"type": "boolean",
+				"required": true
+			},
+			"reduced": {
+				"type": "boolean",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			},
+			"error": {
+				"type": "string",
+				"required": true
+			},
+			"diagnostics": {
+				"type": "object",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"StringModelsResponse": {
+		"fields": {
+			"values": {
+				"type": "stringArray",
+				"required": true
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"OpenRouterKeyInfoResponse": {
+		"fields": {
+			"data": {
+				"type": "unknown",
+				"required": true
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"RecommendedModelsResponse": {
+		"fields": {
+			"recommended": {
+				"type": "objectArray",
+				"required": true
+			},
+			"free": {
+				"type": "objectArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"VsCodeLmModelsResponse": {
+		"fields": {
+			"models": {
+				"type": "objectArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"SapAiCoreModelsResponse": {
+		"fields": {
+			"deployments": {
+				"type": "objectArray",
+				"required": true
+			},
+			"orchestrationAvailable": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"PluginListResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"supported": {
+				"type": "boolean",
+				"required": true
+			},
+			"plugins": {
+				"type": "objectArray",
+				"required": true
+			},
+			"items": {
+				"type": "objectArray",
+				"required": true
+			},
+			"count": {
+				"type": "number",
+				"required": true
+			},
+			"workspaceRoot": {
+				"type": "string",
+				"required": true
+			},
+			"marketplaceEnabled": {
+				"type": "boolean",
+				"required": true
+			},
+			"marketplaceInstallSupported": {
+				"type": "boolean",
+				"required": true
+			},
+			"marketplaceDisabledReason": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ScheduledAgentSpecRequest": {
+		"fields": {
+			"id": {
+				"type": "string"
+			},
+			"specId": {
+				"type": "string"
+			},
+			"name": {
+				"type": "string"
+			},
+			"fileName": {
+				"type": "string"
+			},
+			"description": {
+				"type": "string"
+			},
+			"schedule": {
+				"type": "string"
+			},
+			"cron": {
+				"type": "string"
+			},
+			"prompt": {
+				"type": "string"
+			},
+			"task": {
+				"type": "string"
+			},
+			"text": {
+				"type": "string"
+			},
+			"enabled": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ScheduledAgentListResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"supported": {
+				"type": "boolean",
+				"required": true
+			},
+			"workspaceRoot": {
+				"type": "string",
+				"required": true
+			},
+			"specs": {
+				"type": "objectArray",
+				"required": true
+			},
+			"items": {
+				"type": "objectArray",
+				"required": true
+			},
+			"recentRuns": {
+				"type": "objectArray",
+				"required": true
+			},
+			"automationEnabled": {
+				"type": "boolean",
+				"required": true
+			},
+			"source": {
+				"type": "string",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ScheduledAgentMutationResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"supported": {
+				"type": "boolean",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ShowWebviewResponse": {
+		"fields": {
+			"preserveEditorFocus": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"AddToInputResponse": {
+		"fields": {
+			"value": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"UrlRequest": {
+		"fields": {
+			"value": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"ImageUrlResponse": {
+		"fields": {
+			"isImage": {
+				"type": "boolean",
+				"required": true
+			},
+			"value": {
+				"type": "boolean",
+				"required": true
+			},
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"contentType": {
+				"type": "string"
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"OpenGraphResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"title": {
+				"type": "string"
+			},
+			"description": {
+				"type": "string"
+			},
+			"image": {
+				"type": "string"
+			},
+			"url": {
+				"type": "string"
+			},
+			"siteName": {
+				"type": "string"
+			},
+			"type": {
+				"type": "string"
+			},
+			"error": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeCreateRequest": {
+		"fields": {
+			"path": {
+				"type": "string",
+				"required": true
+			},
+			"branch": {
+				"type": "string"
+			},
+			"branchName": {
+				"type": "string"
+			},
+			"baseBranch": {
+				"type": "string"
+			},
+			"createNewBranch": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeSwitchRequest": {
+		"fields": {
+			"path": {
+				"type": "string",
+				"required": true
+			},
+			"solutionPath": {
+				"type": "string"
+			},
+			"newWindow": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeDeleteRequest": {
+		"fields": {
+			"path": {
+				"type": "string",
+				"required": true
+			},
+			"force": {
+				"type": "boolean"
+			},
+			"deleteBranch": {
+				"type": "boolean"
+			},
+			"branchName": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeMergeRequest": {
+		"fields": {
+			"worktreePath": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			},
+			"targetBranch": {
+				"type": "string"
+			},
+			"deleteAfterMerge": {
+				"type": "boolean"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeRecoveryRequest": {
+		"fields": {
+			"action": {
+				"type": "string"
+			},
+			"value": {
+				"type": "string"
+			},
+			"targetWorktreePath": {
+				"type": "string"
+			},
+			"workspacePath": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeIncludeRequest": {
+		"fields": {
+			"content": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeListResponse": {
+		"fields": {
+			"worktrees": {
+				"type": "objectArray",
+				"required": true
+			},
+			"items": {
+				"type": "objectArray",
+				"required": true
+			},
+			"isGitRepo": {
+				"type": "boolean",
+				"required": true
+			},
+			"isMultiRoot": {
+				"type": "boolean",
+				"required": true
+			},
+			"isSubfolder": {
+				"type": "boolean",
+				"required": true
+			},
+			"gitRootPath": {
+				"type": "string",
+				"required": true
+			},
+			"error": {
+				"type": "string",
+				"required": true
+			},
+			"errorKind": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeDefaultsResponse": {
+		"fields": {
+			"branch": {
+				"type": "string",
+				"required": true
+			},
+			"baseBranch": {
+				"type": "string",
+				"required": true
+			},
+			"currentBranch": {
+				"type": "string",
+				"required": true
+			},
+			"branches": {
+				"type": "stringArray",
+				"required": true
+			},
+			"baseBranches": {
+				"type": "stringArray",
+				"required": true
+			},
+			"cwd": {
+				"type": "string",
+				"required": true
+			},
+			"suggestedBranch": {
+				"type": "string",
+				"required": true
+			},
+			"suggestedPath": {
+				"type": "string",
+				"required": true
+			},
+			"recommendedPath": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeIncludeResponse": {
+		"fields": {
+			"enabled": {
+				"type": "boolean",
+				"required": true
+			},
+			"included": {
+				"type": "boolean",
+				"required": true
+			},
+			"exists": {
+				"type": "boolean",
+				"required": true
+			},
+			"hasGitignore": {
+				"type": "boolean",
+				"required": true
+			},
+			"gitignoreContent": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeMutationResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeMergeResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			},
+			"hasConflicts": {
+				"type": "boolean",
+				"required": true
+			},
+			"conflictingFiles": {
+				"type": "stringArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
+	"WorktreeRecoveryResponse": {
+		"fields": {
+			"success": {
+				"type": "boolean",
+				"required": true
+			},
+			"action": {
+				"type": "string",
+				"required": true
+			},
+			"message": {
+				"type": "string",
+				"required": true
+			},
+			"conflictingFiles": {
+				"type": "stringArray",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
 	}
 } as const
 export const WEBVIEW_RPC_OPERATIONS = {
 	"AccountService.accountLoginClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "Empty",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.accountLogoutClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "Empty",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.clearProviderCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.clearProviderToken": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.completeOAuthCallback": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.deleteProviderCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getOAuthCallbackStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getOrganizationCredits": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "OrganizationRequest",
+		"responseShape": "AccountCreditsResponse"
 	},
 	"AccountService.getProviderAuthRequirements": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getProviderAuthStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getProviderConfigFields": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getProviderCredentialStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getProviderOAuthCallbackStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getRedirectUrl": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.getUserCredits": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "Empty",
+		"responseShape": "AccountCreditsResponse"
 	},
 	"AccountService.getUserOrganizations": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "Empty",
+		"responseShape": "OrganizationsResponse"
 	},
 	"AccountService.hicapAuthClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.openAiCodexSignIn": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.openAiCodexSignOut": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "Empty",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.openrouterAuthClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.refreshOAuthCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.refreshProviderCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.refreshProviderToken": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.requestyAuthClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.saveOAuthCallback": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.saveProviderCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.saveProviderToken": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.setUserOrganization": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "OrganizationRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.storeProviderCredential": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.submitLimitIncreaseRequest": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.submitOAuthCallback": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"AccountService.subscribeToAuthStatusUpdate": {
 		"kind": "serverStream",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "AccountAuthStateResponse"
 	},
 	"AutomationService.deleteScheduledAgent": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"AutomationService.listScheduledAgents": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "Empty",
+		"responseShape": "ScheduledAgentListResponse"
 	},
 	"AutomationService.runScheduledAgent": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"AutomationService.saveScheduledAgent": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"BrowserService.captureScreenshot": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "BrowserActionRequest",
+		"responseShape": "BrowserActionResponse"
 	},
 	"BrowserService.discoverBrowser": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "Empty",
+		"responseShape": "BrowserProbeResponse"
 	},
 	"BrowserService.executeBrowserAction": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "BrowserActionRequest",
+		"responseShape": "BrowserActionResponse"
 	},
 	"BrowserService.getBrowserConnectionInfo": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "Empty",
+		"responseShape": "BrowserConnectionResponse"
 	},
 	"BrowserService.getDetectedChromePath": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "Empty",
+		"responseShape": "BrowserPathResponse"
 	},
 	"BrowserService.listBrowserTabs": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "Empty",
+		"responseShape": "BrowserTabsResponse"
 	},
 	"BrowserService.performBrowserAction": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "BrowserActionRequest",
+		"responseShape": "BrowserActionResponse"
 	},
 	"BrowserService.relaunchChromeDebugMode": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "Empty",
+		"responseShape": "BrowserRelaunchResponse"
 	},
 	"BrowserService.testBrowserConnection": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "browser",
+		"requestShape": "BrowserHostRequest",
+		"responseShape": "BrowserProbeResponse"
 	},
 	"CheckpointsService.checkpointDiff": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "checkpoint",
+		"requestShape": "CheckpointTargetRequest",
+		"responseShape": "CheckpointDiffResponse"
 	},
 	"CheckpointsService.checkpointRestore": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "checkpoint",
+		"requestShape": "CheckpointTargetRequest",
+		"responseShape": "BooleanValueResponse"
 	},
 	"FileService.copyToClipboard": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.createHook": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "hook",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.createRuleFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.createSkillFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.deleteHook": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "hook",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.deleteRuleFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.deleteSkillFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.getRelativePaths": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "RelativePathsRequest",
+		"responseShape": "RelativePathsResponse"
 	},
 	"FileService.ifFileExistsRelativePath": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "BooleanValueResponse"
 	},
 	"FileService.openDiskConversationHistory": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openFileRelativePath": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openFocusChainFile": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openImage": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openMention": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.openVsClineDiff": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FileDiffRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.refreshHooks": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "hook",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.refreshRules": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.refreshSkills": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.revertVsClineChanges": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FileRevertRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.searchCommits": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "FileCommitSearchResponse"
 	},
 	"FileService.searchFiles": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "StringValueRequest",
+		"responseShape": "FileSearchResponse"
 	},
 	"FileService.selectFiles": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "file",
+		"requestShape": "FileSelectRequest",
+		"responseShape": "FileSelectionResponse"
 	},
 	"FileService.toggleAgentsRule": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleClineRule": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleCursorRule": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleHook": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "hook",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleSkill": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleWindsurfRule": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"FileService.toggleWorkflow": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "instructionSettings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"McpService.addRemoteMcpServer": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpAddServerRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.authenticateMcpServer": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpTargetRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.deleteMcpServer": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpTargetRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.downloadMcp": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"McpService.getLatestMcpServers": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "Empty",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.openMcpSettings": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"McpService.refreshMcpMarketplace": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"McpService.restartMcpServer": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpTargetRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.subscribeToMcpMarketplaceCatalog": {
 		"kind": "serverStream",
 		"client": false,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"McpService.subscribeToMcpServers": {
 		"kind": "serverStream",
 		"client": false,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.toggleMcpServer": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpToggleRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.toggleToolAutoApprove": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpToolApprovalRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"McpService.updateMcpTimeout": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "mcp",
+		"requestShape": "McpTimeoutRequest",
+		"responseShape": "McpServersResponse"
 	},
 	"ModelsService.getAihubmixModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.getAskSageModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "StringModelsResponse"
 	},
 	"ModelsService.getLmStudioModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "StringModelsResponse"
 	},
 	"ModelsService.getOllamaModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "StringModelsResponse"
 	},
 	"ModelsService.getOpenRouterKeyInfo": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "OpenRouterKeyInfoResponse"
 	},
 	"ModelsService.getSapAiCoreModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "SapAiCoreModelsResponse"
 	},
 	"ModelsService.getVsCodeLmModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "VsCodeLmModelsResponse"
 	},
 	"ModelsService.refreshBasetenModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshClineModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshClineRecommendedModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "RecommendedModelsResponse"
 	},
 	"ModelsService.refreshGroqModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshHicapModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshHuggingFaceModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshLiteLlmModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshOcaModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshOpenAiModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshOpenRouterModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshRequestyModels": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.refreshVercelAiGatewayModelsRpc": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "modelCatalog",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.subscribeToLiteLlmModels": {
 		"kind": "serverStream",
 		"client": false,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.subscribeToOpenRouterModels": {
 		"kind": "serverStream",
 		"client": false,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "ModelCatalogRequest",
+		"responseShape": "ModelCatalogResponse"
 	},
 	"ModelsService.updateApiConfiguration": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "Empty"
 	},
 	"ModelsService.updateApiConfigurationProto": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "Empty"
 	},
 	"OcaAccountService.ocaAccountLoginClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"OcaAccountService.ocaAccountLogoutClicked": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "account",
+		"requestShape": "ProviderAuthRequest",
+		"responseShape": "AccountAuthResponse"
 	},
 	"OcaAccountService.ocaSubscribeToAuthStatusUpdate": {
 		"kind": "serverStream",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "AccountAuthStateResponse"
 	},
 	"PluginService.getPluginConfigStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "plugin",
+		"requestShape": "Empty",
+		"responseShape": "PluginListResponse"
 	},
 	"PluginService.listPlugins": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "plugin",
+		"requestShape": "Empty",
+		"responseShape": "PluginListResponse"
 	},
 	"PluginsService.getPluginConfigStatus": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "plugin",
+		"requestShape": "Empty",
+		"responseShape": "PluginListResponse"
 	},
 	"PluginsService.listPlugins": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "plugin",
+		"requestShape": "Empty",
+		"responseShape": "PluginListResponse"
 	},
 	"ScheduledAgentsService.createSpec": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.deleteScheduledAgent": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.deleteSpec": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.listScheduledAgents": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "Empty",
+		"responseShape": "ScheduledAgentListResponse"
 	},
 	"ScheduledAgentsService.listSpecs": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "Empty",
+		"responseShape": "ScheduledAgentListResponse"
 	},
 	"ScheduledAgentsService.runScheduledAgent": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.runSpec": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.saveSpec": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"ScheduledAgentsService.updateSpec": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "scheduledAgent",
+		"requestShape": "ScheduledAgentSpecRequest",
+		"responseShape": "ScheduledAgentMutationResponse"
 	},
 	"SlashService.condense": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "task",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"SlashService.reportBug": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"StateService.captureOnboardingProgress": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "BooleanValueResponse"
 	},
 	"StateService.dismissBanner": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "BannerRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.getAvailableTerminalProfiles": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "Empty",
+		"responseShape": "TerminalProfilesResponse"
 	},
 	"StateService.installClineCli": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "BooleanValueResponse"
 	},
 	"StateService.refreshRemoteConfig": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "BooleanValueResponse"
 	},
 	"StateService.resetState": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "ResetStateRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.setWelcomeViewCompleted": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "BooleanValueRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.subscribeToState": {
 		"kind": "serverStream",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "StateStreamResponse"
 	},
 	"StateService.testOtelConnection": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "BooleanValueResponse"
 	},
 	"StateService.testPromptUploading": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "BooleanValueResponse"
 	},
 	"StateService.toggleFavoriteModel": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "StringValueRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.togglePlanActModeProto": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "ModeRequest",
+		"responseShape": "ModeResponse"
 	},
 	"StateService.updateAutoApprovalSettings": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "Empty"
 	},
 	"StateService.updateCliBannerVersion": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "NumberValueRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.updateInfoBannerVersion": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "NumberValueRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.updateModelBannerVersion": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "NumberValueRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.updateSettings": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "FlexibleObject",
+		"responseShape": "Empty"
 	},
 	"StateService.updateTelemetrySetting": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "TelemetryRequest",
+		"responseShape": "Empty"
 	},
 	"StateService.updateTerminalConnectionTimeout": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "settings",
+		"requestShape": "TerminalTimeoutRequest",
+		"responseShape": "Empty"
 	},
 	"TaskService.askResponse": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "TaskPromptRequest",
 		"responseShape": "Empty"
 	},
 	"TaskService.cancelBackgroundCommand": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"TaskService.cancelTask": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "Empty",
 		"responseShape": "Empty"
 	},
@@ -863,6 +2643,7 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "Empty",
 		"responseShape": "Empty"
 	},
@@ -870,6 +2651,7 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "Empty",
 		"responseShape": "Empty"
 	},
@@ -877,30 +2659,37 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "StringListValueRequest",
 		"responseShape": "Empty"
 	},
 	"TaskService.explainChanges": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"TaskService.exportTaskWithId": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "TaskIdRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"TaskService.getTaskHistory": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
-		"requestShape": "Empty",
+		"route": "task",
+		"requestShape": "TaskHistoryQueryRequest",
 		"responseShape": "TaskHistoryResponse"
 	},
 	"TaskService.getTotalTasksSize": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "Empty",
 		"responseShape": "NumberValueResponse"
 	},
@@ -908,6 +2697,7 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "TaskPromptRequest",
 		"responseShape": "Empty"
 	},
@@ -915,213 +2705,877 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "TaskIdRequest",
 		"responseShape": "Empty"
 	},
 	"TaskService.taskCompletionViewChanges": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"TaskService.taskFeedback": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": false
+		"sidecar": false,
+		"requestShape": "FlexibleObject",
+		"responseShape": "FlexibleObject"
 	},
 	"TaskService.toggleTaskFavorite": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
+		"route": "task",
 		"requestShape": "TaskFavoriteRequest",
 		"responseShape": "Empty"
 	},
 	"TerminalService.attachTerminalCommand": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"TerminalService.continueTerminalCommand": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"TerminalService.openTerminalPanel": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"UiService.attachTerminalCommand": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"UiService.continueTerminalCommand": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"UiService.initializeWebview": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.onDidShowAnnouncement": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "Empty",
+		"responseShape": "BooleanValueResponse"
 	},
 	"UiService.openTerminalPanel": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "terminal",
+		"requestShape": "TerminalTargetRequest",
+		"responseShape": "FlexibleObject"
 	},
 	"UiService.openUrl": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "UrlRequest",
+		"responseShape": "Empty"
 	},
 	"UiService.openWalkthrough": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.setTerminalExecutionMode": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToAccountButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToAddToInput": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "AddToInputResponse"
 	},
 	"UiService.subscribeToChatButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToHistoryButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToMcpButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToPartialMessage": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "FlexibleObject"
 	},
 	"UiService.subscribeToRelinquishControl": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToSettingsButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"UiService.subscribeToShowWebview": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "ShowWebviewResponse"
 	},
 	"UiService.subscribeToWorktreesButtonClicked": {
 		"kind": "serverStream",
 		"client": true,
 		"sidecar": true,
-		"fallback": "passive"
+		"fallback": "passive",
+		"route": "stream",
+		"requestShape": "Empty",
+		"responseShape": "Empty"
 	},
 	"WebService.checkIsImageUrl": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "UrlRequest",
+		"responseShape": "ImageUrlResponse"
 	},
 	"WebService.fetchOpenGraphData": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "UrlRequest",
+		"responseShape": "OpenGraphResponse"
 	},
 	"WebService.openInBrowser": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "uiWeb",
+		"requestShape": "UrlRequest",
+		"responseShape": "Empty"
 	},
 	"WorktreeService.createWorktree": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeCreateRequest",
+		"responseShape": "WorktreeMutationResponse"
 	},
 	"WorktreeService.createWorktreeInclude": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeIncludeRequest",
+		"responseShape": "WorktreeMutationResponse"
 	},
 	"WorktreeService.deleteWorktree": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeDeleteRequest",
+		"responseShape": "WorktreeMutationResponse"
 	},
 	"WorktreeService.getWorktreeDefaults": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "Empty",
+		"responseShape": "WorktreeDefaultsResponse"
 	},
 	"WorktreeService.getWorktreeIncludeStatus": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "Empty",
+		"responseShape": "WorktreeIncludeResponse"
 	},
 	"WorktreeService.listWorktrees": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "Empty",
+		"responseShape": "WorktreeListResponse"
 	},
 	"WorktreeService.mergeRecovery": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeRecoveryRequest",
+		"responseShape": "WorktreeRecoveryResponse"
 	},
 	"WorktreeService.mergeWorktree": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeMergeRequest",
+		"responseShape": "WorktreeMergeResponse"
 	},
 	"WorktreeService.recoverMerge": {
 		"kind": "unary",
 		"client": false,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeRecoveryRequest",
+		"responseShape": "WorktreeRecoveryResponse"
 	},
 	"WorktreeService.switchWorktree": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "WorktreeSwitchRequest",
+		"responseShape": "WorktreeMutationResponse"
 	},
 	"WorktreeService.trackWorktreeViewOpened": {
 		"kind": "unary",
 		"client": true,
-		"sidecar": true
+		"sidecar": true,
+		"route": "worktree",
+		"requestShape": "FlexibleObject",
+		"responseShape": "Empty"
 	}
 } as const
+export const WEBVIEW_RPC_SIDECAR_ROUTES = [
+	"account",
+	"stream",
+	"scheduledAgent",
+	"browser",
+	"checkpoint",
+	"file",
+	"hook",
+	"instructionSettings",
+	"mcp",
+	"modelCatalog",
+	"settings",
+	"plugin",
+	"task",
+	"terminal",
+	"uiWeb",
+	"worktree"
+] as const
 export type WebviewRpcOperation = keyof typeof WEBVIEW_RPC_OPERATIONS
+export type WebviewRpcSidecarRoute = (typeof WEBVIEW_RPC_SIDECAR_ROUTES)[number]
+export type WebviewRpcPayloadShapeMap = {
+	"Empty": {
+
+	}
+	"TaskHistoryQueryRequest": {
+		"favoritesOnly"?: boolean
+		"searchQuery"?: string
+		"sortBy"?: string
+		"currentWorkspaceOnly"?: boolean
+	}
+	"TaskPromptRequest": {
+		"text"?: string
+		"answerText"?: string
+		"responseType"?: string
+		"images"?: string[]
+		"files"?: string[]
+		"workspacePath"?: string
+		"cwd"?: string
+		"worktreePath"?: string
+		"delivery"?: string
+		[key: string]: unknown
+	}
+	"StringListValueRequest": {
+		"value": string[]
+	}
+	"TaskIdRequest": {
+		"value"?: string
+		"taskId"?: string
+	}
+	"TaskFavoriteRequest": {
+		"taskId": string
+		"isFavorited": boolean
+	}
+	"TaskHistoryResponse": {
+		"tasks": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"NumberValueResponse": {
+		"value": number
+		[key: string]: unknown
+	}
+	"FlexibleObject": {
+		[key: string]: unknown
+	}
+	"BooleanValueResponse": {
+		"value": boolean
+		[key: string]: unknown
+	}
+	"StringValueRequest": {
+		"value"?: string
+		"text"?: string
+		"path"?: string
+		"filePath"?: string
+		"relativePath"?: string
+		"line"?: number
+		[key: string]: unknown
+	}
+	"BooleanValueRequest": {
+		"value"?: boolean
+		[key: string]: unknown
+	}
+	"NumberValueRequest": {
+		"value"?: number
+		"version"?: number
+		[key: string]: unknown
+	}
+	"RelativePathsResponse": {
+		"values"?: string[]
+		"paths": string[]
+		[key: string]: unknown
+	}
+	"FileSelectionResponse": {
+		"values1": string[]
+		"values2": string[]
+		"error"?: string
+	}
+	"FileSearchResponse": {
+		"results": Array<Record<string, unknown>>
+		"values"?: string[]
+		[key: string]: unknown
+	}
+	"FileCommitSearchResponse": {
+		"commits": Array<Record<string, unknown>>
+		"values"?: string[]
+		[key: string]: unknown
+	}
+	"FileDiffRequest": {
+		"leftPath"?: string
+		"rightPath"?: string
+		"beforePath"?: string
+		"afterPath"?: string
+		"filePath"?: string
+		"title"?: string
+	}
+	"FileRevertRequest": {
+		"files": Array<Record<string, unknown>>
+	}
+	"FileSelectRequest": {
+		"value"?: boolean
+		"allowImages"?: boolean
+		[key: string]: unknown
+	}
+	"RelativePathsRequest": {
+		"uris": string[]
+		[key: string]: unknown
+	}
+	"TerminalTargetRequest": {
+		"terminalId"?: string
+		"commandId"?: string
+		[key: string]: unknown
+	}
+	"TerminalProfilesResponse": {
+		"profiles": Array<Record<string, unknown>>
+	}
+	"McpAddServerRequest": {
+		"serverName": string
+		"serverUrl": string
+		"transportType": string
+		[key: string]: unknown
+	}
+	"McpTargetRequest": {
+		"value"?: string
+		"name"?: string
+		"serverName"?: string
+		[key: string]: unknown
+	}
+	"McpTimeoutRequest": {
+		"serverName": string
+		"timeout": number
+		[key: string]: unknown
+	}
+	"McpToolApprovalRequest": {
+		"serverName": string
+		"toolNames": string[]
+		"autoApprove": boolean
+		[key: string]: unknown
+	}
+	"McpToggleRequest": {
+		"serverName": string
+		"disabled": boolean
+		[key: string]: unknown
+	}
+	"McpServersResponse": {
+		"mcpServers": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"ModeRequest": {
+		"mode"?: string
+		"value"?: string
+		[key: string]: unknown
+	}
+	"ModeResponse": {
+		"value": boolean
+		"mode": string
+	}
+	"TelemetryRequest": {
+		"value"?: string
+		"telemetrySetting"?: string
+		[key: string]: unknown
+	}
+	"BannerRequest": {
+		"value"?: string
+		"banner"?: string
+		"id"?: string
+		"version"?: number
+		[key: string]: unknown
+	}
+	"TerminalTimeoutRequest": {
+		"value"?: number
+		"timeout"?: number
+		"timeoutMs"?: number
+		[key: string]: unknown
+	}
+	"ResetStateRequest": {
+		"global"?: boolean
+		[key: string]: unknown
+	}
+	"StateStreamResponse": {
+		"stateJson": string
+		[key: string]: unknown
+	}
+	"ProviderAuthRequest": {
+		"provider"?: string
+		"providerId"?: string
+		"apiProvider"?: string
+		"value"?: string
+		"token"?: string
+		"apiKey"?: string
+		"credential"?: string
+		"baseUrl"?: string
+		"baseURL"?: string
+		"url"?: string
+		"endpoint"?: string
+		"code"?: string
+		"state"?: string
+		"callbackUrl"?: string
+		"redirectUrl"?: string
+		"organizationId"?: string
+		"clearBaseUrl"?: boolean
+		[key: string]: unknown
+	}
+	"OrganizationRequest": {
+		"organizationId": string
+		[key: string]: unknown
+	}
+	"OrganizationsResponse": {
+		"organizations": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"AccountCreditsResponse": {
+		"credits": number
+		"balance": Record<string, unknown>
+		"value": number
+		"usageTransactions": Array<Record<string, unknown>>
+		"paymentTransactions": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"AccountAuthResponse": {
+		"success"?: boolean
+		"supported"?: boolean
+		"provider"?: string
+		"message"?: string
+		"authStatus"?: string
+		"value"?: string
+		"url"?: string
+		"redirectUrl"?: string
+		"isAuthenticated"?: boolean
+		"hasCredential"?: boolean
+		"fields"?: Record<string, unknown>
+		[key: string]: unknown
+	}
+	"AccountAuthStateResponse": {
+		"loggedIn"?: boolean
+		"user"?: unknown
+		"organizations"?: Array<Record<string, unknown>>
+		"activeOrganization"?: unknown
+		"isAuthenticated"?: boolean
+		"openAiCodexIsAuthenticated"?: boolean
+		"authStatus"?: string
+		[key: string]: unknown
+	}
+	"BrowserHostRequest": {
+		"value"?: string
+		"host"?: string
+		"url"?: string
+		[key: string]: unknown
+	}
+	"BrowserActionRequest": {
+		"action"?: string
+		"name"?: string
+		"url"?: string
+		"value"?: string
+		"tabId"?: string
+		"browserSessionId"?: string
+		"coordinate"?: string
+		"text"?: string
+		[key: string]: unknown
+	}
+	"BrowserPathResponse": {
+		"path": string
+		"isBundled": boolean
+		[key: string]: unknown
+	}
+	"BrowserConnectionResponse": {
+		"isConnected": boolean
+		"isRemote": boolean
+		"host"?: string
+		"path"?: string
+		"browser"?: string
+		"protocolVersion"?: string
+		"tabCount"?: number
+		"activeTabTitle"?: string
+		"activeTabUrl"?: string
+		"error"?: string
+		"webFetchEnabled"?: boolean
+		"webFetchDisabledReason"?: string
+		"browserToolUseDisabled"?: boolean
+		[key: string]: unknown
+	}
+	"BrowserProbeResponse": {
+		"success": boolean
+		"message"?: string
+		"host"?: string
+		"path"?: string
+		[key: string]: unknown
+	}
+	"BrowserRelaunchResponse": {
+		"success": boolean
+		"value": string
+		"message": string
+		[key: string]: unknown
+	}
+	"BrowserTabsResponse": {
+		"success"?: boolean
+		"tabs": Array<Record<string, unknown>>
+		"error"?: string
+		[key: string]: unknown
+	}
+	"BrowserActionResponse": {
+		"success"?: boolean
+		"status"?: string
+		"error"?: string
+		[key: string]: unknown
+	}
+	"CheckpointTargetRequest": {
+		"checkpointRunCount"?: number
+		"runCount"?: number
+		"messageTs"?: number
+		"value"?: number
+		"number"?: number
+		"restoreType"?: string
+		[key: string]: unknown
+	}
+	"CheckpointDiffResponse": {
+		"success": boolean
+		"supported": boolean
+		"message"?: string
+		[key: string]: unknown
+	}
+	"ModelCatalogRequest": {
+		"baseUrl"?: string
+		"baseURL"?: string
+		"url"?: string
+		"value"?: string
+		"apiKey"?: string
+		[key: string]: unknown
+	}
+	"ModelCatalogResponse": {
+		"models": Record<string, unknown>
+		"values": Array<Record<string, unknown>>
+		"items": Array<Record<string, unknown>>
+		"modelIds": string[]
+		"selectedId": string
+		"providerId": string
+		"source": string
+		"supported": boolean
+		"reduced": boolean
+		"message": string
+		"error": string
+		"diagnostics": Record<string, unknown>
+		[key: string]: unknown
+	}
+	"StringModelsResponse": {
+		"values": string[]
+		"error"?: string
+		[key: string]: unknown
+	}
+	"OpenRouterKeyInfoResponse": {
+		"data": unknown
+		"error"?: string
+		[key: string]: unknown
+	}
+	"RecommendedModelsResponse": {
+		"recommended": Array<Record<string, unknown>>
+		"free": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"VsCodeLmModelsResponse": {
+		"models": Array<Record<string, unknown>>
+		[key: string]: unknown
+	}
+	"SapAiCoreModelsResponse": {
+		"deployments": Array<Record<string, unknown>>
+		"orchestrationAvailable": boolean
+		[key: string]: unknown
+	}
+	"PluginListResponse": {
+		"success": boolean
+		"supported": boolean
+		"plugins": Array<Record<string, unknown>>
+		"items": Array<Record<string, unknown>>
+		"count": number
+		"workspaceRoot": string
+		"marketplaceEnabled": boolean
+		"marketplaceInstallSupported": boolean
+		"marketplaceDisabledReason": string
+		[key: string]: unknown
+	}
+	"ScheduledAgentSpecRequest": {
+		"id"?: string
+		"specId"?: string
+		"name"?: string
+		"fileName"?: string
+		"description"?: string
+		"schedule"?: string
+		"cron"?: string
+		"prompt"?: string
+		"task"?: string
+		"text"?: string
+		"enabled"?: boolean
+		[key: string]: unknown
+	}
+	"ScheduledAgentListResponse": {
+		"success": boolean
+		"supported": boolean
+		"workspaceRoot": string
+		"specs": Array<Record<string, unknown>>
+		"items": Array<Record<string, unknown>>
+		"recentRuns": Array<Record<string, unknown>>
+		"automationEnabled": boolean
+		"source": string
+		"message": string
+		[key: string]: unknown
+	}
+	"ScheduledAgentMutationResponse": {
+		"success": boolean
+		"supported": boolean
+		[key: string]: unknown
+	}
+	"ShowWebviewResponse": {
+		"preserveEditorFocus"?: boolean
+		[key: string]: unknown
+	}
+	"AddToInputResponse": {
+		"value"?: string
+		[key: string]: unknown
+	}
+	"UrlRequest": {
+		"value"?: string
+		"url"?: string
+		[key: string]: unknown
+	}
+	"ImageUrlResponse": {
+		"isImage": boolean
+		"value": boolean
+		"success": boolean
+		"contentType"?: string
+		"error"?: string
+		[key: string]: unknown
+	}
+	"OpenGraphResponse": {
+		"success": boolean
+		"title"?: string
+		"description"?: string
+		"image"?: string
+		"url"?: string
+		"siteName"?: string
+		"type"?: string
+		"error"?: string
+		[key: string]: unknown
+	}
+	"WorktreeCreateRequest": {
+		"path": string
+		"branch"?: string
+		"branchName"?: string
+		"baseBranch"?: string
+		"createNewBranch"?: boolean
+		[key: string]: unknown
+	}
+	"WorktreeSwitchRequest": {
+		"path": string
+		"solutionPath"?: string
+		"newWindow"?: boolean
+		[key: string]: unknown
+	}
+	"WorktreeDeleteRequest": {
+		"path": string
+		"force"?: boolean
+		"deleteBranch"?: boolean
+		"branchName"?: string
+		[key: string]: unknown
+	}
+	"WorktreeMergeRequest": {
+		"worktreePath"?: string
+		"path"?: string
+		"targetBranch"?: string
+		"deleteAfterMerge"?: boolean
+		[key: string]: unknown
+	}
+	"WorktreeRecoveryRequest": {
+		"action"?: string
+		"value"?: string
+		"targetWorktreePath"?: string
+		"workspacePath"?: string
+		"path"?: string
+		[key: string]: unknown
+	}
+	"WorktreeIncludeRequest": {
+		"content": string
+		[key: string]: unknown
+	}
+	"WorktreeListResponse": {
+		"worktrees": Array<Record<string, unknown>>
+		"items": Array<Record<string, unknown>>
+		"isGitRepo": boolean
+		"isMultiRoot": boolean
+		"isSubfolder": boolean
+		"gitRootPath": string
+		"error": string
+		"errorKind": string
+		[key: string]: unknown
+	}
+	"WorktreeDefaultsResponse": {
+		"branch": string
+		"baseBranch": string
+		"currentBranch": string
+		"branches": string[]
+		"baseBranches": string[]
+		"cwd": string
+		"suggestedBranch": string
+		"suggestedPath": string
+		"recommendedPath": string
+		[key: string]: unknown
+	}
+	"WorktreeIncludeResponse": {
+		"enabled": boolean
+		"included": boolean
+		"exists": boolean
+		"hasGitignore": boolean
+		"gitignoreContent": string
+		[key: string]: unknown
+	}
+	"WorktreeMutationResponse": {
+		"success": boolean
+		"message": string
+		[key: string]: unknown
+	}
+	"WorktreeMergeResponse": {
+		"success": boolean
+		"message": string
+		"hasConflicts": boolean
+		"conflictingFiles": string[]
+		[key: string]: unknown
+	}
+	"WorktreeRecoveryResponse": {
+		"success": boolean
+		"action": string
+		"message": string
+		"conflictingFiles": string[]
+		[key: string]: unknown
+	}
+}
+export type WebviewRpcRequestPayload<TOperation extends WebviewRpcOperation> = WebviewRpcPayloadShapeMap[(typeof WEBVIEW_RPC_OPERATIONS)[TOperation]["requestShape"]]
+export type WebviewRpcResponsePayload<TOperation extends WebviewRpcOperation> = WebviewRpcPayloadShapeMap[(typeof WEBVIEW_RPC_OPERATIONS)[TOperation]["responseShape"]]
 export function webviewRpcOperation(service: string, method: string) { return WEBVIEW_RPC_OPERATIONS[`${service}.${method}` as WebviewRpcOperation] }
 export type WebviewRpcPayloadValidation = { ok: true } | { ok: false; reason: "payload_not_object" | "missing_required_field" | "invalid_field_type" | "unexpected_field"; field?: string }
 export function validateWebviewRpcPayload(service: string, method: string, direction: "request" | "response", value: unknown): WebviewRpcPayloadValidation {
@@ -1134,7 +3588,7 @@ export function validateWebviewRpcPayload(service: string, method: string, direc
 	for (const [field, rule] of Object.entries(shape.fields) as Array<[string, { type: string; required?: boolean }]>) {
 		if (record[field] === undefined) { if (rule.required) return { ok: false, reason: "missing_required_field", field }; continue }
 		const item = record[field]
-		const valid = rule.type === "unknown" || (rule.type === "string" && typeof item === "string") || (rule.type === "number" && typeof item === "number" && Number.isFinite(item)) || (rule.type === "boolean" && typeof item === "boolean") || (rule.type === "stringArray" && Array.isArray(item) && item.every((entry) => typeof entry === "string"))
+		const valid = rule.type === "unknown" || (rule.type === "string" && typeof item === "string") || (rule.type === "number" && typeof item === "number" && Number.isFinite(item)) || (rule.type === "boolean" && typeof item === "boolean") || (rule.type === "object" && typeof item === "object" && item !== null && !Array.isArray(item)) || (rule.type === "array" && Array.isArray(item)) || (rule.type === "stringArray" && Array.isArray(item) && item.every((entry) => typeof entry === "string")) || (rule.type === "numberArray" && Array.isArray(item) && item.every((entry) => typeof entry === "number" && Number.isFinite(entry))) || (rule.type === "booleanArray" && Array.isArray(item) && item.every((entry) => typeof entry === "boolean")) || (rule.type === "objectArray" && Array.isArray(item) && item.every((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry)))
 		if (!valid) return { ok: false, reason: "invalid_field_type", field }
 	}
 	if (!("allowAdditionalFields" in shape && shape.allowAdditionalFields)) { for (const field of Object.keys(record)) if (!(field in shape.fields)) return { ok: false, reason: "unexpected_field", field } }

@@ -45,7 +45,7 @@ export class AccountRpcHandler {
 		switch (command.type) {
 			case "redirectUrl": return { payload: await this.createCallbackBridge(command.request, "account") }
 			case "organizations": return { payload: { organizations: [] } }
-			case "credits": return { payload: { credits: 0, balance: 0, value: 0 } }
+			case "credits": return { payload: { credits: 0, balance: { currentBalance: 0 }, value: 0, usageTransactions: [], paymentTransactions: [] } }
 			case "unsupportedAccountMutation": return { payload: createVisualStudioAuthUnsupportedResponse("account") }
 			case "login":
 				if (command.clearCodexBefore) {

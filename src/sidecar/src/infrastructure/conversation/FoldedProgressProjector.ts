@@ -1,5 +1,6 @@
 import type { ConversationProjectionState, ProgressPhase } from "../../features/conversation/ConversationProjectionState"
-import { isEmptyTranscriptPlaceholder, normalizeProgressTranscriptText, normalizeReasoningTranscriptText, sanitizeProgressTranscriptForDisplay } from "./ConversationSupport"
+import { isEmptyTranscriptPlaceholder } from "./ConversationMessageProjection"
+import { normalizeProgressTranscriptText, normalizeReasoningTranscriptText, sanitizeProgressTranscriptForDisplay } from "./TranscriptNormalization"
 import { normalizeTranscriptText } from "./TranscriptTextPolicy"
 
 type Message = Record<string, unknown>

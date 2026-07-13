@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 
 namespace VsClineAgent.Host
@@ -9,15 +8,13 @@ namespace VsClineAgent.Host
     {
         private readonly object _gate = new object();
         private readonly PendingWebviewMessageBuffer _pending = new PendingWebviewMessageBuffer();
-        private readonly Dispatcher _dispatcher;
         private readonly Func<CoreWebView2?> _getWebview;
         private bool _flushScheduled;
         private bool _ready;
         private bool _disposed;
 
-        public WebviewMessageQueue(Dispatcher dispatcher, Func<CoreWebView2?> getWebview)
+        public WebviewMessageQueue(Func<CoreWebView2?> getWebview)
         {
-            _dispatcher = dispatcher;
             _getWebview = getWebview;
         }
 
@@ -56,7 +53,7 @@ namespace VsClineAgent.Host
         {
             try
             {
-                _dispatcher.BeginInvoke(new Action(Flush), DispatcherPriority.Background);
+                VisualStudioUiThread.Post(Flush);
             }
             catch (Exception ex)
             {

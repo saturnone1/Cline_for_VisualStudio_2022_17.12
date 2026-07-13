@@ -6,7 +6,7 @@ import { useInterval } from "react-use"
 import * as vscodemodels from "vscode"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { ModelsServiceClient } from "@/services/grpcClient"
-import { DROPDOWN_Z_INDEX, DropdownContainer } from "../ApiOptions"
+import { DROPDOWN_Z_INDEX, DropdownContainer } from "../common/ModelSelector"
 import { getModeSpecificFields } from "../utils/providerUtils"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 

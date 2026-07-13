@@ -1,4 +1,4 @@
-import { normalizeAssistantTranscriptText } from "./ConversationSupport"
+import { normalizeAssistantTranscriptText } from "./TranscriptNormalization"
 import { normalizeTranscriptText } from "./TranscriptTextPolicy"
 
 type Message = Record<string, unknown>

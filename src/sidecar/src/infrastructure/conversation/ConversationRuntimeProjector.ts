@@ -1,12 +1,14 @@
 import type { ConversationProjectionState } from "../../features/conversation/ConversationProjectionState"
 import {
-	buildGroupedToolActivityText,
 	normalizeAssistantTranscriptText,
 	shouldDelayAssistantTextUntilClassified,
 	shouldFoldTextContentAsReasoning,
+} from "./TranscriptNormalization"
+import {
+	buildGroupedToolActivityText,
 	toolActivityEntriesFromMessage,
 	toolActivityEntryKey,
-} from "./ConversationSupport"
+} from "./ToolActivityFormatting"
 import { mergeTextDelta } from "./TranscriptTextPolicy"
 import type { ConversationMessageStore } from "./ConversationMessageStore"
 import type { FoldedProgressProjector } from "./FoldedProgressProjector"

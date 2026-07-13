@@ -2,6 +2,8 @@ import { ModelInfo } from "@shared/api"
 import { VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import styled from "styled-components"
 
+export const DROPDOWN_Z_INDEX = 1_002
+
 /**
  * Container for dropdowns that ensures proper z-index handling
  * This is necessary to ensure dropdown opens downward
@@ -10,7 +12,7 @@ export const DropdownContainer = styled.div.withConfig({
 	shouldForwardProp: (prop) => prop !== "zIndex",
 }).attrs<{ zIndex?: number }>(({ zIndex }) => ({
 	style: {
-		zIndex: zIndex || 1000,
+		zIndex: zIndex || DROPDOWN_Z_INDEX,
 	},
 }))`
 	position: relative;

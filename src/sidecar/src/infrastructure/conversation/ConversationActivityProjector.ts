@@ -1,6 +1,6 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { ConversationProjectionState } from "../../features/conversation/ConversationProjectionState"
-import { tryParseJson } from "./ConversationSupport"
+import { tryParseJson } from "./ToolCommandFormatting"
 
 type ConversationActivityDependencies = {
 	projection: ConversationProjectionState

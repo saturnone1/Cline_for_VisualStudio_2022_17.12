@@ -2,7 +2,6 @@ import type { ModelCatalogCommand } from "../../features/providers/ModelCatalogR
 import { extractApiConfigurationUpdate } from "../configuration/ProviderConfiguration"
 
 const providersByMethod: Readonly<Record<string, string>> = {
-	"ModelsService.getLmStudioModels": "lmstudio",
 	"ModelsService.refreshOpenAiModels": "openai-compatible",
 	"ModelsService.refreshLiteLlmModelsRpc": "litellm",
 	"ModelsService.refreshOpenRouterModelsRpc": "openrouter",
@@ -14,17 +13,17 @@ const providersByMethod: Readonly<Record<string, string>> = {
 	"ModelsService.refreshOcaModels": "oca",
 	"ModelsService.refreshBasetenModelsRpc": "baseten",
 	"ModelsService.refreshHuggingFaceModels": "huggingface",
-	"ModelsService.getSapAiCoreModels": "sapaicore",
 }
 
 export function decodeModelCatalogRpcCommand(key: string, message: unknown): ModelCatalogCommand | undefined {
 	const request = asRecord(message)
 	if (key === "ModelsService.getOllamaModels") return { type: "ollamaValues", baseUrl: readString(request.value) }
+	if (key === "ModelsService.getLmStudioModels") return { type: "lmStudioValues", baseUrl: readString(request.value) || readString(request.baseUrl) }
 	if (key === "ModelsService.getAskSageModels") return { type: "askSage", baseUrl: readString(request.baseUrl) }
 	if (key === "ModelsService.getOpenRouterKeyInfo") return { type: "openRouterKeyInfo", apiKey: readString(request.apiKey) }
 	const providerId = providersByMethod[key]
 	if (providerId) return { type: "refresh", providerId, request: { baseUrl: readString(request.baseUrl) || readString(request.baseURL) || readString(request.url) || readString(request.value), apiConfigurationUpdate: extractApiConfigurationUpdate(request) } }
-	if (["ModelsService.getVsCodeLmModels", "ModelsService.refreshClineModelsRpc", "ModelsService.refreshClineRecommendedModelsRpc"].includes(key)) return { type: "unsupported", key }
+	if (["ModelsService.getVsCodeLmModels", "ModelsService.getSapAiCoreModels", "ModelsService.refreshClineModelsRpc", "ModelsService.refreshClineRecommendedModelsRpc"].includes(key)) return { type: "unsupported", key }
 	return undefined
 }
 

@@ -1,5 +1,5 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning } from "./ConversationSupport"
+import { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning } from "./TranscriptNormalization"
 
 type TextProjectionCallbacks = Readonly<{
 	noteActivity: (reason: string) => void

@@ -1,22 +1,13 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
 import type { AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
-import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
-import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
 import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { normalizeAgentRuntimeEvent, translateToolApprovalRequest } from "./ClineSdkEventTranslator"
-import { ensureUsableHomeEnvironment, getLocalAppDataRoot, resolveWorkspacePath, sanitizePathPart } from "./SdkEnvironment"
-import { fetchWebContentForSdk, normalizeCommandResultForSdk, readPositiveIntEnv } from "./SdkToolSupport"
-import { callMcpListMethod, getArrayProperty, isToolAutoApproved, normalizeMcpPrompts, normalizeMcpResources, normalizeMcpResourceTemplates, toDisplayMcpConfig, toProtoMcpStatus } from "./McpProjection"
-import { buildSdkStartInput, normalizeAgentMode } from "./SdkSessionRequestBuilder"
-
-type ClineSdkModule = typeof import("@cline/sdk")
-type ClineCoreInstance = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
-type CoreSessionEvent = Parameters<ClineCoreInstance["subscribe"]>[0] extends (event: infer T) => void ? T : unknown
-type McpManagerInstance = InstanceType<ClineSdkModule["InMemoryMcpManager"]>
+import { createClineSdkCore } from "./ClineSdkCoreFactory"
+import { ClineSdkMcpAdapter } from "./ClineSdkMcpAdapter"
+import { ClineSdkProviderAdapter } from "./ClineSdkProviderAdapter"
+import { ClineSdkSessionAdapter, type ClineSdkCore } from "./ClineSdkSessionAdapter"
 export type ClineSdkStatus = {
 	mode: "sdk"
 	packageName: string
@@ -28,14 +19,11 @@ export type ClineSdkStatus = {
 }
 
 export class ClineSdkRuntime implements AgentEnginePort {
-	private core: ClineCoreInstance | null = null
-	private starting: Promise<ClineCoreInstance> | null = null
-	private mcpManager: McpManagerInstance | null = null
-	private mcpStarting: Promise<McpManagerInstance> | null = null
-	private mcpSettingsPath: string | null = null
-	private mcpSettingsMutationQueue: Promise<void> = Promise.resolve()
-	private readonly mcpOperationStates = new Map<string, "connecting" | "restarting" | "deleting" | "authenticating" | "toggling">()
-	private readonly mcpOperationErrors = new Map<string, string>()
+	private core: ClineSdkCore | null = null
+	private starting: Promise<ClineSdkCore> | null = null
+	private readonly mcp: ClineSdkMcpAdapter
+	private readonly providers = new ClineSdkProviderAdapter()
+	private readonly sessions: ClineSdkSessionAdapter
 	private activeSessionId: string | null = null
 	private lastError: string | undefined
 
@@ -46,7 +34,18 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>,
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
-	) {}
+	) {
+		this.mcp = new ClineSdkMcpAdapter(host, () => this.readSdkVersion(), (level, message, metadata) => this.logSdkMessage(level, message, metadata))
+		this.sessions = new ClineSdkSessionAdapter({
+			getCore: () => this.getCore(),
+			getCurrentCore: () => this.core,
+			getActiveSessionId: () => this.activeSessionId,
+			setActiveSessionId: (sessionId) => { this.activeSessionId = sessionId },
+			getWorkspacePaths: () => this.host.workspaceClient.getWorkspacePaths({}),
+			createExtraTools: () => this.mcp.createExtraToolsForSession(),
+			getStatus: () => this.status,
+		})
+	}
 
 	get status(): ClineSdkStatus {
 		return {
@@ -61,29 +60,15 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	}
 
 	async getProviderConfigFields(providerId: string): Promise<unknown> {
-		const sdk = await importClineSdk()
-		const getFields = sdk.getProviderConfigFields as ((providerId: string) => unknown) | undefined
-		return typeof getFields === "function" ? getFields(providerId) : null
+		return this.providers.getConfigFields(providerId)
 	}
 
 	markSessionInactive(sessionId?: string) {
-		if (!sessionId || this.activeSessionId === sessionId) {
-			this.activeSessionId = null
-		}
+		this.sessions.markInactive(sessionId)
 	}
 
 	async activateSession(sessionId: string) {
-		const core = await this.getCore()
-		if (!sessionId) {
-			this.activeSessionId = null
-			return null
-		}
-
-		const session = await core.get(sessionId)
-		if (session) {
-			this.activeSessionId = sessionId
-		}
-		return session
+		return this.sessions.activate(sessionId)
 	}
 
 	async ensureStarted() {
@@ -96,513 +81,77 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	}
 
 	async startSession(request: AgentStartRequest) {
-		const core = await this.getCore()
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-		const { startInput, requestedSessionId } = buildSdkStartInput(request, workspaceRoots, await this.createMcpExtraToolsForSession())
-
-		if (requestedSessionId) {
-			this.activeSessionId = requestedSessionId
-		}
-
-		try {
-			const result = await core.start(startInput)
-			this.activeSessionId = result.sessionId || requestedSessionId || this.activeSessionId
-			return result
-		} catch (error) {
-			if (requestedSessionId && this.activeSessionId === requestedSessionId) {
-				this.activeSessionId = null
-			}
-			throw error
-		}
+		return this.sessions.start(request)
 	}
 
 	async send(request: AgentMessageRequest) {
-		const core = await this.getCore()
-		const sessionId = request.sessionId || this.activeSessionId
-		if (!sessionId) {
-			throw new Error("No active Cline SDK session. Call sdk.startSession first.")
-		}
-
-		try {
-			return await core.send({
-				sessionId,
-				prompt: request.prompt,
-				mode: normalizeAgentMode(request.mode),
-				delivery: request.delivery === "queue" || request.delivery === "steer" ? request.delivery : undefined,
-				userImages: [...(request.userImages || [])],
-				userFiles: [...(request.userFiles || [])],
-			})
-		} catch (error) {
-			if (this.activeSessionId === sessionId && /session not found/i.test(error instanceof Error ? error.message : String(error))) {
-				this.activeSessionId = null
-			}
-			throw error
-		}
+		return this.sessions.send(request)
 	}
 
 	async stop(request: AgentSessionRequest) {
-		const sessionId = stringValue(request.sessionId) || this.activeSessionId
-		if (!sessionId || !this.core) {
-			return this.status
-		}
-
-		await this.core.stop(sessionId)
-		if (this.activeSessionId === sessionId) {
-			this.activeSessionId = null
-		}
-
-		return this.status
+		return this.sessions.stop(request)
 	}
 
 	async abort(request: AgentSessionRequest) {
-		const core = await this.getCore()
-		const sessionId = stringValue(request.sessionId) || this.activeSessionId
-		if (!sessionId) {
-			return this.status
-		}
-
-		await core.abort(sessionId)
-		this.activeSessionId = sessionId
-		return this.status
+		return this.sessions.abort(request)
 	}
 
 	async listHistory(params: unknown) {
-		const core = await this.getCore()
-		const request = asRecord(params)
-		const limit = numberValue(request.limit) || 50
-		return core.listHistory({ limit })
+		return this.sessions.listHistory(params)
 	}
 
 	async getSession(params: unknown) {
-		const core = await this.getCore()
-		const sessionId = stringValue(asRecord(params).sessionId) || this.activeSessionId
-		if (!sessionId) {
-			return null
-		}
-		return core.get(sessionId)
+		return this.sessions.getSession(params)
 	}
 
 	async readMessages(params: unknown) {
-		const core = await this.getCore()
-		const sessionId = stringValue(asRecord(params).sessionId) || this.activeSessionId
-		if (!sessionId) {
-			return []
-		}
-		return core.readMessages(sessionId)
+		return this.sessions.readMessages(params)
 	}
 
 	async deleteSession(params: unknown) {
-		const core = await this.getCore()
-		const sessionId = stringValue(asRecord(params).sessionId)
-		if (!sessionId) {
-			return false
-		}
-		if (this.activeSessionId === sessionId) {
-			this.activeSessionId = null
-		}
-		return core.delete(sessionId)
+		return this.sessions.deleteSession(params)
 	}
 
 	async updateSession(params: unknown) {
-		const core = await this.getCore()
-		const request = asRecord(params)
-		const sessionId = stringValue(request.sessionId) || this.activeSessionId
-		if (!sessionId) {
-			throw new Error("No Cline SDK session selected.")
-		}
-		return core.update(sessionId, {
-			title: stringValue(request.title) || null,
-			prompt: stringValue(request.prompt) || null,
-			metadata: asRecord(request.metadata),
-		})
+		return this.sessions.updateSession(params)
 	}
 
 	async getUsage(params: unknown) {
-		const core = await this.getCore()
-		const sessionId = stringValue(asRecord(params).sessionId) || this.activeSessionId
-		if (!sessionId) {
-			return null
-		}
-		return core.getAccumulatedUsage(sessionId)
+		return this.sessions.getUsage(params)
 	}
 
 	async restore(params: unknown) {
-		const core = await this.getCore()
-		const request = asRecord(params)
-		const sessionId = stringValue(request.sessionId) || this.activeSessionId
-		const checkpointRunCount = numberValue(request.checkpointRunCount)
-		if (!sessionId || checkpointRunCount === undefined) {
-			throw new Error("SDK restore requires sessionId and checkpointRunCount.")
-		}
-
-		const result = await core.restore({
-			sessionId,
-			checkpointRunCount,
-			cwd: stringValue(request.cwd),
-			restore: asRecord(request.restore),
-			start: request.start as any,
-		})
-		if (result.sessionId) {
-			this.activeSessionId = result.sessionId
-		} else if (result.startResult?.sessionId) {
-			this.activeSessionId = result.startResult.sessionId
-		}
-		return result
+		return this.sessions.restore(params)
 	}
 
 	async listSettings(params: unknown) {
-		const core = await this.getCore()
-		return core.settings.list(asRecord(params))
+		return this.sessions.listSettings(params)
 	}
 
 	async toggleSetting(params: unknown) {
-		const core = await this.getCore()
-		return core.settings.toggle(asRecord(params) as any)
+		return this.sessions.toggleSetting(params)
 	}
 
-	async getMcpSettingsPath() {
-		const sdk = await importClineSdk()
-		return this.resolveMcpSettingsPath(sdk)
-	}
-
-	async listMcpServers() {
-		const sdk = await importClineSdk()
-		const manager = await this.ensureMcpManager()
-		await this.registerMcpServersFromSettings(sdk, manager)
-		const settings = this.loadMcpSettings(sdk)
-		const registrations = sdk.resolveMcpServerRegistrations({ filePath: this.resolveMcpSettingsPath(sdk) })
-		const snapshots = new Map(manager.listServers().map((server) => [server.name, server]))
-		const oauthStatuses = new Map(sdk.listMcpServerOAuthStatuses({ filePath: this.resolveMcpSettingsPath(sdk) }).map((status) => [status.serverName, status]))
-
-		const servers = []
-		for (const registration of registrations) {
-			const snapshot = snapshots.get(registration.name)
-			const config = asRecord(settings.mcpServers?.[registration.name])
-			const timeout = numberValue(config.timeout) || numberValue(asRecord(registration.metadata).timeout)
-			const disabled = registration.disabled === true || config.disabled === true
-			let tools: Array<Record<string, unknown>> = []
-			const lifecycleState = this.mcpOperationStates.get(registration.name)
-			const lifecycleError = this.mcpOperationErrors.get(registration.name)
-			let error = lifecycleError || snapshot?.lastError || ""
-			let status = disabled ? "disconnected" : snapshot?.status || "disconnected"
-			let resources: Array<Record<string, unknown>> = []
-			let resourceTemplates: Array<Record<string, unknown>> = []
-			let prompts: Array<Record<string, unknown>> = []
-
-			if (lifecycleState && lifecycleState !== "deleting") {
-				status = "connecting"
-			}
-
-			if (!disabled && !lifecycleState) {
-				try {
-					const listedTools = await manager.listTools(registration.name)
-					tools = listedTools.map((tool) => ({
-						name: tool.name,
-						description: tool.description || "",
-						inputSchema: JSON.stringify(tool.inputSchema || {}),
-						autoApprove: isToolAutoApproved(config, tool.name),
-					}))
-					status = "connected"
-				} catch (toolError) {
-					error = toolError instanceof Error ? toolError.message : String(toolError)
-					status = "disconnected"
-				}
-			}
-			if (!disabled && status === "connected") {
-				const serverMetadata = asRecord(snapshot?.metadata)
-				resources = await this.listMcpResourcesBestEffort(manager, registration.name, snapshot, serverMetadata)
-				resourceTemplates = await this.listMcpResourceTemplatesBestEffort(manager, registration.name, snapshot, serverMetadata)
-				prompts = await this.listMcpPromptsBestEffort(manager, registration.name, snapshot, serverMetadata)
-			}
-
-			const oauth = oauthStatuses.get(registration.name)
-			servers.push({
-				name: registration.name,
-				config: JSON.stringify(toDisplayMcpConfig(registration as unknown as Record<string, unknown>, config)),
-				status: toProtoMcpStatus(status),
-				error,
-				tools,
-				resources,
-				resourceTemplates,
-				prompts,
-				disabled,
-				timeout,
-				oauthRequired: oauth?.oauthSupported === true && oauth.oauthConfigured !== true,
-				oauthAuthStatus:
-					lifecycleState === "authenticating"
-						? "pending"
-						: oauth?.oauthConfigured
-							? "authenticated"
-							: oauth?.oauthSupported
-								? "unauthenticated"
-								: undefined,
-			})
-		}
-
-		return servers
-	}
-
-	async getMcpServersResponse() {
-		const mcpServers = await this.listMcpServers()
-		return { mcpServers, servers: mcpServers }
-	}
-
-	async authenticateMcpServer(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-
-		const sdk = await importClineSdk()
-		const filePath = this.resolveMcpSettingsPath(sdk)
-		this.ensureMcpSettingsFile(filePath)
-
-		await this.withMcpOperation(name, "authenticating", async () => {
-			if (typeof sdk.authorizeMcpServerOAuth !== "function") {
-				throw new Error("MCP OAuth is unsupported by the bundled Cline SDK.")
-			}
-			await sdk.authorizeMcpServerOAuth({
-				serverName: name,
-				filePath,
-				clientName: "VsClineAgent",
-				clientVersion: this.readSdkVersion() || "0.0.0",
-				callbackHost: "127.0.0.1",
-				timeoutMs: readPositiveIntEnv("VSCLINE_MCP_OAUTH_TIMEOUT_MS", 300000),
-				openUrl: async (url: string) => {
-					this.logSdkMessage("info", "Opening MCP OAuth URL", { serverName: name })
-					await this.host.envClient.openExternal({ value: url })
-				},
-				onServerListening: (info: unknown) => {
-					this.logSdkMessage("info", "MCP OAuth callback server listening", info)
-				},
-				onServerClose: (info: unknown) => {
-					this.logSdkMessage("info", "MCP OAuth callback server closed", info)
-				},
-			})
-
-			await this.reloadMcpServers()
-		})
-		return this.getMcpServersResponse()
-	}
-
-	async addRemoteMcpServer(params: unknown) {
-		const request = asRecord(params)
-		const serverName = stringValue(request.serverName) || stringValue(request.name)
-		const serverUrl = stringValue(request.serverUrl) || stringValue(request.url)
-		const transportType = stringValue(request.transportType) === "sse" ? "sse" : "streamableHttp"
-		if (!serverName) {
-			throw new Error("MCP server name is required.")
-		}
-		if (!serverUrl) {
-			throw new Error("MCP server URL is required.")
-		}
-
-		new URL(serverUrl)
-		const sdk = await importClineSdk()
-		await this.mutateMcpSettings(sdk, (settings) => {
-			settings.mcpServers[serverName] = {
-				transport: {
-					type: transportType,
-					url: serverUrl,
-				},
-				disabled: false,
-				timeout: readPositiveIntEnv("VSCLINE_MCP_TIMEOUT_SECONDS", 60),
-			} as any
-		})
-		await this.withMcpOperation(serverName, "connecting", async () => {
-			await this.reloadMcpServers()
-		})
-		return this.getMcpServersResponse()
-	}
-
-	async setMcpServerDisabled(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-		const disabled = request.disabled === true
-		const sdk = await importClineSdk()
-		await this.withMcpOperation(name, "toggling", async () => {
-			await this.mutateMcpSettings(sdk, (settings) => {
-				const current = asRecord(settings.mcpServers[name])
-				if (Object.keys(current).length === 0) {
-					throw new Error(`MCP server not found: ${name}`)
-				}
-				settings.mcpServers[name] = { ...current, disabled } as any
-			})
-			const manager = await this.ensureMcpManager()
-			await manager.setServerDisabled(name, disabled).catch(() => undefined)
-			await this.reloadMcpServers()
-		})
-		return this.getMcpServersResponse()
-	}
-
-	async updateMcpTimeout(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
-		const timeout = numberValue(request.timeout)
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-		if (!timeout || timeout <= 0) {
-			throw new Error("MCP timeout must be a positive number of seconds.")
-		}
-
-		const sdk = await importClineSdk()
-		await this.mutateMcpSettings(sdk, (settings) => {
-			const current = asRecord(settings.mcpServers[name])
-			if (Object.keys(current).length === 0) {
-				throw new Error(`MCP server not found: ${name}`)
-			}
-			settings.mcpServers[name] = { ...current, timeout } as any
-		})
-		await this.reloadMcpServers()
-		return this.getMcpServersResponse()
-	}
-
-	async deleteMcpServer(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-		await this.withMcpOperation(name, "deleting", async () => {
-			const sdk = await importClineSdk()
-			await this.mutateMcpSettings(sdk, (settings) => {
-				delete settings.mcpServers[name]
-			})
-			const manager = await this.ensureMcpManager()
-			await manager.unregisterServer(name).catch(() => undefined)
-			await this.reloadMcpServers()
-		})
-		return this.getMcpServersResponse()
-	}
-
-	async restartMcpServer(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name) || stringValue(request.value)
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-		await this.withMcpOperation(name, "restarting", async () => {
-			const manager = await this.ensureMcpManager()
-			await this.reloadMcpServers()
-			await manager.disconnectServer(name).catch(() => undefined)
-			await manager.connectServer(name).catch(() => undefined)
-			await manager.refreshTools(name).catch(() => undefined)
-		})
-		return this.getMcpServersResponse()
-	}
-
-	async toggleMcpToolAutoApprove(params: unknown) {
-		const request = asRecord(params)
-		const name = stringValue(request.serverName) || stringValue(request.name)
-		const toolNames = stringArrayValue(request.toolNames)
-		const autoApprove = request.autoApprove === true
-		if (!name) {
-			throw new Error("MCP server name is required.")
-		}
-
-		const sdk = await importClineSdk()
-		await this.mutateMcpSettings(sdk, (settings) => {
-			const current = asRecord(settings.mcpServers[name])
-			if (Object.keys(current).length === 0) {
-				throw new Error(`MCP server not found: ${name}`)
-			}
-			const metadata = asRecord(current.metadata)
-			const autoApproveTools = new Set(stringArrayValue(metadata.autoApproveTools))
-			for (const toolName of toolNames) {
-				if (autoApprove) {
-					autoApproveTools.add(toolName)
-				} else {
-					autoApproveTools.delete(toolName)
-				}
-			}
-			settings.mcpServers[name] = {
-				...current,
-				metadata: {
-					...metadata,
-					autoApproveTools: [...autoApproveTools],
-				},
-			} as any
-		})
-		return this.getMcpServersResponse()
-	}
-
-	private async withMcpOperation<T>(
-		serverName: string,
-		operation: "connecting" | "restarting" | "deleting" | "authenticating" | "toggling",
-		action: () => Promise<T>,
-	) {
-		this.mcpOperationStates.set(serverName, operation)
-		this.mcpOperationErrors.delete(serverName)
-		try {
-			const result = await action()
-			this.mcpOperationErrors.delete(serverName)
-			return result
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			this.mcpOperationErrors.set(serverName, message)
-			this.logSdkMessage("warn", `MCP ${operation} failed for ${serverName}`, { error: message })
-			throw error
-		} finally {
-			this.mcpOperationStates.delete(serverName)
-		}
-	}
-
-	private async listMcpResourcesBestEffort(
-		manager: McpManagerInstance,
-		serverName: string,
-		snapshot: unknown,
-		metadata: Record<string, unknown>,
-	) {
-		const listed = await callMcpListMethod(manager, serverName, ["listResources", "getResources", "refreshResources", "listServerResources"])
-		return normalizeMcpResources(listed || getArrayProperty(snapshot, "resources") || getArrayProperty(metadata, "resources"))
-	}
-
-	private async listMcpResourceTemplatesBestEffort(
-		manager: McpManagerInstance,
-		serverName: string,
-		snapshot: unknown,
-		metadata: Record<string, unknown>,
-	) {
-		const listed = await callMcpListMethod(manager, serverName, [
-			"listResourceTemplates",
-			"getResourceTemplates",
-			"refreshResourceTemplates",
-			"listServerResourceTemplates",
-		])
-		return normalizeMcpResourceTemplates(
-			listed || getArrayProperty(snapshot, "resourceTemplates") || getArrayProperty(metadata, "resourceTemplates"),
-		)
-	}
-
-	private async listMcpPromptsBestEffort(
-		manager: McpManagerInstance,
-		serverName: string,
-		snapshot: unknown,
-		metadata: Record<string, unknown>,
-	) {
-		const listed = await callMcpListMethod(manager, serverName, ["listPrompts", "getPrompts", "refreshPrompts", "listServerPrompts"])
-		return normalizeMcpPrompts(listed || getArrayProperty(snapshot, "prompts") || getArrayProperty(metadata, "prompts"))
-	}
+	async getMcpSettingsPath() { return this.mcp.getMcpSettingsPath() }
+	async listMcpServers() { return this.mcp.listMcpServers() }
+	async getMcpServersResponse() { return this.mcp.getMcpServersResponse() }
+	async authenticateMcpServer(params: unknown) { return this.mcp.authenticateMcpServer(params) }
+	async addRemoteMcpServer(params: unknown) { return this.mcp.addRemoteMcpServer(params) }
+	async setMcpServerDisabled(params: unknown) { return this.mcp.setMcpServerDisabled(params) }
+	async updateMcpTimeout(params: unknown) { return this.mcp.updateMcpTimeout(params) }
+	async deleteMcpServer(params: unknown) { return this.mcp.deleteMcpServer(params) }
+	async restartMcpServer(params: unknown) { return this.mcp.restartMcpServer(params) }
+	async toggleMcpToolAutoApprove(params: unknown) { return this.mcp.toggleMcpToolAutoApprove(params) }
 
 	async dispose() {
 		const core = this.core
-		const mcpManager = this.mcpManager
 		this.core = null
 		this.starting = null
-		this.mcpManager = null
-		this.mcpStarting = null
 		this.activeSessionId = null
 		if (core) {
 			await core.dispose("Visual Studio sidecar disconnected")
 		}
-		if (mcpManager) {
-			await mcpManager.dispose().catch(() => undefined)
-		}
+		await this.mcp.dispose()
 	}
 
 	private async getCore() {
@@ -628,382 +177,22 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	}
 
 	private async createCore() {
-		ensureUsableHomeEnvironment()
-		const sdk = await importClineSdk()
-		await this.ensureMcpManager()
-		const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({}).catch(() => [] as string[])
-		const workspaceRoot = workspaceRoots[0] || process.cwd()
-		const automationEnabled = this.isAutomationEnabled?.() === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"
-		const automation = automationEnabled
-			? {
-					cronScope: "workspace" as const,
-					workspaceRoot,
-					cronSpecsDir: path.join(workspaceRoot, ".cline", "cron"),
-					autoStart: true,
-				}
-			: undefined
-		const defaultExecutors = sdk.createDefaultExecutors({
-			applyPatch: { restrictToCwd: true },
+		return createClineSdkCore({
+			host: this.host,
+			ensureMcpStarted: () => this.mcp.ensureStarted(),
+			getActiveSessionId: () => this.activeSessionId,
+			onEvent: this.onCoreEvent,
+			onToolApproval: this.onToolApproval,
+			onAskQuestion: this.onAskQuestion,
+			isAutomationEnabled: this.isAutomationEnabled,
+			log: (level, message, metadata) => this.logSdkMessage(level, message, metadata),
 		})
-		const core = await sdk.ClineCore.create({
-			clientName: "VsClineAgent",
-			backendMode: "local",
-			...(automation ? { automation } : {}),
-			capabilities: {
-				requestToolApproval: async (request: unknown) => {
-					if (this.onToolApproval) {
-						return this.onToolApproval(translateToolApprovalRequest(request, this.activeSessionId || ""))
-					}
-
-					return { approved: false, reason: "Visual Studio tool approval UI is not attached." }
-					},
-					toolExecutors: {
-					readFile: async (request: { path: string; start_line?: number | null; end_line?: number | null }) => {
-						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-						const filePath = resolveWorkspacePath(request.path, workspaceRoots)
-						const result = asRecord(await this.host.workspaceClient.readTextFile({ path: filePath }))
-						if (result.exists !== true) {
-							throw new Error(`File not found: ${filePath}`)
-						}
-						const content = stringValue(result.content) || ""
-
-						if (request.start_line || request.end_line) {
-							const lines = content.split(/\r?\n/)
-							const start = Math.max((request.start_line || 1) - 1, 0)
-							const end = request.end_line ? Math.min(request.end_line, lines.length) : lines.length
-							return lines.slice(start, end).join("\n")
-						}
-
-						return content
-					},
-					search: async (query: string, cwd: string) => {
-						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-						const searchRoot = resolveWorkspacePath(cwd, workspaceRoots)
-						const result = asRecord(await this.host.workspaceClient.searchFiles({ path: searchRoot, query, limit: 500 }))
-						return (Array.isArray(result.matches) ? result.matches : []).map(String).join("\n")
-					},
-					bash: async (command: string | { command: string; args?: string[] }, cwd: string, context: AgentToolContext) => {
-						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-						const commandCwd = resolveWorkspacePath(cwd, workspaceRoots)
-						const commandText =
-							typeof command === "string"
-								? normalizeCommandForPlatform(command, process.platform)
-								: normalizeCommandForPlatform([command.command, ...(command.args || []).map((argument) => normalizeCommandArgumentForPlatform(argument, process.platform))].filter(Boolean).join(" "), process.platform)
-						const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal }).abortSignal
-						if (abortSignal?.aborted) {
-							throw new Error("Command was cancelled before it started.")
-						}
-
-						const abortHandler = () => {
-							this.host.workspaceClient.cancelCommands().catch(() => undefined)
-						}
-						abortSignal?.addEventListener("abort", abortHandler, { once: true })
-
-						try {
-							const result = await this.host.workspaceClient.executeCommandInTerminal({
-								command: commandText,
-								cwd: commandCwd,
-								timeoutSeconds: readPositiveIntEnv("VSCLINE_COMMAND_TIMEOUT_SECONDS", 120),
-							})
-							if (abortSignal?.aborted) {
-								throw new Error("Command was cancelled.")
-							}
-							return normalizeCommandResultForSdk(result)
-						} finally {
-							abortSignal?.removeEventListener("abort", abortHandler)
-						}
-					},
-					webFetch: async (urlOrRequest: string | { url?: string; prompt?: string }, promptOrContext?: string | AgentToolContext, context?: AgentToolContext) => {
-						const url = typeof urlOrRequest === "string" ? urlOrRequest : stringValue(urlOrRequest.url) || ""
-						const prompt = typeof urlOrRequest === "string"
-							? typeof promptOrContext === "string" ? promptOrContext : ""
-							: stringValue(urlOrRequest.prompt) || ""
-						const toolContext = (typeof promptOrContext === "object" ? promptOrContext : context) as AgentToolContext | undefined
-						return fetchWebContentForSdk(url, prompt, toolContext)
-					},
-					editor: async (
-						input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null },
-						cwd: string,
-						context?: AgentToolContext,
-					) => {
-						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-						const filePath = resolveWorkspacePath(input.path, workspaceRoots, cwd)
-						const current = asRecord(await this.host.workspaceClient.readTextFile({ path: filePath }))
-						const before = current.exists === true ? stringValue(current.content) || "" : ""
-						let next = before
-						if (input.old_text) {
-							if (!next.includes(input.old_text)) {
-								throw new Error(`old_text not found in ${filePath}`)
-							}
-							next = next.replace(input.old_text, input.new_text)
-						} else if (input.insert_line) {
-							const lines = next.split(/\r?\n/)
-							lines.splice(Math.max(input.insert_line - 1, 0), 0, input.new_text)
-							next = lines.join("\n")
-						} else {
-							next = input.new_text
-						}
-
-						const beforePath = await this.writeChangeSnapshot(filePath, before, context)
-						await this.host.workspaceClient.writeTextFile({ path: filePath, content: next })
-						this.emitFileChanged({
-							sessionId: (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || undefined,
-							filePath,
-							beforePath,
-							afterPath: filePath,
-							action: current.exists === true ? "modified" : "created",
-							...countLineChanges(before, next),
-						})
-						return `Wrote ${filePath}`
-					},
-					applyPatch: async (input: { input: string }, cwd: string, context: AgentToolContext) => {
-						const workspaceRoots = await this.host.workspaceClient.getWorkspacePaths({})
-						const patchText = typeof input === "string" ? input : input.input
-						const changes = parseApplyPatchChanges(patchText)
-						const snapshots = []
-						for (const change of changes) {
-							const beforeFilePath = resolveWorkspacePath(change.path, workspaceRoots, cwd)
-							const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd)
-							const current = asRecord(await this.host.workspaceClient.readTextFile({ path: beforeFilePath }))
-							const before = current.exists === true ? stringValue(current.content) || "" : ""
-							const beforePath = await this.writeChangeSnapshot(beforeFilePath, before, context, "before")
-							snapshots.push({
-								...change,
-								beforeFilePath,
-								afterFilePath,
-								before,
-								beforePath,
-							})
-						}
-
-						const result = await defaultExecutors.applyPatch?.(input, cwd, context)
-
-						for (const snapshot of snapshots) {
-							const after = asRecord(await this.host.workspaceClient.readTextFile({ path: snapshot.afterFilePath }))
-							const afterContent = after.exists === true ? stringValue(after.content) || "" : ""
-							const afterPath =
-								after.exists === true
-									? snapshot.afterFilePath
-									: await this.writeChangeSnapshot(snapshot.afterFilePath, afterContent, context, "after")
-							this.emitFileChanged({
-								sessionId: (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || undefined,
-								filePath: snapshot.afterFilePath,
-								beforePath: snapshot.beforePath,
-								afterPath,
-								action: snapshot.action,
-								...countLineChanges(snapshot.before, afterContent),
-							})
-						}
-
-						return result || `Applied patch to ${snapshots.map((snapshot) => snapshot.afterFilePath).join(", ")}`
-					},
-					askQuestion: async (question: string, options: string[]) => {
-						if (this.onAskQuestion) {
-							return this.onAskQuestion(question, options)
-						}
-
-						throw new Error("Visual Studio follow-up question UI is not attached.")
-					},
-					submit: async (summary: string, verified: boolean) => {
-						return `${verified ? "Verified" : "Submitted"}: ${summary}`
-					},
-				},
-			},
-			logger: {
-				debug: (message: string, metadata?: unknown) => {
-					this.logSdkMessage("debug", message, metadata)
-				},
-				log: (message: string, metadata?: unknown) => {
-					this.logSdkMessage("info", message, metadata)
-				},
-			},
-		})
-		if (this.onCoreEvent) {
-			core.subscribe((event: CoreSessionEvent) => this.onCoreEvent?.(normalizeAgentRuntimeEvent(event)))
-		}
-
-		return core
-	}
-
-	private async createMcpExtraTools() {
-		const sdk = await importClineSdk()
-		const manager = await this.ensureMcpManager()
-		const registrations = sdk.resolveMcpServerRegistrations({ filePath: this.resolveMcpSettingsPath(sdk) })
-		const tools = []
-		for (const registration of registrations) {
-			if (registration.disabled) {
-				continue
-			}
-			try {
-				tools.push(
-					...(await sdk.createMcpTools({
-						serverName: registration.name,
-						provider: manager,
-					})),
-				)
-			} catch (error) {
-				this.logSdkMessage("warn", `Failed to create MCP tools for ${registration.name}`, {
-					error: error instanceof Error ? error.message : String(error),
-				})
-			}
-		}
-		return tools.length > 0 ? tools : undefined
-	}
-
-	private async createMcpExtraToolsForSession() {
-		if (process.env.VSCLINE_ENABLE_MCP_EXTRA_TOOLS === "0") {
-			return undefined
-		}
-
-		try {
-			return await this.createMcpExtraTools()
-		} catch (error) {
-			this.logSdkMessage("warn", "MCP extra tools were skipped for this session.", {
-				error: error instanceof Error ? error.message : String(error),
-			})
-			return undefined
-		}
-	}
-
-	private async ensureMcpManager() {
-		if (this.mcpManager) {
-			return this.mcpManager
-		}
-		if (!this.mcpStarting) {
-			this.mcpStarting = this.createMcpManager()
-				.then((manager) => {
-					this.mcpManager = manager
-					return manager
-				})
-				.catch((error) => {
-					this.mcpStarting = null
-					throw error
-				})
-		}
-		return this.mcpStarting
-	}
-
-	private async createMcpManager() {
-		const sdk = await importClineSdk()
-		const settingsPath = this.resolveMcpSettingsPath(sdk)
-		this.ensureMcpSettingsFile(settingsPath)
-		const manager = new sdk.InMemoryMcpManager({
-			clientFactory: sdk.createDefaultMcpServerClientFactory({
-				settingsPath,
-				clientName: "VsClineAgent",
-				clientVersion: this.readSdkVersion() || "0.0.0",
-			}),
-		})
-		await this.registerMcpServersFromSettings(sdk, manager)
-		return manager
-	}
-
-	private async reloadMcpServers() {
-		const sdk = await importClineSdk()
-		const manager = await this.ensureMcpManager()
-		for (const server of manager.listServers()) {
-			await manager.unregisterServer(server.name).catch(() => undefined)
-		}
-		await this.registerMcpServersFromSettings(sdk, manager)
-	}
-
-	private async registerMcpServersFromSettings(sdk: ClineSdkModule, manager: McpManagerInstance) {
-		const settingsPath = this.resolveMcpSettingsPath(sdk)
-		this.ensureMcpSettingsFile(settingsPath)
-		const registrations = sdk.resolveMcpServerRegistrations({ filePath: settingsPath })
-		const existing = new Set(manager.listServers().map((server) => server.name))
-		for (const registration of registrations) {
-			if (!existing.has(registration.name)) {
-				await manager.registerServer(registration)
-			}
-		}
-		return registrations
-	}
-
-	private resolveMcpSettingsPath(sdk: ClineSdkModule) {
-		if (!this.mcpSettingsPath) {
-			this.mcpSettingsPath = sdk.resolveDefaultMcpSettingsPath()
-		}
-		this.ensureMcpSettingsFile(this.mcpSettingsPath)
-		return this.mcpSettingsPath
-	}
-
-	private loadMcpSettings(sdk: ClineSdkModule) {
-		const filePath = this.resolveMcpSettingsPath(sdk)
-		this.ensureMcpSettingsFile(filePath)
-		const settings = sdk.loadMcpSettingsFile({ filePath }) as { mcpServers: Record<string, Record<string, unknown>> }
-		settings.mcpServers = asRecord(settings.mcpServers) as Record<string, Record<string, unknown>>
-		return settings
-	}
-
-	private async mutateMcpSettings(
-		sdk: ClineSdkModule,
-		mutate: (settings: { mcpServers: Record<string, Record<string, unknown>> }) => void | Promise<void>,
-	) {
-		const operation = this.mcpSettingsMutationQueue.then(async () => {
-			const settings = this.loadMcpSettings(sdk)
-			await mutate(settings)
-			await this.saveMcpSettings(sdk, settings)
-		})
-		this.mcpSettingsMutationQueue = operation.catch(() => undefined)
-		await operation
-	}
-
-	private async saveMcpSettings(sdk: ClineSdkModule, settings: { mcpServers: Record<string, unknown> }) {
-		const filePath = this.resolveMcpSettingsPath(sdk)
-		await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
-		const content = `${JSON.stringify({ mcpServers: settings.mcpServers || {} }, null, 2)}\n`
-		const previous = await fs.promises.readFile(filePath, "utf8").catch(() => "")
-		if (isValidJsonObject(previous)) {
-			await writeFileAtomic(`${filePath}.bak`, previous)
-		}
-		await writeFileAtomic(filePath, content)
-	}
-
-	private ensureMcpSettingsFile(filePath: string) {
-		fs.mkdirSync(path.dirname(filePath), { recursive: true })
-		if (fs.existsSync(filePath)) {
-			const content = fs.readFileSync(filePath, "utf8")
-			if (isValidJsonObject(content)) {
-				return
-			}
-
-			const backupPath = `${filePath}.bak`
-			const backup = fs.existsSync(backupPath) ? fs.readFileSync(backupPath, "utf8") : ""
-			if (isValidJsonObject(backup)) {
-				writeFileAtomicSync(filePath, backup)
-				return
-			}
-
-			if (content.trim()) {
-				const corruptPath = `${filePath}.corrupt-${Date.now()}`
-				fs.renameSync(filePath, corruptPath)
-			}
-		}
-		writeFileAtomicSync(filePath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`)
 	}
 
 	private logSdkMessage(level: string, message: string, metadata?: unknown) {
 		this.host.envClient.debugLog({
 			message: `[Cline SDK:${level}] ${message}${metadata ? ` ${JSON.stringify(metadata)}` : ""}`,
 		}).catch(() => undefined)
-	}
-
-	private async writeChangeSnapshot(filePath: string, content: string, context?: AgentToolContext, suffix = "before") {
-		const sessionId = (context as AgentToolContext & { sessionId?: string } | undefined)?.sessionId || this.activeSessionId || "session"
-		const changeRoot = path.join(getLocalAppDataRoot(), "VsClineAgent", "changes", sanitizePathPart(sessionId))
-		await fs.promises.mkdir(changeRoot, { recursive: true })
-		const snapshotName = `${Date.now()}-${sanitizePathPart(path.basename(filePath) || "file")}.${suffix}`
-		const snapshotPath = path.join(changeRoot, snapshotName)
-		await fs.promises.writeFile(snapshotPath, content, "utf8")
-		return snapshotPath
-	}
-
-	private emitFileChanged(payload: Record<string, unknown>) {
-		this.onCoreEvent?.(normalizeAgentRuntimeEvent({
-			type: "vscline_file_changed",
-			payload,
-		}))
 	}
 
 	private readSdkVersion() {
@@ -1015,59 +204,4 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			return null
 		}
 	}
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-function stringValue(value: unknown) {
-	return typeof value === "string" && value.trim().length > 0 ? value : undefined
-}
-
-function numberValue(value: unknown) {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function isValidJsonObject(content: string) {
-	if (!content.trim()) {
-		return false
-	}
-	try {
-		const parsed = JSON.parse(content)
-		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-	} catch {
-		return false
-	}
-}
-
-async function writeFileAtomic(filePath: string, content: string) {
-	const tempPath = `${filePath}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`
-	try {
-		await fs.promises.writeFile(tempPath, content, "utf8")
-		await fs.promises.rename(tempPath, filePath)
-	} finally {
-		await fs.promises.unlink(tempPath).catch(() => undefined)
-	}
-}
-
-function writeFileAtomicSync(filePath: string, content: string) {
-	const tempPath = `${filePath}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`
-	try {
-		fs.writeFileSync(tempPath, content, "utf8")
-		fs.renameSync(tempPath, filePath)
-	} finally {
-		if (fs.existsSync(tempPath)) {
-			fs.unlinkSync(tempPath)
-		}
-	}
-}
-
-function stringArrayValue(value: unknown) {
-	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : []
-}
-
-async function importClineSdk(): Promise<ClineSdkModule> {
-	const importEsm = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<ClineSdkModule>
-	return importEsm("@cline/sdk")
 }

@@ -29,6 +29,7 @@ import { decodeInstructionSettingsRpcCommand } from "./InstructionSettingsRpcDec
 import { decodeUiWebRpcCommand } from "./UiWebRpcDecoder"
 import { decodePluginRpcCommand } from "./PluginRpcDecoder"
 import { grpcError, grpcHandled, grpcResponse } from "./WebviewGrpcSupport"
+import { webviewRpcOperation, type WebviewRpcSidecarRoute } from "../../application/dto/generated/WebviewRpcContract"
 
 type Dependencies = Readonly<{
 	settings: SettingsRpcHandler; account: AccountRpcHandler; browser: BrowserRpcHandler; terminal: TerminalRpcHandler
@@ -38,48 +39,95 @@ type Dependencies = Readonly<{
 	stateMessages: () => unknown[]; mcpStreamMessages: (payload: unknown) => unknown[]
 }>
 
+type UnaryRoute = Exclude<WebviewRpcSidecarRoute, "stream">
+type UnaryRouteResult = ReturnType<typeof grpcHandled> | null
+type UnaryRouteHandler = (key: string, requestId: string, message: unknown) => Promise<UnaryRouteResult>
+type UnaryRouteRegistry = Record<UnaryRoute, UnaryRouteHandler>
+
 export class WebviewUnaryRpcRouter {
-	constructor(private readonly dependencies: Dependencies) {}
+	private readonly routes: UnaryRouteRegistry
+
+	constructor(private readonly dependencies: Dependencies) {
+		const d = dependencies
+		this.routes = {
+			settings: async (key, requestId, message) => {
+				const command = decodeSettingsRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.settings.handle(command)) : null
+			},
+			account: async (key, requestId, message) => {
+				const command = decodeAccountRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.account.handle(command)) : null
+			},
+			browser: async (key, requestId, message) => {
+				const command = decodeBrowserRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.browser.handle(command), false)) : null
+			},
+			terminal: async (key, requestId, message) => {
+				const command = decodeTerminalRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.terminal.handle(command)) : null
+			},
+			task: async (key, requestId, message) => {
+				const command = decodeTaskRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.task.handle(command, requestId)) : null
+			},
+			checkpoint: async (key, requestId, message) => {
+				const command = decodeCheckpointRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.checkpoint.handle(command)) : null
+			},
+			hook: async (key, requestId, message) => {
+				const command = decodeHookRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.hook.handle(command), false)) : null
+			},
+			scheduledAgent: async (key, requestId, message) => {
+				const command = decodeScheduledAgentRpcCommand(key, message)
+				return command ? this.withOptionalState(requestId, await d.scheduledAgent.handle(command)) : null
+			},
+			worktree: async (key, requestId, message) => {
+				const command = decodeWorktreeRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.worktree.handle(command), false)) : null
+			},
+			mcp: (key, requestId, message) => this.handleMcp(key, requestId, message),
+			modelCatalog: async (key, requestId, message) => {
+				const command = decodeModelCatalogRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.modelCatalog.handle(command), false)) : null
+			},
+			file: (key, requestId, message) => this.handleFile(key, requestId, message),
+			instructionSettings: async (key, requestId, message) => {
+				const command = decodeInstructionSettingsRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.instructionSettings.handle(command), false)) : null
+			},
+			uiWeb: async (key, requestId, message) => {
+				const command = decodeUiWebRpcCommand(key, message)
+				return command ? grpcHandled(grpcResponse(requestId, await d.uiWeb.handle(command), false)) : null
+			},
+			plugin: async (key, requestId) => {
+				const command = decodePluginRpcCommand(key)
+				return command ? grpcHandled(grpcResponse(requestId, await d.plugin.handle(command), false)) : null
+			},
+		}
+	}
 
 	async handle(key: string, requestId: string, message: unknown) {
-		const d = this.dependencies
-		const settings = decodeSettingsRpcCommand(key, message)
-		if (settings) return this.withOptionalState(requestId, await d.settings.handle(settings))
-		const account = decodeAccountRpcCommand(key, message)
-		if (account) return this.withOptionalState(requestId, await d.account.handle(account))
-		const browser = decodeBrowserRpcCommand(key, message)
-		if (browser) return grpcHandled(grpcResponse(requestId, await d.browser.handle(browser), false))
-		const terminal = decodeTerminalRpcCommand(key, message)
-		if (terminal) return this.withOptionalState(requestId, await d.terminal.handle(terminal))
-		const task = decodeTaskRpcCommand(key, message)
-		if (task) return this.withOptionalState(requestId, await d.task.handle(task, requestId))
-		const checkpoint = decodeCheckpointRpcCommand(key, message)
-		if (checkpoint) return this.withOptionalState(requestId, await d.checkpoint.handle(checkpoint))
-		const hook = decodeHookRpcCommand(key, message)
-		if (hook) return grpcHandled(grpcResponse(requestId, await d.hook.handle(hook), false))
-		const scheduledAgent = decodeScheduledAgentRpcCommand(key, message)
-		if (scheduledAgent) return this.withOptionalState(requestId, await d.scheduledAgent.handle(scheduledAgent))
-		const worktree = decodeWorktreeRpcCommand(key, message)
-		if (worktree) return grpcHandled(grpcResponse(requestId, await d.worktree.handle(worktree), false))
-		const mcp = decodeMcpRpcCommand(key, message)
-		if (mcp) {
-			const result = await d.mcp.handle(mcp)
-			if (result.error) return grpcHandled(grpcError(requestId, result.error, false))
-			return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.publishToStreams ? d.mcpStreamMessages(result.payload) : []))
-		}
-		const modelCatalog = decodeModelCatalogRpcCommand(key, message)
-		if (modelCatalog) return grpcHandled(grpcResponse(requestId, await d.modelCatalog.handle(modelCatalog), false))
-		const file = decodeFileRpcCommand(key, message)
-		if (file) {
-			const result = await d.file.handle(file)
-			return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.includeStateMessages ? d.stateMessages() : []))
-		}
-		const instructions = decodeInstructionSettingsRpcCommand(key, message)
-		if (instructions) return grpcHandled(grpcResponse(requestId, await d.instructionSettings.handle(instructions), false))
-		const uiWeb = decodeUiWebRpcCommand(key, message)
-		if (uiWeb) return grpcHandled(grpcResponse(requestId, await d.uiWeb.handle(uiWeb), false))
-		const plugin = decodePluginRpcCommand(key)
-		return plugin ? grpcHandled(grpcResponse(requestId, await d.plugin.handle(plugin), false)) : null
+		const separator = key.indexOf(".")
+		const operation = separator > 0 ? webviewRpcOperation(key.slice(0, separator), key.slice(separator + 1)) : undefined
+		const route = operation && "route" in operation ? operation.route : undefined
+		if (!route || route === "stream") return null
+		return this.routes[route](key, requestId, message)
+	}
+
+	private async handleMcp(key: string, requestId: string, message: unknown) {
+		const command = decodeMcpRpcCommand(key, message)
+		if (!command) return null
+		const result = await this.dependencies.mcp.handle(command)
+		if (result.error) return grpcHandled(grpcError(requestId, result.error, false))
+		return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.publishToStreams ? this.dependencies.mcpStreamMessages(result.payload) : []))
+	}
+
+	private async handleFile(key: string, requestId: string, message: unknown) {
+		const command = decodeFileRpcCommand(key, message)
+		if (!command) return null
+		const result = await this.dependencies.file.handle(command)
+		return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.includeStateMessages ? this.dependencies.stateMessages() : []))
 	}
 
 	private withOptionalState(requestId: string, result: { payload: unknown; includeStateMessages?: boolean }) {

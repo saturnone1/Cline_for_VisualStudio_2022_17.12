@@ -1,4 +1,5 @@
-import { mapToolName, normalizeMcpDisplayMode } from "../conversation/ConversationSupport"
+import { normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
+import { mapToolName } from "../conversation/ToolCommandFormatting"
 import { inferModelInfo } from "../models/ModelCatalog"
 import { normalizeProviderId, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField } from "../../application/services/ProviderIdentity"
 

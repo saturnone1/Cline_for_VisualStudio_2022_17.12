@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
-import { useMcpState } from "./McpState"
-import { useRuntimeViewState } from "./RuntimeViewState"
+import { createElement, type ReactNode } from "react"
+import { McpStateProvider, useMcpState, useMcpStateContext } from "./McpState"
+import { RuntimeViewStateProvider, useRuntimeViewState, useRuntimeViewStateContext } from "./RuntimeViewState"
 
 describe("local WebView state", () => {
 	it("owns MCP server and marketplace state independently", () => {
@@ -26,5 +27,20 @@ describe("local WebView state", () => {
 		expect(result.current.showWelcome).toBe(true)
 		expect(result.current.totalTasksSize).toBe(42)
 		expect(result.current.expandTaskHeader).toBe(false)
+	})
+
+	it("exposes MCP and runtime slices through independent providers", () => {
+		const mcpWrapper = ({ children }: { children: ReactNode }) =>
+			createElement(McpStateProvider, null, children)
+		const runtimeWrapper = ({ children }: { children: ReactNode }) =>
+			createElement(RuntimeViewStateProvider, null, children)
+		const mcp = renderHook(() => useMcpStateContext(), { wrapper: mcpWrapper })
+		const runtime = renderHook(() => useRuntimeViewStateContext(), { wrapper: runtimeWrapper })
+
+		act(() => mcp.result.current.setMcpServers([{ name: "connected" }] as never))
+		act(() => runtime.result.current.setExpandTaskHeader(false))
+
+		expect(mcp.result.current.mcpServers).toHaveLength(1)
+		expect(runtime.result.current.expandTaskHeader).toBe(false)
 	})
 })

@@ -3,7 +3,25 @@ const fs = require("node:fs")
 const path = require("node:path")
 const test = require("node:test")
 const { validateGrpcRequestContract } = require("../dist/application/dto/WebviewRpc")
-const { validateWebviewRpcPayload } = require("../dist/application/dto/generated/WebviewRpcContract")
+const { WEBVIEW_RPC_SIDECAR_ROUTES, validateWebviewRpcPayload, webviewRpcOperation } = require("../dist/application/dto/generated/WebviewRpcContract")
+const decoderDefinitions = [
+	["settings", "SettingsRpcDecoder", "decodeSettingsRpcCommand"],
+	["account", "AccountRpcDecoder", "decodeAccountRpcCommand"],
+	["browser", "BrowserRpcDecoder", "decodeBrowserRpcCommand"],
+	["terminal", "TerminalRpcDecoder", "decodeTerminalRpcCommand"],
+	["task", "TaskRpcDecoder", "decodeTaskRpcCommand"],
+	["checkpoint", "CheckpointRpcDecoder", "decodeCheckpointRpcCommand"],
+	["hook", "HookRpcDecoder", "decodeHookRpcCommand"],
+	["scheduledAgent", "ScheduledAgentRpcDecoder", "decodeScheduledAgentRpcCommand"],
+	["worktree", "WorktreeRpcDecoder", "decodeWorktreeRpcCommand"],
+	["mcp", "McpRpcDecoder", "decodeMcpRpcCommand"],
+	["modelCatalog", "ModelCatalogRpcDecoder", "decodeModelCatalogRpcCommand"],
+	["file", "FileRpcDecoder", "decodeFileRpcCommand"],
+	["instructionSettings", "InstructionSettingsRpcDecoder", "decodeInstructionSettingsRpcCommand"],
+	["uiWeb", "UiWebRpcDecoder", "decodeUiWebRpcCommand"],
+	["plugin", "PluginRpcDecoder", "decodePluginRpcCommand"],
+].map(([route, file, name]) => [route, require(`../dist/infrastructure/webview/${file}`)[name]])
+const { decodeStreamingRpcCommand } = require("../dist/infrastructure/webview/StreamingRpcDecoder")
 
 const repoRoot = path.resolve(__dirname, "../../..")
 const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "contracts/webview-rpc.json"), "utf8"))
@@ -12,6 +30,39 @@ const fixtures = JSON.parse(fs.readFileSync(path.join(repoRoot, "contracts/gener
 test("generated RPC fixtures cover every canonical operation", () => {
 	assert.equal(fixtures.length, manifest.operations.length)
 	assert.deepEqual(fixtures.map((fixture) => fixture.operation), manifest.operations.map((operation) => `${operation.service}.${operation.method}`))
+	for (const [index, fixture] of fixtures.entries()) {
+		const operation = manifest.operations[index]
+		assert.deepEqual(validateWebviewRpcPayload(operation.service, operation.method, "request", fixture.request), { ok: true }, `${fixture.operation} request`)
+		assert.deepEqual(validateWebviewRpcPayload(operation.service, operation.method, "response", fixture.response), { ok: true }, `${fixture.operation} response`)
+	}
+})
+
+test("every canonical RPC operation has request and response payload shapes", () => {
+	for (const operation of manifest.operations) {
+		assert.ok(operation.requestShape, `${operation.service}.${operation.method} requestShape`)
+		assert.ok(operation.responseShape, `${operation.service}.${operation.method} responseShape`)
+		assert.ok(manifest.shapes[operation.requestShape], operation.requestShape)
+		assert.ok(manifest.shapes[operation.responseShape], operation.responseShape)
+	}
+})
+
+test("generated sidecar route registry matches the canonical manifest", () => {
+	const expected = [...new Set(manifest.operations.filter((operation) => operation.sidecar).map((operation) => operation.route))]
+	assert.deepEqual(WEBVIEW_RPC_SIDECAR_ROUTES, expected)
+})
+
+test("generated sidecar routes resolve to exactly one matching decoder", () => {
+	for (const operation of manifest.operations) {
+		const key = `${operation.service}.${operation.method}`
+		const generated = webviewRpcOperation(operation.service, operation.method)
+		if (!operation.sidecar) {
+			assert.equal(generated.route, undefined, key)
+			continue
+		}
+		const routes = decoderDefinitions.filter(([, decode]) => decode(key, {}) !== undefined).map(([route]) => route)
+		if (decodeStreamingRpcCommand(key) !== undefined) routes.push("stream")
+		assert.deepEqual(routes, [generated.route], key)
+	}
 })
 
 test("sidecar contract validates operation ownership and invocation kind", () => {
@@ -59,5 +110,27 @@ test("generated payload shapes reject Task RPC field drift on both wire directio
 		ok: false,
 		reason: "invalid_field_type",
 		field: "value",
+	})
+})
+
+test("expanded payload shapes reject object-array and required-response drift", () => {
+	assert.deepEqual(validateWebviewRpcPayload("FileService", "revertVsClineChanges", "request", { files: ["not-an-object"] }), {
+		ok: false,
+		reason: "invalid_field_type",
+		field: "files",
+	})
+	assert.deepEqual(validateWebviewRpcPayload("FileService", "searchCommits", "response", { results: [] }), {
+		ok: false,
+		reason: "missing_required_field",
+		field: "commits",
+	})
+	assert.deepEqual(validateWebviewRpcPayload("McpService", "toggleToolAutoApprove", "request", {
+		serverName: "server",
+		toolNames: ["one", 2],
+		autoApprove: true,
+	}), {
+		ok: false,
+		reason: "invalid_field_type",
+		field: "toolNames",
 	})
 })

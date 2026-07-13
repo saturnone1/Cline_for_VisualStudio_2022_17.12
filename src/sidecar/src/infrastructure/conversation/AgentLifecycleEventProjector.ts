@@ -1,5 +1,5 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
-import { contentToText } from "./ConversationSupport"
+import { contentToText } from "./SdkContentConversion"
 import { extractCompletionTextFromResult } from "./CompletionExtraction"
 import { normalizeUsageSnapshot } from "./UsageNormalization"
 
@@ -14,6 +14,7 @@ type Callbacks = Readonly<{
 	addError: (text: string) => void
 	finishTask: (sessionId: string, status: string, text?: string) => void
 	updateUsage: (usage: Usage) => void
+	recordContextUsage: (usage: Usage) => void
 	hasCompletion: () => boolean
 	activePartialText: () => string
 	hasAssistantAfterUser: () => boolean
@@ -70,7 +71,14 @@ export class AgentLifecycleEventProjector {
 
 	private failed(sessionId: string, reason: string) { this.callbacks.noteActivity(reason); this.finishRunProgress(); this.callbacks.finishTask(sessionId, "failed") }
 	private done(event: Extract<AgentEvent, { type: "AgentDone" }>) { this.callbacks.noteActivity("done"); this.finishTextProgress(); this.callbacks.finishTask(event.sessionId, "completed", extractCompletionTextFromResult(event.result, event.completion)) }
-	private usage(event: Extract<AgentEvent, { type: "UsageUpdated" }>) { this.callbacks.noteActivity("usage"); this.applyUsage({ ...event.usage, totalInputTokens: event.totalInputTokens, totalOutputTokens: event.totalOutputTokens, totalCacheReadTokens: event.totalCacheReadTokens, totalCacheWriteTokens: event.totalCacheWriteTokens, totalCost: event.totalCost ?? event.usage.totalCost ?? event.usage.cost }) }
+	private usage(event: Extract<AgentEvent, { type: "UsageUpdated" }>) {
+		this.callbacks.noteActivity("usage")
+		this.applyUsage({ ...event.usage, totalInputTokens: event.totalInputTokens, totalOutputTokens: event.totalOutputTokens, totalCacheReadTokens: event.totalCacheReadTokens, totalCacheWriteTokens: event.totalCacheWriteTokens, totalCost: event.totalCost ?? event.usage.totalCost ?? event.usage.cost })
+		const usage = normalizeUsageSnapshot(event.usage)
+		if (usage.reliable) {
+			this.callbacks.recordContextUsage({ tokensIn: usage.inputTokens, tokensOut: usage.outputTokens, cacheReads: usage.cacheReadTokens, cacheWrites: usage.cacheWriteTokens, totalCost: usage.totalCost })
+		}
+	}
 	private error(event: Extract<AgentEvent, { type: "AgentError" }>) { this.callbacks.noteActivity("error"); this.finishTextProgress(); const text = this.callbacks.formatError(event.error); this.callbacks.markErrorLatency(event.sessionId, text); this.callbacks.addError(text) }
 	private finishRunProgress() { this.callbacks.finishToolActivity(); this.finishTextProgress() }
 	private finishTextProgress() { this.callbacks.finishProgress(); this.callbacks.clearReasoning() }

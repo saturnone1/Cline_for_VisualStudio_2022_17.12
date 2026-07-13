@@ -12,7 +12,6 @@ import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { ModelsServiceClient } from "@/services/grpcClient"
-import { OPENROUTER_MODEL_PICKER_Z_INDEX } from "./OpenRouterModelPicker"
 import { AIhubmixProvider } from "./providers/AihubmixProvider"
 import { AnthropicProvider } from "./providers/AnthropicProvider"
 import { AskSageProvider } from "./providers/AskSageProvider"
@@ -56,6 +55,7 @@ import { WandbProvider } from "./providers/WandbProvider"
 import { XaiProvider } from "./providers/XaiProvider"
 import { ZAiProvider } from "./providers/ZAiProvider"
 import { DebouncedTextField } from "./common/DebouncedTextField"
+import { DROPDOWN_Z_INDEX, DropdownContainer } from "./common/ModelSelector"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
 
 interface ApiOptionsProps {
@@ -68,22 +68,6 @@ interface ApiOptionsProps {
 }
 
 // This is necessary to ensure dropdown opens downward, important for when this is used in popup
-export const DROPDOWN_Z_INDEX = OPENROUTER_MODEL_PICKER_Z_INDEX + 2 // Higher than the OpenRouterModelPicker's and ModelSelectorTooltip's z-index
-
-export const DropdownContainer = styled.div.withConfig({
-	shouldForwardProp: (prop) => prop !== "zIndex",
-})<{ zIndex?: number }>`
-	position: relative;
-	z-index: ${(props) => props.zIndex || DROPDOWN_Z_INDEX};
-
-	// Force dropdowns to open downward
-	& vscode-dropdown::part(listbox) {
-		position: absolute !important;
-		top: 100% !important;
-		bottom: auto !important;
-	}
-`
-
 const ApiOptions = ({
 	showModelOptions,
 	apiErrorMessage,

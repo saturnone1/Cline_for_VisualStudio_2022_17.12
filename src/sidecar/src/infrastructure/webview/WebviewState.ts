@@ -1,6 +1,6 @@
 import type { TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
 import { capabilityRegistry } from "../../application/services/CapabilityRegistry"
-import { normalizeClineMessagePayload, normalizeMcpDisplayMode } from "../conversation/ConversationSupport"
+import { normalizeClineMessagePayload, normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
 import {
 	isWebFetchEnabled,
 	normalizeApiConfiguration,

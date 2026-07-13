@@ -106,13 +106,13 @@ namespace VsClineAgent.Host.Adapters
             if (dispatcher == null || dispatcher.CheckAccess())
                 action();
             else
-                dispatcher.Invoke(action);
+                VisualStudioUiThread.Invoke(action);
         }
 
         private static T InvokeOnUiThread<T>(Func<T> action)
         {
             var dispatcher = Application.Current?.Dispatcher;
-            return dispatcher == null || dispatcher.CheckAccess() ? action() : dispatcher.Invoke(action);
+            return dispatcher == null || dispatcher.CheckAccess() ? action() : VisualStudioUiThread.Invoke(action);
         }
     }
 }

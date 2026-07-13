@@ -1,6 +1,6 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { WorkspacePort } from "../../application/ports/HostProviderPort"
-import { buildTerminalActivityText } from "./ConversationSupport"
+import { buildTerminalActivityText } from "./ToolActivityFormatting"
 
 export class TerminalActivityMonitor {
 	private timer: NodeJS.Timeout | null = null

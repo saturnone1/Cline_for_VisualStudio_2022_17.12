@@ -3,7 +3,7 @@ import {
 	isMeaninglessTextMessage,
 	isMeaninglessToolMessage,
 	normalizeClineMessagePayload,
-} from "./ConversationSupport"
+} from "./ConversationMessageProjection"
 
 type Message = Record<string, unknown>
 

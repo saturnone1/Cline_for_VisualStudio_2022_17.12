@@ -28,13 +28,14 @@ if (-not $MSBuildPath -and (Test-Path -LiteralPath "C:\BuildTools2022\MSBuild\Cu
 }
 
 if (-not $MSBuildPath -or -not (Test-Path -LiteralPath $MSBuildPath)) {
-    throw "Visual Studio 2022 MSBuild was not found. Pass -MSBuildPath explicitly."
+    throw "Visual Studio MSBuild was not found. Pass -MSBuildPath explicitly."
 }
 
 $installationRoot = Split-Path (Split-Path (Split-Path (Split-Path $MSBuildPath -Parent) -Parent) -Parent) -Parent
 $vsToolsPath = Join-Path $installationRoot "MSBuild\Microsoft\VisualStudio\v17.0"
 if (-not (Test-Path -LiteralPath $vsToolsPath)) {
-    throw "Visual Studio 2022 VSSDK targets were not found at $vsToolsPath"
+	$vsToolsPath = $null
+	Write-Host "Visual Studio 2022 VSSDK path is not installed; using the project's VSSDK BuildTools package."
 }
 
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory) {
@@ -81,9 +82,12 @@ foreach ($variant in $variants) {
         "/p:VsTarget=$($variant.Target)",
         "/p:Configuration=$Configuration",
         "/p:DeployExtension=false",
-        "/p:VSToolsPath=$vsToolsPath",
+		"/warnaserror",
         "/v:minimal"
     )
+	if ($vsToolsPath) {
+		$msbuildArguments += "/p:VSToolsPath=$vsToolsPath"
+	}
     Invoke-Checked $MSBuildPath $msbuildArguments $repoRoot
 
     $vsixPath = Join-Path $repoRoot "src\extension\bin\$($variant.Target)\$Configuration\$($variant.Vsix)"

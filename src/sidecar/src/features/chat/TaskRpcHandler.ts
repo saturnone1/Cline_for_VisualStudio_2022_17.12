@@ -31,7 +31,7 @@ type Callbacks = Readonly<{
 	compact: (requestId: string) => Promise<void>
 	cancel: () => Promise<void>
 	clear: () => Promise<void>
-	refreshHistory: (source: string) => void
+	refreshHistory: (source: string) => Promise<void>
 	history: () => readonly Record<string, unknown>[]
 	show: (taskId: string) => Promise<void>
 	delete: (taskIds: readonly string[]) => Promise<void>
@@ -56,8 +56,8 @@ export class TaskRpcHandler {
 			case "askResponse": await this.callbacks.respond(command.request, requestId); return empty()
 			case "compact": await this.callbacks.compact(requestId); return { payload: {}, includeStateMessages: true }
 			case "cancel": await this.callbacks.cancel(); return empty()
-			case "history": this.callbacks.refreshHistory("getTaskHistory"); return { payload: { tasks: this.callbacks.history() } }
-			case "historySize": this.callbacks.refreshHistory("getTotalTasksSize"); return { payload: { value: this.callbacks.history().length } }
+			case "history": await this.callbacks.refreshHistory("getTaskHistory"); return { payload: { tasks: this.callbacks.history() } }
+			case "historySize": await this.callbacks.refreshHistory("getTotalTasksSize"); return { payload: { value: this.callbacks.history().length } }
 			case "show": await this.callbacks.show(command.taskId); return empty()
 			case "delete": await this.callbacks.delete(command.taskIds); await this.callbacks.broadcast(); return empty()
 			case "deleteAll": await this.callbacks.deleteAll(); await this.callbacks.broadcast(); return empty()

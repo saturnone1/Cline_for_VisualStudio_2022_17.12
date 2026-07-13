@@ -127,6 +127,21 @@ function Invoke-RuntimeSmoke([string]$VsixPath, [string]$Label) {
                     rawJson = $webviewEnvelope
                 }
                 if ($webview.handled -ne $true -or @($webview.webviewMessages).Count -lt 1) { Fail "$Label initial WebView state RPC was not handled." }
+
+				$stateResponse = @($webview.webviewMessages | Where-Object {
+					$_.type -eq "grpc_response" -and $_.grpc_response.request_id -eq "state-smoke-1"
+				}) | Select-Object -First 1
+				if (-not $stateResponse) { Fail "$Label initial WebView state RPC returned no matching gRPC response." }
+				if ($stateResponse.protocol_version -ne 1 -or $stateResponse.grpc_response.is_streaming -ne $true) {
+					Fail "$Label initial WebView state RPC returned an invalid protocol or stream flag."
+				}
+				$stateJson = [string]$stateResponse.grpc_response.message.stateJson
+				if ([string]::IsNullOrWhiteSpace($stateJson)) { Fail "$Label initial WebView state RPC returned an empty stateJson payload." }
+				try { $initialState = $stateJson | ConvertFrom-Json }
+				catch { Fail "$Label initial WebView state RPC returned malformed stateJson: $($_.Exception.Message)" }
+				if ([string]::IsNullOrWhiteSpace([string]$initialState.version) -or -not $initialState.apiConfiguration) {
+					Fail "$Label initial WebView state RPC returned an incomplete initial state."
+				}
             }
             finally { $writer.Dispose(); $reader.Dispose() }
         }
