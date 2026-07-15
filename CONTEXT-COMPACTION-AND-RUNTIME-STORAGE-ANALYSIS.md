@@ -399,7 +399,150 @@ WebView2 브라우저 프로필은 다음 위치에 생성된다.
 - 설치/업데이트 도구에서 사용하지 않는 버전을 안전하게 제거한다.
 - 빌드 스크립트의 `.webview2-fixed-extract` 임시 폴더는 성공·실패와 무관하게 `finally`에서 정리한다.
 
-## 7. 현재 제공되는 수동 정리 경로
+## 7. Markdown 표가 포함된 대화 복사 실패
+
+### 관찰된 오류
+
+대화 내용을 선택해 복사할 때 다음 WebApp 오류가 발생했다.
+
+```text
+unhandledrejection: Cannot handle unknown node `table`
+
+Error: Cannot handle unknown node `table`
+    at ...
+    at Function.stringify (...)
+```
+
+진단 snapshot상 WebView와 Sidecar는 모두 정상 실행 중이었고 Sidecar 자체 오류도 없었다.
+
+```text
+WebView ready: True
+Loaded: True
+Sidecar running: True
+Last sidecar error: (none)
+```
+
+따라서 이 오류는 Sidecar, 모델 provider 또는 MCP 호출 문제가 아니라 WebView의 클립보드 변환 단계에서 발생한 프런트엔드 예외다. 같은 로그에 있는 `mcp-office`의 `fetch failed` 경고는 시간상 별도의 문제이며 `table` node stringify 실패의 원인이 아니다.
+
+### 재현 조건
+
+다음 조건에서 재현될 수 있다.
+
+1. assistant 메시지 등 대화 영역에 Markdown 표가 렌더링되어 HTML `<table>`이 존재한다.
+2. 사용자가 코드 블록이 아닌 일반 대화 영역을 선택한다.
+3. `Ctrl+C` 또는 copy 명령을 실행한다.
+4. WebView copy handler가 선택 HTML을 Markdown으로 되돌리려고 한다.
+
+표 전체가 아니라 선택 범위 안에 `<table>`, `<thead>`, `<tbody>`, `<tr>`, `<th>`, `<td>` 구조가 일부 포함된 경우에도 같은 변환 경로로 들어갈 수 있다.
+
+### 실제 코드 경로
+
+`src/webview/src/components/chat/ChatView.tsx`는 document 전역에 비동기 `copy` 이벤트 핸들러를 등록한다. 선택 영역이 `pre/code` 같은 plain-text 우선 영역이 아니면 다음 순서로 처리한다.
+
+```text
+Selection Range
+  → cloneContents()
+  → 임시 div.innerHTML
+  → convertHtmlToMarkdown(selectedHtml)
+  → clipboardData 또는 FileService.copyToClipboard
+```
+
+`convertHtmlToMarkdown()`은 `markdownUtils.ts`에서 다음 unified pipeline을 사용한다.
+
+```text
+rehype-parse
+  → rehype-remark
+  → remark-stringify
+```
+
+HTML parser가 `<table>`을 HAST로 만들고 `rehype-remark`가 이를 MDAST의 GFM `table` node로 변환한다. 그러나 마지막 출력 단계에는 기본 `remark-stringify`만 등록되어 있다. 기본 Markdown에는 표 문법이 없기 때문에 `remark-stringify`의 `mdast-util-to-markdown`은 별도 GFM table handler 없이는 `table` node를 직렬화하지 못한다.
+
+결국 다음 불일치가 직접 원인이다.
+
+```text
+입력/중간 AST: GFM table node 생성 가능
+출력 serializer: GFM table node handler 미등록
+결과: Cannot handle unknown node `table`
+```
+
+`remark-gfm`과 그 하위 의존성인 `mdast-util-gfm-table`은 이미 `src/webview/package.json` 및 lockfile에 설치되어 있다. 하지만 해당 HTML→Markdown 변환 pipeline에서는 import하거나 `.use(remarkGfm)`으로 등록하지 않는다. 즉 새 dependency가 없어서 생긴 문제가 아니라 기존 dependency를 변환 pipeline에 연결하지 않은 구성 오류다.
+
+### `unhandledrejection`이 되는 이유
+
+copy handler는 `async` 함수이지만 `convertHtmlToMarkdown()` 호출을 감싸는 `try/catch`가 없다.
+
+```text
+textToCopy = await convertHtmlToMarkdown(selectedHtml)
+```
+
+DOM의 `addEventListener("copy", asyncHandler)`는 반환된 Promise를 기다리거나 reject를 처리하지 않는다. 따라서 stringify 예외가 Promise rejection으로 빠져나가 전역 `unhandledrejection` 진단에 잡힌다.
+
+예외가 clipboard 설정 전에 발생하므로 다음 동작도 실행되지 않는다.
+
+- `e.clipboardData.setData("text/plain", textToCopy)`
+- `FileServiceClient.copyToClipboard(...)`
+- 명시적인 Markdown 복사 완료
+
+브라우저 기본 copy가 우연히 동작할 여지는 있지만 handler의 비동기 시점과 WebView clipboard 정책에 따라 아무 내용도 복사되지 않거나 예상과 다른 HTML/plain text가 복사될 수 있다. 사용자 관점에서는 대화 복사 기능 전체가 실패한다.
+
+### 영향 범위
+
+- Markdown 표를 포함한 assistant 응답 복사
+- 여러 메시지를 한 번에 선택할 때 그 안에 포함된 표
+- tool 또는 MCP 결과가 표 형태로 렌더링된 영역
+- 향후 GFM AST 확장 node를 생성하지만 stringify extension이 없는 다른 문법
+
+화면 렌더링은 `remark-gfm`을 사용하는 별도 Markdown 렌더러에서 정상일 수 있다. 따라서 “표는 화면에 잘 보이지만 복사할 때만 실패”하는 비대칭이 생긴다.
+
+### 권장 수정
+
+첫 번째 수정은 변환 pipeline의 parse/transform/stringify 기능 집합을 일치시키는 것이다.
+
+```ts
+import remarkGfm from "remark-gfm"
+
+const result = await unified()
+    .use(rehypeParse, { fragment: true })
+    .use(rehypeRemark)
+    .use(remarkGfm)
+    .use(remarkStringify, options)
+    .process(html)
+```
+
+`remark-gfm`이 table, strikethrough, task list, autolink literal 등 GFM node와 serialization extension을 함께 등록하므로 현재 설치된 package 조합과도 맞는다.
+
+두 번째로 copy handler에는 반드시 실패 fallback이 필요하다.
+
+```text
+HTML→Markdown 성공
+  → Markdown을 clipboard에 기록
+
+HTML→Markdown 실패
+  → selection.toString() plain text를 clipboard에 기록
+  → 진단 로그에 오류 종류만 기록
+  → 전역 unhandledrejection 방지
+```
+
+복사는 보조 기능이므로 Markdown 변환이 실패해도 사용자가 선택한 원문 텍스트까지 잃게 해서는 안 된다. fallback도 실패할 때만 브라우저 기본 copy를 유지해야 한다.
+
+### 필요한 테스트
+
+현재 `convertHtmlToMarkdown`에 대한 직접 회귀 테스트가 없다. 최소한 다음 테스트가 필요하다.
+
+1. `<table>`을 GFM pipe table로 변환한다.
+2. `thead`가 없는 단순 table도 예외 없이 변환한다.
+3. 셀 내부 emphasis, link, inline code를 보존한다.
+4. 일부 행/셀만 선택한 불완전 HTML fragment도 복사 가능하다.
+5. 변환기가 의도적으로 실패하면 `selection.toString()`으로 fallback한다.
+6. copy handler 실행 후 `unhandledrejection`이 발생하지 않는다.
+7. code block은 기존처럼 Markdown 재변환 없이 plain text로 복사한다.
+8. 한국어와 긴 셀 내용, 줄바꿈이 있는 셀을 처리한다.
+
+### 수정 우선순위
+
+이 문제는 데이터 손상이나 프로세스 충돌을 일으키지는 않지만, 정상적으로 렌더링된 대화 결과를 외부로 가져갈 수 없게 만들고 전역 WebApp 오류 화면까지 유발한다. 재현이 단순하고 수정 범위가 작으므로 P1 사용자 기능 결함으로 처리하는 것이 적절하다.
+
+## 8. 현재 제공되는 수동 정리 경로
 
 저장소에는 다음 정리 스크립트가 있다.
 
@@ -420,7 +563,7 @@ WebView2 브라우저 프로필은 다음 위치에 생성된다.
 
 수동으로 정리할 때는 반드시 Visual Studio와 관련 `node.exe`, `msedgewebview2.exe` 프로세스를 종료해야 한다. 실행 중 파일 잠금 때문에 삭제가 실패할 수 있다.
 
-## 8. 안전한 용량 조사 명령
+## 9. 안전한 용량 조사 명령
 
 다음 PowerShell은 파일을 삭제하지 않고 하위 폴더별 크기를 계산한다.
 
@@ -450,7 +593,7 @@ Get-ChildItem -LiteralPath $root -Directory -Force | ForEach-Object {
 
 WebView2 관련 디렉터리는 Visual Studio 확장 설치 경로에도 존재할 수 있으므로 `%LOCALAPPDATA%\Microsoft\VisualStudio\*\Extensions` 아래에서 `msedgewebview2.exe`와 `node_modules.zip`을 검색하면 중복 설치를 확인할 수 있다.
 
-## 9. 구현 우선순위 제안
+## 10. 구현 우선순위 제안
 
 ### P0: 기능 중단 방지
 
@@ -460,6 +603,7 @@ WebView2 관련 디렉터리는 Visual Studio 확장 설치 경로에도 존재�
 
 ### P1: 디스크 폭증 방지
 
+- GFM table serializer 등록과 대화 복사 plain-text fallback
 - 로그 보존기간과 총량 상한
 - Sidecar 삭제 실패 기록 및 다음 시작 재시도
 - WebView2Data 내부 캐시와 구버전 프로필 정리
