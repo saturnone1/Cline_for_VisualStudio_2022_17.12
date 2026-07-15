@@ -232,6 +232,181 @@ max(보정된 reported usage, 전체 visible conversation 추정값)
 
 최소 수정으로는 `Compacting context... + assistant text`만으로 성공 경계를 만드는 로직을 제거해야 한다. 다만 이것만 적용하면 잘못된 0 리셋은 사라져도 실제 압축 기능은 개선되지 않는다. 올바른 해결은 SDK history를 실제로 축약하고, 그 성공 결과를 영속적인 compaction metadata 및 새 usage snapshot과 함께 전달하는 것이다.
 
+### SDK 작업은 진행됐지만 재시작 전까지 UI에 나타나지 않은 사례
+
+추가로 확보한 실제 `settings.json` snapshot은 앞선 "컨텍스트 초과로 SDK 실행이 중단됐다"는 추정을 수정하게 한다. 해당 사례에서는 실행 당시 Visual Studio 대화창이 진행되지 않는 것처럼 보였지만, Visual Studio를 종료하고 다시 시작한 뒤 같은 SDK 세션에 들어가자 요청한 작업의 진행 기록과 결과가 나타났다.
+
+이 증거에 더 맞는 결론은 다음과 같다.
+
+```text
+SDK session 실행 및 영속 저장: 진행됨
+WebView live projection/state synchronization: 중간에 정지 또는 누락
+Visual Studio 재시작 후 SDK transcript hydration: 누락 결과 복구
+```
+
+Visual Studio가 꺼진 동안 Sidecar가 계속 실행됐다고 단정할 수는 없다. VSIX 종료 시 bundled Node 프로세스도 종료되는 것이 정상이다. 가장 가능성 높은 해석은 SDK가 종료 전에 이미 결과를 저장했지만 WebView가 그 결과를 표시하지 못했고, 재시작 후 영속 session을 다시 읽으면서 보이기 시작했다는 것이다.
+
+#### snapshot에서 확인된 구조적 증거
+
+snapshot에는 같은 task/session에 두 종류의 timestamp가 섞여 있었다.
+
+```text
+1700... 형태의 연속적이고 일정 간격인 timestamp
+1784... 형태의 실제 실행 시각 timestamp
+```
+
+`SdkMessageTranscriptProjection.sdkMessageTimestamp()`는 SDK message에 `ts`, `timestamp`, `createdAt`, `updatedAt`이 없을 때 다음 합성 시각을 만든다.
+
+```ts
+1_700_000_000_000 + (hashString(taskId) % 1_000_000_000) + index * 10
+```
+
+따라서 앞부분의 일정한 `1700...` timestamp는 SDK `readMessages()` 결과를 WebView용 `clineMessages`로 재구성한 흔적이다. 뒤쪽의 실제 시각 timestamp는 live projection 또는 wrapper가 나중에 추가한 메시지다. 하나의 persisted snapshot에 둘이 섞여 있다는 사실은 SDK transcript hydration 이후 로컬 메시지가 다시 덧붙었다는 강한 증거다.
+
+공개 문서에는 실제 사내 URL, 페이지 ID, 업무 본문을 포함하지 않는다. 진단에 필요한 구조만 요약하면 snapshot은 다음과 같았다.
+
+```text
+[합성 timestamp] SDK에서 복구한 task/user/assistant 대화
+[합성 timestamp] 내부 유지보수 압축 프롬프트가 user_feedback으로 저장됨
+[합성 timestamp] 모델이 만든 압축 요약
+[실제 timestamp] completion_result: 완료
+[실제 timestamp] 추가 압축 reasoning/text/usage
+[실제 timestamp] 새 user_feedback
+[실제 timestamp] partial reasoning: 응답 준비 중
+```
+
+마지막 상태가 `partial: true`인데도 별도의 `completion_result`가 앞부분에 존재했다. 이는 작업 전체 완료와 개별 SDK turn/hydration 완료가 혼동되고 있음을 보여준다.
+
+#### 실행 중 자동 재수화가 차단되는 문제
+
+`StateStreamRefreshCoordinator`는 state subscription 뒤 일정 시간 후 history와 선택 task를 갱신하도록 설계되어 있다. 그러나 composition의 skip 조건은 다음 의미다.
+
+```ts
+Boolean(currentTaskItem && sdk.activeSessionId)
+```
+
+현재 task와 active SDK session이 모두 있으면 scheduled refresh 전체를 건너뛴다. 바로 live event 누락 복구가 가장 필요한 활성 세션 동안 polling/reconciliation이 비활성화되는 셈이다.
+
+따라서 다음 상황이 가능하다.
+
+```text
+SDK는 계속 실행하고 transcript를 저장
+→ WebView가 일부 stream event를 놓침
+→ activeSessionId가 있으므로 scheduled refresh 생략
+→ UI는 누락 상태에서 계속 정지
+→ 재시작 전까지 SDK 저장 결과를 다시 읽지 않음
+```
+
+skip 조건은 중복 갱신과 선택 상태 덮어쓰기를 방지하려는 의도로 보이지만, event stream의 건강 상태나 마지막 수신 시각을 확인하지 않고 활성 세션이라는 이유만으로 무기한 생략한다.
+
+#### 메시지가 하나라도 있으면 선택 task 갱신을 중단하는 문제
+
+`TaskTranscriptHydrator.refreshSelected()`에도 강한 조기 반환 조건이 있다.
+
+```text
+live projection이 있으면 return
+현재 active session에 partial message가 있으면 return
+현재 active session에 message가 하나라도 있으면 return
+```
+
+마지막 조건 때문에 live projection flag가 이미 사라졌고 partial도 없더라도, 화면에 과거 메시지 하나만 있으면 SDK transcript를 다시 읽지 않는다. 즉 "일부 메시지는 있지만 최신 결과가 빠진" 전형적인 stale UI 상태를 정상 상태로 오인한다.
+
+사용자가 같은 task를 다시 선택하는 경로도 현재 task ID가 같고 메시지가 하나 이상이면 `showTaskWithId.currentStateFallback`으로 기존 state만 broadcast하고 SDK를 조회하지 않는다. UI에서 세션을 다시 눌러도 복구되지 않고 Visual Studio 전체 재시작 후에야 보일 수 있는 이유다.
+
+#### hydration이 무조건 `완료`를 추가하는 문제
+
+`TaskTranscriptHydrator.hydrateCurrent()`가 SDK transcript를 읽는 데 성공하면 `applyCompleted()`를 호출한다. 현재 composition의 `applyCompleted()`는 다음 작업을 수행한다.
+
+```text
+live partial/reasoning/tool 상태 초기화
+currentTaskItem과 clineMessages를 SDK projection으로 교체
+열린 partial 정리
+taskCompletion.addMarker("completed")
+snapshot 저장
+```
+
+여기서 SDK session의 실제 status, 마지막 assistant 결과, pending tool/approval, incomplete turn 여부를 확인하지 않고 항상 `completed` marker를 붙인다. snapshot에서 SDK 복구 메시지의 합성 timestamp 바로 뒤에 실제 시각의 `completion_result: 완료`가 나타난 것은 이 코드 경로와 정확히 일치한다.
+
+따라서 관찰된 `완료`는 모델이 "전체 업무가 완료됐다"고 답한 결과가 아닐 수 있다. wrapper가 "SDK transcript를 읽는 데 성공했다"를 "task completed"로 잘못 변환한 로컬 terminal marker일 수 있다.
+
+이 문제는 특히 다음 경로에서 발생할 수 있다.
+
+- 정상 run 완료 후 강제 hydration
+- Promise 오류 후 recovery hydration
+- 결과가 비어 있을 때 fallback hydration
+- 실행 도중 저장된 transcript를 복구하는 hydration
+
+hydration 성공과 task 완료는 서로 다른 상태인데 현재 구현은 둘을 결합한다.
+
+#### 재시작 시 lifecycle을 무조건 완료로 초기화하는 문제
+
+backend 생성 마지막에는 다음 의미로 lifecycle을 초기화한다.
+
+```ts
+currentTaskItem ? "completed" : "idle"
+```
+
+persisted `clineMessages`의 마지막 항목이 `partial: true`인지, 저장된 task가 `starting/streaming/waiting/failed`였는지, SDK session이 실제로 완료됐는지를 확인하지 않는다. `currentTaskItem`이 존재한다는 이유만으로 재시작 직후 lifecycle은 `completed`가 된다.
+
+따라서 재시작이 누락 transcript를 보여주는 동시에 잘못된 완료 상태도 강화할 수 있다. transcript 복구와 lifecycle 복구가 독립적으로 검증되어야 한다.
+
+#### session ID rebind 경합 가능성
+
+새 task는 먼저 wrapper 임시 ID로 만들어지고 SDK가 실제 session ID를 반환하거나 event로 알리면 `TaskSessionCoordinator.bindSession()`이 다음 항목을 새 ID로 옮긴다.
+
+- current task ID
+- task history ID
+- task snapshot key
+- latency trace
+
+이 과정 자체는 필요한 동작이다. 하지만 event filtering은 active SDK session ID와 current task ID를 기준으로 다른 session event를 무시한다. bind 이전·도중에 event 순서가 바뀌거나 이전 session ID가 active로 남아 있으면 유효한 이벤트가 stale event로 판단될 가능성이 있다.
+
+확정적인 원인으로 단정하려면 interaction log의 다음 event를 같은 correlation/session 기준으로 확인해야 한다.
+
+```text
+taskSessionIdRebound
+ignoredStaleSdkResult
+ignoredSupersededSdkResult
+stateHydration.selectedTaskSkipped
+stateHydrationRefreshFailed
+sdkMessagesHydrated
+taskLifecycleTransitionRejected
+```
+
+다만 이번 snapshot만으로도 "SDK에는 결과가 있는데 UI에는 없었다"는 불일치와 재수화 후 합성 timestamp/완료 marker 생성은 확인된다.
+
+#### 수정 방향
+
+1. 활성 session에서도 마지막 SDK event 수신 후 일정 시간이 지나면 read-only reconciliation을 수행한다.
+2. refresh skip을 `activeSessionId 존재`가 아니라 `stream healthy + 최근 event 수신 + projection revision 일치` 조건으로 바꾼다.
+3. SDK session에 transcript revision/message count/updatedAt이 있으면 로컬 값과 비교하고 차이가 있을 때만 hydrate한다.
+4. `currentMessages.length > 0`만으로 refresh를 막지 않는다.
+5. 같은 task를 다시 선택할 때 사용자가 강제 새로고침할 수 있는 경로를 제공한다.
+6. hydration은 메시지 교체만 담당하고 `completion_result`를 자동 추가하지 않는다.
+7. completion marker는 SDK의 명시적인 terminal status와 해당 run generation을 확인한 뒤 추가한다.
+8. task 전체 완료와 개별 turn 완료를 별도 상태와 UI 문구로 표현한다.
+9. 재시작 시 persisted lifecycle, 마지막 partial, SDK session status를 조합해 상태를 복원한다.
+10. 마지막 메시지가 partial이면 무조건 completed로 초기화하지 말고 SDK를 조회해 running/recovering/interrupted를 결정한다.
+11. session ID rebind 전후 event를 임시 alias map으로 허용하고, event sequence/revision으로 중복을 제거한다.
+12. WebView stream이 끊겨도 Sidecar 진행 여부와 마지막 SDK update 시각을 표시한다.
+13. "SDK 기록에서 새 결과 발견"과 "작업 완료"를 별개의 진단 event로 기록한다.
+
+#### 수정된 최종 진단
+
+앞서 관찰한 문제를 단순한 context-length 중단으로만 분류하면 안 된다. 현재까지의 증거가 지지하는 복합 실패는 다음과 같다.
+
+```text
+과대 컨텍스트와 가짜 압축 경계 문제
++ 수동 압축 프롬프트의 일반 user message 저장
++ SDK live event 누락 또는 UI projection 정지
++ 활성 session 중 reconciliation 비활성화
++ non-empty stale transcript refresh 차단
++ hydration 성공 시 무조건 완료 marker 추가
++ 재시작 시 current task를 무조건 completed로 초기화
+```
+
+따라서 P0 범위에는 컨텍스트 복구뿐 아니라 "SDK 영속 상태와 WebView live state의 자동 재동기화" 및 "완료 의미 수정"이 포함되어야 한다.
+
 ### 필요한 수정
 
 우선순위가 높은 수정은 다음과 같다.
@@ -600,6 +775,9 @@ WebView2 관련 디렉터리는 Visual Studio 확장 설치 경로에도 존재�
 - context-length 오류 전용 복구 압축
 - 대형 도구 결과의 모델 입력 전 제한
 - `AgentError` 이후 확실한 terminal state 전환
+- 활성 SDK session의 event 누락 감지와 자동 transcript reconciliation
+- hydration 성공과 task 완료 상태 분리
+- 재시작 시 persisted partial 및 SDK status 기반 lifecycle 복원
 
 ### P1: 디스크 폭증 방지
 
