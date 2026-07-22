@@ -9,6 +9,7 @@ const limits = new Map([
 	["src/i18n/index.ts", 100],
 	["src/components/clineRules/ClineRulesToggleModal.tsx", 300],
 	["src/components/worktrees/WorktreesView.tsx", 450],
+	["src/components/chat/checkpoints/CheckpointControl.tsx", 240],
 ])
 const requiredModules = [
 	"src/components/settings/utils/providerConfigurationNormalizer.ts",
@@ -21,7 +22,11 @@ const requiredModules = [
 	"src/components/clineRules/useClineRulesToggleModalController.ts",
 	"src/components/worktrees/WorktreeOperationDialogs.tsx",
 	"src/components/worktrees/useWorktreesViewController.ts",
+	"src/components/chat/checkpoints/CheckpointControl.styles.ts",
+	"src/components/chat/checkpoints/useCheckpointActions.ts",
 ]
+
+const forbiddenSourceNames = [/\.stashed\./i, /\.bak\./i, /\.old\./i, /\.tmp\./i]
 
 const violations = []
 for (const [relativePath, maximumLines] of limits) {
@@ -39,6 +44,12 @@ for (const relativePath of requiredModules) {
 
 const sourceRoot = path.join(root, "src")
 const sourceFiles = collectSourceFiles(sourceRoot)
+for (const filePath of sourceFiles) {
+	const relative = path.relative(root, filePath).replaceAll("\\", "/")
+	if (forbiddenSourceNames.some((pattern) => pattern.test(relative))) {
+		violations.push(`${relative} uses an archival filename inside active source. Delete it or move historical evidence under legacy/.`)
+	}
+}
 const sourceSet = new Set(sourceFiles)
 const importGraph = new Map()
 for (const filePath of sourceFiles) {

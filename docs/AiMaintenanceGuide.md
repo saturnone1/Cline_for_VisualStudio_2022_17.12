@@ -13,10 +13,12 @@ This repository favors explicit ownership and fast verification over architectur
 | Task history query and storage semantics | `src/sidecar/src/features/taskHistory` |
 | Cline SDK translation | `src/sidecar/src/infrastructure/sdk` |
 | WebView rendering and local interaction state | `src/webview/README.md`, then the owning component/context |
+| Checkpoint timeline UI | `src/webview/src/components/chat/checkpoints`; restore semantics remain in `src/sidecar/src/features/checkpoints` |
 | Visual Studio/WebView2/sidecar process lifecycle | `src/extension/README.md`, then `ToolWindows` or `Host` |
 | 17.0 versus 17.12 compatibility metadata | `packaging/vs2022-*` |
 
 Do not edit generated RPC files, `ProductVersionAssemblyInfo.cs`, or `artifacts/WebApp` by hand.
+Do not keep `.stashed`, `.bak`, `.old`, or `.tmp` files under active source. Delete dead code or move historical evidence to `legacy/` so code search has one authoritative implementation.
 
 ## Composition boundaries
 

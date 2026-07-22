@@ -20,7 +20,7 @@ import {
 	TriangleAlertIcon,
 } from "lucide-react"
 import type { MouseEvent, ReactNode, RefObject } from "react"
-import { CheckmarkControl } from "@/components/common/CheckmarkControl"
+import { CheckpointControl } from "./checkpoints/CheckpointControl"
 import { WithCopyButton } from "@/components/common/CopyButton"
 import McpResponseDisplay from "@/components/mcp/chatDisplay/McpResponseDisplay"
 import { useI18n } from "@/i18n"
@@ -227,7 +227,7 @@ export function SayMessageRenderer({
 		case "clineignore_error":
 			return <ErrorRow errorType="clineignore_error" message={message} />
 		case "checkpoint_created":
-			return <CheckmarkControl isCheckpointCheckedOut={message.isCheckpointCheckedOut} messageTs={message.ts} />
+			return <CheckpointControl isCheckpointCheckedOut={message.isCheckpointCheckedOut} messageTs={message.ts} />
 		case "load_mcp_documentation":
 			return (
 				<div className="text-foreground flex items-center opacity-70 text-[12px] py-1 px-0">

@@ -16,12 +16,19 @@ foreach ($relativePath in @("packaging\vs2022-17.0\source.extension.vsixmanifest
     if ($Check) {
         if ($actual -ne $version) { throw "$relativePath has version $actual; expected $version." }
     } elseif ($actual -ne $version) {
-        $manifest.PackageManifest.Metadata.Identity.Version = $version
-        $settings = [System.Xml.XmlWriterSettings]::new()
-        $settings.Indent = $true
-        $settings.Encoding = [System.Text.UTF8Encoding]::new($false)
-        $writer = [System.Xml.XmlWriter]::Create($path, $settings)
-        try { $manifest.Save($writer) } finally { $writer.Dispose() }
+        $content = [System.IO.File]::ReadAllText($path)
+        $identityPattern = '<Identity\b[^>]*\bVersion="[^"]*"[^>]*/>'
+        $identityMatches = [regex]::Matches($content, $identityPattern)
+        if ($identityMatches.Count -ne 1) {
+            throw "$relativePath must contain exactly one self-closing Identity element with a Version attribute."
+        }
+
+        $identity = $identityMatches[0].Value
+        $updatedIdentity = [regex]::Replace($identity, '\bVersion="[^"]*"', "Version=`"$version`"", 1)
+        $updated = $content.Substring(0, $identityMatches[0].Index) +
+            $updatedIdentity +
+            $content.Substring($identityMatches[0].Index + $identityMatches[0].Length)
+        [System.IO.File]::WriteAllText($path, $updated, [System.Text.UTF8Encoding]::new($false))
     }
 }
 
