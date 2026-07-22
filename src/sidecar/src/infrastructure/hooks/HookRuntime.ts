@@ -5,6 +5,8 @@ import { getSettingsPath } from "../persistence/LocalAutomationStore"
 import { normalizeHookName } from "../../features/hooks/HookPolicy"
 export { SUPPORTED_HOOK_NAMES, normalizeHookName } from "../../features/hooks/HookPolicy"
 import type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
+import { terminateChildProcessTree } from "../process/ChildProcessTree"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 export type { HookExecutionResult, HookLifecycleName, HookScript } from "../../application/dto/HookContracts"
 
 export function getGlobalHooksDirectory() {
@@ -95,7 +97,19 @@ export function removeHookToggle(source: "global" | "workspace", workspaceRoot: 
 	writeHookToggleStore(store)
 }
 
-export async function executeHookScript(hook: HookScript, context: Record<string, unknown>) {
+export class HookProcessRegistry {
+	private readonly active = new Set<childProcess.ChildProcess>()
+
+	track(process: childProcess.ChildProcess) { this.active.add(process); process.once("close", () => this.active.delete(process)) }
+	untrack(process: childProcess.ChildProcess) { this.active.delete(process) }
+	async cancelAll() {
+		const processes = [...this.active]
+		await Promise.all(processes.map((process) => terminateChildProcessTree(process)))
+		return processes.length
+	}
+}
+
+export async function executeHookScript(hook: HookScript, context: Record<string, unknown>, registry = new HookProcessRegistry()) {
 	const extension = path.extname(hook.path).toLowerCase()
 	const contextJson = JSON.stringify(context)
 	const cwd = getString(context, "workspaceRoot") || process.cwd()
@@ -129,13 +143,14 @@ export async function executeHookScript(hook: HookScript, context: Record<string
 			},
 			windowsHide: true,
 		})
+		registry.track(child)
 
 		const timer = setTimeout(() => {
 			if (settled) {
 				return
 			}
 			settled = true
-			child.kill()
+			void terminateChildProcessTree(child).catch(() => undefined)
 			resolve({
 				exitCode: -1,
 				stdout: truncateText(stdout, outputLimit),
@@ -156,6 +171,7 @@ export async function executeHookScript(hook: HookScript, context: Record<string
 			}
 			settled = true
 			clearTimeout(timer)
+			registry.untrack(child)
 			resolve({ exitCode: -1, stdout, stderr, error: error.message })
 		})
 		child.on("close", (code) => {
@@ -164,6 +180,7 @@ export async function executeHookScript(hook: HookScript, context: Record<string
 			}
 			settled = true
 			clearTimeout(timer)
+			registry.untrack(child)
 			resolve({ exitCode: code ?? 0, stdout: truncateText(stdout, outputLimit), stderr: truncateText(stderr, outputLimit) })
 		})
 		child.stdin?.end(contextJson)
@@ -179,10 +196,6 @@ function getString(record: Record<string, unknown>, key: string) {
 }
 function tryParseJson(value: string) {
 	try { return JSON.parse(value) as unknown } catch { return undefined }
-}
-function readPositiveIntEnv(name: string, fallback: number) {
-	const value = Number(process.env[name])
-	return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
 }
 function truncateText(value: string, maxChars: number) {
 	return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} chars]`

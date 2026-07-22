@@ -27,18 +27,24 @@ export function buildResumedConversationMessages(
 
 	const selected: Array<{ role: string; text: string }> = []
 	let totalChars = currentPrompt.length
-	for (let index = entries.length - 1; index >= 0 && selected.length < RESUMED_CONVERSATION_MAX_MESSAGES; index--) {
+	let hasUserBoundary = false
+	const boundaryReserve = Math.min(1_200, Math.max(300, Math.floor(maxChars * 0.25)))
+	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index]
-		const text = truncateText(entry.text, RESUMED_CONVERSATION_MAX_ENTRY_CHARS)
-		if (totalChars + text.length > maxChars) {
-			if (selected.length > 0) {
-				break
-			}
-			selected.unshift({ ...entry, text: truncateText(text, Math.max(1_000, maxChars - totalChars)) })
-			break
-		}
+		if (selected.length >= RESUMED_CONVERSATION_MAX_MESSAGES && hasUserBoundary) break
+		if (selected.length >= RESUMED_CONVERSATION_MAX_MESSAGES) continue
+
+		const remaining = Math.max(0, maxChars - totalChars)
+		const available = hasUserBoundary || entry.role === "User"
+			? remaining
+			: Math.max(0, remaining - boundaryReserve)
+		if (available <= 0) continue
+
+		const text = truncateText(entry.text, Math.min(RESUMED_CONVERSATION_MAX_ENTRY_CHARS, available))
 		selected.unshift({ ...entry, text })
 		totalChars += text.length
+		if (entry.role === "User") hasUserBoundary = true
+		if (totalChars >= maxChars && hasUserBoundary) break
 	}
 
 	while (selected.length > 0 && selected[0].role !== "User" && selected[0].role !== "Tool") {
@@ -117,6 +123,60 @@ export function resumedTranscriptTextForMessage(message: Record<string, unknown>
 		return `${label}\n${content}`
 	}
 	return normalizeAssistantTranscriptText(text)
+}
+
+export function buildCompactedConversationMessages(
+	messages: Array<Record<string, unknown>>,
+	excludeTrailingUserText = "",
+) {
+	const compactableMessages = withoutTrailingUserMessage(messages, excludeTrailingUserText)
+	const previousCompaction = findLatestStoredCompaction(compactableMessages)
+	const deltaMessages = previousCompaction ? compactableMessages.slice(previousCompaction.index + 1) : compactableMessages
+	const delta = buildCompleteConversationMessages(deltaMessages)
+	if (previousCompaction) {
+		return [
+			{ role: "context" as const, content: previousCompaction.summary },
+			...delta,
+		]
+	}
+	return delta
+}
+
+function findLatestStoredCompaction(messages: Array<Record<string, unknown>>) {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const contextCompaction = asRecord(messages[index].contextCompaction)
+		const summary = getString(contextCompaction, "summary").trim()
+		if (summary) return { index, summary }
+	}
+	return null
+}
+
+function withoutTrailingUserMessage(messages: Array<Record<string, unknown>>, text: string) {
+	const expected = normalizeTranscriptText(text)
+	if (!expected) return messages
+	const copy = [...messages]
+	for (let index = copy.length - 1; index >= 0; index--) {
+		const entry = clineMessageToResumedTranscriptEntry(copy[index])
+		if (!entry) continue
+		if (entry.role === "User" && normalizeTranscriptText(entry.text) === expected) copy.splice(index, 1)
+		if (entry.role === "User" || entry.role === "Assistant") break
+	}
+	return copy
+}
+
+function buildCompleteConversationMessages(messages: Array<Record<string, unknown>>) {
+	const entries = messages
+		.filter((message) => message.partial !== true)
+		.map(clineMessageToResumedTranscriptEntry)
+		.filter((entry): entry is { role: string; text: string } => Boolean(entry?.text))
+	return entries.map((entry) => ({
+		role: entry.role === "Assistant" ? "assistant" as const : "user" as const,
+		content: entry.role === "Tool"
+			? `Tool result:\n${entry.text}`
+			: entry.role === "System"
+				? `Previous session status:\n${entry.text}`
+				: entry.text,
+	}))
 }
 
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }

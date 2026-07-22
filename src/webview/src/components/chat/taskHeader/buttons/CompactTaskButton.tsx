@@ -8,13 +8,15 @@ const CompactTaskButton: React.FC<{
 	disabled?: boolean
 	onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
 	showLabel?: boolean
-}> = ({ onClick, className, disabled = false, showLabel = false }) => {
+	language?: "en" | "ko"
+}> = ({ onClick, className, disabled = false, showLabel = false, language = "en" }) => {
+	const label = language === "ko" ? "대화 압축" : "Compact conversation"
 	return (
 		<Tooltip>
-			<TooltipContent side="left">Compact Task</TooltipContent>
+			<TooltipContent side="left">{label}</TooltipContent>
 			<TooltipTrigger asChild className={cn("flex items-center", className)}>
 				<Button
-					aria-label="Compact Task"
+					aria-label={label}
 					className={cn("[&_svg]:size-3", showLabel && "px-2 h-6 text-xs")}
 					disabled={disabled}
 					onClick={(e) => {
@@ -28,7 +30,7 @@ const CompactTaskButton: React.FC<{
 					size={showLabel ? "xs" : "icon"}
 					variant={showLabel ? "ghost" : "icon"}>
 					<FoldVerticalIcon />
-					{showLabel && <span>Compact</span>}
+					{showLabel && <span>{label}</span>}
 				</Button>
 			</TooltipTrigger>
 		</Tooltip>

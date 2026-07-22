@@ -1,50 +1,65 @@
-import type { SendMessageCommand } from "../sendMessage/SendMessageCommand"
+import type { AgentCompactSessionRequest } from "../../../application/ports/AgentEnginePort"
 
+type CompactionResult = Readonly<{ sessionId: string; messagesAfter: number; estimatedTokensAfter: number; summary: string }>
 type Callbacks = Readonly<{
 	isRuntimeAvailable: () => boolean
 	activeSessionId: () => string
 	selectedSessionId: () => string
 	language: () => "en" | "ko"
-	mode: () => "plan" | "act"
-	addError: (text: string) => void
 	transitionStarting: () => void
-	startLatency: (requestId: string, sessionId: string, textLength: number) => void
 	showProgress: (text: string) => void
 	persist: () => void
 	broadcast: () => Promise<void>
-	nextGeneration: () => number
-	currentGeneration: () => number
-	send: (sessionId: string, command: SendMessageCommand, textLength: number) => Promise<unknown>
-	resultSessionId: (result: unknown, fallback: string) => string
-	complete: (result: unknown, sessionId: string, generation: number) => Promise<void>
-	recover: (sessionId: string, generation: number, error: unknown) => Promise<void>
+	buildRequest: (sourceSessionId: string, excludeTrailingUserText: string, signal?: AbortSignal) => Promise<AgentCompactSessionRequest>
+	compact: (request: AgentCompactSessionRequest) => Promise<unknown>
+	result: (result: unknown) => CompactionResult
+	applySuccess: (sourceSessionId: string, result: CompactionResult, messagesBefore: number, messagesAfter: number) => Promise<void>
+	applyFailure: (error: unknown) => Promise<void>
+	messageCount: () => number
 	log: (event: string, details: Record<string, unknown>) => void
 }>
 
 export class CompactSessionFlow {
+	private inFlight = false
+
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async execute(requestId: string) {
+	async execute(requestId: string, excludeTrailingUserText = "", signal?: AbortSignal): Promise<string | undefined> {
+		if (this.inFlight) return undefined
 		if (!this.callbacks.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
-		const sessionId = this.callbacks.activeSessionId() || this.callbacks.selectedSessionId(), language = this.callbacks.language()
-		if (!sessionId) { this.callbacks.addError(language === "en" ? "No active session to compact." : "압축할 활성 세션이 없습니다."); await this.callbacks.broadcast(); return }
-		const prompt = language === "en" ? "Internal maintenance request: compact the current conversation context for future turns. Preserve the user's goals, important decisions, file paths, errors, pending tasks, and current state. Do not treat this as a user feature request." : "내부 유지보수 요청: 이후 대화를 위해 현재 대화 컨텍스트를 압축해 주세요. 사용자의 목표, 중요한 결정, 파일 경로, 오류, 남은 작업, 현재 상태를 보존하세요. 이것을 사용자의 일반 기능 요청으로 처리하지 마세요."
+		const sourceSessionId = this.callbacks.activeSessionId() || this.callbacks.selectedSessionId()
+		if (!sourceSessionId) {
+			await this.callbacks.applyFailure(new Error(this.callbacks.language() === "en" ? "No active session to compact." : "압축할 활성 세션이 없습니다."))
+			return undefined
+		}
+
+		this.inFlight = true
+		const messagesBefore = this.callbacks.messageCount()
 		this.callbacks.transitionStarting()
-		this.callbacks.startLatency(requestId, sessionId, prompt.length)
-		this.callbacks.showProgress(language === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
+		this.callbacks.showProgress(this.callbacks.language() === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
 		this.callbacks.persist()
 		await this.callbacks.broadcast()
-		const command: SendMessageCommand = { sessionId, prompt, mode: this.callbacks.mode() }
-		const generation = this.callbacks.nextGeneration()
-		void Promise.resolve()
-			.then(() => this.callbacks.send(sessionId, command, prompt.length))
-			.then((result) => this.callbacks.complete(result, this.callbacks.resultSessionId(result, sessionId), generation))
-			.catch(async (error) => {
-				const currentRunGeneration = this.callbacks.currentGeneration()
-				if (generation !== currentRunGeneration) { this.callbacks.log("ignoredSupersededSdkError", { source: "compact", sessionId, runGeneration: generation, currentRunGeneration, error: stringify(error) }); return }
-				await this.callbacks.recover(sessionId, generation, error)
-			})
+
+		try {
+			throwIfAborted(signal)
+			const command = await this.callbacks.buildRequest(sourceSessionId, excludeTrailingUserText, signal)
+			const result = await this.callbacks.compact(command)
+			throwIfAborted(signal)
+			const compacted = this.callbacks.result(result)
+			const sessionId = compacted.sessionId
+			if (!sessionId || sessionId === sourceSessionId) throw new Error("SDK did not create a replacement session for context compaction.")
+			this.callbacks.log("contextCompactionSessionCreated", { requestId, sourceSessionId, sessionId, messagesBefore, initialMessages: command.initialMessages.length })
+			await this.callbacks.applySuccess(sourceSessionId, compacted, messagesBefore, compacted.messagesAfter)
+			return sessionId
+		} catch (error) {
+			this.callbacks.log("contextCompactionFailed", { requestId, sourceSessionId, error: stringify(error) })
+			await this.callbacks.applyFailure(error)
+			return undefined
+		} finally {
+			this.inFlight = false
+		}
 	}
 }
 
 function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }
+function throwIfAborted(signal?: AbortSignal) { if (signal?.aborted) throw new Error("Context compaction was cancelled.") }

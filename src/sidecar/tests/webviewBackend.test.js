@@ -39,7 +39,7 @@ test("webview backend forwards external URLs and returns the matching gRPC respo
 	assert.deepEqual(openedUrls, ["https://example.com"])
 	assert.equal(result.handled, true)
 	assert.equal(result.webviewMessages[0].grpc_response.request_id, "url-1")
-	backend.dispose()
+	await backend.dispose()
 })
 
 test("webview backend registers and cancels state streams without stale responses", async () => {
@@ -50,12 +50,12 @@ test("webview backend registers and cancels state streams without stale response
 	const cancelled = await backend.handle({ type: "grpc_request_cancel", requestId: "state-1" })
 	assert.equal(cancelled.handled, true)
 	assert.deepEqual(cancelled.webviewMessages, [])
-	backend.dispose()
+	await backend.dispose()
 })
 
-test("webview backend flushes the latest state exactly once when disposed", () => {
+test("webview backend flushes the latest state exactly once when disposed", async () => {
 	const { backend, saved } = createBackend()
-	backend.dispose()
+	await backend.dispose()
 	assert.equal(saved.length, 1)
 	assert.equal(saved[0].mode, "act")
 })

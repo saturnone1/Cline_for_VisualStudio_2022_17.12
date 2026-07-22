@@ -43,6 +43,24 @@ namespace VsClineAgent.Host.Tests
             }
         }
 
+		[Fact]
+		public void HighestPackagedFixedRuntimeVersionIsSelected()
+		{
+			using (var directory = new TemporaryDirectory())
+			{
+				var root = Path.Combine(directory.Path, "WebView2Runtime");
+				var older = Path.Combine(root, "Microsoft.WebView2.FixedVersionRuntime.120.0.1.0.x64");
+				var newer = Path.Combine(root, "Microsoft.WebView2.FixedVersionRuntime.148.0.3967.96.x64");
+				Directory.CreateDirectory(older);
+				Directory.CreateDirectory(newer);
+				File.WriteAllBytes(Path.Combine(older, "msedgewebview2.exe"), new byte[] { 1 });
+				File.WriteAllBytes(Path.Combine(newer, "msedgewebview2.exe"), new byte[] { 1 });
+
+				var packaged = WebView2RuntimeResolver.GetWebView2RuntimeCandidates(directory.Path).Single(candidate => candidate.Label == "Bundled Fixed");
+				Assert.Equal(newer, packaged.BrowserExecutableFolder);
+			}
+		}
+
         private sealed class TemporaryDirectory : IDisposable
         {
             public TemporaryDirectory()

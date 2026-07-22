@@ -1,0 +1,23 @@
+const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const os = require("node:os")
+const path = require("node:path")
+const test = require("node:test")
+const { cleanupInteractionLogs } = require("../dist/infrastructure/diagnostics/InteractionLog")
+
+test("interaction log retention preserves the current file while enforcing age and total size", (t) => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "vscline-log-retention-"))
+	t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+	const current = path.join(root, "interaction-20260715.jsonl")
+	const recent = path.join(root, "interaction-20260714.jsonl")
+	const old = path.join(root, "interaction-20260601.jsonl")
+	for (const file of [current, recent, old]) fs.writeFileSync(file, "x".repeat(10))
+	const now = Date.now()
+	fs.utimesSync(old, new Date(now - 30 * 86400000), new Date(now - 30 * 86400000))
+	fs.utimesSync(recent, new Date(now - 86400000), new Date(now - 86400000))
+
+	cleanupInteractionLogs(root, current, now, 14, 15)
+	assert.equal(fs.existsSync(current), true)
+	assert.equal(fs.existsSync(old), false)
+	assert.equal(fs.existsSync(recent), false)
+})

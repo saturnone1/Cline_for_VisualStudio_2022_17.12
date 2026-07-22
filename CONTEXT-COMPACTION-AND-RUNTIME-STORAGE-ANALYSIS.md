@@ -7,6 +7,25 @@
 1. 대화 컨텍스트가 모델 한도를 넘은 뒤 수동 압축도 같은 컨텍스트 길이 오류로 실패하는 문제
 2. `%LOCALAPPDATA%\VsClineAgent` 아래 로그, Sidecar, WebView2 관련 폴더가 계속 커지는 문제
 
+## 구현 상태 (2026-07-15)
+
+이 문서의 원인 분석은 장애 당시의 동작을 설명하기 위해 그대로 보존한다. 현재 공통 소스에는 다음 수정이 반영되어 있다.
+
+- 수동 압축은 기존 세션에 유지보수 프롬프트를 보내지 않는다. 제한된 로컬 continuation context로 새 SDK 세션을 만들고 기존 task를 새 session ID에 연결한다.
+- context-length 및 음수 `max_tokens` 오류는 별도로 식별한다. 마지막 사용자 요청을 압축 입력에서 제외한 뒤 새 세션에서 한 번 재전송하며, worker request limit 같은 무관한 오류는 복구 압축으로 오인하지 않는다.
+- 압축 성공 경계와 active context 사용량은 문자열이 아닌 `contextCompaction` metadata로 기록한다. archival transcript는 화면에 남지만 사용량 계산에서는 압축 경계 이전 내용을 제외한다.
+- 파일 읽기와 검색 도구 결과는 모델 입력 전에 head/tail 방식으로 제한한다.
+- `AgentError`는 즉시 `failed` terminal state로 전환하며, 이후 도착한 Promise rejection 복구가 완료/실패 상태를 덮지 않는다.
+- 활성 SDK 세션도 주기적으로 transcript를 재조회해 누락된 final response를 병합한다. hydration과 완료 표시는 분리되며 SDK status와 task lifecycle을 재동기화한다.
+- GFM table serializer와 plain-text 복사 fallback을 추가했다.
+- interaction log는 보존 기간과 총량 상한을 적용한다. settings와 bounded transcript는 별도 파일에 저장한다.
+- Sidecar는 현재 버전과 직전 버전만 보존하고 삭제 실패를 기록해 다음 시작에 재시도한다.
+- WebView2는 안정적인 profile schema 경로를 사용하며 HTTP/Code/GPU cache, 실패한 profile, 비활성 profile을 정리한다. Fixed Runtime은 검증된 최신 버전 하나만 선택·보존한다.
+
+회귀 검증은 Sidecar 155개, WebView 221개, .NET host 52개 테스트로 수행했다. 공통 소스에서 생성한 Visual Studio 2022 17.0/17.12 VSIX는 package validation, 236개 공통 payload parity, 번들 Node sidecar `health.ping`, 초기 WebView state RPC smoke를 통과했다.
+
+진단/캐시 용량 UI, 작업별 완전한 지연 로딩 저장소, content-addressed Sidecar dependency cache는 장애 해결에 필수적인 보존 정책 이후의 장기 P2 개선 항목으로 남긴다.
+
 분석 기준은 2026-07-15의 `main` 브랜치이며, 관련 핵심 코드는 다음 위치에 있다.
 
 - `src/sidecar/src/features/chat/runtime/CompactSessionFlow.ts`

@@ -1,3 +1,5 @@
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+
 export function getCommandText(input: Record<string, unknown>) {
 	const command = getString(input, "command")
 	if (command) {
@@ -368,4 +370,3 @@ function getStringArray(value: unknown, key: string) { const item = asRecord(val
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
 function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

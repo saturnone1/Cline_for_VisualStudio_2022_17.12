@@ -6,6 +6,7 @@ import { MessageHandlers } from "../../types/chatTypes"
 
 interface TaskSectionProps {
 	task: ClineMessage
+	messages: ClineMessage[]
 	apiMetrics: {
 		totalTokensIn: number
 		totalTokensOut: number
@@ -15,6 +16,8 @@ interface TaskSectionProps {
 	}
 	contextWindowUsage?: ContextWindowUsage
 	compactResetKey?: number
+	contextCompactionInProgress?: boolean
+	contextCompactionThreshold?: number
 	lastApiReqTotalTokens?: number
 	selectedModelInfo: {
 		supportsPromptCache: boolean
@@ -31,9 +34,12 @@ interface TaskSectionProps {
  */
 export const TaskSection: React.FC<TaskSectionProps> = ({
 	task,
+	messages,
 	apiMetrics,
 	contextWindowUsage,
 	compactResetKey,
+	contextCompactionInProgress,
+	contextCompactionThreshold,
 	lastApiReqTotalTokens,
 	selectedModelInfo,
 	messageHandlers,
@@ -46,9 +52,12 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 			cacheWrites={apiMetrics.totalCacheWrites}
 			doesModelSupportPromptCache={selectedModelInfo.supportsPromptCache}
 			compactResetKey={compactResetKey}
+			contextCompactionInProgress={contextCompactionInProgress}
+			contextCompactionThreshold={contextCompactionThreshold}
 			contextWindowUsage={contextWindowUsage}
 			lastApiReqTotalTokens={lastApiReqTotalTokens}
 			lastProgressMessageText={lastProgressMessageText}
+			messages={messages}
 			onCompact={messageHandlers.handleCompactTask}
 			onClose={messageHandlers.handleTaskCloseButtonClick}
 			showFocusChainPlaceholder={showFocusChainPlaceholder}

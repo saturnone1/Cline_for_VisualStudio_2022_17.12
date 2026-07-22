@@ -7,6 +7,7 @@ type LifecycleEvent = Extract<AgentRuntimeEvent, { type: "status" | "ended" }>
 
 type Callbacks = Readonly<{
 	transitionStreaming: (source: string) => void
+	adoptReplacement: (sessionId: string) => boolean
 	shouldIgnore: (sessionId: string) => boolean
 	markFirstEvent: (sessionId: string, eventType: string) => void
 	projectAgent: (event: AgentEvent, sessionId: string) => void
@@ -54,10 +55,14 @@ export class AgentRuntimeEventDispatcher {
 			this.callbacks.projectAuxiliary(event)
 			return
 		}
-		if (event.type === "status" || event.type === "ended") this.callbacks.projectLifecycle(event)
+		if (event.type === "status" || event.type === "ended") {
+			if (this.ignore(event.sessionId, "ignoredSdkLifecycleEvent")) return
+			this.callbacks.projectLifecycle(event)
+		}
 	}
 
 	private ignore(sessionId: string, logEvent = "") {
+		this.callbacks.adoptReplacement(sessionId)
 		if (!this.callbacks.shouldIgnore(sessionId)) return false
 		if (logEvent) this.callbacks.log(logEvent, { sessionId, activeSessionId: this.callbacks.activeSessionId(), currentTaskId: this.callbacks.currentTaskId() })
 		return true

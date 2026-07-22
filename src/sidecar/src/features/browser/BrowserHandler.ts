@@ -128,6 +128,8 @@ export class BrowserHandler {
 		})
 	}
 
+	cancelActive() { return this.automation.cancelActive() }
+
 	private async runWithSession(host: string, request: BrowserAction) {
 		this.pruneSessions()
 		const normalizedHost = normalizeBrowserDebugHost(host)

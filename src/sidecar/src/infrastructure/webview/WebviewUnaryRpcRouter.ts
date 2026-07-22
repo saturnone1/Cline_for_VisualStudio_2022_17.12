@@ -41,11 +41,23 @@ type Dependencies = Readonly<{
 
 type UnaryRoute = Exclude<WebviewRpcSidecarRoute, "stream">
 type UnaryRouteResult = ReturnType<typeof grpcHandled> | null
-type UnaryRouteHandler = (key: string, requestId: string, message: unknown) => Promise<UnaryRouteResult>
+type UnaryRouteHandler = (key: string, requestId: string, message: unknown, signal: AbortSignal) => Promise<UnaryRouteResult>
 type UnaryRouteRegistry = Record<UnaryRoute, UnaryRouteHandler>
+
+export class WebviewRpcRequestCancelledError extends Error {
+	constructor(readonly requestId: string) {
+		super(`WebView RPC request was cancelled: ${requestId}`)
+		this.name = "WebviewRpcRequestCancelledError"
+	}
+}
+
+export function isWebviewRpcRequestCancelledError(error: unknown): error is WebviewRpcRequestCancelledError {
+	return error instanceof WebviewRpcRequestCancelledError
+}
 
 export class WebviewUnaryRpcRouter {
 	private readonly routes: UnaryRouteRegistry
+	private readonly activeRequests = new Map<string, AbortController>()
 
 	constructor(private readonly dependencies: Dependencies) {
 		const d = dependencies
@@ -66,9 +78,9 @@ export class WebviewUnaryRpcRouter {
 				const command = decodeTerminalRpcCommand(key, message)
 				return command ? this.withOptionalState(requestId, await d.terminal.handle(command)) : null
 			},
-			task: async (key, requestId, message) => {
+			task: async (key, requestId, message, signal) => {
 				const command = decodeTaskRpcCommand(key, message)
-				return command ? this.withOptionalState(requestId, await d.task.handle(command, requestId)) : null
+				return command ? this.withOptionalState(requestId, await d.task.handle(command, requestId, signal)) : null
 			},
 			checkpoint: async (key, requestId, message) => {
 				const command = decodeCheckpointRpcCommand(key, message)
@@ -112,7 +124,28 @@ export class WebviewUnaryRpcRouter {
 		const operation = separator > 0 ? webviewRpcOperation(key.slice(0, separator), key.slice(separator + 1)) : undefined
 		const route = operation && "route" in operation ? operation.route : undefined
 		if (!route || route === "stream") return null
-		return this.routes[route](key, requestId, message)
+		const controller = new AbortController()
+		this.activeRequests.get(requestId)?.abort()
+		this.activeRequests.set(requestId, controller)
+		try {
+			const result = await this.routes[route](key, requestId, message, controller.signal)
+			if (controller.signal.aborted) throw new WebviewRpcRequestCancelledError(requestId)
+			return result
+		} catch (error) {
+			if (controller.signal.aborted && !isWebviewRpcRequestCancelledError(error)) {
+				throw new WebviewRpcRequestCancelledError(requestId)
+			}
+			throw error
+		} finally {
+			if (this.activeRequests.get(requestId) === controller) this.activeRequests.delete(requestId)
+		}
+	}
+
+	cancel(requestId: string) {
+		const controller = this.activeRequests.get(requestId)
+		if (!controller) return false
+		controller.abort()
+		return true
 	}
 
 	private async handleMcp(key: string, requestId: string, message: unknown) {

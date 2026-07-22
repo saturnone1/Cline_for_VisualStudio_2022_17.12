@@ -29,7 +29,7 @@ export class RuntimeStatusEventProjector {
 		this.callbacks.markFirstEvent(event.sessionId, `status:${event.status}`)
 		if (event.status === "idle") {
 			this.callbacks.log("sdkStatusIdle", { sessionId: event.sessionId })
-			this.finish(event.sessionId, "completed")
+			this.callbacks.noteActivity("idle")
 			return
 		}
 		if (isTerminalTaskStatus(event.status)) {

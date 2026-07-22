@@ -79,16 +79,36 @@ const facade = fs.readFileSync(facadePath, "utf8")
 if (facade.split(/\r?\n/).length > 200 || !facade.includes("WebviewBackendComposition")) {
 	violations.push("VisualStudioWebviewBackend must remain a thin composition/dispatch facade (200 lines maximum).")
 }
+
+const maintenanceRepositoryRoot = path.resolve(sourceRoot, "..", "..", "..")
+for (const ownershipDocument of ["src/webview/README.md", "src/extension/README.md", "src/shared/README.md"]) {
+	const documentPath = path.join(maintenanceRepositoryRoot, ownershipDocument)
+	if (!fs.existsSync(documentPath)) {
+		violations.push(`${ownershipDocument} is required for cross-runtime AI ownership guidance.`)
+		continue
+	}
+	const document = fs.readFileSync(documentPath, "utf8")
+	for (const marker of ["Inputs:", "Outputs:", "Owned state:", "Feature owners:", "Tests:"]) {
+		if (!document.includes(marker)) violations.push(`${ownershipDocument} is missing ${marker}`)
+	}
+}
+const documentationIndex = fs.readFileSync(path.join(maintenanceRepositoryRoot, "docs", "README.md"), "utf8")
+if (!documentationIndex.includes("AiMaintenanceGuide.md")) {
+	violations.push("docs/README.md must point AI maintainers to AiMaintenanceGuide.md.")
+}
 if (facade.includes("createInitialState(") || facade.includes("new WebviewUnaryRpcRouter") || facade.includes("new AgentRuntimeEventDispatcher")) {
 	violations.push("VisualStudioWebviewBackend must not rebuild state, RPC routing, or runtime event composition.")
 }
 const routerPath = path.join(sourceRoot, "infrastructure", "webview", "WebviewBackendComposition.ts")
 const router = fs.readFileSync(routerPath, "utf8")
-if (router.split(/\r?\n/).length > 750) {
-	violations.push("WebviewBackendComposition must remain bounded while state/session slices are extracted (750 lines maximum).")
-}
 for (const collaborator of ["WebviewFeatureRegistry", "WebviewRpcIngress", "WebviewRuntimeEventIngress", "WebviewStreamPublisher", "StateStreamRefreshCoordinator"]) {
 	if (!router.includes(collaborator)) violations.push(`WebviewBackendComposition must delegate to ${collaborator}.`)
+}
+for (const focusedComposition of ["createWebviewRpcComposition", "createTaskHistoryComposition", "createContextCompactionFlow"]) {
+	if (!router.includes(focusedComposition)) violations.push(`WebviewBackendComposition must retain focused wiring through ${focusedComposition}.`)
+}
+for (const migratedField of ["settingsRpc", "accountRpc", "browserRpc", "terminalRpc", "taskRpc", "checkpointRpc", "hookRpc", "scheduledAgentRpc", "worktreeRpc", "modelCatalogRpc", "fileRpc", "instructionSettingsRpc", "uiWebRpc", "pluginRpc"]) {
+	if (router.includes(`private readonly ${migratedField}`)) violations.push(`WebviewBackendComposition must not restore transient RPC handler field ${migratedField}.`)
 }
 const unaryRouter = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewUnaryRpcRouter.ts"), "utf8")
 for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPort", "InteractionLoggerPort"]) {
@@ -96,6 +116,18 @@ for (const marker of ["HostProviderPort", "AgentEnginePort", "WebviewTransportPo
 }
 if (router.includes("VisualStudioHostProvider") || router.includes("sendHostRequest(")) {
 	violations.push("VisualStudioWebviewBackend must not reference concrete host or transport implementations.")
+}
+
+const connectionFactory = fs.readFileSync(path.join(sourceRoot, "bootstrap", "SidecarConnectionFactory.ts"), "utf8")
+if (!connectionFactory.includes("satisfies RuntimeWebviewFeatures") || !connectionFactory.includes("configureFeatures(features)")) {
+	violations.push("SidecarConnectionFactory must atomically configure a compile-time complete RuntimeWebviewFeatures object.")
+}
+if (/\.set[A-Z][A-Za-z]+Handler\(/.test(connectionFactory)) {
+	violations.push("SidecarConnectionFactory must not restore piecemeal feature setter injection.")
+}
+const featureRegistry = fs.readFileSync(path.join(sourceRoot, "infrastructure", "webview", "WebviewFeatureRegistry.ts"), "utf8")
+if (!featureRegistry.includes("complete(features: RuntimeWebviewFeatures)") || !featureRegistry.includes("private sealed = false")) {
+	violations.push("WebviewFeatureRegistry must reject partial or repeated runtime feature configuration.")
 }
 const unaryHandler = router.match(/private async handleUnaryRequest[\s\S]*?\n\t}\n\n\tprivate disposeStreamRequest/)?.[0] || ""
 if (unaryHandler.includes("switch (key)")) {
@@ -402,193 +434,13 @@ if (router.includes("function createProviderAuthInfo") || router.includes("funct
 	violations.push("VisualStudioWebviewBackend must delegate provider authentication support to ProviderAuthSupport.")
 }
 
-for (const requiredFile of [
-	"domain/agent/AgentRuntimeEvent.ts",
-	"domain/agent/AgentSessionState.ts",
-	"infrastructure/sdk/ClineSdkEventTranslator.ts",
-	"application/ports/AgentEnginePort.ts",
-	"application/ports/BrowserAutomationPort.ts",
-	"application/ports/WorktreeOperationsPort.ts",
-	"application/ports/OAuthCallbackListenerPort.ts",
-	"application/ports/OAuthAuthorizationPort.ts",
-	"application/ports/OAuthTokenExchangePort.ts",
-	"application/ports/ProviderCredentialEnvironmentPort.ts",
-	"application/ports/ProviderAuthUiPort.ts",
-	"application/ports/ScheduledAgentStorePort.ts",
-	"application/ports/HookStorePort.ts",
-	"application/ports/HookExecutionPort.ts",
-	"application/dto/HookContracts.ts",
-	"application/dto/OAuthContracts.ts",
-	"features/mcp/McpHandler.ts",
-	"features/mcp/McpRpcHandler.ts",
-	"application/useCases/StatePersistenceUseCase.ts",
-	"application/useCases/TaskLifecycleUseCase.ts",
-	"application/useCases/TaskSessionUseCase.ts",
-	"infrastructure/persistence/JsonStateStore.ts",
-	"infrastructure/persistence/LocalScheduledAgentStore.ts",
-	"infrastructure/browser/BrowserDevToolsAdapter.ts",
-	"infrastructure/conversation/ConversationSupport.ts",
-	"infrastructure/conversation/AgentChunkTranscriptConversion.ts",
-	"infrastructure/conversation/ConversationMessageProjection.ts",
-	"infrastructure/conversation/ResumedConversationProjection.ts",
-	"infrastructure/conversation/SdkContentConversion.ts",
-	"infrastructure/conversation/SdkMessageTranscriptProjection.ts",
-	"infrastructure/conversation/SettingsItemProjection.ts",
-	"infrastructure/conversation/ToolActivityFormatting.ts",
-	"infrastructure/conversation/ToolCommandFormatting.ts",
-	"infrastructure/conversation/TranscriptConversion.ts",
-	"infrastructure/conversation/TranscriptNormalization.ts",
-	"infrastructure/conversation/TerminalActivityMonitor.ts",
-	"infrastructure/conversation/PartialTextProjector.ts",
-	"infrastructure/conversation/FoldedProgressProjector.ts",
-	"infrastructure/conversation/AgentTextEventProjector.ts",
-	"infrastructure/conversation/AgentToolEventProjector.ts",
-	"infrastructure/conversation/AgentLifecycleEventProjector.ts",
-	"infrastructure/conversation/AgentAuxiliaryEventProjector.ts",
-	"infrastructure/conversation/AgentSnapshotEventProjector.ts",
-	"infrastructure/conversation/AgentChunkEventProjector.ts",
-	"infrastructure/conversation/TaskCompletionProjector.ts",
-	"infrastructure/conversation/ConversationRuntimeProjector.ts",
-	"infrastructure/conversation/ConversationCleanupCoordinator.ts",
-	"infrastructure/conversation/ToolApprovalPromptProjector.ts",
-	"infrastructure/conversation/ConversationActivityProjector.ts",
-	"infrastructure/conversation/RuntimeStatusEventProjector.ts",
-	"infrastructure/conversation/ConversationMessageStore.ts",
-	"features/taskHistory/TaskHistorySync.ts",
-	"features/taskHistory/TaskHistoryCommands.ts",
-	"features/taskHistory/TaskTranscriptHydrator.ts",
-	"features/chat/TaskRpcHandler.ts",
-	"features/chat/clearTask/ClearTaskHandler.ts",
-	"features/chat/cancelTask/CancelTaskFlow.ts",
-	"features/chat/runtime/AgentRunRecoveryFlow.ts",
-	"features/chat/runtime/AgentRunCompletionFlow.ts",
-	"features/chat/runtime/SendOrResumeSessionFlow.ts",
-	"features/chat/runtime/ResumeSessionFlow.ts",
-	"features/chat/runtime/LaunchAgentSessionFlow.ts",
-	"features/chat/startTask/PrepareNewTaskFlow.ts",
-	"features/chat/startTask/StartNewTaskFlow.ts",
-	"features/chat/sendMessage/AskResponseInteractionFlow.ts",
-	"features/chat/sendMessage/SendUserMessageFlow.ts",
-	"features/chat/runtime/CompactSessionFlow.ts",
-	"infrastructure/configuration/ProviderConfiguration.ts",
-	"infrastructure/configuration/ApiConfigurationProfileManager.ts",
-	"infrastructure/configuration/SettingsMutationHandler.ts",
-	"infrastructure/configuration/ToolRuntimePolicy.ts",
-	"infrastructure/configuration/AgentSdkConfigBuilder.ts",
-	"infrastructure/models/EffectiveModelResolver.ts",
-	"infrastructure/auth/ProviderAuthSupport.ts",
-	"infrastructure/auth/NodeOAuthCallbackListener.ts",
-	"infrastructure/auth/FetchOAuthTokenExchangeAdapter.ts",
-	"infrastructure/auth/ProviderCredentialEnvironmentAdapter.ts",
-	"infrastructure/auth/VisualStudioProviderAuthUiAdapter.ts",
-	"infrastructure/auth/ProviderOAuthAuthorizationAdapter.ts",
-	"infrastructure/hooks/HookRuntime.ts",
-	"infrastructure/hooks/LocalHookStore.ts",
-	"infrastructure/hooks/ProcessHookExecutionAdapter.ts",
-	"infrastructure/models/ModelCatalog.ts",
-	"infrastructure/models/ProviderModelCatalogHandler.ts",
-	"infrastructure/models/RuntimeModelContext.ts",
-	"infrastructure/notifications/AutoApprovalNotifier.ts",
-	"features/providers/ModelCatalogRpcHandler.ts",
-	"infrastructure/persistence/LocalAutomationStore.ts",
-	"infrastructure/worktree/WorktreeSupport.ts",
-	"infrastructure/worktree/NodeWorktreeOperationsAdapter.ts",
-	"infrastructure/workspace/ChangeTrackingHandler.ts",
-	"features/files/FileRpcHandler.ts",
-	"infrastructure/webview/WebviewState.ts",
-	"infrastructure/webview/WebviewStreamPublisher.ts",
-	"infrastructure/webview/WebviewInteractionLogSupport.ts",
-	"infrastructure/webview/WebviewGrpcSupport.ts",
-	"infrastructure/webview/RuntimeErrorFormatter.ts",
-	"infrastructure/webview/SettingsRpcDecoder.ts",
-	"infrastructure/webview/AccountRpcDecoder.ts",
-	"infrastructure/webview/BrowserRpcDecoder.ts",
-	"infrastructure/webview/TerminalRpcDecoder.ts",
-	"infrastructure/webview/TaskRpcDecoder.ts",
-	"infrastructure/webview/CheckpointRpcDecoder.ts",
-	"infrastructure/webview/HookRpcDecoder.ts",
-	"infrastructure/webview/ScheduledAgentRpcDecoder.ts",
-	"infrastructure/webview/WorktreeRpcDecoder.ts",
-	"infrastructure/webview/McpRpcDecoder.ts",
-	"infrastructure/webview/ModelCatalogRpcDecoder.ts",
-	"infrastructure/webview/FileRpcDecoder.ts",
-	"infrastructure/webview/InstructionSettingsRpcDecoder.ts",
-	"infrastructure/webview/UiWebRpcDecoder.ts",
-	"infrastructure/webview/StreamingRpcDecoder.ts",
-	"infrastructure/webview/PluginRpcDecoder.ts",
-	"infrastructure/transport/SidecarRpcServer.ts",
-	"bootstrap/SidecarConnectionFactory.ts",
-	"features/chat/sendMessage/SendMessageCommand.ts",
-	"features/chat/sendMessage/SendMessageHandler.ts",
-	"features/chat/startTask/StartTaskCommand.ts",
-	"features/chat/startTask/StartTaskHandler.ts",
-	"features/chat/cancelTask/CancelTaskCommand.ts",
-	"features/chat/cancelTask/CancelTaskHandler.ts",
-	"features/approvals/ApprovalCoordinator.ts",
-	"features/taskHistory/TaskHistoryCollection.ts",
-	"features/taskHistory/TaskSnapshotStore.ts",
-	"features/taskHistory/TaskStateCoordinator.ts",
-	"features/providers/ProviderSelection.ts",
-	"features/providers/OAuthCallbackCoordinator.ts",
-	"features/providers/OAuthCallbackHandler.ts",
-	"features/providers/OAuthAuthorizationHandler.ts",
-	"features/providers/OAuthTokenHandler.ts",
-	"features/providers/ProviderCredentialPolicy.ts",
-	"features/providers/ProviderCredentialHandler.ts",
-	"features/providers/ProviderAuthActionPolicy.ts",
-	"features/providers/ProviderAuthActionHandler.ts",
-	"features/providers/AccountRpcHandler.ts",
-	"features/settings/PlanActMode.ts",
-	"features/settings/SdkSettingsHandler.ts",
-	"features/settings/InstructionSettingsRpcHandler.ts",
-	"features/web/UiWebRpcHandler.ts",
-	"features/web/StreamingRpcHandler.ts",
-	"features/web/StateStreamRefreshCoordinator.ts",
-	"features/plugins/PluginRpcHandler.ts",
-	"features/settings/SettingsRpcHandler.ts",
-	"features/worktrees/WorktreePolicy.ts",
-	"features/worktrees/WorktreeQueryHandler.ts",
-	"features/worktrees/WorktreeMutationHandler.ts",
-	"features/worktrees/WorktreeRpcHandler.ts",
-	"features/browser/BrowserPolicy.ts",
-	"features/browser/BrowserHandler.ts",
-	"features/browser/BrowserRpcHandler.ts",
-	"features/browser/BrowserToolEventFlow.ts",
-	"features/terminal/TerminalRpcHandler.ts",
-	"features/hooks/HookPolicy.ts",
-	"features/hooks/HookSettingsHandler.ts",
-	"features/hooks/HookExecutionHandler.ts",
-	"features/hooks/HookLifecycleCoordinator.ts",
-	"features/hooks/HookRpcHandler.ts",
-	"features/scheduledAgents/ScheduledAgentPolicy.ts",
-	"features/scheduledAgents/ScheduledAgentHandler.ts",
-	"features/scheduledAgents/ScheduledAgentRpcHandler.ts",
-	"features/checkpoints/CheckpointPolicy.ts",
-	"features/checkpoints/CheckpointHandler.ts",
-	"features/checkpoints/CheckpointRpcHandler.ts",
-	"features/conversation/ConversationProjectionState.ts",
-	"features/runtime/TaskActivityMonitor.ts",
-	"features/runtime/PartialStateScheduler.ts",
-	"features/runtime/SendLatencyMonitor.ts",
-	"features/runtime/RuntimeMonitoringCoordinator.ts",
-	"features/runtime/TaskSessionCoordinator.ts",
-	"features/runtime/AgentRuntimeEventDispatcher.ts",
-	"features/runtime/AgentEventDispatcher.ts",
-	"features/approvals/ToolApprovalFlow.ts",
-	"features/chat/TaskPromptFlow.ts",
-]) {
-	if (!fs.existsSync(path.join(sourceRoot, ...requiredFile.split("/")))) {
-		violations.push(`Missing architecture component: ${requiredFile}`)
-	}
-}
-
 if (violations.length) {
 	console.error("Clean Architecture dependency check failed:")
 	for (const violation of violations) console.error(`- ${violation}`)
 	process.exit(1)
 }
 
-console.log("Clean Architecture dependency check passed.")
+console.log("AI maintenance architecture checks passed.")
 
 function walk(directory) {
 	const files = []

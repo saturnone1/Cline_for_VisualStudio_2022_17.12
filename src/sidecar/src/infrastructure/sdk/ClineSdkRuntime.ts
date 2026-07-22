@@ -1,13 +1,14 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
+import type { AgentCompactSessionRequest, AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { createClineSdkCore } from "./ClineSdkCoreFactory"
 import { ClineSdkMcpAdapter } from "./ClineSdkMcpAdapter"
 import { ClineSdkProviderAdapter } from "./ClineSdkProviderAdapter"
 import { ClineSdkSessionAdapter, type ClineSdkCore } from "./ClineSdkSessionAdapter"
+import { summarizeCompactionContext } from "./ClineSdkCompactionSummarizer"
 export type ClineSdkStatus = {
 	mode: "sdk"
 	packageName: string
@@ -50,6 +51,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 				return combined.length > 0 ? combined : undefined
 			},
 			getStatus: () => this.status,
+			summarizeCompaction: summarizeCompactionContext,
 		})
 	}
 
@@ -88,6 +90,10 @@ export class ClineSdkRuntime implements AgentEnginePort {
 
 	async startSession(request: AgentStartRequest) {
 		return this.sessions.start(request)
+	}
+
+	async compactSession(request: AgentCompactSessionRequest) {
+		return this.sessions.compact(request)
 	}
 
 	async send(request: AgentMessageRequest) {

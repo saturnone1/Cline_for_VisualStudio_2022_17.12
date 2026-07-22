@@ -304,4 +304,4 @@ function getString(record: Record<string, unknown>, key: string) { const value =
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
 function booleanValue(value: unknown) { return typeof value === "boolean" ? value : undefined }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"

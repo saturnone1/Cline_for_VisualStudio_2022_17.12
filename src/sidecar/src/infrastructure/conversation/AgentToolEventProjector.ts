@@ -1,4 +1,5 @@
 import type { AgentEvent } from "../../domain/agent/AgentRuntimeEvent"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import { isBrowserToolName } from "../../features/browser/BrowserPolicy"
 import { getCommandText, getPatchPathsFromUnknown, getSearchFilePattern, getSearchQuery, getToolPath, getToolPathFromUnknown, mapToolName, summarizeCommandOutput, summarizeToolOutput } from "./ToolCommandFormatting"
 import { formatCompletedCommandActivity } from "./ToolActivityFormatting"
@@ -74,4 +75,3 @@ function isCommand(toolName: string) { return toolName === "bash" || toolName ==
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }
 function truncate(value: string, limit: number) { return value.length <= limit ? value : `${value.slice(0, limit)}\n\n[truncated ${value.length - limit} chars]` }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

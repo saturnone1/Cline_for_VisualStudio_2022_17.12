@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
@@ -10,6 +11,7 @@ const artifactsRoot = path.resolve(root, "..", "..", "artifacts");
 const packageSidecar = path.join(artifactsRoot, "Sidecar");
 const packageNodeModules = path.join(artifactsRoot, ".staging", "node_modules");
 const packageNodeModulesZip = path.join(packageSidecar, "node_modules.zip");
+const packageNodeModulesFingerprint = path.join(packageSidecar, "node_modules.fingerprint");
 const source = path.join(dist, "main.js");
 const target = path.join(packageSidecar, "cline-sidecar.js");
 
@@ -22,6 +24,7 @@ for (const layer of ["application", "bootstrap", "domain", "features", "infrastr
   copyDirectory(path.join(dist, layer), path.join(packageSidecar, layer));
 }
 copyDirectory(path.join(root, "node_modules"), packageNodeModules, shouldCopyRuntimeNodeModuleEntry);
+fs.writeFileSync(packageNodeModulesFingerprint, fingerprintDirectory(packageNodeModules), "utf8");
 createZip(packageNodeModules, packageNodeModulesZip);
 linkNodeModulesForLocalSmokeTests(packageNodeModules, path.join(packageSidecar, "node_modules"));
 
@@ -99,4 +102,26 @@ function createZip(sourceDir, targetZip) {
   if (result.status !== 0) {
     throw new Error(`Failed to create ${targetZip}`);
   }
+}
+
+function fingerprintDirectory(sourceDir) {
+  const hash = crypto.createHash("sha256");
+  for (const file of listFiles(sourceDir)) {
+    const relativePath = path.relative(sourceDir, file).split(path.sep).join("/");
+    const stat = fs.statSync(file);
+    hash.update(`${relativePath}|${stat.size}\n`, "utf8");
+    hash.update(fs.readFileSync(file));
+    hash.update("\n", "utf8");
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
+
+function listFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...listFiles(entryPath));
+    else if (entry.isFile()) files.push(entryPath);
+  }
+  return files;
 }

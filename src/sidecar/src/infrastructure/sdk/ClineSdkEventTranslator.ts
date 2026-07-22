@@ -88,7 +88,17 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 		return { type: "AgentStarted", sessionId, iteration: readNumber(raw.iteration), raw }
 	}
 	if (type === "iteration_end") { const toolCallCount = readNumber(raw.toolCallCount) || 0; return { type: "IterationCompleted", sessionId, iteration: readNumber(raw.iteration), toolCallCount, hadToolCalls: raw.hadToolCalls === true || toolCallCount > 0, raw } }
-	if (type === "notice") return { type: "NoticeReceived", sessionId, message: readString(raw.message), reason: readString(raw.reason), noticeType: readString(raw.noticeType), raw }
+	if (type === "notice") {
+		const reason = readString(raw.reason)
+		return {
+			type: "NoticeReceived",
+			sessionId,
+			message: readString(raw.message),
+			reason,
+			noticeType: readString(raw.noticeType) || (isTransientSdkStatus(reason, raw) ? "status" : ""),
+			raw,
+		}
+	}
 	if (type === "tool-finished") return { type: "ToolFinished", sessionId, toolCall: asRecord(raw.toolCall), result: asRecord(raw.result), message: raw.message, raw }
 	if (type === "assistant-message") return { type: "AssistantMessageReceived", sessionId, message: asRecord(raw.message), raw }
 	if (type === "run-finished") return { type: "RunFinished", sessionId, result: asRecord(raw.result), usage: asRecord(raw.usage), completion: completionFields(raw), raw }
@@ -166,6 +176,11 @@ function readString(value: unknown) {
 
 function readNumber(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function isTransientSdkStatus(reason: string, raw: AgentEventPayload) {
+	const kind = readString(raw.kind)
+	return reason === "auto_compaction" || reason === "manual_compaction" || kind === "auto_compaction" || kind === "manual_compaction"
 }
 
 function records(value: unknown): AgentEventPayload[] { return Array.isArray(value) ? value.map(asRecord) : [] }

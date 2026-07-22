@@ -94,10 +94,10 @@ const HistoryViewItem = ({
 	}, [])
 
 	return (
-		<div className="history-item cursor-pointer flex group mb-1 hover:bg-list-hover border-b border-accent/10" key={item.id}>
+		<div className="history-item group mb-1 flex min-w-0 cursor-pointer border-b border-accent/10 hover:bg-list-hover" key={item.id}>
 			<VSCodeCheckbox
 				checked={selectedItems.includes(item.id)}
-				className="pl-3 pr-1 py-auto self-start mt-3"
+				className="mt-3 shrink-0 self-start pl-3 pr-1"
 				onClick={(e) => {
 					e.preventDefault()
 					e.stopPropagation()
@@ -107,54 +107,54 @@ const HistoryViewItem = ({
 			/>
 
 			<div
-				className={cn("flex flex-col gap-2 py-2 pl-2 pr-3 relative flex-grow min-w-0", {
+				className={cn("relative flex min-w-0 flex-grow flex-col gap-2 py-2 pl-2 pr-2", {
 					"opacity-80": isOpening,
 				})}
 				onClick={(e) => {
 					e.stopPropagation()
 					handleShowTaskWithId(item.id)
 				}}>
-				<div className="flex items-center gap-2">
+				<div className="flex min-w-0 items-center gap-1">
 					<div className="line-clamp-1 overflow-hidden break-words whitespace-pre-wrap flex-1 min-w-0">
 						<span className="ph-no-capture">{item.task}</span>
 					</div>
-					<div className="flex gap-2 flex-shrink-0">
+					<div className="flex shrink-0 items-center gap-0.5">
 						<Button
 							aria-label={t("history.continue")}
-							className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+							className="size-7 shrink-0 p-0"
 							disabled={isOpening}
 							onClick={(e) => {
 								e.stopPropagation()
 								handleShowTaskWithId(item.id)
 							}}
-							variant="secondary">
-							<span className={cn("codicon scale-90", isOpening ? "codicon-loading animate-spin" : "codicon-debug-continue")} />
-							{isOpening ? t("history.opening") : t("history.continue")}
+							title={isOpening ? t("history.opening") : t("history.continue")}
+							variant="icon">
+							{isOpening ? <span className="codicon codicon-loading animate-spin" /> : <ArrowRightIcon className="!size-3.5" />}
 						</Button>
 						<Button
 							aria-label={t("history.delete")}
-							className="p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+							className="size-7 shrink-0 p-0"
 							disabled={isFavoritedItem}
 							onClick={(e) => {
 								e.stopPropagation()
 								handleDeleteHistoryItem(item.id)
 							}}
-							variant="ghost">
-							<span className="flex items-center gap-1 text-xs">
-								<TrashIcon className="stroke-1" />
-							</span>
+							title={isFavoritedItem ? t("history.removeFavoriteBeforeDelete") : t("history.delete")}
+							variant="icon">
+							<TrashIcon className="!size-3.5 stroke-1" />
 						</Button>
 						<Button
 							aria-label={isFavoritedItem ? t("history.removeFavorite") : t("history.addFavorite")}
-							className="p-0"
+							className="size-7 shrink-0 p-0"
 							disabled={pendingFavoriteToggles[item.id] !== undefined}
 							onClick={(e) => {
 								e.stopPropagation()
 								toggleFavorite(item.id, isFavoritedItem)
 							}}
+							title={isFavoritedItem ? t("history.removeFavorite") : t("history.addFavorite")}
 							variant="icon">
 							<StarIcon
-								className={cn("opacity-70", {
+								className={cn("!size-3.5 opacity-70", {
 									"text-button-background  fill-button-background opacity-100": isFavoritedItem,
 								})}
 							/>
@@ -225,7 +225,7 @@ const HistoryViewItem = ({
 									{item.modelId && (
 										<div className="flex justify-between items-center w-full gap-1 text-xs">
 											<span className="font-medium text-description">{t("history.model")}</span>
-											<span className="text-description">{item.modelId}</span>
+											<span className="min-w-0 break-all text-right text-description">{item.modelId}</span>
 										</div>
 									)}
 

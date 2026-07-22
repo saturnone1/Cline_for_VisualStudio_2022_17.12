@@ -1,6 +1,7 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { WorkspacePort } from "../../application/ports/HostProviderPort"
 import { buildTerminalActivityText } from "./ToolActivityFormatting"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
 export class TerminalActivityMonitor {
 	private timer: NodeJS.Timeout | null = null
@@ -31,4 +32,3 @@ export class TerminalActivityMonitor {
 function records(value: unknown) { return Array.isArray(value) ? value.map(asRecord) : [] }
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readNumber(value: unknown) { const number = Number(value); return Number.isFinite(number) ? number : undefined }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

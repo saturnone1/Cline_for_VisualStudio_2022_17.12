@@ -1,45 +1,51 @@
-import type { ExtensionState } from "@shared/ExtensionMessage"
-import type { UserInfo } from "@shared/proto/cline/account"
-import type React from "react"
-import { createContext, useContext } from "react"
-import { McpStateProvider, type McpState, useMcpStateContext } from "./McpState"
-import { ModelCatalogStateProvider, type ModelCatalogState } from "./ModelCatalogState"
-import { NavigationStateProvider, type NavigationState, useNavigationStateContext } from "./NavigationState"
-import { RuntimeViewStateProvider, type RuntimeViewState, useRuntimeViewStateContext } from "./RuntimeViewState"
-import { TaskStreamStateProvider, useTaskStreamStateContext } from "./TaskStreamState"
+import type { ExtensionState } from "@shared/ExtensionMessage";
+import type { UserInfo } from "@shared/proto/cline/account";
+import type React from "react";
+import { createContext, useContext } from "react";
+import { UiLanguageProvider } from "@/i18n";
+import { McpStateProvider, type McpState, useMcpStateContext } from "./McpState";
+import { ModelCatalogStateProvider, type ModelCatalogState } from "./ModelCatalogState";
+import { NavigationStateProvider, type NavigationState, useNavigationStateContext } from "./NavigationState";
+import { RuntimeViewStateProvider, type RuntimeViewState, useRuntimeViewStateContext } from "./RuntimeViewState";
+import { TaskStreamStateProvider, useTaskBaseStateContext } from "./TaskStreamState";
 
-export { mergeLivePartialMessages } from "./TaskStreamState"
+export { mergeLivePartialMessages } from "./TaskStreamState";
 
-export interface ExtensionStateContextType extends ExtensionState, NavigationState, ModelCatalogState, McpState, RuntimeViewState {
-	didHydrateState: boolean
-	lastDismissedCliBannerVersion: number
-	dismissedBanners?: Array<{ bannerId: string; dismissedAt: number }>
+export interface ExtensionStateContextType
+	extends ExtensionState,
+		NavigationState,
+		ModelCatalogState,
+		McpState,
+		RuntimeViewState {
+	didHydrateState: boolean;
+	lastDismissedCliBannerVersion: number;
+	dismissedBanners?: Array<{ bannerId: string; dismissedAt: number }>;
 
 	// Setters
-	setShouldShowAnnouncement: (value: boolean) => void
-	setGlobalClineRulesToggles: (toggles: Record<string, boolean>) => void
-	setLocalClineRulesToggles: (toggles: Record<string, boolean>) => void
-	setLocalCursorRulesToggles: (toggles: Record<string, boolean>) => void
-	setLocalWindsurfRulesToggles: (toggles: Record<string, boolean>) => void
-	setLocalAgentsRulesToggles: (toggles: Record<string, boolean>) => void
-	setLocalWorkflowToggles: (toggles: Record<string, boolean>) => void
-	setGlobalWorkflowToggles: (toggles: Record<string, boolean>) => void
-	setGlobalSkillsToggles: (toggles: Record<string, boolean>) => void
-	setLocalSkillsToggles: (toggles: Record<string, boolean>) => void
-	setRemoteRulesToggles: (toggles: Record<string, boolean>) => void
-	setRemoteWorkflowToggles: (toggles: Record<string, boolean>) => void
-	setUserInfo: (userInfo?: UserInfo) => void
+	setShouldShowAnnouncement: (value: boolean) => void;
+	setGlobalClineRulesToggles: (toggles: Record<string, boolean>) => void;
+	setLocalClineRulesToggles: (toggles: Record<string, boolean>) => void;
+	setLocalCursorRulesToggles: (toggles: Record<string, boolean>) => void;
+	setLocalWindsurfRulesToggles: (toggles: Record<string, boolean>) => void;
+	setLocalAgentsRulesToggles: (toggles: Record<string, boolean>) => void;
+	setLocalWorkflowToggles: (toggles: Record<string, boolean>) => void;
+	setGlobalWorkflowToggles: (toggles: Record<string, boolean>) => void;
+	setGlobalSkillsToggles: (toggles: Record<string, boolean>) => void;
+	setLocalSkillsToggles: (toggles: Record<string, boolean>) => void;
+	setRemoteRulesToggles: (toggles: Record<string, boolean>) => void;
+	setRemoteWorkflowToggles: (toggles: Record<string, boolean>) => void;
+	setUserInfo: (userInfo?: UserInfo) => void;
 
 	// Event callbacks
-	onRelinquishControl: (callback: () => void) => () => void
+	onRelinquishControl: (callback: () => void) => () => void;
 }
 
-export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
+export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined);
 
 const ExtensionStateContextBridge: React.FC<{
-	children: React.ReactNode
+	children: React.ReactNode;
 }> = ({ children }) => {
-	const navigation = useNavigationStateContext()
+	const navigation = useNavigationStateContext();
 	const {
 		showMcp,
 		mcpTab,
@@ -66,11 +72,11 @@ const ExtensionStateContextBridge: React.FC<{
 		hideWorktrees,
 		hideAnnouncement,
 		closeMcpView,
-	} = navigation
+	} = navigation;
 
-	const mcpState = useMcpStateContext()
-	const runtimeViewState = useRuntimeViewStateContext()
-	const { state, setState, didHydrateState, onRelinquishControl } = useTaskStreamStateContext()
+	const mcpState = useMcpStateContext();
+	const runtimeViewState = useRuntimeViewStateContext();
+	const { state, setState, didHydrateState, onRelinquishControl } = useTaskBaseStateContext();
 
 	const createContextValue = (modelCatalog: ModelCatalogState): ExtensionStateContextType => ({
 		...state,
@@ -180,21 +186,23 @@ const ExtensionStateContextBridge: React.FC<{
 		setMcpTab,
 		onRelinquishControl,
 		setUserInfo: (userInfo?: UserInfo) => setState((prevState) => ({ ...prevState, userInfo })),
-	})
+	});
 
 	return (
-		<ModelCatalogStateProvider apiConfiguration={state.apiConfiguration}>
-			{(modelCatalog) => (
-				<ExtensionStateContext.Provider value={createContextValue(modelCatalog)}>
-					{children}
-				</ExtensionStateContext.Provider>
-			)}
-		</ModelCatalogStateProvider>
-	)
-}
+		<UiLanguageProvider language={state.uiLanguage}>
+			<ModelCatalogStateProvider apiConfiguration={state.apiConfiguration}>
+				{(modelCatalog) => (
+					<ExtensionStateContext.Provider value={createContextValue(modelCatalog)}>
+						{children}
+					</ExtensionStateContext.Provider>
+				)}
+			</ModelCatalogStateProvider>
+		</UiLanguageProvider>
+	);
+};
 
 export const ExtensionStateContextProvider: React.FC<{
-	children: React.ReactNode
+	children: React.ReactNode;
 }> = ({ children }) => (
 	<NavigationStateProvider>
 		<McpStateProvider>
@@ -205,12 +213,12 @@ export const ExtensionStateContextProvider: React.FC<{
 			</RuntimeViewStateProvider>
 		</McpStateProvider>
 	</NavigationStateProvider>
-)
+);
 
 export const useExtensionState = () => {
-	const context = useContext(ExtensionStateContext)
+	const context = useContext(ExtensionStateContext);
 	if (context === undefined) {
-		throw new Error("useExtensionState must be used within an ExtensionStateContextProvider")
+		throw new Error("useExtensionState must be used within an ExtensionStateContextProvider");
 	}
-	return context
-}
+	return context;
+};

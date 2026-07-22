@@ -1,4 +1,7 @@
 import type { AgentToolContext } from "@cline/shared"
+import { readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+
+export { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
 export function normalizeCommandResultForSdk(result: unknown) {
 	const limit = readPositiveIntEnv("VSCLINE_SDK_COMMAND_RESULT_CHARS", 20000)
@@ -20,7 +23,7 @@ export function normalizeCommandResultForSdk(result: unknown) {
 export async function fetchWebContentForSdk(url: string, prompt: string, context?: AgentToolContext) {
 	const normalizedUrl = normalizeHttpUrl(url)
 	if (!normalizedUrl) throw new Error(`Invalid URL for fetch_web_content: ${url}`)
-	const timeoutMs = readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 15000)
+	const timeoutMs = readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", RUNTIME_DEFAULTS.webFetchTimeoutMs)
 	const maxChars = readPositiveIntEnv("VSCLINE_WEB_FETCH_RESULT_CHARS", 20000)
 	const controller = new AbortController()
 	const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal } | undefined)?.abortSignal
@@ -42,11 +45,6 @@ export async function fetchWebContentForSdk(url: string, prompt: string, context
 		clearTimeout(timer)
 		abortSignal?.removeEventListener("abort", abortHandler)
 	}
-}
-
-export function readPositiveIntEnv(name: string, fallback: number) {
-	const value = Number.parseInt(process.env[name] || "", 10)
-	return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 export function normalizeHttpUrl(value: string) {

@@ -20,15 +20,26 @@ type TaskSessionDependencies = {
 
 export class TaskSessionCoordinator {
 	private readonly closingSessionIds = new Set<string>()
+	private replacementSourceSessionId = ""
 
 	constructor(private readonly dependencies: TaskSessionDependencies) {}
 
 	get status() { return this.dependencies.lifecycle.status }
-	get currentSessionId() { return this.dependencies.activeSessionId() || String(this.dependencies.currentTask()?.id || "") }
+	get currentSessionId() {
+		return this.dependencies.lifecycle.snapshot.sessionId
+			|| this.dependencies.activeSessionId()
+	}
 
 	initialize(status: TaskLifecycleStatus) {
-		this.dependencies.lifecycle.initialize(status)
+		this.dependencies.lifecycle.initialize(status, this.dependencies.activeSessionId() || null)
 		this.dependencies.writeLifecycleStatus(this.dependencies.lifecycle.status)
+	}
+
+	reconcile(status: TaskLifecycleStatus, sessionId: string, source: string) {
+		const previous = this.dependencies.lifecycle.status
+		this.dependencies.lifecycle.initialize(status, sessionId || this.currentSessionId || null)
+		this.dependencies.writeLifecycleStatus(status)
+		if (previous !== status) this.dependencies.logger.log("sidecar", "taskLifecycleReconciled", { previous, current: status, source, sessionId })
 	}
 
 	markClosing(sessionId: string, closing = true) {
@@ -39,21 +50,46 @@ export class TaskSessionCoordinator {
 
 	prepareActivation(sessionId: string) { this.markClosing(sessionId, false) }
 
+	beginReplacement(sourceSessionId: string) {
+		this.cancelReplacement()
+		this.replacementSourceSessionId = sourceSessionId
+		this.markClosing(sourceSessionId)
+	}
+
+	adoptReplacement(sessionId: string) {
+		const sourceSessionId = this.replacementSourceSessionId
+		if (!sourceSessionId || !sessionId || sessionId === sourceSessionId) return false
+		this.replacementSourceSessionId = ""
+		this.markClosing(sourceSessionId, false)
+		this.bindSession(sessionId)
+		return true
+	}
+
+	completeReplacement(sessionId: string) {
+		const sourceSessionId = this.replacementSourceSessionId
+		if (!sourceSessionId) return
+		this.replacementSourceSessionId = ""
+		this.markClosing(sourceSessionId, false)
+		if (sessionId) this.bindSession(sessionId)
+	}
+
+	cancelReplacement() {
+		if (this.replacementSourceSessionId) this.markClosing(this.replacementSourceSessionId, false)
+		this.replacementSourceSessionId = ""
+	}
+
 	shouldIgnoreEvent(sessionId: string) {
 		if (!sessionId) return false
 		if (this.closingSessionIds.has(sessionId)) return true
 		const currentTask = this.dependencies.currentTask()
 		if (!currentTask) return true
-		const activeSessionId = this.dependencies.activeSessionId()
-		if (activeSessionId) return sessionId !== activeSessionId
-		const currentTaskId = String(currentTask.id || "")
-		return Boolean(currentTaskId && sessionId !== currentTaskId)
+		const currentSessionId = this.currentSessionId
+		return Boolean(currentSessionId && sessionId !== currentSessionId)
 	}
 
 	isCurrentResult(sessionId: string) {
 		if (!sessionId || this.closingSessionIds.has(sessionId) || this.dependencies.isDeleted(sessionId)) return false
-		const currentTaskId = String(this.dependencies.currentTask()?.id || "")
-		return Boolean(currentTaskId && currentTaskId === sessionId)
+		return this.currentSessionId === sessionId
 	}
 
 	bindSession(sessionId: string) {
@@ -88,6 +124,7 @@ export class TaskSessionCoordinator {
 	}
 
 	reset(source: string) {
+		this.cancelReplacement()
 		const transition = this.dependencies.lifecycle.reset(source)
 		this.dependencies.writeLifecycleStatus(transition.current)
 		return transition

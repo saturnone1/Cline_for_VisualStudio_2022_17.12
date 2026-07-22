@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["schemaVersion", "protocolVersion", "shapes", "operations"],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "protocolVersion": { "type": "integer", "minimum": 1 },
     "shapes": {
       "type": "object",
@@ -33,7 +33,9 @@
                     "unknown"
                   ]
                 },
-                "required": { "type": "boolean" }
+                "required": { "type": "boolean" },
+                "shape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+                "values": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }
               },
               "additionalProperties": false
             }
@@ -63,7 +65,8 @@
             ]
           },
           "requestShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
-          "responseShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
+          "responseShape": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "timeoutMs": { "type": "integer", "minimum": 1000 }
         },
         "allOf": [
           {

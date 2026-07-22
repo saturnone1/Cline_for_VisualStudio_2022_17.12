@@ -11,7 +11,7 @@ import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEven
 export class VisualStudioWebviewController {
 	constructor(private readonly application: WebviewApplicationPort) {}
 
-	dispose() { this.application.dispose() }
+	dispose() { return this.application.dispose() }
 	isScheduledAgentsEnabled() { return this.application.isScheduledAgentsEnabled() }
 	requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult> { return this.application.requestToolApproval(request) }
 	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> { return this.application.requestQuestion(question, options) }

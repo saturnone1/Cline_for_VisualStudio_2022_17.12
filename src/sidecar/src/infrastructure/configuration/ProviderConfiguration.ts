@@ -1,4 +1,5 @@
 import { normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
+import { readPositiveIntEnv } from "./RuntimeEnvironment"
 import { mapToolName } from "../conversation/ToolCommandFormatting"
 import { inferModelInfo } from "../models/ModelCatalog"
 import { normalizeProviderId, normalizeProviderValue, normalizeSdkProviderId, oauthCredentialsField } from "../../application/services/ProviderIdentity"
@@ -436,4 +437,3 @@ function arrayOfRecords(value: unknown): Array<Record<string, unknown>> { return
 function tryParseJson(value: string) { try { return JSON.parse(value) as unknown } catch { return undefined } }
 function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

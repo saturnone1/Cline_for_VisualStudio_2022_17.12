@@ -1,5 +1,6 @@
 import { getSearchFilePattern, getSearchQuery, mapToolName, stripCommandSentinel, summarizeCommandLabel, summarizeCommandOutput, tryParseJson } from "./ToolCommandFormatting"
 import { normalizeProgressTranscriptText } from "./TranscriptNormalization"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import { isToolTranscript } from "./TranscriptTextPolicy"
 
 export function toolActivityEntriesFromMessage(tool: string, text: string): ToolActivityEntry[] {
@@ -293,4 +294,3 @@ function asRecord(value: unknown): Record<string, unknown> { return value && typ
 function getString(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "string" ? item : item == null ? "" : String(item) }
 function getNumber(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "number" && Number.isFinite(item) ? item : undefined }
 function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

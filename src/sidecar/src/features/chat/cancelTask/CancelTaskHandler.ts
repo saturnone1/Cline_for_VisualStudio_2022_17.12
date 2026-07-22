@@ -6,11 +6,8 @@ export class CancelTaskHandler {
 
 	async execute(command: CancelTaskCommand) {
 		if (!command.sessionId.trim()) return { cancelled: false, sessionId: "" }
-		try {
-			await this.agentEngine.abort(command)
-			return { cancelled: true, sessionId: command.sessionId }
-		} finally {
-			this.agentEngine.markSessionInactive(command.sessionId)
-		}
+		await this.agentEngine.abort(command)
+		this.agentEngine.markSessionInactive(command.sessionId)
+		return { cancelled: true, sessionId: command.sessionId }
 	}
 }

@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using VsClineAgent.Host;
 
 namespace VsClineAgent.Services
 {
@@ -31,6 +32,7 @@ namespace VsClineAgent.Services
         private long _commandSequence;
         private long _outputSequence;
         private bool _disposed;
+        private readonly WindowsProcessJob _processJob = new WindowsProcessJob();
 
         public VsCommandExecutionService(ICommandOutputWriter? outputWriter = null)
         {
@@ -239,27 +241,37 @@ namespace VsClineAgent.Services
 
         public async Task<int> CancelAllAsync()
         {
+            var commands = _activeCommands.Values.ToArray();
+            var processes = commands
+                .Select(command => command.Process)
+                .Where(process => process != null)
+                .GroupBy(process => process!.Id)
+                .Select(group => group.First()!)
+                .ToArray();
+            var terminationTasks = processes.ToDictionary(
+                process => process.Id,
+                process => Task.Run(() => TryKill(process)));
+
+            await Task.WhenAll(terminationTasks.Values).ConfigureAwait(false);
+
+            var failedProcessIds = terminationTasks
+                .Where(pair => !pair.Value.Result)
+                .Select(pair => pair.Key)
+                .ToArray();
+            if (failedProcessIds.Length > 0)
+                throw new InvalidOperationException("Failed to terminate terminal process(es): " + string.Join(", ", failedProcessIds));
+
             var cancelled = 0;
-            foreach (var command in _activeCommands.Values)
+            foreach (var command in commands)
             {
                 var process = command.Process;
-                if (process == null)
+                if (process == null || !terminationTasks.ContainsKey(process.Id))
                     continue;
 
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        TryKill(process);
-                        command.Status = "cancelled";
-                        cancelled++;
-                        AppendCommandOutput(command, "stderr", "Command cancelled by user.", new StringBuilder());
-                        await _outputWriter.WriteLineAsync($"  Command cancelled: {command.Command}");
-                    }
-                }
-                catch
-                {
-                }
+                command.Status = "cancelled";
+                cancelled++;
+                AppendCommandOutput(command, "stderr", "Command cancelled by user.", new StringBuilder());
+                await _outputWriter.WriteLineAsync($"  Command cancelled: {command.Command}");
             }
 
             return cancelled;
@@ -328,6 +340,7 @@ namespace VsClineAgent.Services
             process.Exited += (_, __) => CompleteBackgroundCommand(session, process.ExitCode, "shell-exited");
 
             process.Start();
+            _processJob.Assign(process);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             return session;
@@ -458,18 +471,35 @@ namespace VsClineAgent.Services
             }
         }
 
-        private static void TryKill(Process process)
+        private static bool TryKill(Process process)
         {
             try
             {
                 if (!process.HasExited)
                 {
-                    process.Kill();
-                    process.WaitForExit(2000);
+                    if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                    {
+                        using var killer = Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "taskkill.exe",
+                            Arguments = "/PID " + process.Id + " /T /F",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                        });
+                        killer?.WaitForExit(3000);
+                    }
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                        process.WaitForExit(2000);
+                    }
                 }
+
+                return process.HasExited;
             }
             catch
             {
+                return false;
             }
         }
 
@@ -504,6 +534,7 @@ namespace VsClineAgent.Services
 
             _activeCommands.Clear();
             _sessionsByCwd.Clear();
+            _processJob.Dispose();
         }
 
         private void AppendCommandOutput(RunningCommandInfo command, string stream, string text, StringBuilder target)

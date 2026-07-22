@@ -5,24 +5,25 @@
  * including non-React code. The configuration is compile-time constant, so direct
  * import is safe and ensures the methods work consistently regardless of React context.
  */
-import { PLATFORM_CONFIG } from "../config/platform.config"
-import { validateWebviewRpcPayload, WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract"
+import { PLATFORM_CONFIG } from "../config/platform.config";
+import { validateWebviewRpcPayload, WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract";
 
 export interface Callbacks<TResponse> {
-	onResponse: (response: TResponse) => void
-	onError: (error: Error) => void
-	onComplete: () => void
+	onResponse: (response: TResponse) => void;
+	onError: (error: Error) => void;
+	onComplete: () => void;
+}
+
+export function createClientOperationId(): string {
+	if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID()
+	return `vscline-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 export abstract class ProtoBusClient {
-	static serviceName: string
+	static serviceName: string;
 
 	private static createRequestId(): string {
-		if (typeof globalThis.crypto?.randomUUID === "function") {
-			return globalThis.crypto.randomUUID()
-		}
-
-		return `vscline-${Date.now()}-${Math.random().toString(16).slice(2)}`
+		return createClientOperationId();
 	}
 
 	static async makeUnaryRequest<TRequest, TResponse>(
@@ -30,25 +31,29 @@ export abstract class ProtoBusClient {
 		request: TRequest,
 		encodeRequest: (_: TRequest) => unknown,
 		decodeResponse: (value: Record<string, unknown>) => TResponse,
+		timeoutMs = PLATFORM_CONFIG.rpcUnaryTimeoutMs,
 	): Promise<TResponse> {
-		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest)
-		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest)
+		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest);
+		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest);
 		if (requestValidation.ok === false) {
 			return Promise.reject(
-				new Error(`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`),
-			)
+				new Error(
+					`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`,
+				),
+			);
 		}
 		return new Promise((resolve, reject) => {
-			const requestId = this.createRequestId()
-			let closed = false
+			const requestId = this.createRequestId();
+			let closed = false;
+			let unregisterResponse = () => undefined;
 			const cleanup = () => {
 				if (closed) {
-					return
+					return;
 				}
-				closed = true
-				window.removeEventListener("message", handleResponse)
-				window.clearTimeout(timeout)
-			}
+				closed = true;
+				unregisterResponse();
+				window.clearTimeout(timeout);
+			};
 			const cancelHostRequest = () => {
 				PLATFORM_CONFIG.postMessage({
 					protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
@@ -56,39 +61,53 @@ export abstract class ProtoBusClient {
 					grpc_request_cancel: {
 						request_id: requestId,
 					},
-				})
-			}
+				});
+			};
 			const timeout = window.setTimeout(() => {
-				cancelHostRequest()
-				cleanup()
-				reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`))
-			}, 120_000)
+				cancelHostRequest();
+				cleanup();
+				reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`));
+			}, timeoutMs);
 
 			// Set up one-time listener for this specific request
 			const handleResponse = (event: MessageEvent<unknown>) => {
 				if (closed) {
-					return
+					return;
 				}
-				const response = parseGrpcResponse(event.data, requestId)
+				const response = parseGrpcResponse(event.data, requestId);
 				if (response) {
-					// Remove listener once we get our response
-					cleanup()
-					if (response.message) {
-						const responseValidation = validateWebviewRpcPayload(this.serviceName, methodName, "response", response.message)
-						if (responseValidation.ok === false) {
-							reject(new Error(`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`))
-							return
+					// Remove listener once we get our response. Decode failures must reject this
+					// request because the timeout has already been cleared by cleanup.
+					cleanup();
+					try {
+						if (response.message) {
+							const responseValidation = validateWebviewRpcPayload(
+								this.serviceName,
+								methodName,
+								"response",
+								response.message,
+							);
+							if (responseValidation.ok === false) {
+								reject(
+									new Error(
+										`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`,
+									),
+								);
+								return;
+							}
+							resolve(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse));
+						} else if (response.error) {
+							reject(new Error(response.error));
+						} else {
+							resolve(PLATFORM_CONFIG.decodeMessage({}, decodeResponse));
 						}
-						resolve(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
-					} else if (response.error) {
-						reject(new Error(response.error))
-					} else {
-						resolve(PLATFORM_CONFIG.decodeMessage({}, decodeResponse))
+					} catch (error) {
+						reject(toError(error, `Failed to decode ${this.serviceName}.${methodName} response`));
 					}
 				}
-			}
+			};
 
-			window.addEventListener("message", handleResponse)
+			unregisterResponse = grpcResponseRouter.register(requestId, handleResponse);
 			PLATFORM_CONFIG.postMessage({
 				protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 				type: "grpc_request",
@@ -99,8 +118,8 @@ export abstract class ProtoBusClient {
 					request_id: requestId,
 					is_streaming: false,
 				},
-			})
-		})
+			});
+		});
 	}
 
 	static makeStreamingRequest<TRequest, TResponse>(
@@ -110,58 +129,75 @@ export abstract class ProtoBusClient {
 		decodeResponse: (value: Record<string, unknown>) => TResponse,
 		callbacks: Callbacks<TResponse>,
 	): () => void {
-		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest)
-		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest)
+		const encodedRequest = PLATFORM_CONFIG.encodeMessage(request, encodeRequest);
+		const requestValidation = validateWebviewRpcPayload(this.serviceName, methodName, "request", encodedRequest);
 		if (requestValidation.ok === false) {
 			callbacks.onError(
-				new Error(`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`),
-			)
-			return () => undefined
+				new Error(
+					`Invalid ${this.serviceName}.${methodName} request payload: ${requestValidation.reason}${requestValidation.field ? ` (${requestValidation.field})` : ""}`,
+				),
+			);
+			return () => undefined;
 		}
-		const requestId = this.createRequestId()
-		let closed = false
+		const requestId = this.createRequestId();
+		let closed = false;
+		let unregisterResponse = () => undefined;
 		const cleanup = () => {
 			if (closed) {
-				return false
+				return false;
 			}
-			closed = true
-			window.removeEventListener("message", handleResponse)
-			return true
-		}
+			closed = true;
+			unregisterResponse();
+			return true;
+		};
+		const reportError = (error: unknown) => {
+			cleanup();
+			try {
+				callbacks.onError(toError(error, `Failed to process ${this.serviceName}.${methodName} stream`));
+			} catch (callbackError) {
+				console.error(callbackError);
+			}
+		};
 		// Set up listener for streaming responses
 		const handleResponse = (event: MessageEvent<unknown>) => {
 			if (closed) {
-				return
+				return;
 			}
-			const response = parseGrpcResponse(event.data, requestId)
+			const response = parseGrpcResponse(event.data, requestId);
 			if (response) {
-				if (response.message) {
-					const responseValidation = validateWebviewRpcPayload(this.serviceName, methodName, "response", response.message)
-					if (responseValidation.ok === false) {
-						callbacks.onError(new Error(`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`))
-						cleanup()
-						return
+				try {
+					if (response.message) {
+						const responseValidation = validateWebviewRpcPayload(
+							this.serviceName,
+							methodName,
+							"response",
+							response.message,
+						);
+						if (responseValidation.ok === false) {
+							reportError(
+								new Error(
+									`Invalid ${this.serviceName}.${methodName} response payload: ${responseValidation.reason}${responseValidation.field ? ` (${responseValidation.field})` : ""}`,
+								),
+							);
+							return;
+						}
+						callbacks.onResponse(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse));
+					} else if (response.error) {
+						reportError(new Error(response.error));
+						return;
+					} else {
+						console.error("Received ProtoBus message with no response or error ", JSON.stringify(event.data));
 					}
-					// Process streaming message
-					callbacks.onResponse(PLATFORM_CONFIG.decodeMessage(response.message, decodeResponse))
-				} else if (response.error) {
-					// Handle error
-					if (callbacks.onError) {
-						callbacks.onError(new Error(response.error))
+					if (response.isStreaming === false) {
+						cleanup();
+						callbacks.onComplete();
 					}
-					cleanup()
-				} else {
-					console.error("Received ProtoBus message with no response or error ", JSON.stringify(event.data))
-				}
-				if (response.isStreaming === false) {
-					if (callbacks.onComplete) {
-						callbacks.onComplete()
-					}
-					cleanup()
+				} catch (error) {
+					reportError(error);
 				}
 			}
-		}
-		window.addEventListener("message", handleResponse)
+		};
+		unregisterResponse = grpcResponseRouter.register(requestId, handleResponse);
 		PLATFORM_CONFIG.postMessage({
 			protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
 			type: "grpc_request",
@@ -172,11 +208,11 @@ export abstract class ProtoBusClient {
 				request_id: requestId,
 				is_streaming: true,
 			},
-		})
+		});
 		// Return a function to cancel the stream
 		return () => {
 			if (!cleanup()) {
-				return
+				return;
 			}
 			PLATFORM_CONFIG.postMessage({
 				protocol_version: WEBVIEW_RPC_PROTOCOL_VERSION,
@@ -184,25 +220,67 @@ export abstract class ProtoBusClient {
 				grpc_request_cancel: {
 					request_id: requestId,
 				},
-			})
-		}
+			});
+		};
 	}
 }
 
-type GrpcResponse = Readonly<{ message?: unknown; error?: string; isStreaming: boolean }>
+type ResponseHandler = (event: MessageEvent<unknown>) => void;
+
+const grpcResponseRouter = (() => {
+	const handlers = new Map<string, ResponseHandler>();
+	let listening = false;
+	const onMessage = (event: MessageEvent<unknown>) => {
+		const requestId = grpcResponseRequestId(event.data);
+		if (requestId) handlers.get(requestId)?.(event);
+	};
+	return {
+		register(requestId: string, handler: ResponseHandler) {
+			handlers.set(requestId, handler);
+			if (!listening) {
+				window.addEventListener("message", onMessage);
+				listening = true;
+			}
+			return () => {
+				handlers.delete(requestId);
+				if (listening && handlers.size === 0) {
+					window.removeEventListener("message", onMessage);
+					listening = false;
+				}
+			};
+		},
+	};
+})();
+
+type GrpcResponse = Readonly<{
+	message?: unknown;
+	error?: string;
+	isStreaming: boolean;
+}>;
 
 function parseGrpcResponse(value: unknown, requestId: string): GrpcResponse | null {
-	const envelope = asRecord(value)
-	if (envelope.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION || envelope.type !== "grpc_response") return null
-	const response = asRecord(envelope.grpc_response)
-	if (response.request_id !== requestId || typeof response.is_streaming !== "boolean") return null
+	const envelope = asRecord(value);
+	if (envelope.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION || envelope.type !== "grpc_response") return null;
+	const response = asRecord(envelope.grpc_response);
+	if (response.request_id !== requestId || typeof response.is_streaming !== "boolean") return null;
 	return {
 		...(response.message !== undefined ? { message: response.message } : {}),
 		...(typeof response.error === "string" ? { error: response.error } : {}),
 		isStreaming: response.is_streaming,
-	}
+	};
+}
+
+function grpcResponseRequestId(value: unknown) {
+	const envelope = asRecord(value);
+	if (envelope.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION || envelope.type !== "grpc_response") return "";
+	const requestId = asRecord(envelope.grpc_response).request_id;
+	return typeof requestId === "string" ? requestId : "";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function toError(value: unknown, fallback: string): Error {
+	return value instanceof Error ? value : new Error(value == null ? fallback : String(value));
 }

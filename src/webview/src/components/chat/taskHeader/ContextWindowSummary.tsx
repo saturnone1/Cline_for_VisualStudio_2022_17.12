@@ -7,6 +7,7 @@ interface TokenUsageInfoProps {
 	tokensOut?: number
 	cacheWrites?: number
 	cacheReads?: number
+	language?: "en" | "ko"
 }
 
 interface TokenDetail {
@@ -69,7 +70,8 @@ const TOKEN_DETAILS_CONFIG: Omit<TokenDetail, "value">[] = [
 	{ title: "Cache Reads", icon: "codicon-arrow-right" },
 ]
 
-const TokenUsageDetails = memo<TokenUsageInfoProps>(({ tokensIn, tokensOut, cacheWrites, cacheReads }) => {
+const TokenUsageDetails = memo<TokenUsageInfoProps>(({ tokensIn, tokensOut, cacheWrites, cacheReads, language = "en" }) => {
+	const isKorean = language === "ko"
 	const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 	const contextTokenDetails = useMemo(() => {
 		const values = [tokensIn, tokensOut, cacheWrites || 0, cacheReads || 0]
@@ -77,14 +79,14 @@ const TokenUsageDetails = memo<TokenUsageInfoProps>(({ tokensIn, tokensOut, cach
 	}, [tokensIn, tokensOut, cacheWrites, cacheReads])
 
 	if (totalTokens <= 0) {
-		return <div>No token usage data available</div>
+		return <div>{isKorean ? "토큰 사용량 정보가 없습니다" : "No token usage data available"}</div>
 	}
 
 	return (
 		<div className="space-y-1">
 			{contextTokenDetails.map((item) => (
-				<div className="flex justify-between">
-					<span>{item.title}</span>
+				<div className="flex justify-between" key={item.title}>
+					<span>{isKorean ? ({ "Prompt Tokens": "입력 토큰", "Completion Tokens": "출력 토큰", "Cache Writes": "캐시 쓰기", "Cache Reads": "캐시 읽기" }[item.title] ?? item.title) : item.title}</span>
 					<span className="font-mono">{formatTokenNumber(item.value || 0)}</span>
 				</div>
 			))}
@@ -134,14 +136,14 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 				<AccordionItem
 					isExpanded={expandedSections.has("threshold")}
 					onToggle={(event) => toggleSection("threshold", event)}
-					title="Auto Condense Threshold"
+					title={isKorean ? "자동 압축 임계치" : "Auto compaction threshold"}
 					value={<span className="text-muted-foreground">{`${(autoCompactThreshold * 100).toFixed(0)}%`}</span>}>
 					<div className="space-y-1">
 						<p className="text-xs leading-relaxed text-white">
-							Click on the context window bar to set a new threshold.
+							{isKorean ? "컨텍스트 창 막대를 눌러 새 임계치를 설정합니다." : "Click the context window bar to set a new threshold."}
 						</p>
 						<p className="text-xs leading-relaxed mt-0 mb-0">
-							When the context window usage exceeds this threshold, the task will be automatically condensed.
+							{isKorean ? "컨텍스트 사용량이 이 값을 넘으면 대화 압축을 제안합니다." : "When context usage exceeds this threshold, conversation compaction is suggested."}
 						</p>
 					</div>
 				</AccordionItem>
@@ -184,11 +186,12 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 				<AccordionItem
 					isExpanded={expandedSections.has("tokens")}
 					onToggle={(event) => toggleSection("tokens", event)}
-					title="Token Usage"
+					title={isKorean ? "토큰 사용량" : "Token usage"}
 					value={`${formatTokenNumber(totalTokens)}`}>
 					<TokenUsageDetails
 						cacheReads={cacheReads}
 						cacheWrites={cacheWrites}
+						language={language}
 						tokensIn={tokensIn}
 						tokensOut={tokensOut}
 					/>

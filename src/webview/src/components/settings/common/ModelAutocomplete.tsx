@@ -3,7 +3,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import Fuse from "fuse.js"
 import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
-import { highlight } from "../../history/HistoryView"
+import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
 
 interface ModelAutocompleteProps {
 	models: Record<string, ModelInfo>

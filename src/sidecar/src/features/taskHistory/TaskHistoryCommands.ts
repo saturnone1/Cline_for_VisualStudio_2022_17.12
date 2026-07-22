@@ -61,7 +61,7 @@ export class TaskHistoryCommands {
 		this.callbacks.persist()
 	}
 
-	toggleFavorite(taskIdValue: string, isFavorited: boolean) {
+	async toggleFavorite(taskIdValue: string, isFavorited: boolean) {
 		if (!taskIdValue) return
 		this.callbacks.writeHistory(setTaskHistoryFavorite(this.callbacks.readHistory(), taskIdValue, isFavorited))
 		const snapshot = this.callbacks.getSnapshot(taskIdValue)
@@ -69,7 +69,12 @@ export class TaskHistoryCommands {
 		const current = this.callbacks.readCurrentTask()
 		if (current?.id === taskIdValue) this.callbacks.writeCurrentTask({ ...current, isFavorited })
 		this.callbacks.persist()
-		void this.callbacks.updateRemoteFavorite(taskIdValue, isFavorited).catch(() => undefined)
+		try {
+			await this.callbacks.updateRemoteFavorite(taskIdValue, isFavorited)
+		} catch (error) {
+			this.callbacks.log("updateSessionFavoriteFailed", { sessionId: taskIdValue, isFavorited, error: stringify(error) })
+			throw error
+		}
 	}
 
 	private clearSelectedTask(reason: string) {

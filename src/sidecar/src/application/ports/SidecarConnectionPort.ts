@@ -1,5 +1,5 @@
 export interface WebviewMessagePort {
-	dispose(): void
+	dispose(): Promise<void>
 	handle(params: unknown): Promise<unknown>
 }
 

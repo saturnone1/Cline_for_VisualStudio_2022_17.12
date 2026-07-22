@@ -6,8 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -47,76 +45,39 @@ namespace VsClineAgent.ToolWindows
         private string? _lastWebMessageJson;
         private readonly WebviewMessageQueue _webviewMessages;
         private readonly UiThemePreferenceStore _themePreferences;
+        private readonly WebViewLoadingPresenter _loadingPresenter;
+        private readonly ToolWindowLifetime _lifetime;
+		private readonly CancellationTokenSource _diagnosticCancellation = new CancellationTokenSource();
         private bool _loaded;
-        private bool _disposed;
-        private CancellationTokenSource? _pendingUnloadDispose;
+        internal bool IsDisposed => _lifetime.IsDisposed;
 
         public ChatToolWindowControl()
         {
             InitializeComponent();
 			_themePreferences = new UiThemePreferenceStore();
 			_webviewMessages = new WebviewMessageQueue(() => webView.CoreWebView2);
-			ApplyLoadingTheme(_themePreferences.Read());
-            InitializeLoadingLogo();
+			_loadingPresenter = new WebViewLoadingPresenter(this, loadingLogoImage, loadingTitleText, loadingBrandText, statusText, loadingProgress, errorText);
+			_loadingPresenter.ApplyTheme(_themePreferences.Read());
+			_loadingPresenter.InitializeLogo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory);
+			_loadingPresenter.StartAnimation();
             _sidecar = new SidecarLifecycle(
                 new VsEditorService(),
                 new VsCommandExecutionService(new VisualStudioOutputPaneWriter()),
                 SetStatus);
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
+            _lifetime = new ToolWindowLifetime(
+                () =>
+                {
+                    Loaded -= OnLoaded;
+                    Unloaded -= OnUnloaded;
+                    DetachWebViewEventHandlers();
+                },
+                () => _webviewMessages.Dispose(),
+				() => { _diagnosticCancellation.Cancel(); _diagnosticCancellation.Dispose(); },
+                () => _loadingPresenter.StopAnimation(),
+                () => _sidecar.Dispose());
         }
-
-        private void InitializeLoadingLogo()
-        {
-            try
-            {
-                var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
-                    ?? AppDomain.CurrentDomain.BaseDirectory;
-                var logoPath = Path.Combine(assemblyDirectory, "Assets", "lig-mark-white.png");
-                if (!File.Exists(logoPath))
-                    return;
-
-                var bitmap = new BitmapImage();
-                bitmap.BeginInit();
-                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.UriSource = new Uri(logoPath, UriKind.Absolute);
-                bitmap.EndInit();
-                bitmap.Freeze();
-                loadingLogoImage.Source = bitmap;
-            }
-            catch
-            {
-            }
-        }
-
-		private static SolidColorBrush ThemeBrush(string color)
-		{
-			var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-			brush.Freeze();
-			return brush;
-		}
-
-		private void ApplyLoadingTheme(string theme)
-		{
-			void Apply()
-			{
-				var isLight = string.Equals(theme, UiThemePreferenceStore.LightTheme, StringComparison.OrdinalIgnoreCase);
-				Background = ThemeBrush(isLight ? "#F7F8FA" : "#1E1E1E");
-				loadingTitleText.Foreground = ThemeBrush(isLight ? "#172033" : "#CCCCCC");
-				loadingBrandText.Foreground = ThemeBrush(isLight ? "#4B5563" : "#888888");
-				statusText.Foreground = ThemeBrush(isLight ? "#4B5563" : "#888888");
-				loadingProgress.Foreground = ThemeBrush(isLight ? "#0969B7" : "#0E70C0");
-				loadingProgress.Background = ThemeBrush(isLight ? "#D9DEE7" : "#333333");
-				errorText.Foreground = ThemeBrush(isLight ? "#B42318" : "#F44747");
-				errorText.Background = ThemeBrush(isLight ? "#FFFFFF" : "#1E1E1E");
-				errorText.BorderBrush = ThemeBrush(isLight ? "#C7CCD4" : "#3C3C3C");
-			}
-
-			if (Dispatcher.CheckAccess())
-				Apply();
-			else
-				VisualStudioUiThread.Post(Apply);
-		}
 
 		private bool TryHandleThemePreference(string webMessageAsJson)
 		{
@@ -130,7 +91,7 @@ namespace VsClineAgent.ToolWindows
 
 				var theme = UiThemePreferenceStore.Normalize((string?)message["theme"]);
 				_themePreferences.Write(theme);
-				ApplyLoadingTheme(theme);
+				_loadingPresenter.ApplyTheme(theme);
 				return true;
 			}
 			catch
@@ -141,13 +102,12 @@ namespace VsClineAgent.ToolWindows
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            CancelPendingUnloadDispose();
-            _ = OnLoadedAsync();
+	            _ = OnLoadedAsync();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            CancelPendingUnloadDispose();
+	            _webviewMessages.ScheduleFlush();
         }
 
         private async Task OnLoadedAsync()
@@ -206,11 +166,13 @@ namespace VsClineAgent.ToolWindows
                         SetStatus($"WebView2를 초기화하는 중입니다 ({runtimeLabel})...");
                         WebView2RuntimeResolver.EnsureWebView2RuntimeAvailable(browserExecutableFolder);
                         await CreateWebView2WithRetryAsync(runtimeLabel, browserExecutableFolder, userDataFolder);
+                        WebView2RuntimeResolver.CleanupInactiveUserDataFolders(userDataFolder);
                         initialized = true;
                         break;
                     }
                     catch (Exception ex)
                     {
+                        WebView2RuntimeResolver.RemoveFailedUserDataFolder(userDataFolder);
                         initializationFailures.Add(
                             $"{runtimeLabel}: {ex.Message} (HRESULT 0x{ex.HResult:X8})");
                     }
@@ -351,6 +313,7 @@ namespace VsClineAgent.ToolWindows
                 }
 
                 _webviewMessages.SetReady(true);
+				_loadingPresenter.StopAnimation();
                 if (Dispatcher.CheckAccess())
                 {
                     loadingPanel.Visibility = Visibility.Collapsed;
@@ -365,7 +328,7 @@ namespace VsClineAgent.ToolWindows
                     });
                 }
 
-                await ReportBlankWebviewIfNeededAsync();
+				await ReportBlankWebviewIfNeededAsync(_diagnosticCancellation.Token);
             }
             catch (Exception ex)
             {
@@ -430,17 +393,7 @@ namespace VsClineAgent.ToolWindows
 
         public void Dispose()
         {
-            if (_disposed)
-                return;
-
-            _disposed = true;
-            Loaded -= OnLoaded;
-            Unloaded -= OnUnloaded;
-            DetachWebViewEventHandlers();
-            CancelPendingUnloadDispose();
-            _webviewMessages.Dispose();
-
-            _sidecar.Dispose();
+            _lifetime.Dispose();
         }
 
         private void DetachWebViewEventHandlers()
@@ -457,58 +410,6 @@ namespace VsClineAgent.ToolWindows
             }
             catch
             {
-            }
-        }
-
-        private void ScheduleUnloadDispose()
-        {
-            if (_disposed)
-                return;
-
-            CancelPendingUnloadDispose();
-            var unloadDispose = new CancellationTokenSource();
-            _pendingUnloadDispose = unloadDispose;
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(3), unloadDispose.Token).ConfigureAwait(false);
-                    if (unloadDispose.IsCancellationRequested)
-                        return;
-
-                    await VisualStudioUiThread.InvokeAsync(() =>
-                    {
-                        if (!IsLoaded)
-                            _webviewMessages.ScheduleFlush();
-                    });
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                catch
-                {
-                }
-            });
-        }
-
-        private void CancelPendingUnloadDispose()
-        {
-            var pending = _pendingUnloadDispose;
-            _pendingUnloadDispose = null;
-            if (pending == null)
-                return;
-
-            try
-            {
-                pending.Cancel();
-            }
-            catch
-            {
-            }
-            finally
-            {
-                pending.Dispose();
             }
         }
 
@@ -533,11 +434,12 @@ namespace VsClineAgent.ToolWindows
             }
         }
 
-        private async Task ReportBlankWebviewIfNeededAsync()
+		private async Task ReportBlankWebviewIfNeededAsync(CancellationToken cancellationToken)
         {
             try
             {
-                await Task.Delay(10000).ConfigureAwait(true);
+				await Task.Delay(_loadingPresenter.BlankDiagnosticDelay, cancellationToken).ConfigureAwait(true);
+				cancellationToken.ThrowIfCancellationRequested();
                 if (webView.CoreWebView2 == null)
                     return;
 
@@ -584,7 +486,11 @@ namespace VsClineAgent.ToolWindows
                         CreateDiagnosticContext()));
                 }
             }
-            catch (Exception ex)
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				// The ToolWindow was closed before the delayed diagnostic was needed.
+			}
+			catch (Exception ex)
             {
                 ShowError("WebApp diagnostics failed:\n" + ex.Message);
             }
@@ -606,21 +512,16 @@ namespace VsClineAgent.ToolWindows
             return Task.CompletedTask;
         }
 
-        private void SetStatus(string message)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                statusText.Text = message;
-                return;
-            }
-
-            VisualStudioUiThread.Post(() => statusText.Text = message);
-        }
+	        private void SetStatus(string message)
+	        {
+	            _loadingPresenter.SetStatus(message);
+	        }
 
         private void ShowError(string message)
         {
             void ApplyError()
             {
+				_loadingPresenter.StopAnimation();
                 var detailedMessage = message.IndexOf("=== Snapshot ===", StringComparison.Ordinal) >= 0
                     ? message
                     : HostDiagnosticReport.Create(message, null, null, CreateDiagnosticContext());

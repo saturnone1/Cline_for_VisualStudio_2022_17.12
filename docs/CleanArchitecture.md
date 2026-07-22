@@ -1,5 +1,7 @@
 # Clean Architecture
 
+> Historical reference: this document preserves dependency-direction rationale. The active maintenance model is explicit feature ownership and fast verification in `AiMaintenanceGuide.md` and `TargetArchitecture.md`; architectural ceremony is not a goal by itself.
+
 ## Dependency Rule
 
 Source dependencies point inward:

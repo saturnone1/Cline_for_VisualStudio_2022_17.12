@@ -47,6 +47,57 @@ namespace VsClineAgent.Host.Tests
             Assert.Equal("$(VsAssemblyName)", assemblyName);
         }
 
+        [Fact]
+        public void ProductVersionIsSynchronizedFromOneCanonicalProperty()
+        {
+            var root = FindRepositoryRoot();
+            var versionProperties = XDocument.Load(Path.Combine(root, "packaging", "ProductVersion.props"));
+            var version = versionProperties.Descendants().First(element => element.Name.LocalName == "ProductVersion").Value.Trim();
+            var assemblyVersion = versionProperties.Descendants().First(element => element.Name.LocalName == "ProductAssemblyVersion").Value.Trim();
+            foreach (var target in new[] { "17.0", "17.12" })
+            {
+                var manifest = XDocument.Load(Path.Combine(root, "packaging", "vs2022-" + target, "source.extension.vsixmanifest"));
+                Assert.Equal(version, manifest.Descendants().First(element => element.Name.LocalName == "Identity").Attribute("Version")?.Value);
+            }
+
+            var generated = File.ReadAllText(Path.Combine(root, "src", "extension", "Properties", "ProductVersionAssemblyInfo.cs"));
+            Assert.Contains("AssemblyVersion(\"" + assemblyVersion + "\")", generated);
+            Assert.Contains("AssemblyInformationalVersion(\"" + version + "\")", generated);
+        }
+
+        [Fact]
+        public void ToolWindowDelegatesLoadingPresentationAndHasNoTimingBasedUnloadState()
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"));
+            Assert.Contains("WebViewLoadingPresenter", source);
+            Assert.Contains("ToolWindowLifetime", source);
+            Assert.DoesNotContain("ScheduleUnloadDispose", source);
+            Assert.DoesNotContain("TimeSpan.FromSeconds", source);
+        }
+
+        [Fact]
+        public void ExtensionProjectCompilesCriticalHostLifecycleSources()
+        {
+            var project = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "extension", "VsClineAgent.csproj"));
+            var compileItems = project.Descendants()
+                .Where(element => element.Name.LocalName == "Compile")
+                .Select(element => ((string?)element.Attribute("Include") ?? "").Replace('/', '\\'))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            Assert.Contains("Host\\SidecarProcess.cs", compileItems);
+            Assert.Contains("Host\\ToolWindowLifetime.cs", compileItems);
+            Assert.Contains("ToolWindows\\ChatToolWindowControl.xaml.cs", compileItems);
+            Assert.Contains("Services\\VsCommandExecutionService.cs", compileItems);
+        }
+
+        [Fact]
+        public void BackgroundCommandLoggingDoesNotOpenOrActivateTheOutputPane()
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "extension", "Host", "VisualStudioOutputPaneWriter.cs"));
+            Assert.Contains("CreatePane(ref outputPaneGuid, \"VsCline Agent\", 0, 1)", source);
+            Assert.DoesNotContain("pane?.Activate()", source);
+        }
+
         private static PackagingManifest ReadManifest(string path)
         {
             var document = XDocument.Load(path);

@@ -1,18 +1,26 @@
 import type { Boolean, EmptyRequest } from "@shared/proto/cline/common"
-import { useCallback, useEffect } from "react"
-import AccountView from "./components/account/AccountView"
+import { lazy, Suspense, useCallback, useEffect } from "react"
 import ChatView from "./components/chat/ChatView"
-import HistoryView from "./components/history/HistoryView"
-import McpView from "./components/mcp/configuration/McpConfigurationView"
 import OnboardingView from "./components/onboarding/OnboardingView"
-import SettingsView from "./components/settings/SettingsView"
 import LoadingScreen from "./components/welcome/LoadingScreen"
-import WorktreesView from "./components/worktrees/WorktreesView"
+import BackgroundTaskStatus from "./components/common/BackgroundTaskStatus"
 import { useClineAuth } from "./context/ClineAuthContext"
 import { useExtensionState } from "./context/ExtensionStateContext"
 import { Providers } from "./Providers"
 import { UiServiceClient } from "./services/grpcClient"
 import { applyLigTheme, getLigTheme } from "./utils/ligTheme"
+
+const AccountView = lazy(() => import("./components/account/AccountView"))
+const HistoryView = lazy(() => import("./components/history/HistoryView"))
+const McpView = lazy(() => import("./components/mcp/configuration/McpConfigurationView"))
+const SettingsView = lazy(() => import("./components/settings/SettingsView"))
+const WorktreesView = lazy(() => import("./components/worktrees/WorktreesView"))
+
+const SecondaryViewFallback = () => (
+	<div className="flex h-full w-full items-center justify-center" role="status">
+		<span aria-label="Loading" className="codicon codicon-loading codicon-modifier-spin text-(--vscode-descriptionForeground)" />
+	</div>
+)
 
 const AppContent = () => {
 	const {
@@ -68,18 +76,21 @@ const AppContent = () => {
 
 	return (
 		<div className="flex h-screen w-full flex-col">
-			{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
-			{showHistory && <HistoryView onDone={hideHistory} />}
-			{showMcp && <McpView initialTab={mcpTab} onDone={closeMcpView} />}
-			{showAccount && (
-				<AccountView
-					activeOrganization={activeOrganization}
-					clineUser={clineUser}
-					onDone={hideAccount}
-					organizations={organizations}
-				/>
-			)}
-			{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
+			<BackgroundTaskStatus visible={showSettings || showHistory || showMcp || showAccount || showWorktrees} />
+			<Suspense fallback={<SecondaryViewFallback />}>
+				{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
+				{showHistory && <HistoryView onDone={hideHistory} />}
+				{showMcp && <McpView initialTab={mcpTab} onDone={closeMcpView} />}
+				{showAccount && (
+					<AccountView
+						activeOrganization={activeOrganization}
+						clineUser={clineUser}
+						onDone={hideAccount}
+						organizations={organizations}
+					/>
+				)}
+				{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
+			</Suspense>
 			{/* Do not conditionally load ChatView, it's expensive and there's state we don't want to lose (user input, disableInput, askResponse promise, etc.) */}
 			<ChatView
 				hideAnnouncement={hideAnnouncement}

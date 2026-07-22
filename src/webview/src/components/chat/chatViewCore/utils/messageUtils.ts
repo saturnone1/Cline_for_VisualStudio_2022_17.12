@@ -353,7 +353,6 @@ export function isBrowserSessionMessage(message: ClineMessage): boolean {
 			"text",
 			"browser_action",
 			"browser_action_result",
-			"checkpoint_created",
 			"reasoning",
 			"error_retry",
 		].includes(message.say!)
@@ -503,9 +502,10 @@ export function groupLowStakesTools(groupedMessages: (ClineMessage | ClineMessag
 			continue
 		}
 
-		// Checkpoint - absorb into active tool group
-		if (messageType === "checkpoint_created" && hasTools) {
-			toolGroup.push(message)
+		// Checkpoints are actionable timeline markers and must remain independently visible.
+		if (messageType === "checkpoint_created") {
+			commitToolGroup()
+			result.push(message)
 			continue
 		}
 

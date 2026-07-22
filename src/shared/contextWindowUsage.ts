@@ -8,6 +8,7 @@ export interface ContextWindowUsage {
 
 const MAX_ESTIMATED_TEXT_CHARS_PER_MESSAGE = 64_000
 const MAX_ESTIMATED_FILE_TOKENS_PER_MESSAGE = 1_000
+const messageTokenCache = new WeakMap<ClineMessage, number>()
 
 /** Returns the raw token count from the latest completed API request. */
 export function getLastApiReqTotalTokens(messages: ClineMessage[]): number {
@@ -20,6 +21,7 @@ export function getLastApiReqTotalTokens(messages: ClineMessage[]): number {
 
 export function getContextWindowUsage(messages: ClineMessage[]): ContextWindowUsage | undefined {
 	const currentContextMessages = getCurrentContextMessages(messages)
+	const compactedBaseline = getLastCompactedTokenBaseline(messages)
 	const snapshot = findLatestReportedUsage(currentContextMessages)
 	if (snapshot) {
 		const reported = getCalibratedConversationUsage(currentContextMessages, snapshot)
@@ -37,8 +39,16 @@ export function getContextWindowUsage(messages: ClineMessage[]): ContextWindowUs
 		}
 	}
 
-	const estimated = estimateConversationTokens(currentContextMessages)
+	const estimated = compactedBaseline + estimateConversationTokens(currentContextMessages)
 	return estimated > 0 ? { used: estimated, source: "estimated", reliable: false } : undefined
+}
+
+function getLastCompactedTokenBaseline(messages: ClineMessage[]) {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const value = messages[index].contextCompaction?.estimatedTokensAfter
+		if (typeof value === "number" && Number.isFinite(value) && value > 0) return value
+	}
+	return 0
 }
 
 type ReportedUsageSnapshot = { index: number; promptTokens: number; outputTokens: number; used: number }
@@ -115,12 +125,18 @@ export function getCurrentContextMessages(messages: ClineMessage[]): ClineMessag
 }
 
 export function estimateConversationTokens(messages: ClineMessage[]): number {
-	return messages.reduce((total, message) => {
+	return messages.reduce((total, message) => total + estimateMessageTokens(message), 0)
+}
+
+function estimateMessageTokens(message: ClineMessage): number {
+	const cached = messageTokenCache.get(message)
+	if (cached !== undefined) return cached
+	const estimated = (() => {
 		if (isInternalUsageMetadata(message)) {
-			return total
+			return 0
 		}
 		if (isEmptyJsonNoise(message.text) && !message.reasoning && !message.files?.length && !message.images?.length) {
-			return total
+			return 0
 		}
 
 		const text = [message.text, message.reasoning].filter(Boolean).join("\n")
@@ -130,8 +146,10 @@ export function estimateConversationTokens(messages: ClineMessage[]): number {
 			MAX_ESTIMATED_FILE_TOKENS_PER_MESSAGE,
 		)
 		const imageTokens = (message.images?.length ?? 0) * 85
-		return total + textTokens + fileTokens + imageTokens + 12
-	}, 0)
+		return textTokens + fileTokens + imageTokens + 12
+	})()
+	messageTokenCache.set(message, estimated)
+	return estimated
 }
 
 function advancesModelContext(message: ClineMessage) {
@@ -236,25 +254,11 @@ function isWhitespaceCodePoint(codePoint: number) {
 	)
 }
 
-function isContextCompactionBoundaryMessage(message: ClineMessage): boolean {
-	if (message.type !== "say" || message.say !== "reasoning") {
-		return false
-	}
-	const text = [message.text, message.reasoning].filter(Boolean).join("\n").toLowerCase()
-	return text.includes("컨텍스트 압축 중") || text.includes("compacting context")
-}
-
 function findLastSuccessfulCompactionBoundaryIndex(messages: ClineMessage[]): number {
 	for (let i = messages.length - 1; i >= 0; i--) {
-		if (isContextCompactionBoundaryMessage(messages[i]) && hasAssistantTextAfterIndex(messages, i)) {
+		if (messages[i].contextCompaction?.sessionId) {
 			return i
 		}
 	}
 	return -1
-}
-
-function hasAssistantTextAfterIndex(messages: ClineMessage[], index: number): boolean {
-	return messages.slice(index + 1).some((message) =>
-		message.type === "say" && message.say === "text" && !!message.text?.trim(),
-	)
 }

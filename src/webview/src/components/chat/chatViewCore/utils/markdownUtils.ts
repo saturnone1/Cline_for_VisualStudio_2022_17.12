@@ -4,6 +4,7 @@
 
 import rehypeParse from "rehype-parse"
 import rehypeRemark from "rehype-remark"
+import remarkGfm from "remark-gfm"
 import remarkStringify from "remark-stringify"
 import { unified } from "unified"
 
@@ -38,6 +39,7 @@ export async function convertHtmlToMarkdown(html: string): Promise<string> {
 	const result = await unified()
 		.use(rehypeParse as any, { fragment: true }) // Parse HTML fragments
 		.use(rehypeRemark as any) // Convert HTML to Markdown AST
+		.use(remarkGfm as any)
 		.use(remarkStringify as any, {
 			// Convert Markdown AST to text
 			bullet: "-", // Use - for unordered lists
@@ -55,4 +57,17 @@ export async function convertHtmlToMarkdown(html: string): Promise<string> {
 	const md = String(result)
 	// Apply comprehensive cleanup of escape characters
 	return cleanupMarkdownEscapes(md)
+}
+
+export async function convertHtmlToMarkdownWithFallback(
+	html: string,
+	plainText: string,
+	convert: (value: string) => Promise<string> = convertHtmlToMarkdown,
+) {
+	try {
+		return await convert(html)
+	} catch (error) {
+		console.warn("HTML-to-Markdown copy conversion failed; using plain text.", error instanceof Error ? error.message : String(error))
+		return plainText
+	}
 }

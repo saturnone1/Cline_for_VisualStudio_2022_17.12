@@ -13,6 +13,8 @@ const VERBOSE_INTERACTION_LOG = process.env.VSCLINE_VERBOSE_INTERACTION_LOG === 
 const ENABLE_INTERACTION_LOG = VERBOSE_INTERACTION_LOG || process.env.VSCLINE_ENABLE_INTERACTION_LOG === "1"
 const LOG_FLUSH_INTERVAL_MS = 50
 const LOG_FLUSH_BATCH_SIZE = 100
+const LOG_RETENTION_DAYS = VERBOSE_INTERACTION_LOG ? 7 : 14
+const LOG_TOTAL_BYTES = 150 * 1024 * 1024
 
 const SENSITIVE_KEYS = [
 	"apikey",
@@ -27,6 +29,7 @@ const SENSITIVE_KEYS = [
 let pendingLogLines: string[] = []
 let flushTimer: NodeJS.Timeout | null = null
 let flushPromise: Promise<void> | null = null
+let lastCleanupStamp = ""
 
 export function logInteraction(direction: string, event: string, payload?: unknown) {
 	try {
@@ -135,6 +138,7 @@ async function flushLogLines() {
 				pendingLogLines = []
 				const filePath = getLogPath()
 				fs.mkdirSync(path.dirname(filePath), { recursive: true })
+				cleanupLogsOncePerDay(path.dirname(filePath), filePath)
 				rotateIfNeeded(filePath)
 				await fs.promises.appendFile(filePath, lines.join(""), "utf8")
 			}
@@ -151,9 +155,42 @@ async function flushLogLines() {
 	await flushPromise
 }
 
-function isImportantDiagnosticEvent(event: string) {
+function cleanupLogsOncePerDay(directory: string, currentFile: string) {
+	const stamp = dateStamp()
+	if (lastCleanupStamp === stamp) return
+	lastCleanupStamp = stamp
+	cleanupInteractionLogs(directory, currentFile, Date.now(), LOG_RETENTION_DAYS, LOG_TOTAL_BYTES)
+}
+
+export function cleanupInteractionLogs(directory: string, currentFile: string, nowMs: number, retentionDays: number, maxTotalBytes: number) {
+	try {
+		const current = path.resolve(currentFile)
+		const cutoff = nowMs - Math.max(1, retentionDays) * 24 * 60 * 60 * 1000
+		let files = fs.readdirSync(directory, { withFileTypes: true })
+			.filter((entry) => entry.isFile() && /^interaction-\d{8}\.jsonl(?:\.\d+)?$/i.test(entry.name))
+			.map((entry) => { const filePath = path.join(directory, entry.name), stat = fs.statSync(filePath); return { path: filePath, size: stat.size, modified: stat.mtimeMs } })
+		for (const file of files) if (path.resolve(file.path) !== current && file.modified < cutoff) tryRemove(file.path)
+		files = files.filter((file) => fs.existsSync(file.path)).sort((left, right) => left.modified - right.modified)
+		let total = files.reduce((sum, file) => sum + file.size, 0)
+		for (const file of files) {
+			if (total <= maxTotalBytes) break
+			if (path.resolve(file.path) === current) continue
+			if (tryRemove(file.path)) total -= file.size
+		}
+	} catch {
+		// Retention cleanup must not interfere with diagnostics.
+	}
+}
+
+function tryRemove(filePath: string) { try { fs.rmSync(filePath, { force: true }); return true } catch { return false } }
+
+export function isImportantDiagnosticEvent(event: string) {
 	const normalized = event.toLowerCase()
-	return normalized.includes("failed") || normalized.includes("error") || normalized.includes("slow")
+	return normalized.includes("failed")
+		|| normalized.includes("error")
+		|| normalized.includes("slow")
+		|| normalized.startsWith("sendlatency.")
+		|| normalized === "taskidlenotice"
 }
 
 function shouldSkipDefaultLog(direction: string, event: string, payload: unknown) {

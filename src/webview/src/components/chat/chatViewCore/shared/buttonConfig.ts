@@ -402,7 +402,7 @@ export function getButtonConfig(message: ClineMessage | undefined, _mode: Mode =
 				return resolve(BUTTON_CONFIGS.report_bug)
 
 			default:
-				return resolve(BUTTON_CONFIGS.tool_approve)
+				return resolve(BUTTON_CONFIGS.default)
 		}
 	}
 

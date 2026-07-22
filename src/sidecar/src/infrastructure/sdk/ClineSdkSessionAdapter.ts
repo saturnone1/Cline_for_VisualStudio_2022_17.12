@@ -1,5 +1,6 @@
-import type { AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
+import type { AgentCompactSessionRequest, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import { buildSdkStartInput, normalizeAgentMode } from "./SdkSessionRequestBuilder"
+import { estimateCompactedTokens } from "./ClineSdkCompactionSummarizer"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 export type ClineSdkCore = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -12,6 +13,7 @@ type SessionAdapterDependencies = {
 	getWorkspacePaths: () => Promise<string[]>
 	createExtraTools: () => Promise<unknown>
 	getStatus: () => unknown
+	summarizeCompaction: (config: Readonly<Record<string, unknown>>, initialMessages: readonly unknown[], signal?: AbortSignal) => Promise<string>
 }
 
 export class ClineSdkSessionAdapter {
@@ -53,6 +55,44 @@ export class ClineSdkSessionAdapter {
 		}
 	}
 
+	async compact(request: AgentCompactSessionRequest) {
+		const core = await this.dependencies.getCore()
+		const workspaceRoots = await this.dependencies.getWorkspacePaths()
+		const summary = await this.dependencies.summarizeCompaction(request.config, request.initialMessages, request.signal)
+		throwIfAborted(request.signal)
+		const { startInput } = buildSdkStartInput({
+			cwd: request.cwd,
+			interactive: true,
+				sessionMetadata: {
+					...request.sessionMetadata,
+					ligVsCompactedFrom: request.sourceSessionId,
+					ligVsCompactedContext: summary,
+					ligVsCompactedInitialMessageCount: 0,
+			},
+			config: { ...request.config, sessionId: undefined },
+			toolPolicies: request.toolPolicies,
+			prompt: "",
+		}, workspaceRoots, await this.dependencies.createExtraTools())
+
+		const result = await core.start(startInput)
+		if (request.signal?.aborted) {
+			if (result.sessionId) await core.stop(result.sessionId).catch(() => undefined)
+			if (result.sessionId) await core.delete(result.sessionId).catch(() => false)
+			throw new Error("Context compaction was cancelled.")
+		}
+		this.dependencies.setActiveSessionId(result.sessionId)
+		await core.stop(request.sourceSessionId).catch(() => undefined)
+		const sourceSessionDeleted = await core.delete(request.sourceSessionId).catch(() => false)
+		return {
+			...result,
+			compactedFrom: request.sourceSessionId,
+			sourceSessionDeleted,
+			compactedMessageCount: 0,
+			estimatedTokensAfter: estimateCompactedTokens([{ role: "context", content: summary }]),
+			compactionSummary: summary,
+		}
+	}
+
 	async send(request: AgentMessageRequest) {
 		const core = await this.dependencies.getCore()
 		const sessionId = request.sessionId || this.dependencies.getActiveSessionId()
@@ -86,9 +126,9 @@ export class ClineSdkSessionAdapter {
 	}
 
 	async abort(request: AgentSessionRequest) {
-		const core = await this.dependencies.getCore()
 		const sessionId = stringValue(request.sessionId) || this.dependencies.getActiveSessionId()
-		if (!sessionId) return this.dependencies.getStatus()
+		const core = this.dependencies.getCurrentCore()
+		if (!sessionId || !core) return this.dependencies.getStatus()
 
 		await core.abort(sessionId)
 		this.dependencies.setActiveSessionId(sessionId)
@@ -171,3 +211,5 @@ function stringValue(value: unknown) {
 function numberValue(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
+
+function throwIfAborted(signal?: AbortSignal) { if (signal?.aborted) throw new Error("Context compaction was cancelled.") }

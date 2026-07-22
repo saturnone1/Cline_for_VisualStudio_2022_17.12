@@ -52,6 +52,8 @@ export type WebviewFeatures = {
 	sdkSettings: SdkSettingsHandler
 }
 
+export type RuntimeWebviewFeatures = Omit<WebviewFeatures, "streamPublisher">
+
 const labels: Record<keyof WebviewFeatures, string> = {
 	agentEngine: "LIG VS SDK runtime",
 	taskSessions: "Task session use case",
@@ -82,9 +84,19 @@ const labels: Record<keyof WebviewFeatures, string> = {
 
 export class WebviewFeatureRegistry {
 	private readonly values: Partial<WebviewFeatures> = {}
+	private sealed = false
 
 	attach<K extends keyof WebviewFeatures>(key: K, value: WebviewFeatures[K]) {
+		if (this.sealed) throw new Error("WebView features are already configured.")
 		this.values[key] = value
+	}
+
+	complete(features: RuntimeWebviewFeatures) {
+		if (this.sealed) throw new Error("WebView features are already configured.")
+		Object.assign(this.values, features)
+		const missing = (Object.keys(labels) as Array<keyof WebviewFeatures>).filter((key) => !this.values[key])
+		if (missing.length > 0) throw new Error(`WebView feature configuration is incomplete: ${missing.join(", ")}`)
+		this.sealed = true
 	}
 
 	optional<K extends keyof WebviewFeatures>(key: K): WebviewFeatures[K] | null {

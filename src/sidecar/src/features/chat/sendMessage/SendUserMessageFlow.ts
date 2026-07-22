@@ -1,63 +1,57 @@
 import type { SendMessageCommand } from "./SendMessageCommand"
 
 export type SendUserMessageInput = Readonly<{ requestId: string; prompt: string; transcriptText: string; images: string[]; files: string[]; delivery?: "queue" | "steer"; mode: "plan" | "act"; activeSessionId: string; selectedSessionId: string }>
-type Callbacks = Readonly<{
-	hasPendingApproval: () => boolean
-	hasPendingQuestion: () => boolean
-	clearPending: () => void
-	startNewTask: (input: SendUserMessageInput) => Promise<void>
-	startLatency: (requestId: string, sessionId: string, textLength: number) => void
-	transitionStarting: () => void
-	projectUserMessage: (text: string) => unknown
-	showPreparing: () => void
-	persist: () => void
-	publishPartial: (message: unknown) => void
-	broadcast: () => void
-	normalizeImages: (images: string[]) => Promise<readonly string[]>
-	runHook: (context: Record<string, unknown>) => void
-	nextGeneration: () => number
-	currentGeneration: () => number
-	send: (sessionId: string, command: SendMessageCommand, textLength: number) => Promise<unknown>
-	resultSessionId: (result: unknown, fallback: string) => string
-	complete: (result: unknown, sessionId: string, generation: number) => Promise<void>
-	recover: (sessionId: string, generation: number, error: unknown) => Promise<void>
+type Dependencies = Readonly<{
+	interactions: Readonly<{ hasPending: () => boolean; clear: () => void }>
+	newTask: Readonly<{ start: (input: SendUserMessageInput) => Promise<void> }>
+	lifecycle: Readonly<{ startLatency: (requestId: string, sessionId: string, textLength: number) => void; transitionStarting: () => void; nextGeneration: () => number; currentGeneration: () => number }>
+	projection: Readonly<{ addUserMessage: (text: string) => unknown; showPreparing: () => void; persist: () => void; publishPartial: (message: unknown) => void; broadcast: () => void }>
+	attachments: Readonly<{ normalizeImages: (images: string[]) => Promise<readonly string[]> }>
+	hooks: Readonly<{ onPrompt: (context: Record<string, unknown>) => void }>
+	agent: Readonly<{ send: (sessionId: string, command: SendMessageCommand, textLength: number) => Promise<unknown>; resultSessionId: (result: unknown, fallback: string) => string; complete: (result: unknown, sessionId: string, generation: number) => Promise<void>; recover: (sessionId: string, generation: number, error: unknown) => Promise<void>; recoverContextOverflow: (input: SendUserMessageInput, generation: number, error: unknown) => Promise<boolean> }>
 	log: (event: string, details: Record<string, unknown>) => void
 }>
 
 export class SendUserMessageFlow {
-	constructor(private readonly callbacks: Callbacks) {}
+	constructor(private readonly dependencies: Dependencies) {}
 
 	async execute(input: SendUserMessageInput) {
 		if (!input.transcriptText.trim()) return
-		if (this.callbacks.hasPendingApproval() || this.callbacks.hasPendingQuestion()) {
-			this.callbacks.log("sendAskResponse.stalePendingIgnored", { hasPendingApproval: this.callbacks.hasPendingApproval(), hasPendingQuestion: this.callbacks.hasPendingQuestion(), activeSessionId: input.activeSessionId, selectedSessionId: input.selectedSessionId })
-			this.callbacks.clearPending()
+		const normalizedImages = await this.dependencies.attachments.normalizeImages(input.images)
+		if (normalizedImages.length !== input.images.length) {
+			throw new Error("One or more attached images could not be read. Reattach the image and try again.")
+		}
+		if (this.dependencies.interactions.hasPending()) {
+			this.dependencies.log("sendAskResponse.stalePendingIgnored", { activeSessionId: input.activeSessionId, selectedSessionId: input.selectedSessionId })
+			this.dependencies.interactions.clear()
 		}
 		const sessionId = input.activeSessionId || input.selectedSessionId
 		if (!sessionId) {
-			this.callbacks.log("sendAskResponse.startNewTask", { textLength: input.transcriptText.length })
-			await this.callbacks.startNewTask(input)
+			this.dependencies.log("sendAskResponse.startNewTask", { textLength: input.transcriptText.length })
+			await this.dependencies.newTask.start(input)
 			return
 		}
-		this.callbacks.startLatency(input.requestId, sessionId, input.transcriptText.length)
-		this.callbacks.transitionStarting()
-		const userMessage = this.callbacks.projectUserMessage(input.transcriptText)
-		this.callbacks.showPreparing()
-		this.callbacks.persist()
-		this.callbacks.publishPartial(userMessage)
-		this.callbacks.broadcast()
-		const command: SendMessageCommand = { sessionId, prompt: input.prompt, mode: input.mode, userImages: await this.callbacks.normalizeImages(input.images), userFiles: input.files, delivery: input.delivery }
-		this.callbacks.runHook({ prompt: input.prompt, sessionId, images: input.images, files: input.files })
-		const generation = this.callbacks.nextGeneration()
-		this.callbacks.send(sessionId, command, input.transcriptText.length)
-			.then((result) => this.callbacks.complete(result, this.callbacks.resultSessionId(result, sessionId), generation))
+		this.dependencies.lifecycle.startLatency(input.requestId, sessionId, input.transcriptText.length)
+		this.dependencies.lifecycle.transitionStarting()
+		const userMessage = this.dependencies.projection.addUserMessage(input.transcriptText)
+		this.dependencies.projection.showPreparing()
+		this.dependencies.projection.persist()
+		this.dependencies.projection.publishPartial(userMessage)
+		this.dependencies.projection.broadcast()
+		const command: SendMessageCommand = { sessionId, prompt: input.prompt, mode: input.mode, userImages: normalizedImages, userFiles: input.files, delivery: input.delivery }
+		this.dependencies.log("sendAskResponse.attachmentsPrepared", { imageCount: input.images.length, normalizedImageCount: normalizedImages.length, fileCount: input.files.length })
+		this.dependencies.hooks.onPrompt({ prompt: input.prompt, sessionId, images: input.images, files: input.files })
+		const generation = this.dependencies.lifecycle.nextGeneration()
+		this.dependencies.agent.send(sessionId, command, input.transcriptText.length)
+			.then((result) => this.dependencies.agent.complete(result, this.dependencies.agent.resultSessionId(result, sessionId), generation))
 			.catch(async (error) => {
-				const currentRunGeneration = this.callbacks.currentGeneration()
+				const currentRunGeneration = this.dependencies.lifecycle.currentGeneration()
 				if (generation !== currentRunGeneration) {
-					this.callbacks.log("ignoredSupersededSdkError", { source: "send", sessionId, runGeneration: generation, currentRunGeneration, error: stringify(error) })
+					this.dependencies.log("ignoredSupersededSdkError", { source: "send", sessionId, runGeneration: generation, currentRunGeneration, error: stringify(error) })
 					return
 				}
-				await this.callbacks.recover(sessionId, generation, error)
+				if (await this.dependencies.agent.recoverContextOverflow(input, generation, error)) return
+				await this.dependencies.agent.recover(sessionId, generation, error)
 			})
 	}
 }

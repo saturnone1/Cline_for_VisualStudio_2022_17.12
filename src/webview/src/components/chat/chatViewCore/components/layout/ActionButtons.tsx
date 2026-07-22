@@ -53,7 +53,6 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 	// Single effect to handle all configuration updates
 	useEffect(() => {
 		setSendingDisabled(requestPending ? true : buttonConfig.sendingDisabled)
-		setIsProcessing(false)
 	}, [buttonConfig, requestPending, setSendingDisabled])
 
 	// Clear input when transitioning from command_output to api_req
@@ -73,10 +72,10 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 			}
 			setIsProcessing(true)
 
-			void messageHandlers.executeButtonAction(action, text, images, files).catch(() => {
-				// Reset processing state on errors to avoid getting stuck.
-				setIsProcessing(false)
-			})
+			void messageHandlers
+				.executeButtonAction(action, text, images, files)
+				.catch((error) => console.error("Task action failed:", error))
+				.finally(() => setIsProcessing(false))
 		},
 		[messageHandlers, isProcessing],
 	)

@@ -1,3 +1,9 @@
+/**
+ * Upstream-compatible provider and model catalog snapshot.
+ *
+ * Keep this module free of Visual Studio behavior. Product decisions belong to
+ * the owning sidecar or WebView feature; see src/shared/README.md.
+ */
 import { ApiFormat } from "./proto/cline/models"
 import type { ApiHandlerSettings } from "./storage/stateKeys"
 

@@ -36,7 +36,7 @@ export class AgentRunCompletionFlow {
 			this.callbacks.log("ignoredStaleSdkResult", { source, sessionId, currentTaskId: this.callbacks.currentTaskId(), activeSessionId: this.callbacks.activeSessionId() })
 			return
 		}
-		if (await this.callbacks.hydrate(sessionId, `complete:${source}`)) return this.callbacks.broadcast()
+		await this.callbacks.hydrate(sessionId, `complete:${source}`)
 
 		if (decoded.empty) {
 			const activeText = this.callbacks.activeText()

@@ -79,7 +79,7 @@ export class AgentLifecycleEventProjector {
 			this.callbacks.recordContextUsage({ tokensIn: usage.inputTokens, tokensOut: usage.outputTokens, cacheReads: usage.cacheReadTokens, cacheWrites: usage.cacheWriteTokens, totalCost: usage.totalCost })
 		}
 	}
-	private error(event: Extract<AgentEvent, { type: "AgentError" }>) { this.callbacks.noteActivity("error"); this.finishTextProgress(); const text = this.callbacks.formatError(event.error); this.callbacks.markErrorLatency(event.sessionId, text); this.callbacks.addError(text) }
+	private error(event: Extract<AgentEvent, { type: "AgentError" }>) { this.callbacks.noteActivity("error"); this.finishTextProgress(); const text = this.callbacks.formatError(event.error); this.callbacks.markErrorLatency(event.sessionId, text); this.callbacks.addError(text); this.callbacks.finishTask(event.sessionId, "failed") }
 	private finishRunProgress() { this.callbacks.finishToolActivity(); this.finishTextProgress() }
 	private finishTextProgress() { this.callbacks.finishProgress(); this.callbacks.clearReasoning() }
 	private applyUsage(value: unknown) { const usage = normalizeUsageSnapshot(asRecord(value)); if (usage.reliable) this.callbacks.updateUsage({ tokensIn: usage.inputTokens, tokensOut: usage.outputTokens, cacheReads: usage.cacheReadTokens, cacheWrites: usage.cacheWriteTokens, totalCost: usage.totalCost }) }

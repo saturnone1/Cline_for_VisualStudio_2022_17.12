@@ -36,6 +36,7 @@ export type Platform = "aix" | "darwin" | "freebsd" | "linux" | "openbsd" | "sun
 export const DEFAULT_PLATFORM = "unknown"
 
 export const COMMAND_CANCEL_TOKEN = "__cline_command_cancel__"
+export type TaskLifecycleStatus = "idle" | "starting" | "streaming" | "awaiting_user" | "cancelling" | "completed" | "failed"
 export interface ExtensionState {
 	isNewUser: boolean
 	welcomeViewCompleted: boolean
@@ -51,6 +52,9 @@ export interface ExtensionState {
 	mode: Mode
 	checkpointManagerErrorMessage?: string
 	clineMessages: ClineMessage[]
+	taskLifecycleStatus?: TaskLifecycleStatus
+	contextCompactionInProgress?: boolean
+	contextCompactionThreshold?: number
 	currentTaskItem?: HistoryItem
 	currentFocusChainChecklist?: string | null
 	mcpMarketplaceEnabled?: boolean
@@ -169,6 +173,14 @@ export interface ClineMessage {
 	conversationHistoryIndex?: number
 	conversationHistoryDeletedRange?: [number, number] // for when conversation history is truncated for API requests
 	modelInfo?: ClineMessageModelInfo
+	contextCompaction?: {
+		sourceSessionId: string
+		sessionId: string
+		messagesBefore?: number
+		messagesAfter?: number
+		estimatedTokensAfter?: number
+		summary?: string
+	}
 }
 
 export type ClineAsk =

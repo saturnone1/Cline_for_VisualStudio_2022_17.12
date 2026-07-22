@@ -1,5 +1,6 @@
 import { upsertTaskHistoryItem, type TaskHistoryItem } from "./TaskHistoryCollection"
 import type { TaskSnapshotStore } from "./TaskSnapshotStore"
+import { taskTranscriptStorageBytes } from "./TaskHistoryStorageSize"
 
 type TaskRecord = Record<string, unknown>
 
@@ -25,7 +26,7 @@ export class TaskStateCoordinator {
 			...currentTask,
 			...updates,
 			ts: (this.dependencies.now ?? Date.now)(),
-			size: messages.length,
+			size: taskTranscriptStorageBytes(messages),
 		}
 		this.dependencies.writeCurrentTask(task)
 		this.dependencies.writeHistory(upsertTaskHistoryItem(this.dependencies.readHistory(), task))

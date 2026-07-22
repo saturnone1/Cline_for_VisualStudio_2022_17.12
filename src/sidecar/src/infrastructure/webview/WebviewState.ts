@@ -123,6 +123,9 @@ export function loadInitialState(persisted: Record<string, unknown> | null) {
 	if (typeof persisted.nativeToolCallSetting === "boolean") {
 		state.nativeToolCallSetting = persisted.nativeToolCallSetting
 	}
+	if (typeof persisted.contextCompactionThreshold === "number" && Number.isFinite(persisted.contextCompactionThreshold)) {
+		state.contextCompactionThreshold = Math.min(100, Math.max(1, persisted.contextCompactionThreshold))
+	}
 	if (typeof persisted.mcpDisplayMode === "string") {
 		state.mcpDisplayMode = normalizeMcpDisplayMode(persisted.mcpDisplayMode, state.mcpDisplayMode)
 	}
@@ -192,6 +195,7 @@ export function createPersistedStateSnapshot(state: ReturnType<typeof createInit
 		strictPlanModeEnabled: state.strictPlanModeEnabled,
 		yoloModeToggled: state.yoloModeToggled,
 		useAutoCondense: state.useAutoCondense,
+		contextCompactionThreshold: state.contextCompactionThreshold,
 		subagentsEnabled: state.subagentsEnabled,
 		scheduledAgentsEnabled: state.scheduledAgentsEnabled,
 		backgroundEditEnabled: state.backgroundEditEnabled,
@@ -253,6 +257,8 @@ export function createInitialState() {
 		activeApiConfigurationProfileId: "",
 		clineMessages: [] as Array<Record<string, unknown>>,
 		taskLifecycleStatus: "idle" as TaskLifecycleStatus,
+		contextCompactionInProgress: false,
+		contextCompactionThreshold: 90,
 		taskHistory: [] as Array<Record<string, unknown>>,
 		taskSnapshots: {} as Record<string, { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> }>,
 		shouldShowAnnouncement: false,
@@ -313,7 +319,7 @@ export function createInitialState() {
 		primaryRootIndex: 0,
 		isMultiRootWorkspace: false,
 		multiRootSetting: { user: false, featureFlag: false },
-		hooksEnabled: true,
+		hooksEnabled: false,
 		nativeToolCallSetting: false,
 		enableParallelToolCalling: false,
 		currentTaskItem: null as Record<string, unknown> | null,

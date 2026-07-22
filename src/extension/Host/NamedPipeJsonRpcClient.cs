@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using VsClineAgent.Host.Generated;
 
 namespace VsClineAgent.Host
 {
@@ -21,7 +22,9 @@ namespace VsClineAgent.Host
         private StreamWriter? _writer;
         private int _nextId;
         private CancellationTokenSource? _receiveLoopCancellation;
+        private Task? _receiveLoopTask;
         private readonly SemaphoreSlim _inboundRequestSlots = new SemaphoreSlim(4, 4);
+        private int _disposed;
 
         public event Func<string, JToken?, Task<JToken?>>? RequestReceived;
 
@@ -43,7 +46,7 @@ namespace VsClineAgent.Host
             _reader = new StreamReader(_pipe, new UTF8Encoding(false));
             _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
             _receiveLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _ = Task.Run(() => ReceiveLoopAsync(_receiveLoopCancellation.Token));
+            _receiveLoopTask = Task.Run(() => ReceiveLoopAsync(_receiveLoopCancellation.Token));
         }
 
         public async Task<JToken?> SendRequestAsync(
@@ -85,6 +88,7 @@ namespace VsClineAgent.Host
 
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
         {
+            Exception? terminalError = null;
             try
             {
                 var reader = _reader ?? throw new IOException("Pipe reader was not initialized.");
@@ -92,7 +96,10 @@ namespace VsClineAgent.Host
                 {
                     var line = await reader.ReadLineAsync().ConfigureAwait(false);
                     if (line == null)
+                    {
+                        terminalError = new EndOfStreamException("The LIG VS sidecar closed the named pipe.");
                         break;
+                    }
 
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
@@ -111,7 +118,14 @@ namespace VsClineAgent.Host
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
-                FailAllPendingRequests(ex);
+                terminalError = ex;
+            }
+            finally
+            {
+                if (terminalError != null)
+                    FailAllPendingRequests(terminalError);
+                else if (cancellationToken.IsCancellationRequested)
+                    FailAllPendingRequests(new OperationCanceledException("The LIG VS sidecar connection was closed."));
             }
         }
 
@@ -122,6 +136,20 @@ namespace VsClineAgent.Host
 
             if (!string.IsNullOrEmpty(method))
             {
+                var protocolVersion = (int?)message["protocolVersion"];
+                if (protocolVersion != HostRpcContract.ProtocolVersion)
+                {
+                    await WriteMessageAsync(new JObject
+                    {
+                        ["id"] = id,
+                        ["error"] = new JObject
+                        {
+                            ["code"] = "unsupported_host_protocol",
+                            ["message"] = "Unsupported Host RPC protocol version."
+                        }
+                    }, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
                 await HandleInboundRequestAsync(id, method!, message["params"], cancellationToken)
                     .ConfigureAwait(false);
                 return;
@@ -230,13 +258,19 @@ namespace VsClineAgent.Host
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+
             _receiveLoopCancellation?.Cancel();
+            FailAllPendingRequests(new ObjectDisposedException(nameof(NamedPipeJsonRpcClient)));
+            try { _pipe.Dispose(); } catch { }
             _receiveLoopCancellation?.Dispose();
-            _inboundRequestSlots.Dispose();
-            _writeLock.Dispose();
-            _writer?.Dispose();
-            _reader?.Dispose();
-            _pipe.Dispose();
+            try { _writer?.Dispose(); } catch { }
+            try { _reader?.Dispose(); } catch { }
+
+            // Inbound handlers may still be unwinding after pipe disposal. Disposing their
+            // semaphores here can turn a normal shutdown into an unobserved ObjectDisposedException.
+            _receiveLoopTask = null;
         }
 
         private static string NormalizePipeName(string pipeName)

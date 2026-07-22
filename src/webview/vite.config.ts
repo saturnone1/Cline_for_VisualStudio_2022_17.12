@@ -85,7 +85,6 @@ export default defineConfig({
 		sourcemap: isDevBuild ? "inline" : false,
 		rollupOptions: {
 			output: {
-				inlineDynamicImports: true,
 				entryFileNames: `assets/[name].js`,
 				chunkFileNames: `assets/[name].js`,
 				assetFileNames: `assets/[name].[ext]`,

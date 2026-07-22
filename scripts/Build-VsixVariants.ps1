@@ -6,11 +6,19 @@ param(
 
     [string]$NodeRuntimeArchive,
 
-    [switch]$SkipFrontend
+    [switch]$SkipFrontend,
+
+    [switch]$SkipSidecar,
+
+    [switch]$SkipWebview
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
+
+& (Join-Path $PSScriptRoot "Sync-ProductVersion.ps1")
+[xml]$productVersionProps = Get-Content -LiteralPath (Join-Path $repoRoot "packaging\ProductVersion.props")
+$expectedProductVersion = [string]$productVersionProps.Project.PropertyGroup.ProductVersion
 
 & (Join-Path $PSScriptRoot "Test-MenuContract.ps1") -RepoRoot $repoRoot
 & node (Join-Path $PSScriptRoot "generate-webview-rpc-contracts.mjs") --check
@@ -51,6 +59,20 @@ function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$Workin
     }
 }
 
+function Assert-GeneratedArtifactFresh([string]$Name, [string]$SourceDirectory, [string]$ArtifactPath) {
+    if (-not (Test-Path -LiteralPath $ArtifactPath)) {
+        throw "$Name artifact is missing: $ArtifactPath"
+    }
+    $latestSource = Get-ChildItem -LiteralPath $SourceDirectory -Recurse -File |
+        Where-Object { $_.Extension -in @(".ts", ".tsx", ".js", ".mjs", ".css", ".html", ".json") } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    $artifact = Get-Item -LiteralPath $ArtifactPath
+    if ($latestSource -and $latestSource.LastWriteTimeUtc -gt $artifact.LastWriteTimeUtc) {
+        throw "$Name artifact is stale. Rebuild it or remove the matching skip option. Latest source: $($latestSource.FullName)"
+    }
+}
+
 $prepareNodeArguments = @{}
 if ($NodeRuntimeArchive) {
     $prepareNodeArguments.ArchivePath = $NodeRuntimeArchive
@@ -64,7 +86,18 @@ if (-not $SkipFrontend) {
             Invoke-Checked "npm.cmd" @("ci") $absoluteFrontendDirectory
         }
     }
+}
+
+$skipSidecarBuild = $SkipFrontend -or $SkipSidecar
+$skipWebviewBuild = $SkipFrontend -or $SkipWebview
+if ($skipSidecarBuild) {
+    Assert-GeneratedArtifactFresh "Sidecar" (Join-Path $repoRoot "src\sidecar\src") (Join-Path $repoRoot "artifacts\Sidecar\cline-sidecar.js")
+} else {
     Invoke-Checked "npm.cmd" @("run", "build") (Join-Path $repoRoot "src\sidecar")
+}
+if ($skipWebviewBuild) {
+    Invoke-Checked "node" @("scripts/webAppSnapshot.mjs", "--check") (Join-Path $repoRoot "src\webview")
+} else {
     Invoke-Checked "npm.cmd" @("run", "build") (Join-Path $repoRoot "src\webview")
 }
 
@@ -91,9 +124,7 @@ foreach ($variant in $variants) {
     Invoke-Checked $MSBuildPath $msbuildArguments $repoRoot
 
     $vsixPath = Join-Path $repoRoot "src\extension\bin\$($variant.Target)\$Configuration\$($variant.Vsix)"
-    $manifest = [xml](Get-Content -LiteralPath (Join-Path $repoRoot $variant.Manifest))
-    $expectedVersion = [string]$manifest.PackageManifest.Metadata.Identity.Version
-    & (Join-Path $PSScriptRoot "Test-VsixPackage.ps1") -VsixPath $vsixPath -ExpectedVersion $expectedVersion -ExpectedAssembly $variant.Assembly
+	    & (Join-Path $PSScriptRoot "Test-VsixPackage.ps1") -VsixPath $vsixPath -ExpectedVersion $expectedProductVersion -ExpectedAssembly $variant.Assembly
 
     $item = Get-Item -LiteralPath $vsixPath
     $hash = Get-FileHash -LiteralPath $vsixPath -Algorithm SHA256

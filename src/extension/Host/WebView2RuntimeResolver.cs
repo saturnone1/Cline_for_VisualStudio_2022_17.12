@@ -55,10 +55,12 @@ namespace VsClineAgent.Host
             if (!string.IsNullOrEmpty(packagedRuntime))
                 candidates.Add(new WebView2RuntimeCandidate("Bundled Fixed", packagedRuntime));
 
-            var localRuntime = FindRuntimeFolder(Path.Combine(
+            var localRuntimeRoot = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "VsClineAgent",
-                "WebView2Runtime"));
+                "WebView2Runtime");
+            var localRuntime = FindRuntimeFolder(localRuntimeRoot);
+            CleanupUnusedFixedRuntimes(localRuntimeRoot, localRuntime);
             if (!string.IsNullOrEmpty(localRuntime) &&
                 !candidates.Any(candidate => string.Equals(candidate.BrowserExecutableFolder, localRuntime, StringComparison.OrdinalIgnoreCase)))
             {
@@ -82,16 +84,11 @@ namespace VsClineAgent.Host
                 return candidateRoot;
             }
 
-            foreach (var subDirectory in Directory.EnumerateDirectories(candidateRoot))
-            {
-                if (IsOfficialFixedRuntimeFolder(subDirectory) &&
-                    File.Exists(Path.Combine(subDirectory, "msedgewebview2.exe")))
-                {
-                    return subDirectory;
-                }
-            }
-
-            return null;
+            return Directory.EnumerateDirectories(candidateRoot)
+                .Where(subDirectory => IsOfficialFixedRuntimeFolder(subDirectory) && File.Exists(Path.Combine(subDirectory, "msedgewebview2.exe")))
+                .OrderByDescending(GetFixedRuntimeVersion)
+                .ThenByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault();
         }
 
         private static bool IsOfficialFixedRuntimeFolder(string runtimeFolder)
@@ -114,18 +111,60 @@ namespace VsClineAgent.Host
                 "VsClineAgent",
                 "WebView2Data",
                 profileVersion);
-            CleanupVersionedCacheDirectory(Path.GetDirectoryName(profileRoot), profileVersion, 2);
-            return Path.Combine(
+            CleanupVersionedCacheDirectory(Path.GetDirectoryName(profileRoot), profileVersion, 0);
+            var userDataFolder = Path.Combine(
                 profileRoot,
                 runtimeId);
+            CleanupTransientCaches(userDataFolder);
+            return userDataFolder;
         }
 
         private static string GetWebView2ProfileVersion()
         {
-            var assemblyName = Assembly.GetExecutingAssembly().GetName();
-            var name = string.IsNullOrWhiteSpace(assemblyName.Name) ? "VsClineAgent" : assemblyName.Name!;
-            var version = assemblyName.Version?.ToString() ?? "unknown";
-            return SanitizePathSegment(name + "-" + version);
+            return "profile-v1";
+        }
+
+        internal static void RemoveFailedUserDataFolder(string userDataFolder)
+        {
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsClineAgent", "WebView2Data");
+            TryDeleteDirectoryUnderRoot(userDataFolder, root);
+        }
+
+        internal static void CleanupInactiveUserDataFolders(string activeUserDataFolder)
+        {
+            var profileRoot = Path.GetDirectoryName(activeUserDataFolder);
+            if (string.IsNullOrWhiteSpace(profileRoot) || !Directory.Exists(profileRoot))
+                return;
+            foreach (var directory in Directory.EnumerateDirectories(profileRoot).Where(path => !string.Equals(path, activeUserDataFolder, StringComparison.OrdinalIgnoreCase)))
+                TryDeleteDirectoryUnderRoot(directory, profileRoot);
+        }
+
+        private static void CleanupTransientCaches(string userDataFolder)
+        {
+            foreach (var relative in new[] { "Cache", "Code Cache", "GPUCache", Path.Combine("Default", "Cache"), Path.Combine("Default", "Code Cache"), Path.Combine("Default", "GPUCache") })
+                TryDeleteDirectoryUnderRoot(Path.Combine(userDataFolder, relative), userDataFolder);
+        }
+
+        private static Version GetFixedRuntimeVersion(string directory)
+        {
+            var name = Path.GetFileName(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            const string prefix = "Microsoft.WebView2.FixedVersionRuntime.";
+            const string suffix = ".x64";
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) &&
+                Version.TryParse(name.Substring(prefix.Length, name.Length - prefix.Length - suffix.Length), out var version))
+                return version;
+            return new Version(0, 0);
+        }
+
+        private static void CleanupUnusedFixedRuntimes(string runtimeRoot, string? selectedRuntime)
+        {
+            if (!Directory.Exists(runtimeRoot))
+                return;
+            foreach (var directory in Directory.EnumerateDirectories(runtimeRoot).Where(IsOfficialFixedRuntimeFolder))
+            {
+                if (!string.Equals(directory, selectedRuntime, StringComparison.OrdinalIgnoreCase))
+                    TryDeleteDirectoryUnderRoot(directory, runtimeRoot);
+            }
         }
 
         private static string SanitizePathSegment(string value)
@@ -168,8 +207,10 @@ namespace VsClineAgent.Host
 
                 Directory.Delete(resolved, true);
             }
-            catch
+            catch (Exception ex)
             {
+                if (Directory.Exists(path))
+                    InteractionLog.Write("host", "webview.cacheDeleteFailed", new { path, error = ex.Message });
             }
         }
 

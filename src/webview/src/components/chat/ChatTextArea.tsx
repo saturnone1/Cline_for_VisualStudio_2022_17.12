@@ -88,6 +88,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const _shiftHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
 		const [showDimensionError, setShowDimensionError] = useState(false)
 		const dimensionErrorTimerRef = useRef<NodeJS.Timeout | null>(null)
+		const [showUnsupportedImage, setShowUnsupportedImage] = useState(false)
+		const unsupportedImageTimerRef = useRef<NodeJS.Timeout | null>(null)
 
 		const mentionMenu = useContextMentionMenu({
 			cursorPosition,
@@ -296,6 +298,20 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}, 3000)
 		}, [])
 
+		const showUnsupportedImageMessage = useCallback(() => {
+			setShowUnsupportedImage(true)
+			if (unsupportedImageTimerRef.current) clearTimeout(unsupportedImageTimerRef.current)
+			unsupportedImageTimerRef.current = setTimeout(() => {
+				setShowUnsupportedImage(false)
+				unsupportedImageTimerRef.current = null
+			}, 3000)
+		}, [])
+
+		useEffect(() => () => {
+			if (dimensionErrorTimerRef.current) clearTimeout(dimensionErrorTimerRef.current)
+			if (unsupportedImageTimerRef.current) clearTimeout(unsupportedImageTimerRef.current)
+		}, [])
+
 		const { isDraggingOver, showUnsupportedFileError, handleDragEnter, handleDragLeave, onDragOver, onDrop } =
 			useChatDrop({
 				inputValue,
@@ -327,6 +343,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			selectedFiles,
 			setSelectedImages,
 			showDimensionErrorMessage,
+			showUnsupportedImageMessage,
 		})
 
 		const handleThumbnailsHeightChange = useCallback((height: number) => {
@@ -470,6 +487,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							<span className="text-error font-bold text-xs">Files other than images are currently disabled</span>
 						</div>
 					)}
+					{showUnsupportedImage && (
+						<div className="absolute inset-2.5 bg-[rgba(var(--vscode-errorForeground-rgb),0.1)] border-2 border-error rounded-xs flex items-center justify-center z-10 pointer-events-none">
+							<span className="text-error font-bold text-xs text-center">현재 모델은 이미지 입력을 지원하지 않습니다.</span>
+						</div>
+					)}
 					{showSlashCommandsMenu && (
 						<div ref={slashCommandsMenuContainerRef}>
 							<SlashCommandMenu
@@ -552,7 +574,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						onPaste={handlePaste}
 						onScroll={() => updateHighlights()}
 						onSelect={updateCursorPosition}
-						placeholder={showUnsupportedFileError || showDimensionError ? "" : placeholderText}
+						placeholder={showUnsupportedFileError || showDimensionError || showUnsupportedImage ? "" : placeholderText}
 						ref={(el) => {
 							if (typeof ref === "function") {
 								ref(el)

@@ -4,6 +4,7 @@ import { isToolTranscript, looksLikeReasoningNarration, looksLikeTokenizedReason
 import { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning, shouldDelayAssistantTextUntilClassified, stripRawToolCallMarkup, normalizeReasoningTranscriptText, normalizeProgressTranscriptText, sanitizeProgressTranscriptForDisplay, normalizeAssistantTranscriptText } from "./TranscriptNormalization"
 import { toolActivityEntriesFromMessage, toolTranscriptToActivityEntries, buildGroupedToolActivityText, formatToolActivitySection, buildTerminalActivityText, formatCompletedCommandActivity, normalizeTerminalOutputText, toolActivityEntryKey, uniqueToolActivityEntries, splitToolPaths, looksLikeCommandText, uniqueStrings } from "./ToolActivityFormatting"
 import type { ToolActivityEntry } from "./ToolActivityFormatting"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import { contentToText, toolInputToText, toolResultToText } from "./SdkContentConversion"
 
 export function agentChunkToTranscriptText(chunk: unknown): string {
@@ -386,5 +387,4 @@ function numberValue(value: unknown) { return typeof value === "number" && Numbe
 function arrayOfRecords(value: unknown): Array<Record<string, unknown>> { return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : [] }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
 function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }
 function formatProviderErrorForTranscript(value: unknown, language: "en" | "ko") { const text = stringify(value).trim(); return text || (language === "ko" ? "모델 제공자가 빈 오류를 반환했습니다." : "The model provider returned an empty error.") }

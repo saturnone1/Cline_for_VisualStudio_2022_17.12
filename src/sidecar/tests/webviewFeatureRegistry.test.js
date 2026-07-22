@@ -17,3 +17,48 @@ test("WebView feature registry reports the stable feature label when missing", (
 	assert.throws(() => registry.require("streamPublisher"), /Webview stream publisher is not attached\./)
 	assert.throws(() => registry.require("mcp"), /LIG VS MCP application service is not attached\./)
 })
+
+test("WebView feature registry activates a complete feature set exactly once", () => {
+	const registry = new WebviewFeatureRegistry()
+	const feature = {}
+	registry.attach("streamPublisher", feature)
+	const runtimeFeatures = {
+		agentEngine: feature,
+		taskSessions: feature,
+		mcp: feature,
+		sendMessage: feature,
+		startTask: feature,
+		cancelTask: feature,
+		browser: feature,
+		worktreeQueries: feature,
+		worktreeMutations: feature,
+		oauthAuthorization: feature,
+		oauthCallback: feature,
+		providerCredentials: feature,
+		providerAuthActions: feature,
+		scheduledAgents: feature,
+		hookSettings: feature,
+		hookExecution: feature,
+		checkpoints: feature,
+		terminalActivity: feature,
+		taskActivity: feature,
+		partialState: feature,
+		sendLatency: feature,
+		changeTracking: feature,
+		providerModelCatalogs: feature,
+		sdkSettings: feature,
+	}
+
+	registry.complete(runtimeFeatures)
+
+	assert.equal(registry.require("agentEngine"), feature)
+	assert.throws(() => registry.complete(runtimeFeatures), /already configured/)
+	assert.throws(() => registry.attach("mcp", feature), /already configured/)
+})
+
+test("WebView feature registry rejects incomplete activation", () => {
+	const registry = new WebviewFeatureRegistry()
+	registry.attach("streamPublisher", {})
+
+	assert.throws(() => registry.complete({}), /configuration is incomplete/)
+})

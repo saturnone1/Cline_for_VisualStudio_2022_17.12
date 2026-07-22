@@ -6,14 +6,12 @@
 	--color-border-panel: var(--vscode-panel-border);
 	--color-foreground: var(--vscode-foreground);
 	--color-shadow: var(--vscode-widget-shadow);
-	--color-code: var(--vscode-editor-background);
+	--color-code: var(--lig-code-background, var(--vscode-editor-background));
 	--color-code-foreground: var(--vscode-editor-foreground);
-	--color-code-border: var(--vscode-editor-border);
+	--color-code-border: var(--lig-code-border, var(--vscode-editor-border));
 	--color-code-block-background: var(
-		--vscode-textCodeBlock-background,
-		--vscode-editor-background,
-		--vscode-sideBar-background,
-		rgb(30 30 30)
+		--lig-code-background,
+		var(--vscode-textCodeBlock-background, var(--vscode-editor-background, rgb(30 30 30)))
 	);
 	--color-quote: var(--vscode-textBlockQuote-background);
 	--color-quote-foreground: var(--vscode-textBlockQuote-foreground);
@@ -300,6 +298,12 @@
 			padding: 10px 10px;
 			max-width: calc(100vw - 20px);
 			padding-right: 70px;
+		}
+
+		.lig-markdown-code-block {
+			border: 1px solid var(--lig-code-border, var(--vscode-panel-border));
+			border-radius: 5px;
+			background: var(--lig-code-background, var(--vscode-textCodeBlock-background));
 		}
 
 		pre > code .hljs-deletion {

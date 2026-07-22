@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -10,7 +11,9 @@ namespace VsClineAgent.Host
     {
         private const long MaxBytes = 8L * 1024L * 1024L;
         private const int MaxLineChars = 96 * 1024;
+        private const long MaxTotalBytes = 150L * 1024L * 1024L;
         private static readonly object Gate = new object();
+        private static string _lastCleanupDate = "";
 
         public static void Write(string direction, string eventName, object? payload)
         {
@@ -115,7 +118,47 @@ namespace VsClineAgent.Host
                 "VsClineAgent",
                 "logs");
             Directory.CreateDirectory(directory);
+            CleanupLogsOncePerDay(directory);
             return Path.Combine(directory, "interaction-" + DateTime.Now.ToString("yyyyMMdd") + ".jsonl");
+        }
+
+        private static void CleanupLogsOncePerDay(string directory)
+        {
+            var date = DateTime.Now.ToString("yyyyMMdd");
+            if (string.Equals(_lastCleanupDate, date, StringComparison.Ordinal))
+                return;
+            _lastCleanupDate = date;
+            var retentionDays = string.Equals(Environment.GetEnvironmentVariable("VSCLINE_VERBOSE_INTERACTION_LOG"), "1", StringComparison.Ordinal) ? 7 : 14;
+            var currentPath = Path.GetFullPath(Path.Combine(directory, "interaction-" + date + ".jsonl"));
+            try
+            {
+                var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+                var files = new DirectoryInfo(directory).EnumerateFiles("interaction-*.jsonl*")
+                    .OrderBy(file => file.LastWriteTimeUtc).ToList();
+                foreach (var file in files.Where(file => !string.Equals(file.FullName, currentPath, StringComparison.OrdinalIgnoreCase) && file.LastWriteTimeUtc < cutoff).ToList())
+                    TryDelete(file);
+                files = files.Where(file => file.Exists).OrderBy(file => file.LastWriteTimeUtc).ToList();
+                var total = files.Sum(file => file.Length);
+                foreach (var file in files)
+                {
+                    if (total <= MaxTotalBytes)
+                        break;
+                    if (string.Equals(file.FullName, currentPath, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var length = file.Length;
+                    if (TryDelete(file))
+                        total -= length;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryDelete(FileInfo file)
+        {
+            try { file.Delete(); return true; }
+            catch { return false; }
         }
 
         private static void RotateIfNeeded(string path)

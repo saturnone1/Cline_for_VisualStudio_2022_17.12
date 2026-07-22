@@ -3,16 +3,37 @@ import path from "node:path"
 import { spawn } from "node:child_process"
 import type { BrowserAutomationPort } from "../../application/ports/BrowserAutomationPort"
 import { normalizeBrowserActionName, normalizeBrowserDebugHost, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
+import { terminateChildProcessTree } from "../process/ChildProcessTree"
+import { readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
 
 export class BrowserDevToolsAdapter implements BrowserAutomationPort {
+	private readonly resources = new BrowserResourceRegistry()
 	resolveExecutablePath(configuredPath = "") { return resolveBrowserExecutablePath(configuredPath) }
-	ensureAvailable(host: string, executablePath: string) { return ensureBrowserDebugHost(host, executablePath) }
+	ensureAvailable(host: string, executablePath: string) { return ensureBrowserDebugHost(host, executablePath, this.resources) }
 	fetchDebugInfo(host: string) { return fetchBrowserDebugInfo(host) }
 	listTabs(host: string) { return listDevToolsTabs(host) }
-	runAction(host: string, request: BrowserAction) { return runBrowserActionViaDevTools(host, request) }
+	runAction(host: string, request: BrowserAction) { return runBrowserActionViaDevTools(host, request, this.resources) }
+	cancelActive() { return this.resources.cancelAll() }
 }
 
-export async function ensureBrowserDebugHost(host: string, executablePath: string) {
+class BrowserResourceRegistry {
+	private readonly controllers = new Set<AbortController>()
+	private readonly sockets = new Set<{ close: () => void }>()
+	private readonly ownedProcesses = new Set<ReturnType<typeof spawn>>()
+	trackController(controller: AbortController) { this.controllers.add(controller); return () => this.controllers.delete(controller) }
+	trackSocket(socket: { close: () => void }) { this.sockets.add(socket); return () => this.sockets.delete(socket) }
+	trackProcess(process: ReturnType<typeof spawn>) { this.ownedProcesses.add(process); process.once("close", () => this.ownedProcesses.delete(process)) }
+	async cancelAll() {
+		const count = this.controllers.size + this.sockets.size + this.ownedProcesses.size
+		for (const controller of this.controllers) controller.abort()
+		for (const socket of this.sockets) { try { socket.close() } catch { /* already closed */ } }
+		await Promise.all([...this.ownedProcesses].map((process) => terminateChildProcessTree(process)))
+		this.controllers.clear(); this.sockets.clear(); this.ownedProcesses.clear()
+		return count
+	}
+}
+
+export async function ensureBrowserDebugHost(host: string, executablePath: string, resources = new BrowserResourceRegistry()) {
 	const existing = await fetchBrowserDebugInfo(host)
 	if (existing.success) return existing
 	if (!executablePath || !fs.existsSync(executablePath)) {
@@ -30,9 +51,9 @@ export async function ensureBrowserDebugHost(host: string, executablePath: strin
 			"--no-first-run",
 			"--no-default-browser-check",
 			"about:blank",
-		], { detached: true, stdio: "ignore", windowsHide: false })
+		], { detached: false, stdio: "ignore", windowsHide: false })
 		child.once("error", (error) => { launchError = stringify(error) })
-		child.unref()
+		resources.trackProcess(child)
 	} catch (error) {
 		return { success: false, host, error: `Browser could not be launched: ${stringify(error)}` }
 	}
@@ -147,7 +168,7 @@ export async function listDevToolsTabs(host: string) {
 	}
 }
 
-export async function runBrowserActionViaDevTools(host: string, request: BrowserAction) {
+export async function runBrowserActionViaDevTools(host: string, request: BrowserAction, resources = new BrowserResourceRegistry()) {
 	const normalized = normalizeBrowserDebugHost(host)
 	if (!normalized) {
 		return { success: false, status: "error", error: "Browser debug host is not configured." }
@@ -163,7 +184,7 @@ export async function runBrowserActionViaDevTools(host: string, request: Browser
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
 				request.onPhase?.({ phase: attempt > 0 ? "reconnected" : "connected", action: normalizeBrowserActionName(request.action), tabId: tab.id })
-				return await executeBrowserActionOnDevToolsTab(normalized, tab, request)
+				return await executeBrowserActionOnDevToolsTab(normalized, tab, request, resources)
 			} catch (error) {
 				lastError = error
 				if (attempt > 0 || !isRetryableDevToolsError(error)) {
@@ -191,8 +212,8 @@ export async function runBrowserActionViaDevTools(host: string, request: Browser
 	}
 }
 
-async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab, request: BrowserAction) {
-	const client = await connectDevTools(tab.webSocketDebuggerUrl)
+async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab, request: BrowserAction, resources: BrowserResourceRegistry) {
+	const client = await connectDevTools(tab.webSocketDebuggerUrl, resources)
 	try {
 		request.onPhase?.({ phase: "preparing", action: normalizeBrowserActionName(request.action), tabId: tab.id })
 		await client.send("Page.enable")
@@ -318,9 +339,10 @@ async function closeDevToolsTab(host: string, tabId: string) {
 	await fetch(`${host}/json/close/${encodeURIComponent(tabId)}`).catch(() => undefined)
 }
 
-function connectDevTools(webSocketDebuggerUrl: string) {
+function connectDevTools(webSocketDebuggerUrl: string, resources: BrowserResourceRegistry) {
 	const WebSocketCtor = (globalThis as Record<string, any>).WebSocket
 	const socket = new WebSocketCtor(webSocketDebuggerUrl)
+	const untrackSocket = resources.trackSocket(socket)
 	let nextId = 1
 	const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
 	const eventWaiters = new Map<string, Array<{ resolve: (value: unknown) => void; timer: NodeJS.Timeout }>>()
@@ -363,6 +385,7 @@ function connectDevTools(webSocketDebuggerUrl: string) {
 	})
 
 	socket.addEventListener("close", () => {
+		untrackSocket()
 		for (const waiter of pending.values()) {
 			waiter.reject(new Error("Chrome DevTools WebSocket closed."))
 		}
@@ -491,7 +514,7 @@ export async function checkIsImageUrl(url: string) {
 		return { isImage: false, value: false, success: false }
 	}
 	const controller = new AbortController()
-	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 5000))
+	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_IMAGE_PROBE_TIMEOUT_MS", RUNTIME_DEFAULTS.imageProbeTimeoutMs))
 	try {
 		const response = await fetch(normalized, { method: "HEAD", signal: controller.signal })
 		const contentType = response.headers.get("content-type") || ""
@@ -510,7 +533,7 @@ export async function fetchOpenGraphData(url: string) {
 		return { success: false, error: "Invalid URL." }
 	}
 	const controller = new AbortController()
-	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", 8000))
+	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_OPEN_GRAPH_TIMEOUT_MS", RUNTIME_DEFAULTS.openGraphTimeoutMs))
 	try {
 		const response = await fetch(normalized, {
 			signal: controller.signal,
@@ -584,11 +607,6 @@ function stringify(value: unknown) {
 
 function tryParseJson(value: string) {
 	try { return JSON.parse(value) as unknown } catch { return undefined }
-}
-
-function readPositiveIntEnv(name: string, fallback: number) {
-	const value = Number(process.env[name])
-	return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
 }
 
 function normalizeHttpUrl(value: string) {

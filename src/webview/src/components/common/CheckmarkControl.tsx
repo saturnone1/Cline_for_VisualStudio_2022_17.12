@@ -9,6 +9,7 @@ import styled from "styled-components"
 import { CODE_BLOCK_BG_COLOR } from "@/components/common/CodeBlock"
 import { Button } from "@/components/ui/button"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { CheckpointsServiceClient } from "@/services/grpcClient"
 
@@ -25,6 +26,7 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 	const [showRestoreConfirm, setShowRestoreConfirm] = useState(false)
 	const [showMoreOptions, setShowMoreOptions] = useState(false)
 	const { checkpointManagerErrorMessage, enableCheckpointsSetting, onRelinquishControl } = useExtensionState()
+	const { t } = useI18n()
 	const canUseCheckpointActions = enableCheckpointsSetting && !checkpointManagerErrorMessage
 
 	// Debounce
@@ -178,14 +180,14 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 					"text-link": isCheckpointCheckedOut,
 				})}
 			/>
+			<span
+				className={cn("shrink-0 text-[10px] text-description", {
+					"text-link": isCheckpointCheckedOut,
+				})}>
+				{isCheckpointCheckedOut ? t("checkpoint.restored") : t("checkpoint.label")}
+			</span>
 			<DottedLine $isCheckedOut={isCheckpointCheckedOut} className="hover-show-inverse" />
 			<div className="hover-content">
-				<span
-					className={cn("text-[9px] text-description shrink-0", {
-						"text-link": isCheckpointCheckedOut,
-					})}>
-					{isCheckpointCheckedOut ? "Checkpoint (restored)" : "Checkpoint"}
-				</span>
 				{canUseCheckpointActions && <DottedLine $isCheckedOut={isCheckpointCheckedOut} />}
 				{canUseCheckpointActions && <ButtonGroup>
 					<CustomButton
@@ -206,7 +208,7 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 							}
 						}}
 						style={{ cursor: compareDisabled ? "wait" : "pointer" }}>
-						Compare
+						{t("checkpoint.compare")}
 					</CustomButton>
 					<DottedLine $isCheckedOut={isCheckpointCheckedOut} small />
 					<div ref={refs.setReference} style={{ position: "relative", marginTop: -2 }}>
@@ -214,7 +216,7 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 							$isCheckedOut={isCheckpointCheckedOut}
 							isActive={showRestoreConfirm}
 							onClick={() => setShowRestoreConfirm(true)}>
-							Restore
+							{t("checkpoint.restore")}
 						</CustomButton>
 						{showRestoreConfirm &&
 							createPortal(
@@ -232,13 +234,13 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 												cursor: restoreBothDisabled ? "wait" : "pointer",
 											}}>
 											<i className="codicon codicon-debug-restart" style={{ marginRight: "6px" }} />
-											Restore Files & Task
+											{t("checkpoint.restoreFilesAndTask")}
 										</Button>
-										<p>Revert files and clear messages after this point</p>
+										<p>{t("checkpoint.restoreFilesAndTaskHelp")}</p>
 									</PrimaryRestoreOption>
 
 									<MoreOptionsToggle onClick={() => setShowMoreOptions(!showMoreOptions)}>
-										More options
+									{t("checkpoint.moreOptions")}
 										<i
 											className={`codicon codicon-chevron-${showMoreOptions ? "up" : "down"}`}
 											style={{ marginLeft: "4px", fontSize: "10px" }}
@@ -263,9 +265,9 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 														className="codicon codicon-file-symlink-directory"
 														style={{ marginRight: "6px" }}
 													/>
-													Restore Files Only
+													{t("checkpoint.restoreFilesOnly")}
 												</Button>
-												<p>Revert files to this checkpoint</p>
+												<p>{t("checkpoint.restoreFilesOnlyHelp")}</p>
 											</RestoreOption>
 											<RestoreOption>
 												<Button
@@ -279,9 +281,9 @@ export const CheckmarkControl = ({ messageTs, isCheckpointCheckedOut }: Checkmar
 														className="codicon codicon-comment-discussion"
 														style={{ marginRight: "6px" }}
 													/>
-													Restore Task Only
+													{t("checkpoint.restoreTaskOnly")}
 												</Button>
-												<p>Clear messages after this point</p>
+												<p>{t("checkpoint.restoreTaskOnlyHelp")}</p>
 											</RestoreOption>
 										</AdditionalOptions>
 									)}
@@ -307,7 +309,7 @@ const Container = styled.div<{ isMenuOpen?: boolean; $isCheckedOut?: boolean }>`
 	margin-top: -2px;
 	margin-bottom: 1px;
 	opacity: ${(props) => (props.$isCheckedOut ? 1 : props.isMenuOpen ? 1 : 0.5)};
-	height: 0.5rem;
+	height: auto;
 
 	&:first-of-type {
 		padding-top: 0px;

@@ -22,11 +22,13 @@ export class SendOrResumeSessionFlow {
 		let activateMissing = false
 		if (engine.status.activeSessionId !== sessionId) {
 			this.callbacks.log("sendAskResponse.activateSession", { from: engine.status.activeSessionId, to: sessionId })
-			await engine.activateSession(sessionId).catch((error) => {
+			const activated = await engine.activateSession(sessionId).catch((error) => {
 				if (!this.callbacks.isSessionNotFound(error)) throw error
 				activateMissing = true
 				this.callbacks.log("sendAskResponse.activateSessionMissing", { sessionId, error: stringify(error) })
+				return null
 			})
+			if (!activated) activateMissing = true
 		}
 		try {
 			if (activateMissing) return await this.callbacks.resume(sessionId, command, textLength)
@@ -42,10 +44,17 @@ export class SendOrResumeSessionFlow {
 			this.callbacks.log("sendAskResponse.sdkSend", { sessionId, textLength })
 			return await this.callbacks.send(command)
 		} catch (error) {
-			this.callbacks.markError(sessionId, error)
-			if (!this.callbacks.isSessionNotFound(error)) throw error
+			if (!this.callbacks.isSessionNotFound(error)) {
+				this.callbacks.markError(sessionId, error)
+				throw error
+			}
 			this.callbacks.log("sendAskResponse.sdkSendMissingSession", { sessionId, error: stringify(error) })
-			return this.callbacks.resume(sessionId, command, textLength)
+			try {
+				return await this.callbacks.resume(sessionId, command, textLength)
+			} catch (resumeError) {
+				this.callbacks.markError(sessionId, resumeError)
+				throw resumeError
+			}
 		}
 	}
 }

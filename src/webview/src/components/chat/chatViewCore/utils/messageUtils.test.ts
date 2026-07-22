@@ -1,6 +1,6 @@
 import type { ClineMessage } from "@shared/ExtensionMessage"
 import { describe, expect, it } from "vitest"
-import { filterVisibleMessages, groupLowStakesTools, isToolGroup } from "./messageUtils"
+import { filterVisibleMessages, groupLowStakesTools, groupMessages, isToolGroup } from "./messageUtils"
 
 const createTextMessage = (ts: number, text: string): ClineMessage => ({
 	type: "say",
@@ -28,6 +28,14 @@ const createApiRequestMessage = (ts: number, request: string): ClineMessage => (
 	say: "api_req_started",
 	text: JSON.stringify({ request, tokensIn: 0, tokensOut: 0, cost: 0 }),
 	ts,
+})
+
+const createCheckpointMessage = (ts: number): ClineMessage => ({
+	type: "say",
+	say: "checkpoint_created",
+	text: "SDK checkpoint",
+	ts,
+	checkpointRunCount: ts,
 })
 
 describe("filterVisibleMessages", () => {
@@ -109,6 +117,27 @@ describe("filterVisibleMessages", () => {
 })
 
 describe("groupLowStakesTools", () => {
+	it("keeps checkpoints visible after a folded tool group", () => {
+		const checkpoint = createCheckpointMessage(2)
+		const grouped = groupLowStakesTools([createToolMessage(1, "readFile"), checkpoint])
+
+		expect(grouped).toHaveLength(2)
+		expect(isToolGroup(grouped[0])).toBe(true)
+		expect(grouped[1]).toBe(checkpoint)
+	})
+
+	it("keeps checkpoints outside browser session groups", () => {
+		const checkpoint = createCheckpointMessage(2)
+		const grouped = groupMessages([
+			{ type: "say", say: "browser_action_launch", text: "https://example.com", ts: 1 },
+			checkpoint,
+		])
+
+		expect(grouped).toHaveLength(2)
+		expect(Array.isArray(grouped[0])).toBe(true)
+		expect(grouped[1]).toBe(checkpoint)
+	})
+
 	it("compacts repeated completed progress rows by category", () => {
 		const grouped = groupLowStakesTools([
 			{

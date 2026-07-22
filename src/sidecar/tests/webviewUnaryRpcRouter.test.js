@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
-const { WebviewUnaryRpcRouter } = require("../dist/infrastructure/webview/WebviewUnaryRpcRouter")
+const { WebviewUnaryRpcRouter, WebviewRpcRequestCancelledError } = require("../dist/infrastructure/webview/WebviewUnaryRpcRouter")
 
 function dependencies(overrides = {}) {
 	const empty = { handle: async () => { throw new Error("unexpected route") } }
@@ -38,4 +38,25 @@ test("unary RPC router publishes MCP stream updates and contains MCP errors", as
 test("unary RPC router returns null for operations outside its registry", async () => {
 	const router = new WebviewUnaryRpcRouter(dependencies())
 	assert.equal(await router.handle("UnknownService.missing", "unknown-1", {}), null)
+})
+
+test("unary RPC router aborts active work and discards its late response", async () => {
+	let release
+	let observedSignal
+	const waiting = new Promise((resolve) => { release = resolve })
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		task: {
+			handle: async (_command, _requestId, signal) => {
+				observedSignal = signal
+				await waiting
+				return { payload: { ok: true } }
+			},
+		},
+	}))
+	const pending = router.handle("SlashService.condense", "compact-cancelled", {})
+	await Promise.resolve()
+	assert.equal(router.cancel("compact-cancelled"), true)
+	assert.equal(observedSignal.aborted, true)
+	release()
+	await assert.rejects(pending, WebviewRpcRequestCancelledError)
 })

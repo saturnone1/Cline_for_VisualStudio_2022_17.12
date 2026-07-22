@@ -5,9 +5,10 @@ import styled from "styled-components"
 import { visit } from "unist-util-visit"
 import "./codeBlockParser.css"
 
-export const CODE_BLOCK_BG_COLOR = "var(--vscode-editor-background, --vscode-sideBar-background, rgb(30 30 30))"
+export const CODE_BLOCK_BG_COLOR =
+	"var(--lig-code-background, var(--vscode-textCodeBlock-background, var(--vscode-editor-background, rgb(30 30 30))))"
 
-export const TERMINAL_CODE_BLOCK_BG_COLOR = "var(--vscode-editor-background, --vscode-sideBar-background, rgb(30 30 30))"
+export const TERMINAL_CODE_BLOCK_BG_COLOR = CODE_BLOCK_BG_COLOR
 
 // Theme-aware background colors for expanded/collapsed states
 export const CHAT_ROW_EXPANDED_BG_COLOR = "var(--vscode-editor-background)"
@@ -39,6 +40,7 @@ const StyledMarkdown = styled.div<{ forceWrap: boolean }>`
 
 	pre {
 		background-color: ${CODE_BLOCK_BG_COLOR};
+		border: 1px solid var(--lig-code-border, var(--vscode-panel-border));
 		border-radius: 5px;
 		margin: 0;
 		min-width: ${({ forceWrap }) => (forceWrap ? "auto" : "max-content")};
@@ -75,6 +77,7 @@ const StyledMarkdown = styled.div<{ forceWrap: boolean }>`
 	}
 
 	background-color: ${CODE_BLOCK_BG_COLOR};
+	border-radius: 5px;
 	font-family: var(--lig-font-family);
 	font-size: var(--vscode-editor-font-size, var(--vscode-font-size, 12px));
 	color: var(--vscode-editor-foreground, #fff);

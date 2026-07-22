@@ -1,1 +1,1 @@
-artifacts/WebApp/** -whitespace linguist-generated=true
+artifacts/WebApp/** -diff -text -whitespace linguist-generated=true

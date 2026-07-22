@@ -13,6 +13,7 @@ export class ClineSdkMcpAdapter {
 	private readonly settings = new ClineSdkMcpSettingsStore()
 	private readonly operationStates = new Map<string, McpOperation>()
 	private readonly operationErrors = new Map<string, string>()
+	private readonly sessionToolErrors = new Map<string, string>()
 
 	constructor(
 		private readonly host: HostProviderPort,
@@ -45,7 +46,8 @@ export class ClineSdkMcpAdapter {
 			let tools: Array<Record<string, unknown>> = []
 			const lifecycleState = this.operationStates.get(registration.name)
 			const lifecycleError = this.operationErrors.get(registration.name)
-			let error = lifecycleError || snapshot?.lastError || ""
+			const sessionToolError = this.sessionToolErrors.get(registration.name)
+			let error = lifecycleError || sessionToolError || snapshot?.lastError || ""
 			let status = disabled ? "disconnected" : snapshot?.status || "disconnected"
 			let resources: Array<Record<string, unknown>> = []
 			let resourceTemplates: Array<Record<string, unknown>> = []
@@ -69,6 +71,9 @@ export class ClineSdkMcpAdapter {
 					error = toolError instanceof Error ? toolError.message : String(toolError)
 					status = "disconnected"
 				}
+			}
+			if (!disabled && sessionToolError && !lifecycleState) {
+				status = "disconnected"
 			}
 			if (!disabled && status === "connected") {
 				const serverMetadata = asRecord(snapshot?.metadata)
@@ -194,7 +199,8 @@ export class ClineSdkMcpAdapter {
 				settings.mcpServers[name] = { ...current, disabled } as any
 			})
 			const manager = await this.ensureMcpManager()
-			await manager.setServerDisabled(name, disabled).catch(() => undefined)
+			await manager.setServerDisabled(name, disabled)
+			this.sessionToolErrors.delete(name)
 			await this.reloadMcpServers()
 		})
 		return this.getMcpServersResponse()
@@ -235,7 +241,8 @@ export class ClineSdkMcpAdapter {
 				delete settings.mcpServers[name]
 			})
 			const manager = await this.ensureMcpManager()
-			await manager.unregisterServer(name).catch(() => undefined)
+			await manager.unregisterServer(name)
+			this.sessionToolErrors.delete(name)
 			await this.reloadMcpServers()
 		})
 		return this.getMcpServersResponse()
@@ -250,9 +257,10 @@ export class ClineSdkMcpAdapter {
 		await this.withMcpOperation(name, "restarting", async () => {
 			const manager = await this.ensureMcpManager()
 			await this.reloadMcpServers()
-			await manager.disconnectServer(name).catch(() => undefined)
-			await manager.connectServer(name).catch(() => undefined)
-			await manager.refreshTools(name).catch(() => undefined)
+			await manager.disconnectServer(name)
+			await manager.connectServer(name)
+			await manager.refreshTools(name)
+			this.sessionToolErrors.delete(name)
 		})
 		return this.getMcpServersResponse()
 	}
@@ -357,6 +365,7 @@ export class ClineSdkMcpAdapter {
 		const tools = []
 		for (const registration of registrations) {
 			if (registration.disabled) {
+				this.sessionToolErrors.delete(registration.name)
 				continue
 			}
 			try {
@@ -366,9 +375,12 @@ export class ClineSdkMcpAdapter {
 						provider: manager,
 					})),
 				)
+				this.sessionToolErrors.delete(registration.name)
 			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error)
+				this.sessionToolErrors.set(registration.name, `Connected, but unavailable to the current agent session: ${message}`)
 				this.logSdkMessage("warn", `Failed to create MCP tools for ${registration.name}`, {
-					error: error instanceof Error ? error.message : String(error),
+					error: message,
 				})
 			}
 		}
@@ -380,14 +392,7 @@ export class ClineSdkMcpAdapter {
 			return undefined
 		}
 
-		try {
-			return await this.createMcpExtraTools()
-		} catch (error) {
-			this.logSdkMessage("warn", "MCP extra tools were skipped for this session.", {
-				error: error instanceof Error ? error.message : String(error),
-			})
-			return undefined
-		}
+		return this.createMcpExtraTools()
 	}
 
 	private async ensureMcpManager() {
@@ -426,7 +431,7 @@ export class ClineSdkMcpAdapter {
 		const sdk = await importClineSdk()
 		const manager = await this.ensureMcpManager()
 		for (const server of manager.listServers()) {
-			await manager.unregisterServer(server.name).catch(() => undefined)
+			await manager.unregisterServer(server.name)
 		}
 		await this.registerMcpServersFromSettings(sdk, manager)
 	}
@@ -447,6 +452,7 @@ export class ClineSdkMcpAdapter {
 		const manager = this.manager
 		this.manager = null
 		this.starting = null
+		this.sessionToolErrors.clear()
 		if (manager) await manager.dispose().catch(() => undefined)
 	}
 

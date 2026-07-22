@@ -36,7 +36,8 @@ export class PrepareNewTaskFlow {
 			const sessionId = String(input.taskItem.id || ""), context = { prompt: input.text, cwd, files: input.files, images: input.images, sessionId }
 			this.callbacks.runHook("TaskStart", context)
 			this.callbacks.runHook("UserPromptSubmit", context)
-			await this.callbacks.launch({ prompt: input.text, cwd, userImages: await this.callbacks.normalizeImages(input.images), userFiles: input.files, interactive: true }, cwd, sessionId)
+			const userImages = await this.callbacks.normalizeImages(input.images)
+			void this.callbacks.launch({ prompt: input.text, cwd, userImages, userFiles: input.files, interactive: true }, cwd, sessionId)
 		} catch (error) {
 			await this.callbacks.projectError(error)
 		}

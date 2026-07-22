@@ -26,6 +26,7 @@ interface UseChatPasteOptions {
 	selectedFiles: string[]
 	setSelectedImages: Dispatch<SetStateAction<string[]>>
 	showDimensionErrorMessage: () => void
+	showUnsupportedImageMessage: () => void
 }
 
 export function useChatPaste(options: UseChatPasteOptions) {
@@ -50,7 +51,12 @@ export function useChatPaste(options: UseChatPasteOptions) {
 				const [type, subtype] = item.type.split("/")
 				return type === "image" && ["png", "jpeg", "webp"].includes(subtype)
 			})
-			if (!options.modelSupportsImages || options.shouldDisableFilesAndImages || imageItems.length === 0) {
+			if (imageItems.length > 0 && !options.modelSupportsImages) {
+				event.preventDefault()
+				options.showUnsupportedImageMessage()
+				return
+			}
+			if (options.shouldDisableFilesAndImages || imageItems.length === 0) {
 				return
 			}
 

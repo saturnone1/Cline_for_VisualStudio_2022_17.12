@@ -11,8 +11,9 @@ const LigHeroLogo = ({ className = "", environment }: LigHeroLogoProps) => {
 
 	return (
 		<div
-			className={`relative flex h-28 w-28 items-center justify-center drop-shadow-[0_16px_32px_rgba(0,0,0,0.30)] ${className}`}>
-			<img alt="LIG" className="h-full w-full object-contain" src={ligMark} />
+			className={`lig-brand-logo relative flex h-32 w-32 items-center justify-center ${className}`}>
+			<div aria-hidden="true" className="lig-brand-orbit absolute inset-0 rounded-full" />
+			<img alt="LIG" className="lig-brand-mark h-28 w-28 object-contain" src={ligMark} />
 		</div>
 	)
 }

@@ -1,4 +1,7 @@
-const TERMINAL_TASK_STATUSES = new Set(["completed", "stopped", "cancelled", "failed", "error"])
+const TERMINAL_TASK_STATUSES = new Set(["completed", "complete", "ended", "stopped", "cancelled", "aborted", "failed", "error"])
+const FAILED_TASK_STATUSES = new Set(["failed", "error"])
+const CANCELLED_TASK_STATUSES = new Set(["stopped", "cancelled", "aborted"])
+const STALLED_TASK_STATUSES = new Set(["stalled", "idle-timeout"])
 
 export type TaskLifecycleStatus = "idle" | "starting" | "streaming" | "awaiting_user" | "cancelling" | "completed" | "failed"
 
@@ -14,6 +17,16 @@ const ALLOWED_TRANSITIONS: Record<TaskLifecycleStatus, ReadonlySet<TaskLifecycle
 
 export function isTerminalTaskStatus(status: string) {
 	return TERMINAL_TASK_STATUSES.has(status.trim().toLowerCase())
+}
+
+export type TerminalTaskOutcome = "completed" | "failed" | "cancelled" | "stalled"
+
+export function terminalTaskOutcome(status: string): TerminalTaskOutcome {
+	const normalized = status.trim().toLowerCase()
+	if (FAILED_TASK_STATUSES.has(normalized)) return "failed"
+	if (CANCELLED_TASK_STATUSES.has(normalized)) return "cancelled"
+	if (STALLED_TASK_STATUSES.has(normalized)) return "stalled"
+	return "completed"
 }
 
 export function canTransitionTask(from: TaskLifecycleStatus, to: TaskLifecycleStatus) {

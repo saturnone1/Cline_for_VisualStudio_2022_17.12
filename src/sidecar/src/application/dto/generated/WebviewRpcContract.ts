@@ -13,10 +13,22 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 				"type": "string"
 			},
 			"sortBy": {
-				"type": "string"
+				"type": "string",
+				"values": [
+					"newest",
+					"oldest",
+					"mostTokens",
+					"mostRelevant"
+				]
 			},
 			"currentWorkspaceOnly": {
 				"type": "boolean"
+			},
+			"cursor": {
+				"type": "number"
+			},
+			"pageSize": {
+				"type": "number"
 			}
 		}
 	},
@@ -47,6 +59,9 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 				"type": "string"
 			},
 			"delivery": {
+				"type": "string"
+			},
+			"clientOperationId": {
 				"type": "string"
 			}
 		},
@@ -82,10 +97,63 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 			}
 		}
 	},
+	"TaskHistoryItem": {
+		"fields": {
+			"id": {
+				"type": "string",
+				"required": true
+			},
+			"ts": {
+				"type": "number",
+				"required": true
+			},
+			"task": {
+				"type": "string",
+				"required": true
+			},
+			"tokensIn": {
+				"type": "number"
+			},
+			"tokensOut": {
+				"type": "number"
+			},
+			"cacheWrites": {
+				"type": "number"
+			},
+			"cacheReads": {
+				"type": "number"
+			},
+			"totalCost": {
+				"type": "number"
+			},
+			"isFavorited": {
+				"type": "boolean"
+			},
+			"size": {
+				"type": "number"
+			},
+			"cwdOnTaskInitialization": {
+				"type": "string"
+			},
+			"modelId": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
 	"TaskHistoryResponse": {
 		"fields": {
 			"tasks": {
 				"type": "objectArray",
+				"shape": "TaskHistoryItem",
+				"required": true
+			},
+			"nextCursor": {
+				"type": "number",
+				"required": true
+			},
+			"total": {
+				"type": "number",
 				"required": true
 			}
 		},
@@ -103,6 +171,19 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 	"FlexibleObject": {
 		"fields": {},
 		"allowAdditionalFields": true
+	},
+	"TaskPartialMessageEvent": {
+		"fields": {
+			"taskId": {
+				"type": "string",
+				"required": true
+			},
+			"message": {
+				"type": "object",
+				"shape": "FlexibleObject",
+				"required": true
+			}
+		}
 	},
 	"BooleanValueResponse": {
 		"fields": {
@@ -349,10 +430,61 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 		},
 		"allowAdditionalFields": true
 	},
+	"McpServerItem": {
+		"fields": {
+			"name": {
+				"type": "string",
+				"required": true
+			},
+			"config": {
+				"type": "string",
+				"required": true
+			},
+			"status": {
+				"type": "string",
+				"required": true
+			},
+			"error": {
+				"type": "string",
+				"required": true
+			},
+			"tools": {
+				"type": "objectArray",
+				"required": true
+			},
+			"resources": {
+				"type": "objectArray",
+				"required": true
+			},
+			"resourceTemplates": {
+				"type": "objectArray",
+				"required": true
+			},
+			"prompts": {
+				"type": "objectArray",
+				"required": true
+			},
+			"disabled": {
+				"type": "boolean",
+				"required": true
+			},
+			"timeout": {
+				"type": "number"
+			},
+			"oauthRequired": {
+				"type": "boolean"
+			},
+			"oauthAuthStatus": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
 	"McpServersResponse": {
 		"fields": {
 			"mcpServers": {
 				"type": "objectArray",
+				"shape": "McpServerItem",
 				"required": true
 			}
 		},
@@ -361,10 +493,18 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 	"ModeRequest": {
 		"fields": {
 			"mode": {
-				"type": "string"
+				"type": "string",
+				"values": [
+					"plan",
+					"act"
+				]
 			},
 			"value": {
-				"type": "string"
+				"type": "string",
+				"values": [
+					"plan",
+					"act"
+				]
 			}
 		},
 		"allowAdditionalFields": true
@@ -377,6 +517,10 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 			},
 			"mode": {
 				"type": "string",
+				"values": [
+					"plan",
+					"act"
+				],
 				"required": true
 			}
 		}
@@ -740,6 +884,31 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 		},
 		"allowAdditionalFields": true
 	},
+	"BrowserTabItem": {
+		"fields": {
+			"id": {
+				"type": "string",
+				"required": true
+			},
+			"type": {
+				"type": "string",
+				"required": true
+			},
+			"url": {
+				"type": "string",
+				"required": true
+			},
+			"title": {
+				"type": "string",
+				"required": true
+			},
+			"webSocketDebuggerUrl": {
+				"type": "string",
+				"required": true
+			}
+		},
+		"allowAdditionalFields": true
+	},
 	"BrowserTabsResponse": {
 		"fields": {
 			"success": {
@@ -747,6 +916,7 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 			},
 			"tabs": {
 				"type": "objectArray",
+				"shape": "BrowserTabItem",
 				"required": true
 			},
 			"error": {
@@ -2871,7 +3041,7 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"fallback": "passive",
 		"route": "stream",
 		"requestShape": "Empty",
-		"responseShape": "FlexibleObject"
+		"responseShape": "TaskPartialMessageEvent"
 	},
 	"UiService.subscribeToRelinquishControl": {
 		"kind": "serverStream",
@@ -3044,13 +3214,14 @@ export type WebviewRpcOperation = keyof typeof WEBVIEW_RPC_OPERATIONS
 export type WebviewRpcSidecarRoute = (typeof WEBVIEW_RPC_SIDECAR_ROUTES)[number]
 export type WebviewRpcPayloadShapeMap = {
 	"Empty": {
-
 	}
 	"TaskHistoryQueryRequest": {
 		"favoritesOnly"?: boolean
 		"searchQuery"?: string
-		"sortBy"?: string
+		"sortBy"?: "newest" | "oldest" | "mostTokens" | "mostRelevant"
 		"currentWorkspaceOnly"?: boolean
+		"cursor"?: number
+		"pageSize"?: number
 	}
 	"TaskPromptRequest": {
 		"text"?: string
@@ -3062,6 +3233,7 @@ export type WebviewRpcPayloadShapeMap = {
 		"cwd"?: string
 		"worktreePath"?: string
 		"delivery"?: string
+		"clientOperationId"?: string
 		[key: string]: unknown
 	}
 	"StringListValueRequest": {
@@ -3075,8 +3247,25 @@ export type WebviewRpcPayloadShapeMap = {
 		"taskId": string
 		"isFavorited": boolean
 	}
+	"TaskHistoryItem": {
+		"id": string
+		"ts": number
+		"task": string
+		"tokensIn"?: number
+		"tokensOut"?: number
+		"cacheWrites"?: number
+		"cacheReads"?: number
+		"totalCost"?: number
+		"isFavorited"?: boolean
+		"size"?: number
+		"cwdOnTaskInitialization"?: string
+		"modelId"?: string
+		[key: string]: unknown
+	}
 	"TaskHistoryResponse": {
-		"tasks": Array<Record<string, unknown>>
+		"tasks": Array<WebviewRpcPayloadShapeMap["TaskHistoryItem"]>
+		"nextCursor": number
+		"total": number
 		[key: string]: unknown
 	}
 	"NumberValueResponse": {
@@ -3085,6 +3274,10 @@ export type WebviewRpcPayloadShapeMap = {
 	}
 	"FlexibleObject": {
 		[key: string]: unknown
+	}
+	"TaskPartialMessageEvent": {
+		"taskId": string
+		"message": WebviewRpcPayloadShapeMap["FlexibleObject"]
 	}
 	"BooleanValueResponse": {
 		"value": boolean
@@ -3184,18 +3377,33 @@ export type WebviewRpcPayloadShapeMap = {
 		"disabled": boolean
 		[key: string]: unknown
 	}
+	"McpServerItem": {
+		"name": string
+		"config": string
+		"status": string
+		"error": string
+		"tools": Array<Record<string, unknown>>
+		"resources": Array<Record<string, unknown>>
+		"resourceTemplates": Array<Record<string, unknown>>
+		"prompts": Array<Record<string, unknown>>
+		"disabled": boolean
+		"timeout"?: number
+		"oauthRequired"?: boolean
+		"oauthAuthStatus"?: string
+		[key: string]: unknown
+	}
 	"McpServersResponse": {
-		"mcpServers": Array<Record<string, unknown>>
+		"mcpServers": Array<WebviewRpcPayloadShapeMap["McpServerItem"]>
 		[key: string]: unknown
 	}
 	"ModeRequest": {
-		"mode"?: string
-		"value"?: string
+		"mode"?: "plan" | "act"
+		"value"?: "plan" | "act"
 		[key: string]: unknown
 	}
 	"ModeResponse": {
 		"value": boolean
-		"mode": string
+		"mode": "plan" | "act"
 	}
 	"TelemetryRequest": {
 		"value"?: string
@@ -3334,9 +3542,17 @@ export type WebviewRpcPayloadShapeMap = {
 		"message": string
 		[key: string]: unknown
 	}
+	"BrowserTabItem": {
+		"id": string
+		"type": string
+		"url": string
+		"title": string
+		"webSocketDebuggerUrl": string
+		[key: string]: unknown
+	}
 	"BrowserTabsResponse": {
 		"success"?: boolean
-		"tabs": Array<Record<string, unknown>>
+		"tabs": Array<WebviewRpcPayloadShapeMap["BrowserTabItem"]>
 		"error"?: string
 		[key: string]: unknown
 	}
@@ -3580,17 +3796,29 @@ export function webviewRpcOperation(service: string, method: string) { return WE
 export type WebviewRpcPayloadValidation = { ok: true } | { ok: false; reason: "payload_not_object" | "missing_required_field" | "invalid_field_type" | "unexpected_field"; field?: string }
 export function validateWebviewRpcPayload(service: string, method: string, direction: "request" | "response", value: unknown): WebviewRpcPayloadValidation {
 	const operation = webviewRpcOperation(service, method)
-	const shapeName = operation && (direction === "request" ? "requestShape" in operation ? operation.requestShape : undefined : "responseShape" in operation ? operation.responseShape : undefined)
-	if (!shapeName) return { ok: true }
+	const shapeName = operation && (direction === "request" ? operation.requestShape : operation.responseShape)
+	return shapeName ? validateShape(shapeName, value) : { ok: true }
+}
+function validateShape(shapeName: string, value: unknown): WebviewRpcPayloadValidation {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, reason: "payload_not_object" }
-	const shape = WEBVIEW_RPC_PAYLOAD_SHAPES[shapeName]
+	const shape = WEBVIEW_RPC_PAYLOAD_SHAPES[shapeName as keyof typeof WEBVIEW_RPC_PAYLOAD_SHAPES] as { fields: Record<string, { type: string; required?: boolean; shape?: string; values?: readonly string[] }>; allowAdditionalFields?: boolean } | undefined
+	if (!shape) return { ok: false, reason: "invalid_field_type" }
 	const record = value as Record<string, unknown>
-	for (const [field, rule] of Object.entries(shape.fields) as Array<[string, { type: string; required?: boolean }]>) {
+	for (const [field, rule] of Object.entries(shape.fields)) {
 		if (record[field] === undefined) { if (rule.required) return { ok: false, reason: "missing_required_field", field }; continue }
 		const item = record[field]
-		const valid = rule.type === "unknown" || (rule.type === "string" && typeof item === "string") || (rule.type === "number" && typeof item === "number" && Number.isFinite(item)) || (rule.type === "boolean" && typeof item === "boolean") || (rule.type === "object" && typeof item === "object" && item !== null && !Array.isArray(item)) || (rule.type === "array" && Array.isArray(item)) || (rule.type === "stringArray" && Array.isArray(item) && item.every((entry) => typeof entry === "string")) || (rule.type === "numberArray" && Array.isArray(item) && item.every((entry) => typeof entry === "number" && Number.isFinite(entry))) || (rule.type === "booleanArray" && Array.isArray(item) && item.every((entry) => typeof entry === "boolean")) || (rule.type === "objectArray" && Array.isArray(item) && item.every((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry)))
-		if (!valid) return { ok: false, reason: "invalid_field_type", field }
+		if (!validPrimitive(rule.type, item) || (rule.values && !rule.values.includes(item as string))) return { ok: false, reason: "invalid_field_type", field }
+		if (rule.shape) {
+			const nestedValues = Array.isArray(item) ? item : [item]
+			for (let index = 0; index < nestedValues.length; index++) {
+				const nested = validateShape(rule.shape, nestedValues[index])
+				if ("reason" in nested) return { ok: false, reason: nested.reason, field: Array.isArray(item) ? `${field}[${index}].${nested.field || ""}` : `${field}.${nested.field || ""}` }
+			}
+		}
 	}
-	if (!("allowAdditionalFields" in shape && shape.allowAdditionalFields)) { for (const field of Object.keys(record)) if (!(field in shape.fields)) return { ok: false, reason: "unexpected_field", field } }
+	if (!shape.allowAdditionalFields) for (const field of Object.keys(record)) if (!(field in shape.fields)) return { ok: false, reason: "unexpected_field", field }
 	return { ok: true }
+}
+function validPrimitive(type: string, item: unknown) {
+	return type === "unknown" || (type === "string" && typeof item === "string") || (type === "number" && typeof item === "number" && Number.isFinite(item)) || (type === "boolean" && typeof item === "boolean") || (type === "object" && typeof item === "object" && item !== null && !Array.isArray(item)) || (type === "array" && Array.isArray(item)) || (type === "stringArray" && Array.isArray(item) && item.every((entry) => typeof entry === "string")) || (type === "numberArray" && Array.isArray(item) && item.every((entry) => typeof entry === "number" && Number.isFinite(entry))) || (type === "booleanArray" && Array.isArray(item) && item.every((entry) => typeof entry === "boolean")) || (type === "objectArray" && Array.isArray(item) && item.every((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry)))
 }

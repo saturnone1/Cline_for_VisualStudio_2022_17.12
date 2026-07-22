@@ -26,7 +26,7 @@ export class RuntimeModelContext {
 		const providerId = normalizeProviderId(stringValue(configuration[`${modePrefix}ApiProvider`]) || "anthropic")
 		const contextWindowTokens = resolveConfiguredContextWindow(configuration, providerId, modePrefix, this.modelId())
 		return contextWindowTokens
-			? Math.min(this.dependencies.maxResumedConversationChars, Math.max(2_000, Math.floor(contextWindowTokens * 0.5)))
+			? Math.min(this.dependencies.maxResumedConversationChars, Math.max(4_000, Math.floor(contextWindowTokens * 1.25)))
 			: this.dependencies.maxResumedConversationChars
 	}
 }

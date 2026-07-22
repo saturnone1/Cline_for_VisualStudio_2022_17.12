@@ -5,8 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "tsc && node --test tests/*.test.js && node scripts/architectureChecks.js && node scripts/parityChecks.js && node ../../scripts/generate-webview-rpc-contracts.mjs --check",
-    "contracts:check": "node ../../scripts/generate-webview-rpc-contracts.mjs --check",
+    "test": "tsc && node --test tests/*.test.js && node scripts/architectureChecks.js && node scripts/parityChecks.js && node ../../scripts/generate-webview-rpc-contracts.mjs --check && node ../../scripts/generate-host-rpc-contracts.mjs --check",
+    "contracts:check": "node ../../scripts/generate-webview-rpc-contracts.mjs --check && node ../../scripts/generate-host-rpc-contracts.mjs --check",
     "build": "node scripts/cleanDist.js && tsc && node scripts/copyRuntime.js"
   },
   "devDependencies": {

@@ -57,9 +57,11 @@ test("webview state persistence restores user settings and omits transient state
 	state.uiLanguage = "en"
 	state.customPrompt = "Review carefully"
 	state.backgroundCommandRunning = true
+	state.taskLifecycleStatus = "streaming"
 	const restored = loadInitialState(createPersistedStateSnapshot(state))
 
 	assert.equal(restored.uiLanguage, "en")
 	assert.equal(restored.customPrompt, "Review carefully")
 	assert.equal(restored.backgroundCommandRunning, false)
+	assert.equal(restored.taskLifecycleStatus, "idle")
 })

@@ -3,7 +3,7 @@
 ## Status
 
 This document is the shared migration target for the Visual Studio 2022 17.0 and 17.12 products.
-The common-source migration and architecture implementation are complete. The former legacy WebView backend is now a thin typed facade, and the shared test, contract, package, and dual-VSIX runtime smoke gates verify both products from one source tree.
+The common-source migration is complete and the target architecture is substantially implemented. Remaining work is tracked as bounded ownership improvements rather than declared complete prematurely. Shared test, contract, package, and dual-VSIX runtime smoke gates verify both products from one source tree.
 
 ## Decision
 
@@ -42,7 +42,7 @@ Verified progress includes:
 - the agent runtime exposes normalized typed events and keeps direct `@cline/sdk` imports inside `infrastructure/sdk`;
 - Chat start/send/cancel, approvals, task history, providers/settings, MCP, worktrees, browser, hooks, scheduled agents, and checkpoints have feature-owned handlers or policies;
 - WebView ingress and host/sidecar transport use versioned contracts, and shared WebView proto aliases no longer use `any`;
-- the presentation controller and WebView bridge are thin adapters, while the WebView remains a state renderer and typed-intent source.
+- the presentation controller and WebView bridge are typed adapters; stateful screens move RPC concurrency into feature controller hooks so rendering components remain inspectable.
 
 Implementation evidence at the verification gate:
 
@@ -157,7 +157,7 @@ type RpcEnvelope<T> = {
 }
 ```
 
-Contracts are grouped by boundary and operation. TypeScript and C# representations are generated from shared schemas or verified by contract tests. Free-form payloads are normalized immediately at adapter edges. RPC handlers are registered explicitly in the composition root.
+Contracts are grouped by boundary and operation. WebView RPC shapes come from `contracts/webview-rpc.json`; Visual Studio Host RPC method identity comes from `contracts/host-rpc.json`. TypeScript and C# representations are generated or verified by contract tests. Free-form payloads are normalized immediately at adapter edges. RPC handlers are registered explicitly in the composition root.
 
 ## Common-source strategy
 

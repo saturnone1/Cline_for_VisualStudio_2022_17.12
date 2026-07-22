@@ -26,6 +26,8 @@ interface ContextWindowProgressProps extends ContextWindowInfoProps {
 	}
 	contextWindow?: number
 	compactResetKey?: number
+	compactionInProgress?: boolean
+	compactThreshold?: number
 	taskId?: string
 	language?: "en" | "ko"
 	onCompact?: () => Promise<void> | void
@@ -34,26 +36,27 @@ interface ContextWindowProgressProps extends ContextWindowInfoProps {
 const ConfirmationDialog = memo<{
 	onConfirm: (e: React.MouseEvent) => void
 	onCancel: (e: React.MouseEvent) => void
-}>(({ onConfirm, onCancel }) => (
+	language: "en" | "ko"
+}>(({ onConfirm, onCancel, language }) => (
 	<div className="text-sm my-2 flex items-center gap-0 justify-between">
-		<span className="font-semibold text-sm">Compact the current task?</span>
+		<span className="font-semibold text-sm">{language === "ko" ? "현재 대화를 압축할까요?" : "Compact the current conversation?"}</span>
 		<span className="flex gap-1">
 			<VSCodeButton
 				appearance="secondary"
 				className="text-sm"
 				onClick={onCancel}
-				title="No, keep the task as is"
+				title={language === "ko" ? "압축하지 않기" : "Keep the conversation as is"}
 				type="button">
-				Cancel
+				{language === "ko" ? "취소" : "Cancel"}
 			</VSCodeButton>
 			<VSCodeButton
 				appearance="primary"
 				autoFocus={true}
 				className="text-sm"
 				onClick={onConfirm}
-				title="Yes, compact the task"
+				title={language === "ko" ? "대화 압축하기" : "Compact the conversation"}
 				type="button">
-				Yes
+				{language === "ko" ? "예" : "Yes"}
 			</VSCodeButton>
 		</span>
 	</div>
@@ -64,6 +67,8 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 	contextWindow = 0,
 	contextUsage,
 	compactResetKey,
+	compactionInProgress = false,
+	compactThreshold = 90,
 	lastApiReqTotalTokens = 0,
 	language = "en",
 	onCompact,
@@ -76,22 +81,23 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 }) => {
 	const [isOpened, setIsOpened] = useState(false)
 	const [confirmationNeeded, setConfirmationNeeded] = useState(false)
-	const [autoCompactDismissedTaskId, setAutoCompactDismissedTaskId] = useState<string | undefined>()
+	const [autoCompactSuppressed, setAutoCompactSuppressed] = useState(false)
 	const [isCompacting, setIsCompacting] = useState(false)
 	const progressBarRef = useRef<HTMLDivElement>(null)
 	const isKorean = language === "ko"
-	const compactThreshold = 90
+	const normalizedCompactThreshold = Math.min(100, Math.max(1, compactThreshold))
+	const compacting = isCompacting || compactionInProgress
 
 	const handleCompactClick = useCallback(
 		(e: React.MouseEvent) => {
 			e.preventDefault()
 			e.stopPropagation()
-			if (isCompacting) {
+			if (compacting) {
 				return
 			}
 			setConfirmationNeeded(!confirmationNeeded)
 		},
-		[confirmationNeeded, isCompacting],
+		[confirmationNeeded, compacting],
 	)
 
 	const handleConfirm = useCallback(
@@ -103,11 +109,11 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 				setIsCompacting(false)
 				return
 			}
+			setConfirmationNeeded(false)
+			setAutoCompactSuppressed(true)
 			setIsCompacting(true)
 			try {
 				await onCompact()
-				setConfirmationNeeded(false)
-				setAutoCompactDismissedTaskId(undefined)
 				setIsCompacting(false)
 			} catch (error) {
 				console.error(error)
@@ -121,31 +127,22 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 		e.preventDefault()
 		e.stopPropagation()
 		setConfirmationNeeded(false)
-		setAutoCompactDismissedTaskId(taskId)
-	}, [taskId])
+		setAutoCompactSuppressed(true)
+	}, [])
 
 	useEffect(() => {
 		setConfirmationNeeded(false)
-		setAutoCompactDismissedTaskId(undefined)
+		setAutoCompactSuppressed(false)
 		setIsCompacting(false)
 	}, [taskId])
 
 	useEffect(() => {
 		if (compactResetKey !== undefined) {
+			setConfirmationNeeded(false)
+			setAutoCompactSuppressed(true)
 			setIsCompacting(false)
 		}
 	}, [compactResetKey])
-
-	useEffect(() => {
-		if (!isCompacting) {
-			return
-		}
-
-		const timeout = window.setTimeout(() => {
-			setIsCompacting(false)
-		}, 180_000)
-		return () => window.clearTimeout(timeout)
-	}, [isCompacting])
 
 	const tokenData = useMemo(() => {
 		const used = contextUsage?.used || lastApiReqTotalTokens
@@ -165,10 +162,16 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 	const shouldSuggestCompact =
 		Boolean(tokenData) &&
 		useAutoCondense &&
-		!isCompacting &&
+		!compacting &&
 		!confirmationNeeded &&
-		autoCompactDismissedTaskId !== taskId &&
-		(tokenData?.percentage ?? 0) >= compactThreshold
+		!autoCompactSuppressed &&
+		(tokenData?.percentage ?? 0) >= normalizedCompactThreshold
+
+	useEffect(() => {
+		if (!tokenData || tokenData.percentage < normalizedCompactThreshold) {
+			setAutoCompactSuppressed(false)
+		}
+	}, [normalizedCompactThreshold, tokenData])
 
 	useEffect(() => {
 		if (shouldSuggestCompact) {
@@ -219,7 +222,7 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 			? isKorean
 				? "한도 초과 가능"
 				: "Limit may be exceeded"
-			: tokenData.percentage >= compactThreshold
+			: tokenData.percentage >= normalizedCompactThreshold
 				? isKorean
 					? "압축 권장"
 					: "Compact recommended"
@@ -233,7 +236,7 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 	const indicatorClassName =
 		tokenData.percentage >= 100
 			? "bg-error"
-			: tokenData.percentage >= compactThreshold
+			: tokenData.percentage >= normalizedCompactThreshold
 				? "bg-warning"
 				: "bg-success"
 
@@ -241,7 +244,7 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 		<div className="flex flex-col my-1.5" onMouseLeave={debounceCloseHover}>
 			<div className="flex gap-1 flex-row @max-xs:flex-col @max-xs:items-start items-center text-sm">
 				<div className="flex items-center gap-1.5 flex-1 whitespace-nowrap">
-					<span className="cursor-pointer text-sm" title="Tokens reported for the most recent completed API request">
+					<span className="cursor-pointer text-sm" title={isKorean ? "현재 대화의 컨텍스트 사용량" : "Context usage for the current conversation"}>
 						{formatTokenNumber(tokenData.used)}
 					</span>
 					<div className="flex relative items-center gap-1 flex-1 w-full h-full" onMouseEnter={() => setIsOpened(true)}>
@@ -268,7 +271,7 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 									onFocus={handleFocus}
 									ref={progressBarRef}>
 									<Progress
-										aria-label="Context window usage progress"
+									aria-label={isKorean ? "컨텍스트 창 사용량" : "Context window usage progress"}
 										indicatorClassName={indicatorClassName}
 										value={tokenData.cappedPercentage}
 									/>
@@ -277,19 +280,19 @@ const ContextWindow: React.FC<ContextWindowProgressProps> = ({
 							</HoverCardTrigger>
 						</HoverCard>
 					</div>
-					<span className="cursor-pointer text-sm" title="Maximum context window size for this model">
+					<span className="cursor-pointer text-sm" title={isKorean ? "설정된 최대 컨텍스트 창" : "Configured maximum context window"}>
 						{formatTokenNumber(tokenData.max)}
 					</span>
 				</div>
 				<span className="text-xs text-muted-foreground whitespace-nowrap">{`${tokenData.percentage.toFixed(1)}% · ${usageStatus}`}</span>
-				<CompactTaskButton disabled={isCompacting} onClick={handleCompactClick} showLabel />
+				<CompactTaskButton disabled={compacting} language={language} onClick={handleCompactClick} showLabel />
 			</div>
-			{isCompacting && (
+			{compacting && (
 				<div className="mt-1 rounded border border-[var(--vscode-widget-border)] px-2 py-1 text-xs text-muted-foreground">
 					{isKorean ? "컨텍스트 압축 중..." : "Compacting context..."}
 				</div>
 			)}
-			{confirmationNeeded && !isCompacting && <ConfirmationDialog onCancel={handleCancel} onConfirm={handleConfirm} />}
+			{confirmationNeeded && !compacting && <ConfirmationDialog language={language} onCancel={handleCancel} onConfirm={handleConfirm} />}
 		</div>
 	)
 }

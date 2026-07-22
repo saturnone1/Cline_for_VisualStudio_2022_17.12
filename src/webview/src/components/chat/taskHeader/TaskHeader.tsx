@@ -8,7 +8,6 @@ import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import { getEnvironmentColor } from "@/utils/environmentColors"
 import CopyTaskButton from "./buttons/CopyTaskButton"
-import DeleteTaskButton from "./buttons/DeleteTaskButton"
 import NewTaskButton from "./buttons/NewTaskButton"
 import OpenDiskConversationHistoryButton from "./buttons/OpenDiskConversationHistoryButton"
 import { CheckpointError } from "./CheckpointError"
@@ -19,6 +18,7 @@ import { highlightText } from "./Highlights"
 const IS_DEV = process.env.IS_DEV === '"true"'
 interface TaskHeaderProps {
 	task: ClineMessage
+	messages: ClineMessage[]
 	tokensIn: number
 	tokensOut: number
 	doesModelSupportPromptCache: boolean
@@ -28,6 +28,8 @@ interface TaskHeaderProps {
 	lastApiReqTotalTokens?: number
 	contextWindowUsage?: ContextWindowUsage
 	compactResetKey?: number
+	contextCompactionInProgress?: boolean
+	contextCompactionThreshold?: number
 	lastProgressMessageText?: string
 	showFocusChainPlaceholder?: boolean
 	onCompact?: () => Promise<void> | void
@@ -39,6 +41,7 @@ const BACK_BUTTON_CLASS = "size-7 border-0 bg-transparent hover:bg-toolbar-hover
 
 const TaskHeader: React.FC<TaskHeaderProps> = ({
 	task,
+	messages,
 	tokensIn,
 	tokensOut,
 	cacheWrites,
@@ -47,6 +50,8 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	lastApiReqTotalTokens,
 	contextWindowUsage,
 	compactResetKey,
+	contextCompactionInProgress,
+	contextCompactionThreshold,
 	lastProgressMessageText,
 	showFocusChainPlaceholder,
 	onCompact,
@@ -119,6 +124,9 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	}, [navigateToSettings])
 
 	const environmentBorderColor = getEnvironmentColor(environment, "border")
+	const taskHeaderLabel = isTaskExpanded
+		? uiLanguage === "ko" ? "작업 정보 접기" : "Collapse task header"
+		: uiLanguage === "ko" ? "작업 정보 펼치기" : "Expand task header"
 
 	return (
 		<div className="py-1.5 px-3 flex flex-col gap-1.5">
@@ -141,7 +149,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 				}}>
 				{/* Task Title */}
 				<div
-					aria-label={isTaskExpanded ? "Collapse task header" : "Expand task header"}
+					aria-label={taskHeaderLabel}
 					className="flex justify-between items-center cursor-pointer"
 					onClick={toggleTaskExpanded}
 					onKeyDown={(e) => {
@@ -156,12 +164,7 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 						{isTaskExpanded ? <ChevronDownIcon size="16" /> : <ChevronRightIcon size="16" />}
 						{isTaskExpanded && (
 							<div className="mt-1 flex justify-end cursor-pointer opacity-80 gap-2 mx-2">
-								<CopyTaskButton className={BUTTON_CLASS} taskText={task.text} />
-								<DeleteTaskButton
-									className={BUTTON_CLASS}
-									taskId={currentTaskItem?.id}
-									taskSize={currentTaskItem?.size}
-								/>
+								<CopyTaskButton className={BUTTON_CLASS} language={uiLanguage} messages={messages} />
 								{/* Only visible in development mode */}
 								{IS_DEV && (
 									<OpenDiskConversationHistoryButton className={BUTTON_CLASS} taskId={currentTaskItem?.id} />
@@ -191,36 +194,42 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 				{/* Expand/Collapse Task Details */}
 				{isTaskExpanded && (
 					<div className="flex flex-col break-words" key={`task-details-${currentTaskItem?.id}`}>
-						<div
-							className={cn(
-								"ph-no-capture whitespace-pre-wrap break-words px-0.5 text-sm mt-1 relative",
-								"max-h-[4.5rem] overflow-hidden",
-								{
-									"max-h-[25vh] overflow-y-auto scroll-smooth": isHighlightedTextExpanded,
-									"cursor-pointer": isTextOverflowing,
-								},
-							)}
-							onClick={() => isTextOverflowing && setIsHighlightedTextExpanded(true)}
-							ref={highlightedTextRef}
-							style={
-								!isHighlightedTextExpanded && isTextOverflowing
-									? {
-											WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
-											maskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
-										}
-									: undefined
-							}>
-							{highlightedText}
-						</div>
+						<div className="lig-user-message-row mt-1">
+							<div className="lig-user-message lig-task-prompt">
+								<div
+									className={cn(
+										"ph-no-capture whitespace-pre-wrap break-words text-sm relative",
+										"max-h-[4.5rem] overflow-hidden",
+										{
+											"max-h-[25vh] overflow-y-auto scroll-smooth": isHighlightedTextExpanded,
+											"cursor-pointer": isTextOverflowing,
+										},
+									)}
+									onClick={() => isTextOverflowing && setIsHighlightedTextExpanded(true)}
+									ref={highlightedTextRef}
+									style={
+										!isHighlightedTextExpanded && isTextOverflowing
+											? {
+													WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
+													maskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
+												}
+											: undefined
+									}>
+									{highlightedText}
+								</div>
 
-						{((task.images && task.images.length > 0) || (task.files && task.files.length > 0)) && (
-							<Thumbnails files={task.files ?? []} images={task.images ?? []} />
-						)}
+								{((task.images && task.images.length > 0) || (task.files && task.files.length > 0)) && (
+									<Thumbnails files={task.files ?? []} images={task.images ?? []} style={{ marginTop: "8px" }} />
+								)}
+							</div>
+						</div>
 
 						<ContextWindow
 							cacheReads={cacheReads}
 							cacheWrites={cacheWrites}
 							compactResetKey={compactResetKey}
+							compactionInProgress={contextCompactionInProgress}
+							compactThreshold={contextCompactionThreshold}
 							contextUsage={contextWindowUsage}
 							contextWindow={selectedModelInfo?.contextWindow}
 							language={uiLanguage}

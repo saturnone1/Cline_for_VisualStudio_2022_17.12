@@ -4,4 +4,5 @@ export type HookProcessResult = Readonly<{ exitCode: number; stdout: string; std
 
 export interface HookExecutionPort {
 	execute(hook: HookScript, context: Record<string, unknown>): Promise<HookProcessResult>
+	cancelAll(): Promise<number>
 }

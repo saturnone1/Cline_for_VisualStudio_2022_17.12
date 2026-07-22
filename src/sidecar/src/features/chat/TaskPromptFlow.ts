@@ -28,9 +28,10 @@ export class TaskPromptFlow {
 	async start(request: NewTaskPrompt, options: NewTaskPromptOptions = {}) {
 		const images = request.images ?? []
 		const files = request.files ?? []
+		const prompt = resolveTaskPrompt(request.text, images, files)
 		const requestedWorkspacePath = request.workspacePath ?? ""
-		this.dependencies.startFlow.execute({
-			text: request.text,
+		await this.dependencies.startFlow.execute({
+			text: prompt,
 			images,
 			files,
 			requestedWorkspacePath,
@@ -43,7 +44,8 @@ export class TaskPromptFlow {
 	async respond(request: TaskPromptRequest, requestId?: string) {
 		if (!this.dependencies.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
 		const { responseType, images, files } = request
-		const transcriptText = this.dependencies.buildTranscript(request.text, images, files)
+		const prompt = resolveTaskPrompt(request.text, images, files)
+		const transcriptText = this.dependencies.buildTranscript(prompt, images, files)
 		const activeSessionId = this.dependencies.activeSessionId()
 		const selectedSessionId = this.dependencies.selectedSessionId()
 		this.dependencies.log("sendAskResponse.received", {
@@ -55,11 +57,11 @@ export class TaskPromptFlow {
 			selectedSessionId,
 		})
 
-		const answerText = this.dependencies.buildTranscript(request.answerText, images, files)
+		const answerText = this.dependencies.buildTranscript(resolveTaskPrompt(request.answerText || request.text, images, files), images, files)
 		if (await this.dependencies.interactionFlow.handle({ responseType, text: transcriptText, answerText, images, files, activeSessionId })) return
 		await this.dependencies.sendFlow.execute({
 			requestId: requestId || this.dependencies.createRequestId(),
-			prompt: request.text,
+			prompt,
 			transcriptText,
 			images,
 			files,
@@ -69,6 +71,15 @@ export class TaskPromptFlow {
 			selectedSessionId,
 		})
 	}
+}
+
+export function resolveTaskPrompt(text: string, images: readonly string[], files: readonly string[]) {
+	const prompt = text.trim()
+	if (prompt) return prompt
+	if (images.length > 0 && files.length > 0) return "Review the attached images and files."
+	if (images.length > 0) return "Review the attached image."
+	if (files.length > 0) return "Review the attached file."
+	return ""
 }
 
 function normalizeDelivery(value: string): "queue" | "steer" | undefined {

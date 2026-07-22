@@ -73,4 +73,38 @@ describe("context window usage", () => {
 		const messages: ClineMessage[] = [{ ts: 1, type: "say", say: "text", text: "가".repeat(12_000) }]
 		expect(estimateConversationTokens(messages)).toBeGreaterThan(12_000)
 	})
+
+	it("resets displayed context at an explicit successful compaction boundary", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "text", text: "이전 대화".repeat(2_000) },
+			{ ts: 2, type: "say", say: "info", text: "컨텍스트 압축이 완료되었습니다.", contextCompaction: { sourceSessionId: "old", sessionId: "new" } },
+			{ ts: 3, type: "say", say: "user_feedback", text: "다음 질문" },
+		]
+
+		const usage = getContextWindowUsage(messages)
+		expect(usage?.used).toBeLessThan(100)
+	})
+
+	it("uses the validated compacted context size as the post-compaction baseline", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "text", text: "이전 대화".repeat(2_000) },
+			{ ts: 2, type: "say", say: "info", text: "컨텍스트 압축이 완료되었습니다.", contextCompaction: { sourceSessionId: "old", sessionId: "new", estimatedTokensAfter: 1_250 } },
+			{ ts: 3, type: "say", say: "user_feedback", text: "다음 질문" },
+		]
+
+		const usage = getContextWindowUsage(messages)
+		expect(usage?.used).toBeGreaterThanOrEqual(1_250)
+		expect(usage?.used).toBeLessThan(1_350)
+	})
+
+	it("does not treat compaction progress text as a successful boundary", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "text", text: "이전 대화".repeat(2_000) },
+			{ ts: 2, type: "say", say: "reasoning", text: "컨텍스트 압축 중입니다." },
+			{ ts: 3, type: "say", say: "text", text: "압축 요청을 처리할 수 없습니다." },
+		]
+
+		const usage = getContextWindowUsage(messages)
+		expect(usage?.used).toBeGreaterThan(2_000)
+	})
 })

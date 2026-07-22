@@ -1,4 +1,5 @@
 import type { ConversationProjectionState, ProgressPhase } from "../../features/conversation/ConversationProjectionState"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import { isEmptyTranscriptPlaceholder } from "./ConversationMessageProjection"
 import { normalizeProgressTranscriptText, normalizeReasoningTranscriptText, sanitizeProgressTranscriptForDisplay } from "./TranscriptNormalization"
 import { normalizeTranscriptText } from "./TranscriptTextPolicy"
@@ -111,4 +112,3 @@ export class FoldedProgressProjector {
 
 function readString(value: unknown) { return typeof value === "string" ? value : "" }
 function truncateText(value: string, limit: number) { return value.length <= limit ? value : `${value.slice(0, limit)}\n\n[truncated ${value.length - limit} chars]` }
-function readPositiveIntEnv(name: string, fallback: number) { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback }

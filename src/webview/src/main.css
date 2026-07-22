@@ -107,9 +107,19 @@ body {
 	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 16%, transparent);
 	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, transparent);
 	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
+	--lig-message-background: color-mix(in srgb, var(--lig-panel) 58%, transparent);
+	--lig-user-message-background: color-mix(in srgb, var(--lig-accent-2) 18%, var(--lig-panel-raised));
+	--lig-user-message-border: color-mix(in srgb, var(--lig-accent-2) 58%, var(--lig-border));
+	--lig-user-message-foreground: color-mix(in srgb, var(--vscode-foreground) 96%, white);
+	--lig-code-background: color-mix(in srgb, var(--vscode-textCodeBlock-background, #161b19) 78%, #050807);
+	--lig-code-border: color-mix(in srgb, var(--vscode-foreground) 18%, var(--lig-border));
+	--lig-quote-background: color-mix(in srgb, var(--lig-accent-2) 8%, var(--lig-panel));
+	--lig-table-header-background: color-mix(in srgb, var(--lig-accent-2) 12%, var(--lig-panel-raised));
 	--lig-mode-active-background: #f5f5f5;
 	--lig-mode-active-foreground: #111827;
 	--lig-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+	--lig-brand-glow: #2b9ad6;
+	--lig-brand-ring: color-mix(in srgb, var(--lig-brand-glow) 72%, transparent);
 }
 
 :root[data-vscline-theme="light"] {
@@ -124,9 +134,76 @@ body {
 	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 12%, transparent);
 	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #9a6700) 12%, transparent);
 	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 74%, transparent);
+	--lig-message-background: color-mix(in srgb, var(--lig-panel) 72%, #ffffff);
+	--lig-user-message-background: color-mix(in srgb, var(--lig-accent-2) 11%, #ffffff);
+	--lig-user-message-border: color-mix(in srgb, var(--lig-accent-2) 52%, var(--lig-border));
+	--lig-user-message-foreground: var(--vscode-foreground);
+	--lig-code-background: color-mix(in srgb, var(--vscode-textCodeBlock-background, #f3f5f7) 82%, #e7ebf0);
+	--lig-code-border: color-mix(in srgb, var(--vscode-foreground) 24%, var(--lig-border));
+	--lig-quote-background: color-mix(in srgb, var(--lig-accent-2) 7%, #ffffff);
+	--lig-table-header-background: color-mix(in srgb, var(--lig-accent-2) 11%, #ffffff);
 	--lig-mode-active-background: #111827;
 	--lig-mode-active-foreground: #ffffff;
 	--lig-shadow: 0 10px 24px rgba(31, 35, 40, 0.1);
+	--lig-brand-glow: #0969b7;
+}
+
+@keyframes lig-brand-orbit {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes lig-brand-breathe {
+	from {
+		filter: drop-shadow(0 0 7px color-mix(in srgb, var(--lig-brand-glow) 32%, transparent));
+	}
+	to {
+		filter: drop-shadow(0 0 19px color-mix(in srgb, var(--lig-brand-glow) 70%, transparent));
+	}
+}
+
+@keyframes lig-brand-copy-breathe {
+	from {
+		text-shadow: 0 0 5px color-mix(in srgb, var(--lig-brand-glow) 20%, transparent);
+	}
+	to {
+		text-shadow: 0 0 11px color-mix(in srgb, var(--lig-brand-glow) 42%, transparent);
+	}
+}
+
+.lig-brand-orbit {
+	box-sizing: border-box;
+	border: 1.5px dashed var(--lig-brand-ring);
+	box-shadow: 0 0 9px color-mix(in srgb, var(--lig-brand-glow) 28%, transparent);
+	animation: lig-brand-orbit 6s linear infinite;
+	will-change: transform;
+}
+
+.lig-brand-mark {
+	animation: lig-brand-breathe 1.8s ease-in-out infinite alternate;
+	will-change: filter;
+}
+
+.lig-brand-copy {
+	animation: lig-brand-copy-breathe 2.2s ease-in-out infinite alternate;
+	will-change: text-shadow;
+}
+
+.lig-brand-title {
+	color: var(--vscode-foreground);
+}
+
+.lig-brand-byline {
+	color: var(--vscode-descriptionForeground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lig-brand-orbit,
+	.lig-brand-mark,
+	.lig-brand-copy {
+		animation: none;
+	}
 }
 
 :root[data-vscline-theme="light"] .text-description,
@@ -209,9 +286,45 @@ vscode-tag {
 	user-select: text;
 }
 
+.lig-user-message-row {
+	display: flex;
+	width: 100%;
+	justify-content: flex-end;
+	box-sizing: border-box;
+}
+
+.lig-user-message {
+	box-sizing: border-box;
+	width: fit-content;
+	max-width: 82%;
+	padding: 7px 10px;
+	border: 1px solid var(--lig-user-message-border);
+	border-right: 3px solid var(--lig-accent-2);
+	border-radius: 6px 0 0 6px;
+	background: var(--lig-user-message-background);
+	color: var(--lig-user-message-foreground);
+	text-align: left;
+	overflow-wrap: anywhere;
+	user-select: text;
+}
+
+.lig-task-prompt {
+	max-width: min(82%, 48rem);
+}
+
+@media (max-width: 520px) {
+	.lig-user-message,
+	.lig-task-prompt {
+		max-width: 92%;
+	}
+}
+
 .lig-assistant-message {
 	max-width: 980px;
-	padding: 1px 3px;
+	padding: 6px 9px;
+	border-left: 2px solid color-mix(in srgb, var(--lig-accent) 58%, var(--lig-border));
+	border-radius: 0 5px 5px 0;
+	background: var(--lig-message-background);
 	color: color-mix(in srgb, var(--vscode-foreground) 96%, white);
 	user-select: text;
 }
@@ -233,15 +346,70 @@ vscode-tag {
 	margin-block-end: 0.35em;
 }
 
+.lig-assistant-message .inline-markdown-block :is(h1, h2, h3, h4) {
+	margin-block: 0.85em 0.4em;
+	color: var(--vscode-foreground);
+	line-height: 1.3;
+}
+
+.lig-assistant-message .inline-markdown-block :is(h1, h2) {
+	padding-bottom: 0.3em;
+	border-bottom: 1px solid var(--lig-border);
+}
+
+.lig-assistant-message .inline-markdown-block .lig-markdown-code-block {
+	margin: 10px 0;
+	border: 1px solid var(--lig-code-border);
+	border-left: 3px solid color-mix(in srgb, var(--lig-accent-2) 72%, var(--lig-code-border));
+	border-radius: 5px;
+	background: var(--lig-code-background);
+	box-shadow:
+		0 1px 0 color-mix(in srgb, var(--vscode-foreground) 7%, transparent) inset,
+		0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.lig-assistant-message .inline-markdown-block .lig-markdown-code-block > code {
+	background: transparent;
+	color: var(--vscode-editor-foreground, var(--vscode-foreground));
+	line-height: 1.5;
+}
+
+.lig-assistant-message .inline-markdown-block blockquote {
+	margin: 0.75em 0;
+	padding: 0.45em 0.75em;
+	border-left: 3px solid color-mix(in srgb, var(--lig-accent-2) 72%, var(--lig-border));
+	background: var(--lig-quote-background);
+	color: color-mix(in srgb, var(--vscode-foreground) 84%, transparent);
+}
+
+.lig-assistant-message .inline-markdown-block blockquote > :first-child {
+	margin-top: 0;
+}
+
+.lig-assistant-message .inline-markdown-block blockquote > :last-child {
+	margin-bottom: 0;
+}
+
+.lig-assistant-message .inline-markdown-block hr {
+	margin: 0.9em 0;
+	border: 0;
+	border-top: 1px solid var(--lig-border-strong);
+}
+
 .lig-assistant-message .inline-markdown-block table {
+	border: 1px solid var(--lig-code-border);
 	border-radius: 5px;
 	overflow: hidden;
-	background: color-mix(in srgb, var(--lig-panel) 76%, transparent);
+	background: color-mix(in srgb, var(--lig-panel-raised) 72%, transparent);
 }
 
 .lig-assistant-message .inline-markdown-block th {
-	background: color-mix(in srgb, var(--lig-accent-muted) 70%, var(--lig-panel));
+	background: var(--lig-table-header-background);
 	color: color-mix(in srgb, var(--vscode-foreground) 96%, white);
+}
+
+.lig-assistant-message .inline-markdown-block :is(th, td) {
+	border-color: var(--lig-code-border);
 }
 
 .lig-assistant-message .inline-markdown-block tr:nth-child(even) {
@@ -250,8 +418,9 @@ vscode-tag {
 
 .lig-assistant-message .inline-markdown-block code:not(pre > code) {
 	border-color: color-mix(in srgb, var(--lig-accent) 24%, var(--lig-border));
-	background: color-mix(in srgb, var(--lig-panel-raised) 78%, transparent);
+	background: var(--lig-code-background);
 	color: color-mix(in srgb, var(--vscode-editor-foreground, #d4d4d4) 92%, #ffd479);
+	padding-inline: 4px;
 }
 
 .lig-tool-group,
@@ -267,6 +436,7 @@ vscode-tag {
 .lig-tool-group {
 	padding: 6px 8px;
 	margin: 5px 0;
+	border-left: 2px solid color-mix(in srgb, var(--lig-accent-2) 62%, var(--lig-border));
 	color: var(--lig-text-muted);
 }
 
@@ -274,6 +444,14 @@ vscode-tag {
 .lig-reasoning-row {
 	padding: 5px 8px;
 	margin: 5px 0;
+}
+
+.lig-progress-row {
+	border-left: 2px solid color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 64%, var(--lig-border));
+}
+
+.lig-reasoning-row {
+	border-left: 2px solid color-mix(in srgb, var(--lig-accent) 54%, var(--lig-border));
 }
 
 .lig-thinking-row button {
@@ -560,3 +738,26 @@ vscode-dropdown::part(listbox) {
 	animation: none !important;
 	transition: none !important;
 }
+.lig-background-task-status {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 34px;
+	padding: 5px 10px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	background: var(--vscode-sideBar-background);
+	color: var(--vscode-foreground);
+	font-size: 12px;
+}
+
+.lig-background-task-action {
+	border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	padding: 3px 8px;
+	cursor: pointer;
+}
+
+.lig-background-task-action:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.lig-background-task-action.danger { color: var(--vscode-errorForeground); }
+.lig-background-task-action:disabled { cursor: default; opacity: 0.6; }

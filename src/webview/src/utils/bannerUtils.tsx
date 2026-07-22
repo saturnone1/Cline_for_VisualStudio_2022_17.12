@@ -1,8 +1,25 @@
 import { BannerAction, BannerCardData } from "@shared/cline/banner"
-import DynamicIcon from "lucide-react/dist/esm/DynamicIcon.js"
-import type { IconName } from "lucide-react/dynamic"
+import { CircleAlert, ExternalLink, Gift, Info, Megaphone, Rocket, Sparkles, TriangleAlert, type LucideIcon } from "lucide-react"
 import React from "react"
 import { BannerData } from "@/components/common/BannerCarousel"
+
+const bannerIcons: Readonly<Record<string, LucideIcon>> = {
+	"circle-alert": CircleAlert,
+	"external-link": ExternalLink,
+	gift: Gift,
+	info: Info,
+	megaphone: Megaphone,
+	rocket: Rocket,
+	sparkles: Sparkles,
+	"triangle-alert": TriangleAlert,
+	warning: TriangleAlert,
+}
+
+function bannerIcon(name: string | undefined) {
+	if (!name) return undefined
+	const Icon = bannerIcons[name.trim().toLowerCase()] ?? Info
+	return <Icon className="size-4" />
+}
 
 /**
  * Convert BannerCardData to BannerData for rendering
@@ -25,9 +42,7 @@ export function convertBannerData(
 
 	return {
 		id: banner.id,
-		icon: banner.icon ? (
-			<DynamicIcon className="size-4" name={banner.icon as IconName} />
-		) : undefined,
+		icon: bannerIcon(banner.icon),
 		title: banner.title,
 		description: banner.description,
 		actions: filteredActions.length > 0 ? filteredActions : undefined,

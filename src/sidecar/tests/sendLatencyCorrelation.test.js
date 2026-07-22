@@ -43,6 +43,7 @@ test("state and partial WebView stream envelopes carry the originating request c
 		{ log: () => {} },
 		() => JSON.stringify({ task: "active" }),
 		() => "webview-request-3",
+		() => "task-1",
 	)
 
 	const initial = publisher.subscribeState("state-subscription")
@@ -53,4 +54,25 @@ test("state and partial WebView stream envelopes carry the originating request c
 
 	assert.equal(sent[0].grpc_response.request_id, "partial-subscription")
 	assert.equal(sent[0].grpc_response.correlation_id, "webview-request-3")
+	assert.equal(sent[0].grpc_response.message.taskId, "task-1")
+	assert.equal(sent[0].grpc_response.message.message.text, "hello")
+})
+
+test("failed state delivery remains retryable and unsubscribe clears both stream kinds", async () => {
+	let attempts = 0
+	const sent = []
+	const publisher = new WebviewStreamPublisher(
+		{ send: async (_method, params) => { attempts += 1; if (attempts === 1) throw new Error("transport unavailable"); sent.push(params.message) } },
+		{ log: () => {} },
+		() => JSON.stringify({ task: "active" }),
+	)
+	publisher.subscribeState("shared-subscription")
+	publisher.subscribePartial("shared-subscription")
+	await assert.rejects(() => publisher.broadcastState(), /transport unavailable/)
+	await publisher.broadcastState()
+	assert.equal(sent.length, 1)
+	assert.equal(publisher.unsubscribe("shared-subscription"), true)
+	publisher.sendPartial({ ts: 1, type: "say", say: "text", text: "late", partial: true })
+	await Promise.resolve()
+	assert.equal(sent.length, 1)
 })

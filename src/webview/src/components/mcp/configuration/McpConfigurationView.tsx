@@ -3,11 +3,11 @@ import { EmptyRequest } from "@shared/proto/cline/common"
 import { McpServers } from "@shared/proto/cline/mcp"
 import { convertProtoMcpServersToMcpServers } from "@shared/protoConversions/mcp/mcpServerConversion"
 import { useEffect, useState } from "react"
-import styled from "styled-components"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { McpServiceClient } from "@/services/grpcClient"
 import ViewHeader from "../../common/ViewHeader"
+import TabButton from "../../common/TabButton"
 import AddRemoteServerForm from "./tabs/addServer/AddRemoteServerForm"
 import ConfigureServersView from "./tabs/installed/ConfigureServersView"
 import McpMarketplaceView from "./tabs/marketplace/McpMarketplaceView"
@@ -114,43 +114,5 @@ const McpConfigurationView = ({ onDone, initialTab }: McpViewProps) => {
 		</div>
 	)
 }
-
-const StyledTabButton = styled.button.withConfig({
-	shouldForwardProp: (prop) => !["isActive"].includes(prop),
-})<{ isActive: boolean; disabled?: boolean }>`
-	background: none;
-	border: none;
-	border-bottom: 2px solid ${(props) => (props.isActive ? "var(--vscode-foreground)" : "transparent")};
-	color: ${(props) => (props.isActive ? "var(--vscode-foreground)" : "var(--vscode-descriptionForeground)")};
-	padding: 8px 16px;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	font-size: 13px;
-	margin-bottom: -1px;
-	font-family: inherit;
-	opacity: ${(props) => (props.disabled ? 0.6 : 1)};
-	pointer-events: ${(props) => (props.disabled ? "none" : "auto")};
-
-	&:hover {
-		color: ${(props) => (props.disabled ? "var(--vscode-descriptionForeground)" : "var(--vscode-foreground)")};
-	}
-`
-
-export const TabButton = ({
-	children,
-	isActive,
-	onClick,
-	disabled,
-	style,
-}: {
-	children: React.ReactNode
-	isActive: boolean
-	onClick: () => void
-	disabled?: boolean
-	style?: React.CSSProperties
-}) => (
-	<StyledTabButton disabled={disabled} isActive={isActive} onClick={onClick} style={style}>
-		{children}
-	</StyledTabButton>
-)
 
 export default McpConfigurationView

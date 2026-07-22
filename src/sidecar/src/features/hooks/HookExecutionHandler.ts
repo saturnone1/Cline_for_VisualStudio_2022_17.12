@@ -40,6 +40,8 @@ export class HookExecutionHandler {
 		}
 		return combined
 	}
+
+	cancelAll() { return this.execution.cancelAll() }
 }
 
 function mergeDecision(current: PreToolUseDecision, next: PreToolUseDecision): PreToolUseDecision {

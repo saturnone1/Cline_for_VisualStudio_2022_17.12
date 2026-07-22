@@ -9,6 +9,7 @@ export interface PlatformConfig {
 	decodeMessage: MessageDecoder
 	togglePlanActKeys: string
 	supportsTerminalMentions: boolean
+	rpcUnaryTimeoutMs: number
 }
 
 export enum PlatformType {
@@ -36,6 +37,7 @@ type PlatformConfigJson = {
 	postMessageHandler: "vscode" | "standalone"
 	togglePlanActKeys: string
 	supportsTerminalMentions: boolean
+	rpcUnaryTimeoutMs: number
 }
 
 type PlatformConfigs = Record<string, PlatformConfigJson>
@@ -108,6 +110,7 @@ export const PLATFORM_CONFIG: PlatformConfig = {
 	decodeMessage: messageDecoders[selectedConfig.messageEncoding],
 	togglePlanActKeys: selectedConfig.togglePlanActKeys,
 	supportsTerminalMentions: selectedConfig.supportsTerminalMentions,
+	rpcUnaryTimeoutMs: selectedConfig.rpcUnaryTimeoutMs,
 }
 
 type MessageEncoding = "none" | "json"

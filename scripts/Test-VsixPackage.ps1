@@ -58,6 +58,7 @@ try {
         "WebApp/assets/lig-mark-black.png",
         "Sidecar/runtime/cline-sidecar.js",
         "Sidecar/runtime/node.exe",
+        "Sidecar/node_modules.fingerprint",
 		"Sidecar/runtime/bootstrap/SidecarConnectionFactory.js",
 		"Sidecar/runtime/application/dto/WebviewRpc.js",
         "Sidecar/runtime/application/ports/AgentEnginePort.js",

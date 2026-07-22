@@ -49,4 +49,11 @@ describe("deriveRequestPendingState", () => {
 		})
 		expect(deriveRequestPendingState(active, "task-1", [user, cancelled]).pending).toBe(false)
 	})
+
+	it("uses the typed lifecycle instead of display-message heuristics", () => {
+		const user = message({ ts: 1, type: "say", say: "task", text: "inspect" })
+		expect(deriveRequestPendingState(idle, "task-1", [user], "starting").pending).toBe(true)
+		const active: RequestPendingState = { taskKey: "task-1", turnTs: 1, pending: true }
+		expect(deriveRequestPendingState(active, "task-1", [user], "completed").pending).toBe(false)
+	})
 })

@@ -11,8 +11,8 @@ export type TaskTransition = Readonly<{
 export class TaskLifecycleUseCase {
 	private readonly session = new AgentSessionStateMachine()
 
-	initialize(status: TaskLifecycleStatus) {
-		this.session.initialize(status)
+	initialize(status: TaskLifecycleStatus, sessionId: string | null = null) {
+		this.session.initialize(status, sessionId)
 	}
 
 	bindSession(sessionId: string) { this.session.bindSession(sessionId) }

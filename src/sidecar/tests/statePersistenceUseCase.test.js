@@ -26,3 +26,12 @@ test("state persistence clears pending writes before clearing storage", async ()
 	await new Promise((resolve) => setTimeout(resolve, 35))
 	assert.deepEqual(calls, ["clear"])
 })
+
+test("state persistence surfaces synchronous disk failures to the caller", () => {
+	const failure = new Error("disk is read-only")
+	const store = { load: () => null, save: () => { throw failure }, clear() {} }
+	const useCase = new StatePersistenceUseCase(store, 20)
+
+	assert.throws(() => useCase.flush(() => ({ version: 1 })), /disk is read-only/)
+	assert.equal(useCase.persistenceError, failure)
+})

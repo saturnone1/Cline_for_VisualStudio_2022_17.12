@@ -28,10 +28,10 @@ export const Navbar = () => {
 				navigate: () => {
 					// Close the current task, then navigate to the chat view
 					TaskServiceClient.clearTask({})
+						.then(() => navigateToChat())
 						.catch((error) => {
 							console.error("Failed to clear task:", error)
 						})
-						.finally(() => navigateToChat())
 				},
 			},
 			{

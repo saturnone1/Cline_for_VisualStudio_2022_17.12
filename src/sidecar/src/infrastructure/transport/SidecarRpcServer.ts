@@ -2,6 +2,8 @@ import net from "node:net"
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import type { SidecarConnectionScope } from "../../application/ports/SidecarConnectionPort"
 import type { JsonRpcConnection } from "./JsonRpcConnection"
+import { readBoundedPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+import { tryWriteJsonLine } from "./JsonRpcSocketWriter"
 
 type JsonRpcRequest = {
 	id?: string | null
@@ -15,8 +17,10 @@ export type SidecarScopeFactory = (connection: JsonRpcConnection) => SidecarConn
 
 export class SidecarRpcServer {
 	private readonly scopes = new Set<SidecarConnectionScope>()
+	private readonly sockets = new Set<net.Socket>()
 	private readonly server: net.Server
 	private exiting = false
+	private requestedShutdownGraceMs: number | undefined
 
 	constructor(
 		private readonly pipeName: string,
@@ -40,7 +44,11 @@ export class SidecarRpcServer {
 	}
 
 	private accept(socket: net.Socket) {
+		this.sockets.add(socket)
 		socket.setEncoding("utf8")
+		socket.on("error", (error) => {
+			this.logger.log("sidecar", "hostPipeError", { message: errorMessage(error) })
+		})
 		const connection: JsonRpcConnection = { socket, nextId: 1, pending: new Map() }
 		const scope = this.createScope(connection)
 		this.scopes.add(scope)
@@ -61,6 +69,7 @@ export class SidecarRpcServer {
 		})
 
 		socket.on("close", () => {
+			this.sockets.delete(socket)
 			for (const pending of connection.pending.values()) pending.reject(new Error("Host pipe closed."))
 			connection.pending.clear()
 			void this.shutdown(0)
@@ -85,6 +94,7 @@ export class SidecarRpcServer {
 				.then((result) => {
 					this.logger.log("sidecar->host", `${request.method}.result`, { id: request.id, result })
 					this.write(connection.socket, { id: request.id, result })
+					if (request.method === "upstream.stop") setImmediate(() => void this.shutdown(0))
 				})
 				.catch((error) => {
 					this.logger.log("sidecar->host", `${request.method}.error`, {
@@ -136,15 +146,18 @@ export class SidecarRpcServer {
 			case "sdk.dispose": await runtime.dispose(); return runtime.status
 			case "upstream.status": return runtime.status
 			case "upstream.start": return runtime.ensureStarted()
-			case "upstream.stop": await runtime.dispose(); return runtime.status
+			case "upstream.stop": {
+				this.requestedShutdownGraceMs = shutdownGraceFromRequest(params)
+				return runtime.status
+			}
 			case "webview.message": return scope.webview.handle(params)
 			default: throw new Error(`Unsupported sidecar method: ${method}`)
 		}
 	}
 
 	private handleProcessError(sessionStopEvent: string, error: unknown) {
-		if (errorMessage(error) === "session_stop") {
-			this.logger.log("sidecar", sessionStopEvent, { message: errorMessage(error) })
+		if (isExpectedRuntimeCancellation(error)) {
+			this.logger.log("sidecar", sessionStopEvent, { message: errorMessage(error), expectedCancellation: true })
 			return
 		}
 		console.error(error instanceof Error && error.stack ? error.stack : String(error))
@@ -154,19 +167,32 @@ export class SidecarRpcServer {
 	private async shutdown(code: number) {
 		if (this.exiting) return
 		this.exiting = true
-		for (const scope of this.scopes) {
-			try { scope.webview.dispose() } catch (error) { console.error(error) }
-		}
+		const graceMs = this.requestedShutdownGraceMs ?? readShutdownGraceMs()
+		setTimeout(() => {
+			for (const socket of this.sockets) socket.destroy()
+			process.exit(code)
+		}, graceMs).unref()
+		await Promise.all([...this.scopes].map((scope) => scope.webview.dispose().catch((error) => console.error(error))))
 		await Promise.all([...this.scopes].map((scope) => scope.runtime.dispose().catch((error) => console.error(error))))
 		this.scopes.clear()
 		await this.flushLogs().catch(() => undefined)
 		this.server.close(() => process.exit(code))
-		setTimeout(() => process.exit(code), 500).unref()
+		for (const socket of this.sockets) socket.end()
 	}
 
 	private write(socket: net.Socket, message: unknown) {
-		socket.write(`${JSON.stringify(message)}\n`)
+		tryWriteJsonLine(socket, message, (error) => {
+			this.logger.log("sidecar", "hostPipeWriteFailed", { message: errorMessage(error) })
+		})
 	}
+}
+
+export function isExpectedRuntimeCancellation(error: unknown) {
+	const name = error instanceof Error ? error.name : ""
+	const message = errorMessage(error).trim().toLowerCase()
+	return message === "session_stop"
+		|| name === "AgentRuntimeAbortError"
+		|| (name === "AbortError" && (message === "run aborted" || message === "the operation was aborted"))
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -175,4 +201,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error)
+}
+
+function readShutdownGraceMs() {
+	return readBoundedPositiveIntEnv("VSCLINE_SIDECAR_SHUTDOWN_GRACE_MS", RUNTIME_DEFAULTS.shutdownGraceMs, 1_000, 15_000)
+}
+
+function shutdownGraceFromRequest(value: unknown) {
+	const graceMs = Number(asRecord(value).graceMs)
+	return Number.isFinite(graceMs) ? Math.min(15_000, Math.max(1_000, Math.floor(graceMs))) : undefined
 }

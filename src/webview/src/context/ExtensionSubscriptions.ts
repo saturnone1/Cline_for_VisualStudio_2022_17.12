@@ -2,10 +2,11 @@ import { EmptyRequest } from "@shared/proto/cline/common"
 import type { ClineMessage as ProtoClineMessage } from "@shared/proto/cline/ui"
 import { useCallback, useEffect, useRef } from "react"
 import { StateServiceClient, UiServiceClient } from "../services/grpcClient"
+import { superviseStreamSubscription } from "../services/streamSubscriptionSupervisor"
 
 export interface ExtensionSubscriptionCallbacks {
 	onStateJson: (stateJson: string) => void
-	onPartialMessage: (message: ProtoClineMessage) => void
+	onPartialMessage: (event: { taskId: string; message: ProtoClineMessage }) => void
 	onTerminalProfiles: (profiles: Awaited<ReturnType<typeof StateServiceClient.getAvailableTerminalProfiles>>["profiles"]) => void
 	navigateToMcp: () => void
 	navigateToHistory: () => void
@@ -22,8 +23,6 @@ export interface ExtensionSubscriptions {
 export function useExtensionSubscriptions(callbacks: ExtensionSubscriptionCallbacks): ExtensionSubscriptions {
 	const callbacksRef = useRef(callbacks)
 	callbacksRef.current = callbacks
-	const stateGenerationRef = useRef(0)
-	const partialMessageGenerationRef = useRef(0)
 	const relinquishControlCallbacks = useRef<Set<() => void>>(new Set())
 
 	const onRelinquishControl = useCallback((callback: () => void) => {
@@ -32,65 +31,27 @@ export function useExtensionSubscriptions(callbacks: ExtensionSubscriptionCallba
 	}, [])
 
 	useEffect(() => {
-		const stateGeneration = ++stateGenerationRef.current
-		const partialMessageGeneration = ++partialMessageGenerationRef.current
 		const unsubscribers: Array<() => void> = []
+		const subscribe = <T,>(label: string, factory: (callbacks: { onResponse: (response: T) => void; onError: (error: Error) => void; onComplete: () => void }) => () => void, onResponse: (response: T) => void) => {
+			unsubscribers.push(superviseStreamSubscription({
+				label,
+				subscribe: factory,
+				onResponse,
+				reportError: (stream, error) => console.error(`Error in ${stream} subscription:`, error),
+			}))
+		}
 
-		unsubscribers.push(
-			StateServiceClient.subscribeToState(EmptyRequest.create({}), {
-				onResponse: (response) => {
-					if (stateGenerationRef.current === stateGeneration && response.stateJson) {
-						callbacksRef.current.onStateJson(response.stateJson)
-					}
-				},
-				onError: (error) => console.error("Error in state subscription:", error),
-				onComplete: () => console.log("State subscription completed"),
-			}),
-			UiServiceClient.subscribeToMcpButtonClicked({}, {
-				onResponse: () => callbacksRef.current.navigateToMcp(),
-				onError: (error) => console.error("Error in mcpButtonClicked subscription:", error),
-				onComplete: () => console.log("mcpButtonClicked subscription completed"),
-			}),
-			UiServiceClient.subscribeToHistoryButtonClicked({}, {
-				onResponse: () => callbacksRef.current.navigateToHistory(),
-				onError: (error) => console.error("Error in history button clicked subscription:", error),
-				onComplete: () => console.log("History button clicked subscription completed"),
-			}),
-			UiServiceClient.subscribeToChatButtonClicked({}, {
-				onResponse: () => callbacksRef.current.navigateToChat(),
-				onError: (error) => console.error("Error in chat button subscription:", error),
-				onComplete: () => undefined,
-			}),
-			UiServiceClient.subscribeToSettingsButtonClicked(EmptyRequest.create({}), {
-				onResponse: () => callbacksRef.current.navigateToSettings(),
-				onError: (error) => console.error("Error in settings button clicked subscription:", error),
-				onComplete: () => console.log("Settings button clicked subscription completed"),
-			}),
-			UiServiceClient.subscribeToWorktreesButtonClicked(EmptyRequest.create({}), {
-				onResponse: () => callbacksRef.current.navigateToWorktrees(),
-				onError: (error) => console.error("Error in worktrees button clicked subscription:", error),
-				onComplete: () => console.log("Worktrees button clicked subscription completed"),
-			}),
-			UiServiceClient.subscribeToPartialMessage(EmptyRequest.create({}), {
-				onResponse: (message) => {
-					if (partialMessageGenerationRef.current === partialMessageGeneration) {
-						callbacksRef.current.onPartialMessage(message)
-					}
-				},
-				onError: (error) => console.error("Error in partialMessage subscription:", error),
-				onComplete: () => console.log("Partial message subscription completed"),
-			}),
-			UiServiceClient.subscribeToAccountButtonClicked(EmptyRequest.create({}), {
-				onResponse: () => callbacksRef.current.navigateToAccount(),
-				onError: (error) => console.error("Error in account button clicked subscription:", error),
-				onComplete: () => console.log("Account button clicked subscription completed"),
-			}),
-			UiServiceClient.subscribeToRelinquishControl(EmptyRequest.create({}), {
-				onResponse: () => relinquishControlCallbacks.current.forEach((callback) => callback()),
-				onError: (error) => console.error("Error in relinquishControl subscription:", error),
-				onComplete: () => undefined,
-			}),
-		)
+		subscribe<{ stateJson: string }>("state", (observer) => StateServiceClient.subscribeToState(EmptyRequest.create({}), observer), (response) => {
+			if (response.stateJson) callbacksRef.current.onStateJson(response.stateJson)
+		})
+		subscribe("MCP navigation", (observer) => UiServiceClient.subscribeToMcpButtonClicked({}, observer), () => callbacksRef.current.navigateToMcp())
+		subscribe("history navigation", (observer) => UiServiceClient.subscribeToHistoryButtonClicked({}, observer), () => callbacksRef.current.navigateToHistory())
+		subscribe("chat navigation", (observer) => UiServiceClient.subscribeToChatButtonClicked({}, observer), () => callbacksRef.current.navigateToChat())
+		subscribe("settings navigation", (observer) => UiServiceClient.subscribeToSettingsButtonClicked(EmptyRequest.create({}), observer), () => callbacksRef.current.navigateToSettings())
+		subscribe("worktrees navigation", (observer) => UiServiceClient.subscribeToWorktreesButtonClicked(EmptyRequest.create({}), observer), () => callbacksRef.current.navigateToWorktrees())
+		subscribe<{ taskId: string; message: ProtoClineMessage }>("partial message", (observer) => UiServiceClient.subscribeToPartialMessage(EmptyRequest.create({}), observer), (event) => callbacksRef.current.onPartialMessage(event))
+		subscribe("account navigation", (observer) => UiServiceClient.subscribeToAccountButtonClicked(EmptyRequest.create({}), observer), () => callbacksRef.current.navigateToAccount())
+		subscribe("relinquish control", (observer) => UiServiceClient.subscribeToRelinquishControl(EmptyRequest.create({}), observer), () => relinquishControlCallbacks.current.forEach((callback) => callback()))
 
 		UiServiceClient.initializeWebview(EmptyRequest.create({})).catch((error) => {
 			console.error("Failed to initialize webview via gRPC:", error)
@@ -100,8 +61,6 @@ export function useExtensionSubscriptions(callbacks: ExtensionSubscriptionCallba
 			.catch((error) => console.error("Failed to fetch available terminal profiles:", error))
 
 		return () => {
-			stateGenerationRef.current++
-			partialMessageGenerationRef.current++
 			for (const unsubscribe of unsubscribers) {
 				unsubscribe()
 			}

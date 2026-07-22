@@ -9,6 +9,9 @@ export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: s
 	const userImages = stringArrayValue(request.userImages)
 	const userFiles = stringArrayValue(request.userFiles)
 	const initialMessages = sdkInitialMessages(request.initialMessages)
+	const sessionMetadata = asRecord(request.sessionMetadata)
+	const baseSystemPrompt = stringValue(request.systemPrompt) || stringValue(config.systemPrompt) || DEFAULT_SYSTEM_PROMPT
+	const systemPrompt = appendCompactedContext(baseSystemPrompt, stringValue(sessionMetadata.ligVsCompactedContext))
 	const startInput: any = {
 			config: {
 				...config,
@@ -23,17 +26,22 @@ export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: s
 				enableSpawnAgent: config.enableSpawnAgent === true,
 				enableAgentTeams: config.enableAgentTeams === true,
 				extraTools,
-				systemPrompt: stringValue(config.systemPrompt) || stringValue(request.systemPrompt) || DEFAULT_SYSTEM_PROMPT,
+				systemPrompt,
 			},
 			prompt: stringValue(request.prompt) || "",
 			interactive: request.interactive !== false,
-			sessionMetadata: asRecord(request.sessionMetadata),
+			sessionMetadata,
 			toolPolicies: asRecord(request.toolPolicies),
 			userImages: userImages.length > 0 ? userImages : undefined,
 			userFiles: userFiles.length > 0 ? userFiles : undefined,
 			initialMessages: initialMessages.length > 0 ? initialMessages : undefined,
 	}
 	return { requestedSessionId, startInput }
+}
+
+function appendCompactedContext(basePrompt: string, compactedContext?: string) {
+	if (!compactedContext) return basePrompt
+	return `${basePrompt}\n\n<lig-vs-compacted-context>\n${compactedContext}\n</lig-vs-compacted-context>`
 }
 
 export function normalizeAgentMode(value: unknown): "act" | "plan" | undefined {

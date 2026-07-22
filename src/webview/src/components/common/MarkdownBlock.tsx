@@ -311,7 +311,7 @@ const remarkPreventBoldFilenames = () => {
 	}
 }
 
-const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLPreElement>) => {
+const PreWithCopyButton = ({ children, className, ...preProps }: React.HTMLAttributes<HTMLPreElement>) => {
 	const preRef = useRef<HTMLPreElement>(null)
 
 	const handleCopy = () => {
@@ -329,7 +329,10 @@ const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLP
 
 	return (
 		<WithCopyButton ariaLabel="Copy code" onCopy={handleCopy} position="top-right">
-			<pre {...preProps} ref={preRef}>
+			<pre
+				{...preProps}
+				className={["lig-markdown-code-block", className].filter(Boolean).join(" ")}
+				ref={preRef}>
 				{children}
 			</pre>
 		</WithCopyButton>

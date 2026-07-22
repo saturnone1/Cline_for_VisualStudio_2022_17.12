@@ -17,7 +17,8 @@ type Callbacks = Readonly<{
 	projectMessages: (messages: unknown[], task: TaskHistoryItem) => Message[]
 	applySelected: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
 	applyShown: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
-	applyCompleted: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
+	applyHydrated: (taskId: string, task: TaskHistoryItem, messages: Message[]) => void
+	reconcileSession: (taskId: string, status: string, source: string) => void
 	summarizeMessage: (message: Message) => unknown
 	log: (event: string, details: Record<string, unknown>) => void
 	broadcast: () => Promise<void>
@@ -64,15 +65,16 @@ export class TaskTranscriptHydrator {
 		if (!taskId) return
 		const activeSessionId = this.callbacks.activeSessionId()
 		if (activeSessionId && activeSessionId !== taskId) return
-		if (this.callbacks.hasLiveProjection()) return this.logSkip("live_interaction", taskId, activeSessionId)
 		const currentMessages = this.callbacks.readMessages()
-		if (activeSessionId === taskId && currentMessages.some((message) => message.partial === true)) return this.logSkip("partial_messages", taskId, activeSessionId)
-		if (activeSessionId === taskId && currentMessages.length > 0) return
 
 		const projected = await this.load(taskId, false)
 		if (!projected) return
-		this.callbacks.log("sdkMessagesHydrated", { source: "refreshSelectedTaskFromSdk", sessionId: taskId, sdkCount: projected.sdkCount, clineCount: projected.messages.length, messages: projected.messages.map(this.callbacks.summarizeMessage) })
-		this.callbacks.applySelected(taskId, projected.task, projected.messages)
+		this.callbacks.reconcileSession(taskId, projected.sessionStatus, "refreshSelectedTaskFromSdk")
+		const reconciled = reconcileTranscriptMessages(currentMessages, projected.messages)
+		if (!reconciled.changed) return this.logSkip("already_current", taskId, activeSessionId)
+		this.callbacks.log("sdkMessagesHydrated", { source: "refreshSelectedTaskFromSdk", sessionId: taskId, sdkCount: projected.sdkCount, clineCount: reconciled.messages.length, liveProjection: this.callbacks.hasLiveProjection(), messages: projected.messages.map(this.callbacks.summarizeMessage) })
+		this.callbacks.applySelected(taskId, projected.task, reconciled.messages)
+		return true
 	}
 
 	async hydrateCurrent(sessionId: string, source: string, force = false) {
@@ -83,8 +85,11 @@ export class TaskTranscriptHydrator {
 		if (!force && this.callbacks.hasLiveProjection()) return false
 		const projected = await this.load(sessionId, true)
 		if (!projected || !projected.messages.length) return false
-		this.callbacks.applyCompleted(sessionId, projected.task, projected.messages)
-		this.callbacks.log("sdkMessagesHydrated", { source, sessionId, sdkCount: projected.sdkCount, clineCount: this.callbacks.readMessages().length, force })
+		this.callbacks.reconcileSession(sessionId, projected.sessionStatus, source)
+		const reconciled = reconcileTranscriptMessages(this.callbacks.readMessages(), projected.messages)
+		if (!reconciled.changed) return false
+		this.callbacks.applyHydrated(sessionId, projected.task, reconciled.messages)
+		this.callbacks.log("sdkMessagesHydrated", { source, sessionId, sdkCount: projected.sdkCount, clineCount: reconciled.messages.length, force })
 		return true
 	}
 
@@ -99,7 +104,9 @@ export class TaskTranscriptHydrator {
 		const sdkMessages = transcript?.messages
 		if (!Array.isArray(sdkMessages) || (requireMessages && !sdkMessages.length)) return null
 		const task = this.callbacks.projectSession(session)
-		return { task, messages: this.callbacks.projectMessages(sdkMessages, task), sdkCount: sdkMessages.length }
+		const bootstrapCount = compactedBootstrapMessageCount(session)
+		const visibleMessages = bootstrapCount > 0 ? sdkMessages.slice(bootstrapCount) : sdkMessages
+		return { task, messages: this.callbacks.projectMessages(visibleMessages, task), sdkCount: sdkMessages.length, sessionStatus: stringValue(session.status) }
 	}
 
 	private logSkip(reason: string, taskId: string, activeSessionId: string) {
@@ -107,5 +114,37 @@ export class TaskTranscriptHydrator {
 	}
 }
 
+export function reconcileTranscriptMessages(current: readonly Message[], projected: readonly Message[]) {
+	const next = current.map((message) => ({ ...message }))
+	const signatures = new Set(next.map(messageSignature).filter(Boolean))
+	let changed = false
+	for (const candidate of projected) {
+		const signature = messageSignature(candidate)
+		if (!signature || signatures.has(signature)) continue
+		if (candidate.partial !== true && isAssistantText(candidate)) {
+			const partialIndex = findLastIndex(next, (message) => message.partial === true && isAssistantText(message) && textsOverlap(message, candidate))
+			if (partialIndex >= 0) next.splice(partialIndex, 1)
+		}
+		next.push({ ...candidate, partial: candidate.partial === true ? true : undefined })
+		signatures.add(signature)
+		changed = true
+	}
+	return { changed, messages: next }
+}
+
+function messageSignature(message: Message) {
+	const type = stringValue(message.type), kind = stringValue(message.say) || stringValue(message.ask)
+	const text = normalizeText(stringValue(message.text))
+	if (!type || !kind || !text || kind === "api_req_started" || kind === "reasoning" || kind === "completion_result") return ""
+	return `${type}:${kind}:${text}`
+}
+
+function isAssistantText(message: Message) { return message.type === "say" && message.say === "text" && Boolean(stringValue(message.text).trim()) }
+function textsOverlap(left: Message, right: Message) { const partial = normalizeText(stringValue(left.text)), completed = normalizeText(stringValue(right.text)); return Boolean(partial && completed && completed.startsWith(partial)) }
+function normalizeText(value: string) { return value.replace(/\s+/g, " ").trim() }
+function stringValue(value: unknown) { return typeof value === "string" ? value : "" }
+function findLastIndex<T>(values: readonly T[], predicate: (value: T) => boolean) { for (let index = values.length - 1; index >= 0; index--) if (predicate(values[index])) return index; return -1 }
+
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }
+function compactedBootstrapMessageCount(session: Record<string, unknown>) { const metadata = asRecord(session.metadata ?? session.sessionMetadata); const value = metadata.ligVsCompactedInitialMessageCount; return metadata.ligVsContextCompaction === true && typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 0 }

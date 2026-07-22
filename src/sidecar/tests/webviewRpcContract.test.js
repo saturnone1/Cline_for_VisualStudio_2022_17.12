@@ -134,3 +134,21 @@ test("expanded payload shapes reject object-array and required-response drift", 
 		field: "toolNames",
 	})
 })
+
+test("nested payload shapes and enums reject history contract drift", () => {
+	assert.deepEqual(validateWebviewRpcPayload("TaskService", "getTaskHistory", "request", { sortBy: "expensive" }), {
+		ok: false, reason: "invalid_field_type", field: "sortBy",
+	})
+	assert.deepEqual(validateWebviewRpcPayload("TaskService", "getTaskHistory", "response", { tasks: [{ id: "1", ts: "now", task: "review" }] }), {
+		ok: false, reason: "invalid_field_type", field: "tasks[0].ts",
+	})
+})
+
+test("nested MCP and browser payload shapes reject malformed list items", () => {
+	assert.deepEqual(validateWebviewRpcPayload("McpService", "getLatestMcpServers", "response", { mcpServers: [{ name: "server" }] }), {
+		ok: false, reason: "missing_required_field", field: "mcpServers[0].config",
+	})
+	assert.deepEqual(validateWebviewRpcPayload("BrowserService", "listBrowserTabs", "response", { tabs: [{ id: "tab" }] }), {
+		ok: false, reason: "missing_required_field", field: "tabs[0].type",
+	})
+})

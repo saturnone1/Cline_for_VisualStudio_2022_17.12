@@ -4,6 +4,8 @@ export type StateSnapshotFactory = () => Record<string, unknown>
 
 export class StatePersistenceUseCase {
 	private timer: ReturnType<typeof setTimeout> | null = null
+	private pendingSave: Promise<void> = Promise.resolve()
+	private lastError: Error | null = null
 
 	constructor(
 		private readonly store: StateStorePort,
@@ -15,12 +17,25 @@ export class StatePersistenceUseCase {
 	}
 
 	save(snapshot: Record<string, unknown>) {
-		this.store.save(snapshot)
+		try {
+			this.store.save(snapshot)
+			this.lastError = null
+		} catch (error) {
+			this.lastError = toError(error)
+			throw this.lastError
+		}
 	}
 
 	clear() {
 		this.cancelPending()
-		this.store.clear()
+		this.store.invalidatePendingWrites?.()
+		try {
+			this.store.clear()
+			this.lastError = null
+		} catch (error) {
+			this.lastError = toError(error)
+			throw this.lastError
+		}
 	}
 
 	schedule(createSnapshot: StateSnapshotFactory) {
@@ -29,15 +44,36 @@ export class StatePersistenceUseCase {
 		}
 		this.timer = setTimeout(() => {
 			this.timer = null
-			this.store.save(createSnapshot())
+			const snapshot = createSnapshot()
+			if (this.store.saveDeferred) {
+				this.pendingSave = this.pendingSave
+					.catch(() => undefined)
+					.then(() => this.store.saveDeferred!(snapshot))
+					.then(() => { this.lastError = null })
+					.catch((error) => {
+						this.lastError = toError(error)
+						console.error("Failed to persist deferred LIG VS state:", this.lastError)
+					})
+			} else {
+				try {
+					this.store.save(snapshot)
+					this.lastError = null
+				} catch (error) {
+					this.lastError = toError(error)
+					console.error("Failed to persist LIG VS state:", this.lastError)
+				}
+			}
 		}, this.debounceMs)
 		this.timer.unref?.()
 	}
 
 	flush(createSnapshot: StateSnapshotFactory) {
 		this.cancelPending()
-		this.store.save(createSnapshot())
+		this.store.invalidatePendingWrites?.()
+		this.save(createSnapshot())
 	}
+
+	get persistenceError() { return this.lastError }
 
 	private cancelPending() {
 		if (!this.timer) {
@@ -46,4 +82,8 @@ export class StatePersistenceUseCase {
 		clearTimeout(this.timer)
 		this.timer = null
 	}
+}
+
+function toError(value: unknown) {
+	return value instanceof Error ? value : new Error(String(value))
 }

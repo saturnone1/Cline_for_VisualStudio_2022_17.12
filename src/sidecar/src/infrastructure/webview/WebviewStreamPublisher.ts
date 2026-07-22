@@ -17,6 +17,7 @@ export class WebviewStreamPublisher {
 		private readonly logger: InteractionLoggerPort,
 		private readonly stateJson: () => string,
 		private correlationId: () => string = () => "",
+		private readonly taskId: () => string = () => "",
 	) {}
 
 	setCorrelationIdProvider(provider: () => string) { this.correlationId = provider }
@@ -26,21 +27,29 @@ export class WebviewStreamPublisher {
 	subscribePartial(requestId: string) { this.partialRequests.add(requestId) }
 
 	unsubscribe(requestId: string) {
-		const removed = this.stateRequests.delete(requestId) || this.partialRequests.delete(requestId)
+		const removedState = this.stateRequests.delete(requestId)
+		const removedPartial = this.partialRequests.delete(requestId)
 		this.stateDeliveryKeys.delete(requestId)
 		this.partialDeliveryKeys.delete(requestId)
-		return removed
+		return removedState || removedPartial
 	}
 
 	dispose() { this.stateRequests.clear(); this.partialRequests.clear(); this.stateDeliveryKeys.clear(); this.partialDeliveryKeys.clear() }
 
-	buildStateMessages() {
+	private buildStateDeliveries() {
+		if (this.stateRequests.size === 0) return []
 		const stateJson = this.stateJson(), correlationId = this.correlationId(), stateKey = `${stateJson.length}:${fastStringHash(stateJson)}:${correlationId}`
 		return [...this.stateRequests].flatMap((requestId) => {
 			const deliveryKey = `${requestId}:${stateKey}`
 			if (this.stateDeliveryKeys.get(requestId) === deliveryKey) return []
+			return [{ requestId, deliveryKey, message: grpcResponse(requestId, { stateJson }, true, correlationId) }]
+		})
+	}
+
+	buildStateMessages() {
+		return this.buildStateDeliveries().map(({ requestId, deliveryKey, message }) => {
 			this.stateDeliveryKeys.set(requestId, deliveryKey)
-			return [grpcResponse(requestId, { stateJson }, true, correlationId)]
+			return message
 		})
 	}
 
@@ -52,21 +61,26 @@ export class WebviewStreamPublisher {
 
 	sendPartial(message?: Record<string, unknown>) {
 		if (!message || this.partialRequests.size === 0) return
-		const correlationId = this.correlationId(), messageKey = `${partialMessageDeliveryKey(message)}:${correlationId}`
+		const taskId = this.taskId()
+		if (!taskId) return
+		const correlationId = this.correlationId(), messageKey = `${taskId}:${partialMessageDeliveryKey(message)}:${correlationId}`
 		for (const requestId of this.partialRequests) {
 			const deliveryKey = `${requestId}:${messageKey}`
 			if (this.partialDeliveryKeys.get(requestId) === deliveryKey) continue
 			this.partialDeliveryKeys.set(requestId, deliveryKey)
 			this.logger.log("sidecar->webview", "partialMessage", { correlationId: correlationId || requestId, requestId, message: summarizeMessage(message) })
-			this.transport.send("webview.postMessage", { message: grpcResponse(requestId, toProtoClineMessage(message), true, correlationId) }).catch((error) => { this.partialDeliveryKeys.delete(requestId); console.error(error) })
+			this.transport.send("webview.postMessage", { message: grpcResponse(requestId, { taskId, message: toProtoClineMessage(message) }, true, correlationId) }).catch((error) => { this.partialDeliveryKeys.delete(requestId); console.error(error) })
 		}
 	}
 
 	private async broadcastStateCore() {
-		const messages = this.buildStateMessages()
-		if (!messages.length) return
-		this.logger.log("sidecar->webview", "state.broadcast", { count: messages.length })
-		await Promise.all(messages.map((message) => this.transport.send("webview.postMessage", { message })))
+		const deliveries = this.buildStateDeliveries()
+		if (!deliveries.length) return
+		this.logger.log("sidecar->webview", "state.broadcast", { count: deliveries.length })
+		await Promise.all(deliveries.map(async ({ requestId, deliveryKey, message }) => {
+			await this.transport.send("webview.postMessage", { message })
+			if (this.stateRequests.has(requestId)) this.stateDeliveryKeys.set(requestId, deliveryKey)
+		}))
 	}
 }
 

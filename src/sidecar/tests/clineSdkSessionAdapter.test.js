@@ -2,7 +2,7 @@ const assert = require("node:assert/strict")
 const test = require("node:test")
 const { ClineSdkSessionAdapter } = require("../dist/infrastructure/sdk/ClineSdkSessionAdapter")
 
-function createAdapter(coreOverrides = {}) {
+function createAdapter(coreOverrides = {}, adapterOverrides = {}) {
 	let activeSessionId = null
 	let getCoreCalls = 0
 	const calls = []
@@ -11,6 +11,7 @@ function createAdapter(coreOverrides = {}) {
 		send: async (request) => { calls.push(["send", request]); return { accepted: true } },
 		stop: async (sessionId) => { calls.push(["stop", sessionId]) },
 		abort: async (sessionId) => { calls.push(["abort", sessionId]) },
+		delete: async (sessionId) => { calls.push(["delete", sessionId]); return true },
 		...coreOverrides,
 	}
 	const adapter = new ClineSdkSessionAdapter({
@@ -21,6 +22,8 @@ function createAdapter(coreOverrides = {}) {
 		getWorkspacePaths: async () => ["C:\\workspace"],
 		createExtraTools: async () => [{ name: "mcp_tool" }],
 		getStatus: () => ({ activeSessionId }),
+		summarizeCompaction: async () => "A durable model-generated summary that preserves the original goal, completed work, important files, runtime state, constraints, unresolved issues, and concrete next steps for the replacement agent session.",
+		...adapterOverrides,
 	})
 	return {
 		adapter,
@@ -55,6 +58,32 @@ test("SDK session adapter owns start and send session transitions", async () => 
 	}])
 })
 
+test("SDK session adapter compacts into a fresh session and removes the source transcript", async () => {
+	const fixture = createAdapter()
+	const result = await fixture.adapter.compact({ sourceSessionId: "source", cwd: "C:\\workspace", initialMessages: [{ role: "user", content: "summary" }], config: { sessionId: "source", providerId: "test" }, toolPolicies: {} })
+	assert.equal(result.sessionId, "started-session")
+	assert.equal(result.sourceSessionDeleted, true)
+	assert.equal(fixture.getActiveSessionId(), "started-session")
+	assert.equal(fixture.calls[0][1].config.sessionId, undefined)
+	assert.equal(fixture.calls[0][1].prompt, "")
+	assert.equal(fixture.calls[0][1].initialMessages, undefined)
+	assert.match(fixture.calls[0][1].config.systemPrompt, /<lig-vs-compacted-context>/)
+	assert.match(fixture.calls[0][1].config.systemPrompt, /model-generated summary/)
+	assert.match(fixture.calls[0][1].sessionMetadata.ligVsCompactedContext, /model-generated summary/)
+	assert.match(result.compactionSummary, /model-generated summary/)
+	assert.ok(result.estimatedTokensAfter > 0)
+	assert.deepEqual(fixture.calls.slice(1), [["stop", "source"], ["delete", "source"]])
+})
+
+test("SDK session adapter preserves the source session when model summarization fails", async () => {
+	const fixture = createAdapter({}, { summarizeCompaction: async () => { throw new Error("summary failed") } })
+	await assert.rejects(
+		() => fixture.adapter.compact({ sourceSessionId: "source", cwd: "C:\\workspace", initialMessages: [{ role: "user", content: "important context" }], config: { providerId: "test", modelId: "model" }, toolPolicies: {} }),
+		/summary failed/,
+	)
+	assert.deepEqual(fixture.calls, [])
+})
+
 test("SDK session adapter clears stale sessions after start and send failures", async () => {
 	const startFixture = createAdapter({ start: async () => { throw new Error("start failed") } })
 	await assert.rejects(() => startFixture.adapter.start({ prompt: "inspect", cwd: "", sessionId: "requested" }), /start failed/)
@@ -80,5 +109,22 @@ test("SDK session adapter stop does not start an absent core", async () => {
 	})
 
 	assert.deepEqual(await adapter.stop({ sessionId: "active" }), { activeSessionId: "active" })
+	assert.equal(getCoreCalls, 0)
+})
+
+test("SDK session adapter abort does not recreate a disposed core", async () => {
+	let activeSessionId = "active"
+	let getCoreCalls = 0
+	const adapter = new ClineSdkSessionAdapter({
+		getCore: async () => { getCoreCalls += 1; throw new Error("must not start") },
+		getCurrentCore: () => null,
+		getActiveSessionId: () => activeSessionId,
+		setActiveSessionId: (value) => { activeSessionId = value },
+		getWorkspacePaths: async () => [],
+		createExtraTools: async () => undefined,
+		getStatus: () => ({ activeSessionId }),
+	})
+
+	assert.deepEqual(await adapter.abort({ sessionId: "active" }), { activeSessionId: "active" })
 	assert.equal(getCoreCalls, 0)
 })

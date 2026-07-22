@@ -43,7 +43,8 @@ namespace VsClineAgent.Host
             var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
             var runtimeSourceDirectory = ResolvePackagedRuntimeDirectory(packagedSidecarDirectory);
             var cacheRoot = Path.Combine(_cacheBaseDirectory, _runtimeVersion);
-            CleanupVersionedCacheDirectory(_cacheBaseDirectory, _runtimeVersion, 2);
+            RetryPendingDeletes(_cacheBaseDirectory, _runtimeVersion);
+            CleanupVersionedCacheDirectory(_cacheBaseDirectory, _runtimeVersion, 1);
             var nodeModulesDirectory = Path.Combine(cacheRoot, "node_modules");
             var stampPath = Path.Combine(cacheRoot, ".node_modules.stamp");
             var runtimeStampPath = Path.Combine(cacheRoot, ".runtime.stamp");
@@ -168,10 +169,13 @@ namespace VsClineAgent.Host
                 .Skip(Math.Max(0, keepRecentCount))
                 .ToList();
             foreach (var candidate in candidates)
-                TryDeleteDirectoryUnderRoot(candidate.FullName, root);
+            {
+                if (!TryDeleteDirectoryUnderRoot(candidate.FullName, root))
+                    RecordPendingDelete(root, candidate.FullName);
+            }
         }
 
-        private static void TryDeleteDirectoryUnderRoot(string path, string root)
+        private static bool TryDeleteDirectoryUnderRoot(string path, string root)
         {
             try
             {
@@ -179,10 +183,46 @@ namespace VsClineAgent.Host
                 var resolvedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     + Path.DirectorySeparatorChar;
                 if (resolved.StartsWith(resolvedRoot, StringComparison.OrdinalIgnoreCase))
+                {
                     Directory.Delete(resolved, true);
+                    return true;
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                InteractionLog.Write("host", "sidecar.cacheDeleteFailed", new { path, error = ex.Message });
+            }
+            return false;
+        }
+
+        private static void RetryPendingDeletes(string cacheRoot, string currentVersion)
+        {
+            var pendingPath = Path.Combine(cacheRoot, ".pending-delete");
+            if (!File.Exists(pendingPath))
+                return;
+            var remaining = File.ReadAllLines(pendingPath).Where(path =>
+                !string.Equals(Path.GetFileName(path), currentVersion, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(path) && !TryDeleteDirectoryUnderRoot(path, cacheRoot)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (remaining.Length == 0)
+                File.Delete(pendingPath);
+            else
+                File.WriteAllLines(pendingPath, remaining);
+        }
+
+        private static void RecordPendingDelete(string cacheRoot, string directory)
+        {
+            try
+            {
+                Directory.CreateDirectory(cacheRoot);
+                var pendingPath = Path.Combine(cacheRoot, ".pending-delete");
+                var entries = File.Exists(pendingPath) ? File.ReadAllLines(pendingPath).ToList() : new System.Collections.Generic.List<string>();
+                if (!entries.Contains(directory, StringComparer.OrdinalIgnoreCase))
+                    entries.Add(directory);
+                File.WriteAllLines(pendingPath, entries);
+            }
+            catch (Exception ex)
+            {
+                InteractionLog.Write("host", "sidecar.pendingDeleteWriteFailed", new { directory, error = ex.Message });
             }
         }
 

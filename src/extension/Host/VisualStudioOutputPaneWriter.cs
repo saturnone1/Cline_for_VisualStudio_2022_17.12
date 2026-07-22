@@ -39,9 +39,10 @@ namespace VsClineAgent.Host
             if (outputWindow == null)
                 return null;
 
-            outputWindow.CreatePane(ref outputPaneGuid, "VsCline Agent", 1, 1);
+            // Command output is diagnostic background activity. Creating or activating a
+            // visible pane here steals focus from the LIG VS WebView during a task.
+            outputWindow.CreatePane(ref outputPaneGuid, "VsCline Agent", 0, 1);
             outputWindow.GetPane(ref outputPaneGuid, out var pane);
-            pane?.Activate();
             lock (_paneLock)
             {
                 _pane = pane;

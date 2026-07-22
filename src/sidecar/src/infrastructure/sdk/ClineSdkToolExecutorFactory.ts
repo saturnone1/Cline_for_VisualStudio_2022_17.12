@@ -37,13 +37,13 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				const end = request.end_line ? Math.min(request.end_line, lines.length) : lines.length
 				return lines.slice(start, end).join("\n")
 			}
-			return content
+			return boundToolOutput(content, readPositiveIntEnv("VSCLINE_READ_FILE_OUTPUT_CHARS", 64 * 1024), "File output", "Request a start_line/end_line range to read omitted content.")
 		},
 		search: async (query: string, cwd: string) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
 			const searchRoot = resolveWorkspacePath(cwd, workspaceRoots)
 			const result = asRecord(await host.workspaceClient.searchFiles({ path: searchRoot, query, limit: 500 }))
-			return (Array.isArray(result.matches) ? result.matches : []).map(String).join("\n")
+			return boundToolOutput((Array.isArray(result.matches) ? result.matches : []).map(String).join("\n"), readPositiveIntEnv("VSCLINE_SEARCH_OUTPUT_CHARS", 48 * 1024), "Search output", "Narrow the query or search path to retrieve omitted matches.")
 		},
 		bash: async (command: string | { command: string; args?: string[] }, cwd: string, context: AgentToolContext) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
@@ -167,4 +167,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
 	return typeof value === "string" && value.trim().length > 0 ? value : undefined
+}
+
+export function boundToolOutput(value: string, maxChars: number, label: string, guidance = "") {
+	if (value.length <= maxChars) return value
+	const safeLimit = Math.max(1_024, maxChars)
+	const tailChars = Math.min(Math.floor(safeLimit / 4), 16 * 1024)
+	const headChars = safeLimit - tailChars
+	const omitted = value.length - headChars - tailChars
+	return [value.slice(0, headChars), `\n\n[${label} truncated: ${omitted} characters omitted. ${guidance}]\n\n`, value.slice(-tailChars)].join("")
 }

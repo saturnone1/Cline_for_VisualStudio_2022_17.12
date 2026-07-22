@@ -1,6 +1,6 @@
 {
   "$schema": "./webview-rpc.schema.json",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "protocolVersion": 1,
   "shapes": {
     "Empty": {
@@ -15,10 +15,17 @@
           "type": "string"
         },
         "sortBy": {
-          "type": "string"
+          "type": "string",
+          "values": ["newest", "oldest", "mostTokens", "mostRelevant"]
         },
         "currentWorkspaceOnly": {
           "type": "boolean"
+        },
+        "cursor": {
+          "type": "number"
+        },
+        "pageSize": {
+          "type": "number"
         }
       }
     },
@@ -49,6 +56,9 @@
           "type": "string"
         },
         "delivery": {
+          "type": "string"
+        },
+        "clientOperationId": {
           "type": "string"
         }
       },
@@ -84,10 +94,36 @@
         }
       }
     },
+    "TaskHistoryItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "ts": { "type": "number", "required": true },
+        "task": { "type": "string", "required": true },
+        "tokensIn": { "type": "number" },
+        "tokensOut": { "type": "number" },
+        "cacheWrites": { "type": "number" },
+        "cacheReads": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "isFavorited": { "type": "boolean" },
+        "size": { "type": "number" },
+        "cwdOnTaskInitialization": { "type": "string" },
+        "modelId": { "type": "string" }
+      },
+      "allowAdditionalFields": true
+    },
     "TaskHistoryResponse": {
       "fields": {
         "tasks": {
           "type": "objectArray",
+          "shape": "TaskHistoryItem",
+          "required": true
+        },
+        "nextCursor": {
+          "type": "number",
+          "required": true
+        },
+        "total": {
+          "type": "number",
           "required": true
         }
       },
@@ -105,6 +141,19 @@
     "FlexibleObject": {
       "fields": {},
       "allowAdditionalFields": true
+    },
+    "TaskPartialMessageEvent": {
+      "fields": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "object",
+          "shape": "FlexibleObject",
+          "required": true
+        }
+      }
     },
     "BooleanValueResponse": {
       "fields": {
@@ -351,10 +400,28 @@
       },
       "allowAdditionalFields": true
     },
+    "McpServerItem": {
+      "fields": {
+        "name": { "type": "string", "required": true },
+        "config": { "type": "string", "required": true },
+        "status": { "type": "string", "required": true },
+        "error": { "type": "string", "required": true },
+        "tools": { "type": "objectArray", "required": true },
+        "resources": { "type": "objectArray", "required": true },
+        "resourceTemplates": { "type": "objectArray", "required": true },
+        "prompts": { "type": "objectArray", "required": true },
+        "disabled": { "type": "boolean", "required": true },
+        "timeout": { "type": "number" },
+        "oauthRequired": { "type": "boolean" },
+        "oauthAuthStatus": { "type": "string" }
+      },
+      "allowAdditionalFields": true
+    },
     "McpServersResponse": {
       "fields": {
         "mcpServers": {
           "type": "objectArray",
+          "shape": "McpServerItem",
           "required": true
         }
       },
@@ -363,10 +430,12 @@
     "ModeRequest": {
       "fields": {
         "mode": {
-          "type": "string"
+          "type": "string",
+          "values": ["plan", "act"]
         },
         "value": {
-          "type": "string"
+          "type": "string",
+          "values": ["plan", "act"]
         }
       },
       "allowAdditionalFields": true
@@ -379,6 +448,7 @@
         },
         "mode": {
           "type": "string",
+          "values": ["plan", "act"],
           "required": true
         }
       }
@@ -742,6 +812,16 @@
       },
       "allowAdditionalFields": true
     },
+    "BrowserTabItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "webSocketDebuggerUrl": { "type": "string", "required": true }
+      },
+      "allowAdditionalFields": true
+    },
     "BrowserTabsResponse": {
       "fields": {
         "success": {
@@ -749,6 +829,7 @@
         },
         "tabs": {
           "type": "objectArray",
+          "shape": "BrowserTabItem",
           "required": true
         },
         "error": {
@@ -2717,6 +2798,7 @@
       "sidecar": true,
       "requestShape": "Empty",
       "responseShape": "Empty",
+      "timeoutMs": 195000,
       "route": "task"
     },
     {
@@ -3236,7 +3318,7 @@
       "sidecar": true,
       "fallback": "passive",
       "requestShape": "Empty",
-      "responseShape": "FlexibleObject",
+      "responseShape": "TaskPartialMessageEvent",
       "route": "stream"
     },
     {

@@ -1,6 +1,9 @@
 import type net from "node:net"
+import { HOST_RPC_PROTOCOL_VERSION, type HostRpcMethodName } from "../../application/dto/generated/HostRpcContract"
 import type { WebviewTransportPort } from "../../application/ports/WebviewTransportPort"
 import { logInteraction } from "../diagnostics/InteractionLog"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+import { tryWriteJsonLine } from "./JsonRpcSocketWriter"
 
 export type PendingRequest = {
 	resolve: (value: unknown) => void
@@ -13,13 +16,13 @@ export type JsonRpcConnection = {
 	pending: Map<string, PendingRequest>
 }
 
-export function sendHostRequest(connection: JsonRpcConnection, method: string, params: unknown): Promise<unknown> {
+export function sendHostRequest(connection: JsonRpcConnection, method: HostRpcMethodName, params: unknown): Promise<unknown> {
 	const id = String(connection.nextId++)
 	const startedAt = Date.now()
 	logInteraction("sidecar->host", method, { id, params })
 
 	return new Promise((resolve, reject) => {
-		connection.pending.set(id, {
+		const pending: PendingRequest = {
 			resolve: (value) => {
 				logSlowHostRequest(method, id, startedAt)
 				resolve(value)
@@ -28,15 +31,23 @@ export function sendHostRequest(connection: JsonRpcConnection, method: string, p
 				logSlowHostRequest(method, id, startedAt)
 				reject(error)
 			},
-		})
-		connection.socket.write(`${JSON.stringify({ id, method, params: params || null })}\n`)
+		}
+		connection.pending.set(id, pending)
+		const failWrite = (error: unknown) => {
+			if (connection.pending.get(id) !== pending) return
+			connection.pending.delete(id)
+			pending.reject(error instanceof Error ? error : new Error(String(error)))
+		}
+		if (!tryWriteJsonLine(connection.socket, { protocolVersion: HOST_RPC_PROTOCOL_VERSION, id, method, params: params || null }, failWrite)) {
+			failWrite(new Error("Host pipe is closed."))
+		}
 	})
 }
 
 export class JsonRpcWebviewTransport implements WebviewTransportPort {
 	constructor(private readonly connection: JsonRpcConnection) {}
 
-	send(method: string, params: unknown) {
+	send(method: "webview.postMessage", params: unknown) {
 		return sendHostRequest(this.connection, method, params)
 	}
 }
@@ -47,10 +58,4 @@ function logSlowHostRequest(method: string, id: string, startedAt: number) {
 	if (durationMs >= thresholdMs) {
 		logInteraction("sidecar", "hostRequestSlow", { id, method, durationMs, thresholdMs })
 	}
-}
-
-function readPositiveIntEnv(name: string, fallback: number) {
-	const raw = process.env[name]
-	const value = raw ? Number.parseInt(raw, 10) : NaN
-	return Number.isFinite(value) && value > 0 ? value : fallback
 }

@@ -4,7 +4,7 @@ This folder contains the active agent worker for the Visual Studio port.
 
 The VSIX packages the compiled runtime from `artifacts/Sidecar/cline-sidecar.js`. TypeScript sources remain under `src/sidecar`.
 
-The source follows Clean Architecture layers under `src/sidecar/src`. Run `npm test` to execute both dependency-rule checks and behavioral parity checks.
+The source is organized for explicit feature ownership and fast automated maintenance. The layer directories under `src/sidecar/src` retain useful dependency boundaries, while vertical feature slices own product behavior. Run `npm test` to execute dependency, cycle, ownership, contract, and behavioral parity checks.
 
 Current responsibilities:
 

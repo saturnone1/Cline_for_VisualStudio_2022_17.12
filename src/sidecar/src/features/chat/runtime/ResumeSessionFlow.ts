@@ -13,9 +13,12 @@ type Callbacks = Readonly<{
 	runResumeHook: (context: Record<string, unknown>) => void
 	buildInitialMessages: (prompt: string) => readonly unknown[]
 	normalizeImages: (images: readonly string[]) => Promise<readonly string[]>
-	buildConfig: (cwd: string, sessionId: string) => Promise<Readonly<Record<string, unknown>>>
+	buildConfig: (cwd: string) => Promise<Readonly<Record<string, unknown>>>
 	toolPolicies: () => Readonly<Record<string, unknown>>
 	start: (command: StartTaskCommand) => Promise<unknown>
+	beginReplacement: (sourceSessionId: string) => void
+	completeReplacement: (result: unknown) => void
+	cancelReplacement: () => void
 	markSettingsRevisionActive: () => void
 	log: (event: string, details: Record<string, unknown>) => void
 }>
@@ -34,8 +37,15 @@ export class ResumeSessionFlow {
 		await this.callbacks.broadcast()
 		this.callbacks.log("sendAskResponse.resumeStartSession", { sessionId, textLength, cwd })
 		this.callbacks.runResumeHook({ prompt, cwd, userImages, userFiles, sessionId })
-		const result = await this.callbacks.start({ prompt, cwd, userImages: await this.callbacks.normalizeImages(userImages), userFiles, interactive: true, initialMessages: this.callbacks.buildInitialMessages(prompt), sessionMetadata: task.title ? { title: task.title, ligVsResumed: true } : { ligVsResumed: true }, config: await this.callbacks.buildConfig(cwd, sessionId), toolPolicies: this.callbacks.toolPolicies() })
-		this.callbacks.markSettingsRevisionActive()
-		return result
+		this.callbacks.beginReplacement(sessionId)
+		try {
+			const result = await this.callbacks.start({ prompt, cwd, userImages: await this.callbacks.normalizeImages(userImages), userFiles, interactive: true, initialMessages: this.callbacks.buildInitialMessages(prompt), sessionMetadata: task.title ? { title: task.title, ligVsResumed: true, ligVsResumedFrom: sessionId } : { ligVsResumed: true, ligVsResumedFrom: sessionId }, config: await this.callbacks.buildConfig(cwd), toolPolicies: this.callbacks.toolPolicies() })
+			this.callbacks.completeReplacement(result)
+			this.callbacks.markSettingsRevisionActive()
+			return result
+		} catch (error) {
+			this.callbacks.cancelReplacement()
+			throw error
+		}
 	}
 }

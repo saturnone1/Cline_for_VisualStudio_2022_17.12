@@ -1,6 +1,7 @@
 import type { Callbacks } from "./grpcClientBase"
 import { ProtoBusClient } from "./grpcClientBase"
 import { webviewRpcOperation } from "./generated/WebviewRpcContract"
+import { PLATFORM_CONFIG } from "../config/platform.config"
 import type { PaymentTransaction, UsageTransaction } from "@shared/ClineAccount"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { ModelInfo, OcaModelInfo } from "@shared/api"
@@ -19,6 +20,7 @@ type RpcRequest = Record<string, unknown>
 type EmptyResponse = Record<string, never>
 type ShowWebviewEvent = RpcRequest & { preserveEditorFocus?: boolean }
 type AddToInputEvent = RpcRequest & { value?: string }
+type TaskPartialMessageEvent = RpcRequest & { taskId: string; message: ClineMessage }
 type UnaryOperation<TRequest extends RpcRequest = RpcRequest, TResponse = EmptyResponse> = (request: TRequest) => Promise<TResponse>
 type StreamingOperation<TResponse, TRequest extends RpcRequest = RpcRequest> = (
 	request: TRequest,
@@ -38,7 +40,7 @@ interface UiServiceContract {
 	subscribeToWorktreesButtonClicked: StreamingOperation<EmptyResponse>
 	subscribeToAccountButtonClicked: StreamingOperation<EmptyResponse>
 	subscribeToRelinquishControl: StreamingOperation<EmptyResponse>
-	subscribeToPartialMessage: StreamingOperation<ClineMessage>
+	subscribeToPartialMessage: StreamingOperation<TaskPartialMessageEvent>
 	subscribeToShowWebview: StreamingOperation<ShowWebviewEvent>
 	subscribeToAddToInput: StreamingOperation<AddToInputEvent>
 }
@@ -307,7 +309,7 @@ interface TaskServiceContract {
 	deleteTasksWithIds: UnaryOperation<RpcRequest>
 	showTaskWithId: UnaryOperation<RpcRequest>
 	deleteAllTaskHistory: UnaryOperation<RpcRequest>
-	getTaskHistory: UnaryOperation<RpcRequest, RpcRequest & { tasks: HistoryItem[] }>
+	getTaskHistory: UnaryOperation<RpcRequest, RpcRequest & { tasks: HistoryItem[]; nextCursor: number; total: number }>
 	getTotalTasksSize: UnaryOperation<RpcRequest, RpcRequest & { value: number }>
 	toggleTaskFavorite: UnaryOperation<RpcRequest>
 	exportTaskWithId: UnaryOperation<RpcRequest>
@@ -404,7 +406,10 @@ const createServiceClient = <TContract>(serviceName: string): TContract => {
 					return target.makeStreamingRequest(property, request, encodeMessage, decodeMessage, callbacks)
 				}
 				if (operation.kind !== "unary") throw new Error(`RPC operation requires streaming callbacks: ${serviceName}.${property}`)
-				return target.makeUnaryRequest(property, request, encodeMessage, decodeMessage)
+				const timeoutMs = "timeoutMs" in operation && typeof operation.timeoutMs === "number"
+					? operation.timeoutMs
+					: PLATFORM_CONFIG.rpcUnaryTimeoutMs
+				return target.makeUnaryRequest(property, request, encodeMessage, decodeMessage, timeoutMs)
 			}
 		},
 	}) as unknown as TContract

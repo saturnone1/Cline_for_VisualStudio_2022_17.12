@@ -10,15 +10,23 @@ const {
 	normalizeSdkImageInput,
 } = require("../dist/infrastructure/conversation/AttachmentNormalization")
 const { normalizeUsageSnapshot } = require("../dist/infrastructure/conversation/UsageNormalization")
+const { resolveTaskPrompt } = require("../dist/features/chat/TaskPromptFlow")
 const { createHistoryItem, removeDeletedHistoryItems, sdkSessionToHistoryItem } = require("../dist/infrastructure/conversation/TaskHistoryProjection")
 const { completionCandidateToText, extractCompletionTextFromResult } = require("../dist/infrastructure/conversation/CompletionExtraction")
 const { isToolTranscript, looksLikeReasoningNarration, looksLikeTokenizedReasoning, mergeTextDelta, normalizeTranscriptText } = require("../dist/infrastructure/conversation/TranscriptTextPolicy")
+const { parseStructuredQuestion, projectAssistantTranscript } = require("../dist/infrastructure/conversation/StructuredAssistantResponse")
 
 test("attachment normalization keeps transcript summaries bounded", () => {
 	assert.equal(formatAttachmentSummaryValue("data:image/png;base64,AAAA"), "[attached image/png]")
 	assert.equal(buildTaskInputWithAttachments("inspect", ["data:image/png;base64,AAAA"], ["readme.md"]),
 		"inspect\n\nAttachments:\nImage: [attached image/png]\nFile: readme.md")
 	assert.equal(getImageMimeType("image.JPEG"), "image/jpeg")
+})
+
+test("attachment-only messages receive a valid SDK prompt", () => {
+	assert.equal(resolveTaskPrompt("", ["data:image/png;base64,AAAA"], []), "Review the attached image.")
+	assert.equal(resolveTaskPrompt("  inspect this  ", ["image"], []), "inspect this")
+	assert.equal(resolveTaskPrompt("", [], []), "")
 })
 
 test("local image normalization produces a data URI and rejects unsupported files", async () => {
@@ -74,4 +82,19 @@ test("transcript text policy handles deltas, tools, reasoning, and Korean tokens
 	assert.equal(isToolTranscript("Tool: read_file"), true)
 	assert.equal(looksLikeReasoningNarration("We need to inspect the runtime"), true)
 	assert.equal(looksLikeTokenizedReasoning(["사용자", "요청을", "먼저", "확인", "해야", "합니다"]), true)
+})
+
+test("standalone structured questions project to the follow-up question UI contract", () => {
+	const input = JSON.stringify({ question: "어떤 검토를 원하시나요?", options: ["전체 구조", "잠재 버그"] })
+	assert.deepEqual(parseStructuredQuestion(input), { question: "어떤 검토를 원하시나요?", options: ["전체 구조", "잠재 버그"] })
+	assert.deepEqual(projectAssistantTranscript(input), { type: "ask", ask: "followup", text: input })
+})
+
+test("ordinary JSON examples are not mistaken for interactive questions", () => {
+	assert.equal(parseStructuredQuestion('{"question":"example","options":["a"],"description":"sample"}'), undefined)
+	assert.deepEqual(projectAssistantTranscript('Use this payload: {"question":"example","options":["a"]}'), {
+		type: "say",
+		say: "text",
+		text: 'Use this payload: {"question":"example","options":["a"]}',
+	})
 })

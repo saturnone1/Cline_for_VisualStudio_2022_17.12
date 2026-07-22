@@ -8,9 +8,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
-using VsClineAgent.Host.Adapters;
 using VsClineAgent.Host.Generated;
 using VsClineAgent.Services;
+using Microsoft.VisualStudio.Shell;
 
 namespace VsClineAgent.Host
 {
@@ -22,6 +22,10 @@ namespace VsClineAgent.Host
         private Process? _process;
         private NamedPipeJsonRpcClient? _client;
         private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new ConcurrentDictionary<int, Process>();
+        private static readonly ConcurrentDictionary<int, WindowsProcessJob> OwnedJobs = new ConcurrentDictionary<int, WindowsProcessJob>();
+        private static readonly ConcurrentDictionary<SidecarProcess, byte> OwnedInstances = new ConcurrentDictionary<SidecarProcess, byte>();
+        private readonly WindowsProcessJob _processJob = new WindowsProcessJob();
+        private int _disposed;
         private Func<object, Task>? _postToWebviewAsync;
         private readonly object _recentOutputLock = new object();
         private readonly Queue<string> _recentOutput = new Queue<string>();
@@ -33,17 +37,12 @@ namespace VsClineAgent.Host
             VsCommandExecutionService commandExecutionService)
         {
             _assemblyDirectory = assemblyDirectory;
-            _hostRpcRouter = new HostRpcRouter(new IHostRpcAdapter[]
-            {
-                new HealthHostRpcAdapter(),
-                new EnvironmentHostRpcAdapter(CaptureSidecarLine),
-                new EditorHostRpcAdapter(editorService),
-                new FileSystemHostRpcAdapter(),
-                new TerminalHostRpcAdapter(assemblyDirectory, editorService, commandExecutionService),
-                new DiffHostRpcAdapter(editorService),
-                new WorkspaceHostRpcAdapter(editorService),
-                new WebviewHostRpcAdapter(() => _postToWebviewAsync)
-            });
+            _hostRpcRouter = HostRpcAdapterFactory.Create(
+                assemblyDirectory,
+                editorService,
+                commandExecutionService,
+                CaptureSidecarLine,
+                () => _postToWebviewAsync);
         }
 
         public bool IsRunning => _process != null && !_process.HasExited && _client != null && _client.IsConnected;
@@ -159,23 +158,39 @@ namespace VsClineAgent.Host
                 throw new InvalidOperationException(BuildStartupDiagnostic("Failed to launch node.", ex), ex);
             }
 
-            _process.EnableRaisingEvents = true;
-            OwnedProcesses[_process.Id] = _process;
-            _process.Exited += (sender, args) =>
+            var startedProcess = _process;
+            try
             {
-                OwnedProcesses.TryRemove(_process.Id, out var removedProcess);
-                CaptureSidecarLine("sidecar:exit", "exitCode=" + SafeExitCode(_process));
+                _processJob.Assign(startedProcess);
+                OwnedJobs[startedProcess.Id] = _processJob;
+            }
+            catch
+            {
+                try { startedProcess.Kill(); } catch { }
+                throw;
+            }
+            startedProcess.Exited += (sender, args) =>
+            {
+                OwnedProcesses.TryRemove(startedProcess.Id, out _);
+                OwnedInstances.TryRemove(this, out _);
+                if (OwnedJobs.TryRemove(startedProcess.Id, out var completedJob))
+                    completedJob.Dispose();
+                CaptureSidecarLine("sidecar:exit", "exitCode=" + SafeExitCode(startedProcess));
             };
-            _process.OutputDataReceived += (_, e) => CaptureSidecarLine("sidecar", e.Data);
-            _process.ErrorDataReceived += (_, e) => CaptureSidecarLine("sidecar:error", e.Data);
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
+            OwnedProcesses[startedProcess.Id] = startedProcess;
+            OwnedInstances[this] = 0;
+            startedProcess.EnableRaisingEvents = true;
+            startedProcess.OutputDataReceived += (_, e) => CaptureSidecarLine("sidecar", e.Data);
+            startedProcess.ErrorDataReceived += (_, e) => CaptureSidecarLine("sidecar:error", e.Data);
+            startedProcess.BeginOutputReadLine();
+            startedProcess.BeginErrorReadLine();
 
             _client = new NamedPipeJsonRpcClient(pipeName);
             _client.RequestReceived += HandleSidecarRequestAsync;
             JToken? result;
             long pipeConnectMs = 0;
             long healthPingMs = 0;
+            long sdkWarmupMs = 0;
             try
             {
                 var pipeStopwatch = Stopwatch.StartNew();
@@ -194,6 +209,18 @@ namespace VsClineAgent.Host
                     cancellationToken).ConfigureAwait(false);
                 healthStopwatch.Stop();
                 healthPingMs = healthStopwatch.ElapsedMilliseconds;
+
+                var sdkWarmupStopwatch = Stopwatch.StartNew();
+                using (var sdkWarmupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    sdkWarmupTimeout.CancelAfter(ReadSdkWarmupTimeoutMilliseconds());
+                    await _client.SendRequestAsync(
+                        "upstream.start",
+                        new { reason = "visual_studio_webview_startup" },
+                        sdkWarmupTimeout.Token).ConfigureAwait(false);
+                }
+                sdkWarmupStopwatch.Stop();
+                sdkWarmupMs = sdkWarmupStopwatch.ElapsedMilliseconds;
             }
             catch (Exception ex)
             {
@@ -215,7 +242,8 @@ namespace VsClineAgent.Host
                 ["nodeModulesExtractMs"] = runtimePreparation.NodeModulesExtractMs,
                 ["nodeModulesExtractReason"] = runtimePreparation.NodeModulesExtractReason,
                 ["pipeConnectMs"] = pipeConnectMs,
-                ["healthPingMs"] = healthPingMs
+                ["healthPingMs"] = healthPingMs,
+                ["sdkWarmupMs"] = sdkWarmupMs
             }, 1500);
             return ((JObject?)result)?["status"]?.ToString() ?? "unknown";
         }
@@ -241,17 +269,45 @@ namespace VsClineAgent.Host
 
         public void Dispose()
         {
-            _client?.Dispose();
-            _client = null;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+
+            OwnedInstances.TryRemove(this, out _);
 
             var process = _process;
+            var client = _client;
+            if (client != null && process != null && !process.HasExited)
+            {
+                try
+                {
+					var graceMs = ReadShutdownGraceMilliseconds();
+					using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(graceMs + 1000));
+                    ThreadHelper.JoinableTaskFactory.Run(async delegate
+                    {
+						await client.SendRequestAsync("upstream.stop", new { reason = "visual_studio_host_dispose", graceMs }, timeout.Token);
+                    });
+					process.WaitForExit(graceMs + 1000);
+                }
+                catch (Exception ex)
+                {
+                    CaptureSidecarLine("sidecar:shutdown", "graceful stop failed: " + ex.Message);
+                }
+            }
+
+            client?.Dispose();
+            _client = null;
             try
             {
                 if (process != null && !process.HasExited)
                 {
                     OwnedProcesses.TryRemove(process.Id, out _);
-                    process.Kill();
-                    process.WaitForExit(2000);
+                    if (OwnedJobs.TryRemove(process.Id, out var job))
+                        job.Dispose();
+                    if (!process.WaitForExit(1000))
+                    {
+                        process.Kill();
+                        process.WaitForExit(2000);
+                    }
                 }
             }
             catch
@@ -260,10 +316,28 @@ namespace VsClineAgent.Host
 
             process?.Dispose();
             _process = null;
+            _processJob.Dispose();
+        }
+
+		private static int ReadShutdownGraceMilliseconds()
+		{
+			var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_SHUTDOWN_GRACE_MS");
+			return int.TryParse(configured, out var value) && value >= 1000 && value <= 15000 ? value : 5000;
+		}
+
+        private static int ReadSdkWarmupTimeoutMilliseconds()
+        {
+            var configured = Environment.GetEnvironmentVariable("VSCLINE_SDK_WARMUP_TIMEOUT_MS");
+            return int.TryParse(configured, out var value) && value >= 5000 && value <= 120000 ? value : 60000;
         }
 
         public static void DisposeAllRunning()
         {
+            foreach (var instance in OwnedInstances.Keys.ToArray())
+            {
+                try { instance.Dispose(); } catch { }
+            }
+
             foreach (var item in OwnedProcesses.ToArray())
             {
                 if (!OwnedProcesses.TryRemove(item.Key, out var process))
@@ -271,6 +345,8 @@ namespace VsClineAgent.Host
 
                 try
                 {
+                    if (OwnedJobs.TryRemove(item.Key, out var job))
+                        job.Dispose();
                     if (!process.HasExited)
                     {
                         process.Kill();
@@ -280,6 +356,12 @@ namespace VsClineAgent.Host
                 catch
                 {
                 }
+            }
+
+            foreach (var item in OwnedJobs.ToArray())
+            {
+                if (OwnedJobs.TryRemove(item.Key, out var job))
+                    job.Dispose();
             }
         }
 

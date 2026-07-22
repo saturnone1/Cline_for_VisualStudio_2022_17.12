@@ -4,7 +4,7 @@ import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import type { ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
 
 export interface WebviewApplicationPort {
-	dispose(): void
+	dispose(): Promise<void>
 	isScheduledAgentsEnabled(): boolean
 	requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult>
 	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult>

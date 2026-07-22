@@ -153,14 +153,8 @@ function parseTextToNodes(text: string, compact: boolean): React.ReactNode {
 }
 
 const LightMarkdown: React.FC<LightMarkdownProps> = ({ text, compact = false }) => {
-	if (!text) {
-		return null
-	}
-
-	// Memoize parsed output; recompute only when inputs change
 	const content = React.useMemo(() => parseTextToNodes(text, compact), [text, compact])
-
-	return <>{content}</>
+	return text ? <>{content}</> : null
 }
 
 export default React.memo(LightMarkdown)

@@ -2,7 +2,7 @@ import { validateGrpcRequestContract, type GrpcRequest, type WebviewEnvelope } f
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import { grpcError, grpcHandled } from "./WebviewGrpcSupport"
 import type { WebviewStreamingRpcRouter } from "./WebviewStreamingRpcRouter"
-import type { WebviewUnaryRpcRouter } from "./WebviewUnaryRpcRouter"
+import { isWebviewRpcRequestCancelledError, type WebviewUnaryRpcRouter } from "./WebviewUnaryRpcRouter"
 
 type RpcIngressDependencies = {
 	logger: InteractionLoggerPort
@@ -21,8 +21,9 @@ export class WebviewRpcIngress {
 		if (envelope.type === "grpc_request") return this.handleRequest(envelope.request)
 		if (envelope.type === "grpc_request_cancel") {
 			const requestId = envelope.requestId
-			const disposed = this.dependencies.streaming.unsubscribe(requestId)
-			this.dependencies.logger.log("webview->sidecar", disposed ? "grpc_request_cancel.streamDisposed" : "grpc_request_cancel.ignored", { requestId })
+			const streamDisposed = this.dependencies.streaming.unsubscribe(requestId)
+			const unaryCancelled = this.dependencies.unary.cancel(requestId)
+			this.dependencies.logger.log("webview->sidecar", streamDisposed ? "grpc_request_cancel.streamDisposed" : unaryCancelled ? "grpc_request_cancel.unaryCancelled" : "grpc_request_cancel.ignored", { requestId })
 			return { handled: true, owner: "sidecar" as const, webviewMessages: [] }
 		}
 
@@ -55,6 +56,10 @@ export class WebviewRpcIngress {
 			return result
 		} catch (error) {
 			this.logSlowRequest(key, startedAt, false)
+			if (isWebviewRpcRequestCancelledError(error)) {
+				this.dependencies.logger.log("sidecar", "webviewRpcCancelled", { key, requestId: request.requestId })
+				return grpcHandled()
+			}
 			await this.dependencies.onUnaryError(error)
 			return grpcHandled(grpcError(request.requestId, error instanceof Error ? error.message : String(error), false))
 		}

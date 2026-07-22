@@ -34,6 +34,15 @@ namespace VsClineAgent.Host.Tests
                 Assert.False(unchanged.RuntimeCopied);
                 Assert.False(unchanged.NodeModulesExtracted);
 
+                File.SetLastWriteTimeUtc(entrypoint, DateTime.UtcNow.AddMinutes(1));
+                var timestampOnlyChange = installer.Prepare(packaged);
+                Assert.False(timestampOnlyChange.RuntimeCopied);
+                Assert.False(timestampOnlyChange.NodeModulesExtracted);
+
+                CreateNodeModulesArchive(packaged, "module-one");
+                var repackedSameModules = installer.Prepare(packaged);
+                Assert.False(repackedSameModules.NodeModulesExtracted);
+
                 File.WriteAllText(entrypoint, "second-runtime-version", Encoding.UTF8);
                 File.SetLastWriteTimeUtc(entrypoint, DateTime.UtcNow.AddSeconds(2));
                 File.Delete(removedRuntimeFile);
@@ -72,6 +81,30 @@ namespace VsClineAgent.Host.Tests
             }
         }
 
+        [Fact]
+        public void PrepareKeepsOnlyTheCurrentAndMostRecentPreviousRuntime()
+        {
+            using (var directory = new TemporaryDirectory())
+            {
+                var packaged = Path.Combine(directory.Path, "packaged");
+                Write(Path.Combine(packaged, "runtime", "cline-sidecar.js"), "runtime");
+                CreateNodeModulesArchive(packaged, "module");
+                var cache = Path.Combine(directory.Path, "cache");
+                foreach (var name in new[] { "old-1", "old-2", "old-3" })
+                {
+                    Directory.CreateDirectory(Path.Combine(cache, name));
+                    Directory.SetLastWriteTimeUtc(Path.Combine(cache, name), DateTime.UtcNow.AddMinutes(Array.IndexOf(new[] { "old-1", "old-2", "old-3" }, name)));
+                }
+
+                new SidecarRuntimeInstaller(cache, "current").Prepare(packaged);
+
+				Assert.True(Directory.Exists(Path.Combine(cache, "current")));
+				Assert.True(Directory.Exists(Path.Combine(cache, "old-3")));
+				Assert.False(Directory.Exists(Path.Combine(cache, "old-1")));
+				Assert.False(Directory.Exists(Path.Combine(cache, "old-2")));
+            }
+        }
+
         private static void CreateNodeModulesArchive(string packagedDirectory, string content)
         {
             var source = Path.Combine(packagedDirectory, "node-modules-source");
@@ -80,6 +113,7 @@ namespace VsClineAgent.Host.Tests
             var archive = Path.Combine(packagedDirectory, "node_modules.zip");
             if (File.Exists(archive)) File.Delete(archive);
             ZipFile.CreateFromDirectory(source, archive, CompressionLevel.Fastest, false);
+            File.WriteAllText(Path.Combine(packagedDirectory, "node_modules.fingerprint"), "test:" + content, Encoding.UTF8);
             Directory.Delete(source, true);
         }
 

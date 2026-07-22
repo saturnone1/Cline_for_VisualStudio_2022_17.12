@@ -1,4 +1,4 @@
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import type { ClineMessage, TaskLifecycleStatus } from "@shared/ExtensionMessage"
 
 export type RequestPendingState = {
 	taskKey: string
@@ -50,6 +50,7 @@ export function deriveRequestPendingState(
 	previous: RequestPendingState,
 	taskKey: string,
 	messages: ClineMessage[],
+	lifecycleStatus?: TaskLifecycleStatus,
 ): RequestPendingState {
 	if (!taskKey || messages.length === 0) {
 		return IDLE_REQUEST_STATE
@@ -75,7 +76,19 @@ export function deriveRequestPendingState(
 	const taskChanged = previous.taskKey !== taskKey
 	const turnChanged = !taskChanged && previous.turnTs !== turnTs
 
-	const pending = settled ? false : taskChanged ? hasActivity : turnChanged || hasActivity ? true : previous.pending
+	const lifecyclePending = lifecycleStatus === "starting" || lifecycleStatus === "streaming" || lifecycleStatus === "cancelling"
+	const lifecycleSettled = lifecycleStatus === "idle" || lifecycleStatus === "awaiting_user" || lifecycleStatus === "completed" || lifecycleStatus === "failed"
+	const pending = lifecyclePending
+		? true
+		: lifecycleSettled
+			? false
+			: settled
+				? false
+				: taskChanged
+					? hasActivity
+					: turnChanged || hasActivity
+						? true
+						: previous.pending
 	if (previous.taskKey === taskKey && previous.turnTs === turnTs && previous.pending === pending) {
 		return previous
 	}

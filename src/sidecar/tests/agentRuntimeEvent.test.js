@@ -87,6 +87,25 @@ test("Cline usage events preserve per-call tokens separately from accumulated to
 	)
 })
 
+test("SDK compaction progress notices remain transient status instead of chat text", () => {
+	assert.deepEqual(
+		translateClineAgentEvent({
+			type: "notice",
+			message: "auto-compacting",
+			reason: "auto_compaction",
+			iteration: 3,
+		}, "session-compaction"),
+		{
+			type: "NoticeReceived",
+			sessionId: "session-compaction",
+			message: "auto-compacting",
+			reason: "auto_compaction",
+			noticeType: "status",
+			raw: { type: "notice", message: "auto-compacting", reason: "auto_compaction", iteration: 3 },
+		},
+	)
+})
+
 test("agent runtime events preserve unknown SDK events without leaking an untyped envelope", () => {
 	assert.deepEqual(
 		normalizeAgentRuntimeEvent({ type: "future_event", payload: { value: 1 } }),

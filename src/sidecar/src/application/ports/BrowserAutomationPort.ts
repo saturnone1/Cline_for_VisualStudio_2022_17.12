@@ -18,4 +18,5 @@ export interface BrowserAutomationPort {
 	fetchDebugInfo(host: string): Promise<BrowserDebugInfo>
 	listTabs(host: string): Promise<unknown>
 	runAction(host: string, request: BrowserAction): Promise<unknown>
+	cancelActive(): Promise<number>
 }

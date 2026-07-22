@@ -1,18 +1,19 @@
-import type { ClineMessage } from "@shared/ExtensionMessage"
-import { EmptyRequest, StringRequest } from "@shared/proto/cline/common"
-import { AskResponseRequest, NewTaskRequest } from "@shared/proto/cline/task"
-import { useCallback, useRef } from "react"
-import { useExtensionState } from "@/context/ExtensionStateContext"
-import { SlashServiceClient, TaskServiceClient } from "@/services/grpcClient"
-import type { ButtonActionType } from "../shared/buttonConfig"
-import type { ChatState, MessageHandlers } from "../types/chatTypes"
+import type { ClineMessage } from "@shared/ExtensionMessage";
+import { EmptyRequest, StringRequest } from "@shared/proto/cline/common";
+import { AskResponseRequest, NewTaskRequest } from "@shared/proto/cline/task";
+import { useCallback, useRef } from "react";
+import { useExtensionState } from "@/context/ExtensionStateContext";
+import { SlashServiceClient, TaskServiceClient } from "@/services/grpcClient";
+import { createClientOperationId } from "@/services/grpcClientBase";
+import type { ButtonActionType } from "../shared/buttonConfig";
+import type { ChatState, MessageHandlers } from "../types/chatTypes";
 
 /**
  * Custom hook for managing message handlers
  * Handles sending messages, button clicks, and task management
  */
 export function useMessageHandlers(messages: ClineMessage[], chatState: ChatState): MessageHandlers {
-	const { backgroundCommandRunning, currentTaskItem } = useExtensionState()
+	const { backgroundCommandRunning, currentTaskItem } = useExtensionState();
 	const {
 		setInputValue,
 		activeQuote,
@@ -23,167 +24,160 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		setEnableButtons,
 		clineAsk,
 		lastMessage,
-	} = chatState
-	const cancelInFlightRef = useRef(false)
-	const sendInFlightRef = useRef(false)
-	const clearInFlightRef = useRef(false)
+	} = chatState;
+	const cancelInFlightRef = useRef(false);
+	const sendInFlightRef = useRef(false);
+	const clearInFlightRef = useRef(false);
 
 	const handleCompactTask = useCallback(async () => {
-		setSendingDisabled(true)
-		setEnableButtons(false)
+		setSendingDisabled(true);
+		setEnableButtons(false);
 		await SlashServiceClient.condense(EmptyRequest.create({})).catch((err) => {
-			console.error(err)
-			setSendingDisabled(false)
-			setEnableButtons(true)
-			throw err
-		})
-	}, [setEnableButtons, setSendingDisabled])
+			console.error(err);
+			setSendingDisabled(false);
+			setEnableButtons(true);
+			throw err;
+		});
+	}, [setEnableButtons, setSendingDisabled]);
 
 	// Handle sending a message
 	const handleSendMessage = useCallback(
 		async (text: string, images: string[], files: string[]) => {
 			if (sendInFlightRef.current) {
-				return
+				return;
 			}
-			let messageToSend = text.trim()
-			const hasContent = messageToSend || images.length > 0 || files.length > 0
+			let messageToSend = text.trim();
+			const clientOperationId = createClientOperationId();
+			const quoteToRestore = activeQuote;
+			const hasContent = messageToSend || images.length > 0 || files.length > 0;
 			if (!hasContent) {
-				return
+				return;
 			}
-			sendInFlightRef.current = true
-			let messageSent = false
+			sendInFlightRef.current = true;
+			let messageSent = false;
 			const markMessageSent = () => {
 				if (messageSent) {
-					return
+					return;
 				}
-				messageSent = true
-				setInputValue("")
-				setActiveQuote(null)
-				setSendingDisabled(true)
-				setSelectedImages([])
-				setSelectedFiles([])
-				setEnableButtons(false)
+				messageSent = true;
+				setInputValue("");
+				setActiveQuote(null);
+				setSendingDisabled(true);
+				setSelectedImages([]);
+				setSelectedFiles([]);
+				setEnableButtons(false);
 
 				// Reset auto-scroll
 				if ("disableAutoScrollRef" in chatState) {
-					;(chatState as any).disableAutoScrollRef.current = false
+					(chatState as any).disableAutoScrollRef.current = false;
 				}
-			}
+			};
 
 			// Prepend the active quote if it exists
 			if (activeQuote && hasContent) {
-				const prefix = "[context] \n> "
-				const formattedQuote = activeQuote
-				const suffix = "\n[/context] \n\n"
-				messageToSend = `${prefix} ${formattedQuote} ${suffix} ${messageToSend}`
+				const prefix = "[context] \n> ";
+				const formattedQuote = activeQuote;
+				const suffix = "\n[/context] \n\n";
+				messageToSend = `${prefix} ${formattedQuote} ${suffix} ${messageToSend}`;
 			}
 
 			try {
 				if (messages.length === 0) {
-					markMessageSent()
+					markMessageSent();
 					await TaskServiceClient.newTask(
 						NewTaskRequest.create({
 							text: messageToSend,
 							images,
 							files,
+							clientOperationId,
 						}),
-					)
+					);
 				} else if (clineAsk) {
 					// For resume_task and resume_completed_task, use yesButtonClicked to match Resume button behavior
 					// This ensures Enter key and Resume button work identically
 					if (clineAsk === "resume_task" || clineAsk === "resume_completed_task") {
-						markMessageSent()
+						markMessageSent();
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "yesButtonClicked",
 								text: messageToSend,
 								images,
 								files,
+								clientOperationId,
 							}),
-						)
+						);
 					} else {
-						// All other ask types use messageResponse
-						switch (clineAsk) {
-							case "followup":
-							case "plan_mode_respond":
-							case "tool":
-							case "browser_action_launch":
-							case "command":
-							case "command_output":
-							case "use_mcp_server":
-							case "use_subagents":
-							case "completion_result":
-							case "mistake_limit_reached":
-							case "api_req_failed":
-							case "new_task":
-							case "condense":
-							case "report_bug":
-								markMessageSent()
-								await TaskServiceClient.askResponse(
-									AskResponseRequest.create({
-										responseType: "messageResponse",
-										text: messageToSend,
-										images,
-										files,
-									}),
-								)
-								break
-						}
-					}
-				} else if (messages.length > 0) {
-					// No clineAsk set - check if task is actively running
-					// If so, allow interrupting it with feedback
-					const lastMessage = messages[messages.length - 1]
-					const isTaskRunning =
-						lastMessage.partial === true || (lastMessage.type === "say" && lastMessage.say === "api_req_started")
-
-					if (isTaskRunning) {
-						// Task is running - send message as interruption/feedback
-						markMessageSent()
+						// Typed asks share the same free-form response transport. Keeping the
+						// transport generic prevents a newly added SDK ask from becoming a no-op.
+						markMessageSent();
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "messageResponse",
 								text: messageToSend,
 								images,
 								files,
+								clientOperationId,
 							}),
-						)
+						);
+					}
+				} else if (messages.length > 0) {
+					// No clineAsk set - check if task is actively running
+					// If so, allow interrupting it with feedback
+					const lastMessage = messages.at(-1);
+					const isTaskRunning =
+						lastMessage?.partial === true || (lastMessage?.type === "say" && lastMessage.say === "api_req_started");
+
+					if (isTaskRunning) {
+						// Task is running - send message as interruption/feedback
+						markMessageSent();
+						await TaskServiceClient.askResponse(
+							AskResponseRequest.create({
+								responseType: "messageResponse",
+								text: messageToSend,
+								images,
+								files,
+								clientOperationId,
+							}),
+						);
 					} else {
 						// Completed/cancelled tasks should keep their transcript visible and continue through the
 						// host-side SDK session bridge instead of forcing the user to press Start New Task.
 						if (currentTaskItem?.id) {
-							markMessageSent()
+							markMessageSent();
 							await TaskServiceClient.askResponse(
 								AskResponseRequest.create({
 									responseType: "messageResponse",
 									text: messageToSend,
 									images,
 									files,
+									clientOperationId,
 								}),
-							)
+							);
 						} else {
-							markMessageSent()
+							markMessageSent();
 							await TaskServiceClient.newTask(
 								NewTaskRequest.create({
 									text: messageToSend,
 									images,
 									files,
+									clientOperationId,
 								}),
-							)
+							);
 						}
 					}
 				}
 			} catch (error) {
 				if (messageSent) {
-					setInputValue(text)
-					setSelectedImages(images)
-					setSelectedFiles(files)
-					setSendingDisabled(false)
-					setEnableButtons(true)
+					setInputValue(text);
+					setSelectedImages(images);
+					setSelectedFiles(files);
+					setActiveQuote(quoteToRestore);
+					setSendingDisabled(false);
+					setEnableButtons(true);
 				}
-				throw error
+				throw error;
 			} finally {
-				sendInFlightRef.current = false
+				sendInFlightRef.current = false;
 			}
 		},
 		[
@@ -199,35 +193,36 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			setEnableButtons,
 			chatState,
 		],
-	)
+	);
 
 	// Start a new task
 	const startNewTask = useCallback(async () => {
 		if (clearInFlightRef.current) {
-			return
+			return;
 		}
-		clearInFlightRef.current = true
-		setActiveQuote(null)
+		clearInFlightRef.current = true;
+		setActiveQuote(null);
 		try {
-			await TaskServiceClient.clearTask(EmptyRequest.create({}))
+			await TaskServiceClient.clearTask(EmptyRequest.create({}));
 		} finally {
-			clearInFlightRef.current = false
+			clearInFlightRef.current = false;
 		}
-	}, [setActiveQuote])
+	}, [setActiveQuote]);
 
 	// Clear input state helper
 	const clearInputState = useCallback(() => {
-		setInputValue("")
-		setActiveQuote(null)
-		setSelectedImages([])
-		setSelectedFiles([])
-	}, [setInputValue, setActiveQuote, setSelectedImages, setSelectedFiles])
+		setInputValue("");
+		setActiveQuote(null);
+		setSelectedImages([]);
+		setSelectedFiles([]);
+	}, [setInputValue, setActiveQuote, setSelectedImages, setSelectedFiles]);
 
 	// Execute button action based on type
 	const executeButtonAction = useCallback(
 		async (actionType: ButtonActionType, text?: string, images?: string[], files?: string[]) => {
-			const trimmedInput = text?.trim()
-			const hasContent = trimmedInput || (images && images.length > 0) || (files && files.length > 0)
+			const trimmedInput = text?.trim();
+			const clientOperationId = createClientOperationId();
+			const hasContent = trimmedInput || (images && images.length > 0) || (files && files.length > 0);
 
 			switch (actionType) {
 				case "retry":
@@ -235,10 +230,11 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 					await TaskServiceClient.askResponse(
 						AskResponseRequest.create({
 							responseType: "yesButtonClicked",
+							clientOperationId,
 						}),
-					)
-					clearInputState()
-					break
+					);
+					clearInputState();
+					break;
 				case "approve":
 					if (hasContent) {
 						await TaskServiceClient.askResponse(
@@ -247,17 +243,19 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 								text: trimmedInput,
 								images: images,
 								files: files,
+								clientOperationId,
 							}),
-						)
+						);
 					} else {
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "yesButtonClicked",
+								clientOperationId,
 							}),
-						)
+						);
 					}
-					clearInputState()
-					break
+					clearInputState();
+					break;
 
 				case "reject":
 					if (hasContent) {
@@ -267,17 +265,19 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 								text: trimmedInput,
 								images: images,
 								files: files,
+								clientOperationId,
 							}),
-						)
+						);
 					} else {
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "noButtonClicked",
+								clientOperationId,
 							}),
-						)
+						);
 					}
-					clearInputState()
-					break
+					clearInputState();
+					break;
 
 				case "proceed":
 					if (hasContent) {
@@ -287,17 +287,19 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 								text: trimmedInput,
 								images: images,
 								files: files,
+								clientOperationId,
 							}),
-						)
+						);
 					} else {
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "yesButtonClicked",
+								clientOperationId,
 							}),
-						)
+						);
 					}
-					clearInputState()
-					break
+					clearInputState();
+					break;
 
 				case "new_task":
 					if (clineAsk === "new_task") {
@@ -306,53 +308,56 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 								text: lastMessage?.text,
 								images: [],
 								files: [],
+								clientOperationId,
 							}),
-						)
+						);
 					} else {
-						await startNewTask()
+						await startNewTask();
 					}
-					break
+					break;
 
 				case "cancel": {
 					if (cancelInFlightRef.current) {
-						return
+						return;
 					}
-					cancelInFlightRef.current = true
-					setSendingDisabled(true)
-					setEnableButtons(false)
+					cancelInFlightRef.current = true;
+					setSendingDisabled(true);
+					setEnableButtons(false);
 					try {
 						if (backgroundCommandRunning) {
 							await TaskServiceClient.cancelBackgroundCommand(EmptyRequest.create({})).catch((err) =>
 								console.error("Failed to cancel background command:", err),
-							)
+							);
 						}
-						await TaskServiceClient.cancelTask(EmptyRequest.create({}))
+						await TaskServiceClient.cancelTask(EmptyRequest.create({}));
 					} finally {
-						cancelInFlightRef.current = false
+						cancelInFlightRef.current = false;
 						// Clear any pending state that might interfere with resume
-						setSendingDisabled(false)
-						setEnableButtons(true)
+						setSendingDisabled(false);
+						setEnableButtons(true);
 					}
-					break
+					break;
 				}
 
 				case "utility":
 					switch (clineAsk) {
 						case "condense":
-							await handleCompactTask()
-							break
+							await handleCompactTask();
+							break;
 						case "report_bug":
-							await SlashServiceClient.reportBug(StringRequest.create({ value: lastMessage?.text })).catch(async (err) => {
-								console.error(err)
-								await handleSendMessage("/reportbug", [], [])
-							})
-							break
+							await SlashServiceClient.reportBug(StringRequest.create({ value: lastMessage?.text })).catch(
+								async (err) => {
+									console.error(err);
+									await handleSendMessage("/reportbug", [], []);
+								},
+							);
+							break;
 					}
-					break
+					break;
 			}
 
 			if ("disableAutoScrollRef" in chatState) {
-				;(chatState as any).disableAutoScrollRef.current = false
+				(chatState as any).disableAutoScrollRef.current = false;
 			}
 		},
 		[
@@ -368,12 +373,17 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			setSendingDisabled,
 			setEnableButtons,
 		],
-	)
+	);
 
 	// Handle task close button click
 	const handleTaskCloseButtonClick = useCallback(() => {
-		startNewTask()
-	}, [startNewTask])
+		void startNewTask().catch((error) => {
+			// The sidecar keeps the task visible and projects a detailed error message.
+			// Consume the rejected RPC here so an expected cancellation failure does not
+			// become a global unhandled-rejection diagnostic.
+			console.error("Failed to leave task:", error);
+		});
+	}, [startNewTask]);
 
 	return {
 		executeButtonAction,
@@ -381,5 +391,5 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		handleSendMessage,
 		handleTaskCloseButtonClick,
 		startNewTask,
-	}
+	};
 }

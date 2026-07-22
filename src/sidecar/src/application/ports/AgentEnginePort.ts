@@ -26,6 +26,15 @@ export type AgentStartRequest = Readonly<{
 }>
 
 export type AgentSessionRequest = Readonly<{ sessionId: string }>
+export type AgentCompactSessionRequest = Readonly<{
+	sourceSessionId: string
+	cwd: string
+	initialMessages: readonly unknown[]
+	sessionMetadata?: Readonly<Record<string, unknown>>
+	config: Readonly<Record<string, unknown>>
+	toolPolicies?: Readonly<Record<string, unknown>>
+	signal?: AbortSignal
+}>
 export type AgentRestoreRequest = Readonly<{
 	sessionId: string
 	checkpointRunCount: number
@@ -47,6 +56,7 @@ export interface AgentEnginePort {
 	markSessionInactive(sessionId?: string): void
 	activateSession(sessionId: string): Promise<unknown>
 	startSession(command: AgentStartRequest): Promise<unknown>
+	compactSession(command: AgentCompactSessionRequest): Promise<unknown>
 	send(command: AgentMessageRequest): Promise<unknown>
 	stop(command: AgentSessionRequest): Promise<unknown>
 	abort(command: AgentSessionRequest): Promise<unknown>

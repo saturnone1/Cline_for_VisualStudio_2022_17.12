@@ -6,6 +6,7 @@
     <VsProfilePath>$(VsPackagingRoot)\vs2022-$(VsTarget)\Version.props</VsProfilePath>
     <MSBuildProjectExtensionsPath>$(MSBuildProjectDirectory)\obj\$(VsTarget)\</MSBuildProjectExtensionsPath>
   </PropertyGroup>
+  <Import Project="$(VsPackagingRoot)\ProductVersion.props" Condition="Exists('$(VsPackagingRoot)\ProductVersion.props')" />
   <Import Project="$(VsProfilePath)" Condition="Exists('$(VsProfilePath)')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
           Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -19,9 +20,9 @@
     <RootNamespace>VsClineAgent</RootNamespace>
     <AssemblyName>$(VsAssemblyName)</AssemblyName>
     <TargetFrameworkVersion>$(VsTargetFrameworkVersion)</TargetFrameworkVersion>
-    <AssemblyVersion>2.0.1.0</AssemblyVersion>
-    <FileVersion>2.0.1.0</FileVersion>
-    <Version>2.0.1</Version>
+    <AssemblyVersion>$(ProductAssemblyVersion)</AssemblyVersion>
+    <FileVersion>$(ProductAssemblyVersion)</FileVersion>
+    <Version>$(ProductVersion)</Version>
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -104,9 +105,11 @@
 	<Compile Include="Host\SidecarRuntimeInstaller.cs" />
     <Compile Include="Host\SidecarStartupConnector.cs" />
     <Compile Include="Host\HostRpcRouter.cs" />
+    <Compile Include="Host\HostRpcAdapterFactory.cs" />
     <Compile Include="Host\HostDiagnosticReport.cs" />
     <Compile Include="Host\WebviewGrpcFallback.cs" />
     <Compile Include="Host\Generated\WebviewRpcContract.cs" />
+    <Compile Include="Host\Generated\HostRpcContract.cs" />
     <Compile Include="Host\WebviewBootstrapScript.cs" />
     <Compile Include="Host\WebviewMessageQueue.cs" />
 	<Compile Include="Host\WebViewNavigationPolicy.cs" />
@@ -114,6 +117,9 @@
     <Compile Include="Host\VisualStudioUiThread.cs" />
     <Compile Include="Host\VisualStudioOutputPaneWriter.cs" />
     <Compile Include="Host\WebView2RuntimeResolver.cs" />
+    <Compile Include="Host\WebViewLoadingPresenter.cs" />
+    <Compile Include="Host\ToolWindowLifetime.cs" />
+    <Compile Include="Host\WindowsProcessJob.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
     <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
@@ -129,6 +135,7 @@
       <Link>Host\VisualStudioVersionInfo.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\ProductVersionAssemblyInfo.cs" />
     <Compile Include="Services\CommandExecutionModels.cs" />
     <Compile Include="Services\ICommandOutputWriter.cs" />
     <Compile Include="Services\TerminalCommandPolicy.cs" />
@@ -194,6 +201,11 @@
     </Content>
     <Content Include="$(ArtifactsRoot)\Sidecar\node_modules.zip">
       <Link>Sidecar\node_modules.zip</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="$(ArtifactsRoot)\Sidecar\node_modules.fingerprint">
+      <Link>Sidecar\node_modules.fingerprint</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>

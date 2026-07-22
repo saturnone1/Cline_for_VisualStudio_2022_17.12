@@ -2696,7 +2696,7 @@
     "request": {},
     "response": {
       "value": false,
-      "mode": "fixture"
+      "mode": "plan"
     },
     "envelope": {
       "protocol_version": 1,
@@ -2958,7 +2958,9 @@
     "operation": "TaskService.getTaskHistory",
     "request": {},
     "response": {
-      "tasks": []
+      "tasks": [],
+      "nextCursor": 0,
+      "total": 0
     },
     "envelope": {
       "protocol_version": 1,
@@ -3337,7 +3339,10 @@
   {
     "operation": "UiService.subscribeToPartialMessage",
     "request": {},
-    "response": {},
+    "response": {
+      "taskId": "fixture",
+      "message": {}
+    },
     "envelope": {
       "protocol_version": 1,
       "type": "grpc_request",

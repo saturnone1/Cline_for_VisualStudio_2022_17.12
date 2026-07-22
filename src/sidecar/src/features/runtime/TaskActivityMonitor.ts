@@ -10,6 +10,7 @@ export class TaskActivityMonitor {
 		private readonly logger: InteractionLoggerPort,
 		private readonly isTaskActive: () => boolean,
 		private readonly hasActivePartial: () => boolean,
+		private readonly onWaiting: (idleForMs: number, reason: string) => void,
 		private readonly onLongRunning: () => void,
 		private readonly noticeMs: number,
 		private readonly timeoutMs: number,
@@ -49,6 +50,7 @@ export class TaskActivityMonitor {
 		const idleForMs = Date.now() - this.lastActivityAt
 		if (idleForMs < this.noticeMs - 1000) return
 		this.logger.log("sidecar", "taskIdleNotice", { noticeMs: this.noticeMs, idleForMs, reason: this.lastReason })
+		this.onWaiting(idleForMs, this.lastReason)
 	}
 
 	private timeout() {

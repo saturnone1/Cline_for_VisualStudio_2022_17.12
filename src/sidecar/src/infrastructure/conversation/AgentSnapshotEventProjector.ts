@@ -17,8 +17,7 @@ export class AgentSnapshotEventProjector {
 	handle(event: SessionSnapshotRuntimeEvent) {
 		if (event.sessionId) this.callbacks.bindSession(event.sessionId)
 		const usage = normalizeUsageSnapshot(event.usage)
-		if (event.status === "idle") this.callbacks.finishTask(event.sessionId, "completed", this.callbacks.activeText())
-		else this.callbacks.noteActivity(`session_snapshot:${event.status || "unknown"}`)
+		this.callbacks.noteActivity(`session_snapshot:${event.status || "unknown"}`)
 		this.callbacks.updateTask({ modelId: event.modelId || undefined, tokensIn: usage.reliable ? usage.inputTokens : undefined, tokensOut: usage.reliable ? usage.outputTokens : undefined, cacheReads: usage.reliable ? usage.cacheReadTokens : undefined, cacheWrites: usage.reliable ? usage.cacheWriteTokens : undefined, totalCost: usage.reliable ? usage.totalCost : undefined })
 		if (event.status && !ACTIVE_STATUSES.has(event.status)) this.callbacks.finishTask(event.sessionId, event.status, this.callbacks.activeText())
 		this.callbacks.broadcast()

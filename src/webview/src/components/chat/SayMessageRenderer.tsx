@@ -206,13 +206,7 @@ export function SayMessageRenderer({
 		}
 		case "user_feedback":
 			return (
-				<UserMessage
-					files={message.files}
-					images={message.images}
-					messageTs={message.ts}
-					sendMessageFromChatRow={sendMessageFromChatRow}
-					text={message.text}
-				/>
+				<UserMessage files={message.files} images={message.images} text={message.text} />
 			)
 		case "user_feedback_diff":
 			const tool = JSON.parse(message.text || "{}") as ClineSayTool

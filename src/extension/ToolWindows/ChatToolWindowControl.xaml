@@ -9,25 +9,83 @@
             Background="#1E1E1E"
             UseLayoutRounding="True"
             SnapsToDevicePixels="True">
+    <UserControl.Resources>
+        <Storyboard x:Key="LoadingAnimationStoryboard">
+            <DoubleAnimation Storyboard.TargetName="loadingOrbitRotation"
+                             Storyboard.TargetProperty="Angle"
+                             From="0" To="360"
+                             Duration="0:0:6"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="loadingLogoHalo"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.22" To="0.62"
+                             Duration="0:0:1.8"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="loadingLogoGlowEffect"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.18" To="0.42"
+                             Duration="0:0:1.8"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="loadingTitleGlowEffect"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.12" To="0.30"
+                             Duration="0:0:2.2"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+        </Storyboard>
+    </UserControl.Resources>
     <Grid>
         <wv2:WebView2 x:Name="webView" Visibility="Collapsed" />
 
         <StackPanel x:Name="loadingPanel"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center">
-            <Grid Width="132"
-                  Height="132"
+            <Grid Width="152"
+                  Height="152"
                   Margin="0,0,0,16">
+                <Ellipse x:Name="loadingOrbitRing"
+                         Width="144"
+                         Height="144"
+                         Stroke="#2B9AD6"
+                         StrokeThickness="1.5"
+                         StrokeDashArray="2 7"
+                         StrokeDashCap="Round"
+                         Opacity="0.62"
+                         RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <RotateTransform x:Name="loadingOrbitRotation" />
+                    </Ellipse.RenderTransform>
+                    <Ellipse.Effect>
+                        <DropShadowEffect x:Name="loadingOrbitGlowEffect"
+                                          Color="#2B9AD6"
+                                          BlurRadius="9"
+                                          ShadowDepth="0"
+                                          Opacity="0.22" />
+                    </Ellipse.Effect>
+                </Ellipse>
+                <Ellipse x:Name="loadingLogoHalo"
+                         Width="118"
+                         Height="118"
+                         Fill="#2B9AD6"
+                         Opacity="0.32"
+                         IsHitTestVisible="False">
+                    <Ellipse.Effect>
+                        <BlurEffect Radius="32" />
+                    </Ellipse.Effect>
+                </Ellipse>
                 <Border Width="124"
                         Height="124"
                         Background="Transparent"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                     <Border.Effect>
-                        <DropShadowEffect Color="#000000"
-                                          BlurRadius="28"
-                                          ShadowDepth="8"
-                                          Opacity="0.32" />
+                        <DropShadowEffect x:Name="loadingLogoGlowEffect"
+                                          Color="#2B9AD6"
+                                          BlurRadius="20"
+                                          ShadowDepth="0"
+                                          Opacity="0.24" />
                     </Border.Effect>
                     <Image x:Name="loadingLogoImage"
                            Width="124"
@@ -37,20 +95,38 @@
                            SnapsToDevicePixels="True" />
                 </Border>
             </Grid>
-            <TextBlock x:Name="loadingTitleText"
-                       Text="LIG VS"
-                       Foreground="#CCCCCC"
-                       FontSize="32"
-                       FontWeight="Black"
-                       HorizontalAlignment="Center"
-                       Margin="0,0,0,4" />
-            <TextBlock x:Name="loadingBrandText"
-                       Text="by M&amp;S.Team3"
-                       Foreground="#888888"
-                       FontSize="12"
-                       FontWeight="SemiBold"
-                       HorizontalAlignment="Center"
-                       Margin="0,0,0,14" />
+            <StackPanel x:Name="loadingTextGroup">
+                <TextBlock x:Name="loadingTitleText"
+                           Text="LIG VS"
+                           Foreground="#CCCCCC"
+                           FontSize="32"
+                           FontWeight="Black"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,4">
+                    <TextBlock.Effect>
+                        <DropShadowEffect x:Name="loadingTitleGlowEffect"
+                                          Color="#2B9AD6"
+                                          BlurRadius="12"
+                                          ShadowDepth="0"
+                                          Opacity="0.2" />
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock x:Name="loadingBrandText"
+                           Text="by M&amp;S.Team3"
+                           Foreground="#888888"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,14">
+                    <TextBlock.Effect>
+                        <DropShadowEffect x:Name="loadingBrandGlowEffect"
+                                          Color="#2B9AD6"
+                                          BlurRadius="7"
+                                          ShadowDepth="0"
+                                          Opacity="0.16" />
+                    </TextBlock.Effect>
+                </TextBlock>
+            </StackPanel>
             <TextBlock x:Name="statusText"
                        Text="LIG VS를 준비하는 중입니다..."
                        Foreground="#888888"

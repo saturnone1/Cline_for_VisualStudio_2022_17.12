@@ -6,8 +6,12 @@ Rules:
 
 - Do not hand-edit files under `artifacts/WebApp/`.
 - Regenerate the directory with `npm run build` from `src/webview` whenever WebView source changes.
+- `build-manifest.json` binds the tracked snapshot to both its editable WebView source and generated output hashes.
+- `npm run snapshot:check` and the VSIX build reject a stale or manually altered snapshot.
+- `npm run snapshot:tracked` additionally rejects generated files omitted from Git; run it as the release/commit gate.
 - Commit source and the matching WebApp snapshot together when a commit is requested.
 - Package and runtime smoke tests must verify the snapshot included in both VSIX variants.
 - `artifacts/Sidecar/`, `artifacts/.staging/`, `bin/`, `obj/`, and VSIX files remain untracked build outputs.
+- `src/sidecar/src/application/dto/generated/HostRpcContract.ts`, `src/extension/Host/Generated/HostRpcContract.cs`, and `contracts/generated/host-rpc-fixtures.json` are generated from `contracts/host-rpc.json`.
 
 This tracked exception does not make the WebApp bundle source code. `src/webview/` remains its single editable source of truth.

@@ -13,6 +13,7 @@ import { mergeTextDelta } from "./TranscriptTextPolicy"
 import type { ConversationMessageStore } from "./ConversationMessageStore"
 import type { FoldedProgressProjector } from "./FoldedProgressProjector"
 import type { PartialTextProjector } from "./PartialTextProjector"
+import { projectAssistantTranscript } from "./StructuredAssistantResponse"
 
 type ConversationRuntimeDependencies = {
 	projection: ConversationProjectionState
@@ -70,13 +71,14 @@ export class ConversationRuntimeProjector {
 		this.finishToolActivity()
 		this.dependencies.folded.finish()
 		const projection = this.dependencies.projection
+		const message = projectAssistantTranscript(text)
 		const timestamp = projection.activePartialTextTs
 		if (timestamp) {
-			this.dependencies.messageStore.upsert(timestamp, { type: "say", say: "text", text, partial: false })
+			this.dependencies.messageStore.upsert(timestamp, { ...message, partial: false })
 			this.dependencies.publishPartial(this.dependencies.messages().find((message) => message.ts === timestamp))
 			projection.activePartialTextTs = null
 		} else {
-			this.dependencies.addMessage({ type: "say", say: "text", text })
+			this.dependencies.addMessage(message)
 		}
 		projection.activeAssistantTextBuffer = ""
 	}

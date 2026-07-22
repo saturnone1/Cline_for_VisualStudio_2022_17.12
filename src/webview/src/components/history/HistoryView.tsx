@@ -1,244 +1,43 @@
-import { BooleanRequest, EmptyRequest, StringArrayRequest } from "@shared/proto/cline/common"
-import { GetTaskHistoryRequest, TaskFavoriteRequest } from "@shared/proto/cline/task"
-import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
-import Fuse, { FuseResult } from "fuse.js"
-import { FunnelIcon } from "lucide-react"
-import { memo, useCallback, useEffect, useMemo, useState } from "react"
-import { GroupedVirtuoso } from "react-virtuoso"
-import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
-import { useExtensionState } from "@/context/ExtensionStateContext"
-import { useI18n } from "@/i18n"
-import { TaskServiceClient } from "@/services/grpcClient"
-import { formatSize } from "@/utils/format"
-import ViewHeader from "../common/ViewHeader"
-import HistoryViewItem from "./HistoryViewItem"
+import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react";
+import { FunnelIcon } from "lucide-react";
+import { memo, useMemo } from "react";
+import { GroupedVirtuoso } from "react-virtuoso";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { useExtensionState } from "@/context/ExtensionStateContext";
+import { useI18n } from "@/i18n";
+import { formatSize } from "@/utils/format";
+import ViewHeader from "../common/ViewHeader";
+import HistoryViewItem from "./HistoryViewItem";
+import { type HistorySortOption, useHistoryViewController } from "./useHistoryViewController";
 
 type HistoryViewProps = {
-	onDone: () => void
-}
-
-type SortOption = "newest" | "oldest" | "mostTokens" | "mostRelevant"
+	onDone: () => void;
+};
 
 const isToday = (timestamp: number): boolean => {
-	const date = new Date(timestamp)
-	const today = new Date()
-	return today.toDateString() === date.toDateString()
-}
+	const date = new Date(timestamp);
+	const today = new Date();
+	return today.toDateString() === date.toDateString();
+};
 
 const HistoryView = ({ onDone }: HistoryViewProps) => {
-	const extensionStateContext = useExtensionState()
-	const { taskHistory, onRelinquishControl, environment } = extensionStateContext
-	const { language, t } = useI18n()
-	const [searchQuery, setSearchQuery] = useState("")
-	const [sortOption, setSortOption] = useState<SortOption>("newest")
-	const [lastNonRelevantSort, setLastNonRelevantSort] = useState<SortOption | null>("newest")
-	const [deleteAllDisabled, setDeleteAllDisabled] = useState(false)
-	const [selectedItems, setSelectedItems] = useState<string[]>([])
-	const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
-	const [showCurrentWorkspaceOnly, setShowCurrentWorkspaceOnly] = useState(false)
-
-	// Keep track of pending favorite toggle operations
-	const [pendingFavoriteToggles, setPendingFavoriteToggles] = useState<Record<string, boolean>>({})
-
-	// Load filtered task history with gRPC
-	const [tasks, setTasks] = useState<any[]>([])
-
-	// Load and refresh task history
-	const loadTaskHistory = useCallback(async () => {
-		try {
-			const response = await TaskServiceClient.getTaskHistory(
-				GetTaskHistoryRequest.create({
-					favoritesOnly: showFavoritesOnly,
-					searchQuery: searchQuery || undefined,
-					sortBy: sortOption,
-					currentWorkspaceOnly: showCurrentWorkspaceOnly,
-				}),
-			)
-			setTasks(response.tasks || [])
-		} catch (error) {
-			console.error("Error loading task history:", error)
-		}
-	}, [showFavoritesOnly, showCurrentWorkspaceOnly, searchQuery, sortOption, taskHistory])
-
-	// Load when filters change
-	useEffect(() => {
-		// Force a complete refresh when both filters are active
-		// to ensure proper combined filtering
-		if (showFavoritesOnly && showCurrentWorkspaceOnly) {
-			setTasks([])
-		}
-		loadTaskHistory()
-	}, [loadTaskHistory, showFavoritesOnly, showCurrentWorkspaceOnly])
-
-	const toggleFavorite = useCallback(
-		async (taskId: string, currentValue: boolean) => {
-			// Optimistic UI update
-			setPendingFavoriteToggles((prev) => ({ ...prev, [taskId]: !currentValue }))
-
-			try {
-				await TaskServiceClient.toggleTaskFavorite(
-					TaskFavoriteRequest.create({
-						taskId,
-						isFavorited: !currentValue,
-					}),
-				)
-
-				// Refresh if either filter is active to ensure proper combined filtering
-				if (showFavoritesOnly || showCurrentWorkspaceOnly) {
-					loadTaskHistory()
-				}
-			} catch (err) {
-				console.error(`[FAVORITE_TOGGLE_UI] Error for task ${taskId}:`, err)
-				// Revert optimistic update
-				setPendingFavoriteToggles((prev) => {
-					const updated = { ...prev }
-					delete updated[taskId]
-					return updated
-				})
-			} finally {
-				// Clean up pending state after 1 second
-				setTimeout(() => {
-					setPendingFavoriteToggles((prev) => {
-						const updated = { ...prev }
-						delete updated[taskId]
-						return updated
-					})
-				}, 1000)
-			}
-		},
-		[showFavoritesOnly, loadTaskHistory],
-	)
-
-	// Use the onRelinquishControl hook instead of message event
-	useEffect(() => {
-		return onRelinquishControl(() => {
-			setDeleteAllDisabled(false)
-		})
-	}, [onRelinquishControl])
-
-	const { totalTasksSize, setTotalTasksSize } = extensionStateContext
-
-	const fetchTotalTasksSize = useCallback(async () => {
-		try {
-			const response = await TaskServiceClient.getTotalTasksSize(EmptyRequest.create({}))
-			if (response && typeof response.value === "number") {
-				setTotalTasksSize?.(response.value || 0)
-			}
-		} catch (error) {
-			console.error("Error getting total tasks size:", error)
-		}
-	}, [setTotalTasksSize])
-
-	// Request total tasks size when component mounts
-	useEffect(() => {
-		fetchTotalTasksSize()
-	}, [fetchTotalTasksSize])
-
-	useEffect(() => {
-		if (searchQuery && sortOption !== "mostRelevant" && !lastNonRelevantSort) {
-			setLastNonRelevantSort(sortOption)
-			setSortOption("mostRelevant")
-		} else if (!searchQuery && sortOption === "mostRelevant" && lastNonRelevantSort) {
-			setSortOption(lastNonRelevantSort)
-			setLastNonRelevantSort(null)
-		}
-	}, [searchQuery, sortOption, lastNonRelevantSort])
-
-	const handleHistorySelect = useCallback((itemId: string, checked: boolean) => {
-		setSelectedItems((prev) => {
-			if (checked) {
-				return [...prev, itemId]
-			} else {
-				return prev.filter((id) => id !== itemId)
-			}
-		})
-	}, [])
-
-	const handleTaskOpened = useCallback(() => {
-		onDone()
-	}, [onDone])
-
-	const handleDeleteHistoryItem = useCallback(
-		async (id: string) => {
-			setTasks((prev) => prev.filter((task) => task.id !== id))
-			setSelectedItems((prev) => prev.filter((selectedId) => selectedId !== id))
-			try {
-				await TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: [id] }))
-				await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
-			} catch (error) {
-				console.error("Error deleting task:", error)
-				await loadTaskHistory()
-			}
-		},
-		[fetchTotalTasksSize, loadTaskHistory],
-	)
-
-	const handleDeleteSelectedHistoryItems = useCallback(
-		async (ids: string[]) => {
-			if (ids.length > 0) {
-				const idSet = new Set(ids)
-				setTasks((prev) => prev.filter((task) => !idSet.has(task.id)))
-				setSelectedItems([])
-				try {
-					await TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: ids }))
-					await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
-				} catch (error) {
-					console.error("Error deleting tasks:", error)
-					await loadTaskHistory()
-				}
-			}
-		},
-		[fetchTotalTasksSize, loadTaskHistory],
-	)
-
-	const fuse = useMemo(() => {
-		return new Fuse(tasks, {
-			keys: ["task"],
-			threshold: 0.6,
-			shouldSort: true,
-			isCaseSensitive: false,
-			ignoreLocation: false,
-			includeMatches: true,
-			minMatchCharLength: 1,
-		})
-	}, [tasks])
-
-	const taskHistorySearchResults = useMemo(() => {
-		const results = searchQuery
-			? fuse
-					.search(searchQuery)
-					?.filter(({ matches }) => matches && matches.length)
-					.map(({ item }) => item)
-			: tasks
-
-		results.sort((a, b) => {
-			switch (sortOption) {
-				case "oldest":
-					return a.ts - b.ts
-				case "mostTokens":
-					return (
-						(b.tokensIn || 0) +
-						(b.tokensOut || 0) +
-						(b.cacheWrites || 0) +
-						(b.cacheReads || 0) -
-						((a.tokensIn || 0) + (a.tokensOut || 0) + (a.cacheWrites || 0) + (a.cacheReads || 0))
-					)
-				case "mostRelevant":
-					// NOTE: you must never sort directly on object since it will cause members to be reordered
-					return searchQuery ? 0 : b.ts - a.ts // Keep fuse order if searching, otherwise sort by newest
-				case "newest":
-				default:
-					return b.ts - a.ts
-			}
-		})
-
-		return results
-	}, [tasks, searchQuery, fuse, sortOption])
+	const extensionStateContext = useExtensionState();
+	const { taskHistory, onRelinquishControl, environment } = extensionStateContext;
+	const { t } = useI18n();
+	const {
+		tasks, searchQuery, setSearchQuery, sortOption, setSortOption, lastNonRelevantSort, setLastNonRelevantSort,
+		deleteAllDisabled, setDeleteAllDisabled, selectedItems, showFavoritesOnly, setShowFavoritesOnly,
+		showCurrentWorkspaceOnly, setShowCurrentWorkspaceOnly, pendingFavoriteToggles, totalTasksSize,
+		loadTaskHistory, fetchTotalTasksSize, toggleFavorite, handleHistorySelect, handleDeleteHistoryItem,
+		handleDeleteSelectedHistoryItems, handleBatchHistorySelect, deleteAllTasks,
+	} = useHistoryViewController();
+	const taskHistorySearchResults = tasks;
+	const handleTaskOpened = onDone;
 
 	// Group tasks into "Today" and "Older" (only for date-based sorts)
 	const { groupedTasks, groupCounts, groupLabels } = useMemo(() => {
-		const isDateSort = sortOption === "newest" || sortOption === "oldest"
+		const isDateSort = sortOption === "newest" || sortOption === "oldest";
 
 		if (!isDateSort) {
 			// No grouping for non-date sorts
@@ -246,77 +45,67 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 				groupedTasks: taskHistorySearchResults,
 				groupCounts: [taskHistorySearchResults.length],
 				groupLabels: [] as string[],
-			}
+			};
 		}
 
-		const todayTasks: any[] = []
-		const olderTasks: any[] = []
+		const todayTasks: any[] = [];
+		const olderTasks: any[] = [];
 
 		taskHistorySearchResults.forEach((task) => {
 			if (isToday(task.ts)) {
-				todayTasks.push(task)
+				todayTasks.push(task);
 			} else {
-				olderTasks.push(task)
+				olderTasks.push(task);
 			}
-		})
+		});
 
-		const groups: { tasks: any[]; label: string }[] = []
+		const groups: { tasks: any[]; label: string }[] = [];
 		if (todayTasks.length > 0) {
-			groups.push({ tasks: todayTasks, label: t("history.today") })
+			groups.push({ tasks: todayTasks, label: t("history.today") });
 		}
 		if (olderTasks.length > 0) {
-			groups.push({ tasks: olderTasks, label: t("history.older") })
+			groups.push({ tasks: olderTasks, label: t("history.older") });
 		}
 
 		return {
 			groupedTasks: groups.flatMap((g) => g.tasks),
 			groupCounts: groups.map((g) => g.tasks.length),
 			groupLabels: groups.map((g) => g.label),
-		}
-	}, [taskHistorySearchResults, sortOption, t])
+		};
+	}, [taskHistorySearchResults, sortOption, t]);
 
 	// Calculate total size of selected items
 	const selectedItemsSize = useMemo(() => {
 		if (selectedItems.length === 0) {
-			return 0
+			return 0;
 		}
 
-		return taskHistory.filter((item) => selectedItems.includes(item.id)).reduce((total, item) => total + (item.size || 0), 0)
-	}, [selectedItems, taskHistory])
-
-	const handleBatchHistorySelect = useCallback(
-		(selectAll: boolean) => {
-			if (selectAll) {
-				setSelectedItems(taskHistorySearchResults.map((item) => item.id))
-			} else {
-				setSelectedItems([])
-			}
-		},
-		[taskHistorySearchResults],
-	)
+		return tasks.filter((item) => selectedItems.includes(item.id)).reduce((total, item) => total + (item.size || 0), 0);
+	}, [selectedItems, tasks]);
 
 	return (
-		<div className="fixed overflow-hidden inset-0 flex flex-col w-full">
+		<div className="fixed overflow-hidden inset-0 flex min-w-0 flex-col w-full">
 			{/* HEADER */}
 			<ViewHeader environment={environment} onDone={onDone} title={t("history.title")} />
 
 			{/* FILTERS */}
-			<div className="flex flex-col gap-3 px-3">
+			<div className="flex shrink-0 flex-col gap-3 px-3">
 				{/* REPLACE VSCODE RADIO GROUP */}
-				<div className="flex justify-between items-center">
+				<div className="flex min-w-0 items-center gap-2">
 					{/* SEARCH BOX */}
 					<VSCodeTextField
-						className="w-full"
+						className="min-w-0 flex-1"
 						onInput={(e) => {
-							const newValue = (e.target as HTMLInputElement)?.value
-							setSearchQuery(newValue)
+							const newValue = (e.target as HTMLInputElement)?.value;
+							setSearchQuery(newValue);
 							if (newValue && !searchQuery && sortOption !== "mostRelevant") {
-								setLastNonRelevantSort(sortOption)
-								setSortOption("mostRelevant")
+								setLastNonRelevantSort(sortOption);
+								setSortOption("mostRelevant");
 							}
 						}}
 						placeholder={t("history.search")}
-						value={searchQuery}>
+						value={searchQuery}
+					>
 						<div className="codicon codicon-search opacity-80 mt-0.5 !text-sm" slot="start" />
 						{searchQuery && (
 							<div
@@ -339,25 +128,36 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							) {
 								if (value === "mostRelevant" && !searchQuery) {
 									// Don't allow selecting mostRelevant without a search query
-									return
+									return;
 								}
-								setSortOption(value as SortOption)
+								setSortOption(value as HistorySortOption);
 								if (value !== "mostRelevant") {
-									setLastNonRelevantSort(value as SortOption)
+									setLastNonRelevantSort(value as HistorySortOption);
 								}
 							}
 							// Handle filter toggles
 							else if (value === "workspaceOnly") {
-								setShowCurrentWorkspaceOnly(!showCurrentWorkspaceOnly)
+								setShowCurrentWorkspaceOnly(!showCurrentWorkspaceOnly);
 							} else if (value === "favoritesOnly") {
-								setShowFavoritesOnly(!showFavoritesOnly)
+								setShowFavoritesOnly(!showFavoritesOnly);
 							}
 						}}
-						value={sortOption}>
-						<SelectTrigger className="border-0 cursor-pointer" showIcon={false}>
-							<FunnelIcon className="!size-2 text-foreground" />
+						value={sortOption}
+					>
+						<SelectTrigger
+							aria-label={t("history.filters")}
+							className="relative size-7 shrink-0 cursor-pointer border border-editor-group-border p-0"
+							showIcon={false}
+							title={t("history.filters")}
+						>
+							<FunnelIcon className="!size-3.5 text-foreground" />
+							{(showFavoritesOnly || showCurrentWorkspaceOnly) && (
+								<span className="absolute -right-1 -top-1 flex size-3 items-center justify-center rounded-full bg-button-background text-[8px] text-primary-foreground">
+									{Number(showFavoritesOnly) + Number(showCurrentWorkspaceOnly)}
+								</span>
+							)}
 						</SelectTrigger>
-						<SelectContent position="popper">
+						<SelectContent align="end" position="popper">
 							{Object.entries({
 								newest: t("history.newest"),
 								oldest: t("history.oldest"),
@@ -366,23 +166,24 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 								workspaceOnly: t("history.workspaceOnly"),
 								favoritesOnly: t("history.favoritesOnly"),
 							}).map(([key, value]) => {
-								const isSortOption = ["newest", "oldest", "mostTokens", "mostRelevant"].includes(key)
-								const isFilterOption = ["workspaceOnly", "favoritesOnly"].includes(key)
+								const isSortOption = ["newest", "oldest", "mostTokens", "mostRelevant"].includes(key);
+								const isFilterOption = ["workspaceOnly", "favoritesOnly"].includes(key);
 								const isSelected = isSortOption
 									? sortOption === key
 									: key === "workspaceOnly"
 										? showCurrentWorkspaceOnly
 										: key === "favoritesOnly"
 											? showFavoritesOnly
-											: false
-								const isDisabled = key === "mostRelevant" && !searchQuery
+											: false;
+								const isDisabled = key === "mostRelevant" && !searchQuery;
 
 								return (
 									<SelectItem
 										className={isSelected ? "bg-button-background/30" : ""}
 										disabled={isDisabled}
 										key={key}
-										value={key}>
+										value={key}
+									>
 										<span className="flex items-center gap-2">
 											{isFilterOption && (
 												<span
@@ -394,7 +195,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 											{value}
 										</span>
 									</SelectItem>
-								)
+								);
 							})}
 						</SelectContent>
 					</Select>
@@ -402,7 +203,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 			</div>
 
 			{/* HISTORY ITEMS */}
-			<div className="flex-grow overflow-y-auto m-0 w-full py-2">
+			<div className="m-0 min-h-0 w-full flex-1 overflow-y-auto py-2">
 				<GroupedVirtuoso
 					className="flex-grow overflow-y-scroll"
 					groupContent={(index) => (
@@ -411,8 +212,9 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 						</div>
 					)}
 					groupCounts={groupCounts}
+					endReached={() => { void loadTaskHistory(false); }}
 					itemContent={(index) => {
-						const item = groupedTasks[index]
+						const item = groupedTasks[index];
 						return (
 							<HistoryViewItem
 								handleDeleteHistoryItem={handleDeleteHistoryItem}
@@ -424,145 +226,59 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 								selectedItems={selectedItems}
 								toggleFavorite={toggleFavorite}
 							/>
-						)
+						);
 					}}
 				/>
 			</div>
 
 			{/* FOOTER */}
-			<div className="p-2.5 border-t border-t-border-panel">
-				<div className="flex gap-2.5 mb-2.5">
-					<Button className="flex-1" onClick={() => handleBatchHistorySelect(true)} variant="secondary">
+			<div className="shrink-0 border-t border-t-border-panel p-2.5">
+				<div className="mb-2.5 grid grid-cols-2 gap-2">
+					<Button
+						className="min-w-0 whitespace-normal px-2"
+						onClick={() => handleBatchHistorySelect(true)}
+						variant="secondary"
+					>
 						{t("history.selectAll")}
 					</Button>
-					<Button className="flex-1" onClick={() => handleBatchHistorySelect(false)} variant="secondary">
+					<Button
+						className="min-w-0 whitespace-normal px-2"
+						onClick={() => handleBatchHistorySelect(false)}
+						variant="secondary"
+					>
 						{t("history.selectNone")}
 					</Button>
 				</div>
 				{selectedItems.length > 0 ? (
 					<Button
 						aria-label={t("history.deleteSelectedAria")}
-						className="w-full"
+						className="min-h-8 w-full whitespace-normal px-2 leading-tight"
 						onClick={() => {
-							handleDeleteSelectedHistoryItems(selectedItems)
+							handleDeleteSelectedHistoryItems(selectedItems);
 						}}
-						variant="danger">
+						variant="danger"
+					>
 						{t("history.deleteSelected", { count: selectedItems.length })}
 						{selectedItemsSize > 0 ? ` (${formatSize(selectedItemsSize)})` : ""}
 					</Button>
 				) : (
 					<Button
 						aria-label={t("history.deleteAllAria")}
-						className="w-full"
+						className="min-h-8 w-full whitespace-normal px-2 leading-tight"
 						disabled={deleteAllDisabled || taskHistory.length === 0}
 						onClick={async () => {
-							setDeleteAllDisabled(true)
-							setTasks([])
-							setSelectedItems([])
-							try {
-								await TaskServiceClient.deleteAllTaskHistory(BooleanRequest.create({}))
-								await Promise.all([fetchTotalTasksSize(), loadTaskHistory()])
-							} catch (error) {
-								console.error("Error deleting task history:", error)
-								await loadTaskHistory()
-							} finally {
-								setDeleteAllDisabled(false)
-							}
+							await deleteAllTasks();
 						}}
-						variant="danger">
-						{t("history.deleteAll")}{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
+						variant="danger"
+					>
+						{t("history.deleteAll")}
+						{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
 					</Button>
 				)}
 			</div>
 		</div>
-	)
-}
+	);
+};
 
 // https://gist.github.com/evenfrost/1ba123656ded32fb7a0cd4651efd4db0
-export const highlight = (fuseSearchResult: FuseResult<any>[], highlightClassName: string = "history-item-highlight") => {
-	const set = (obj: Record<string, any>, path: string, value: any) => {
-		const pathValue = path.split(".")
-		let i: number
-
-		for (i = 0; i < pathValue.length - 1; i++) {
-			obj = obj[pathValue[i]] as Record<string, any>
-		}
-
-		obj[pathValue[i]] = value
-	}
-
-	// Function to merge overlapping regions
-	const mergeRegions = (regions: [number, number][]): [number, number][] => {
-		if (regions.length === 0) {
-			return regions
-		}
-
-		// Sort regions by start index
-		regions.sort((a, b) => a[0] - b[0])
-
-		const merged: [number, number][] = [regions[0]]
-
-		for (let i = 1; i < regions.length; i++) {
-			const last = merged[merged.length - 1]
-			const current = regions[i]
-
-			if (current[0] <= last[1] + 1) {
-				// Overlapping or adjacent regions
-				last[1] = Math.max(last[1], current[1])
-			} else {
-				merged.push(current)
-			}
-		}
-
-		return merged
-	}
-
-	const generateHighlightedText = (inputText: string, regions: [number, number][] = []) => {
-		if (regions.length === 0) {
-			return inputText
-		}
-
-		// Sort and merge overlapping regions
-		const mergedRegions = mergeRegions(regions)
-
-		let content = ""
-		let nextUnhighlightedRegionStartingIndex = 0
-
-		mergedRegions.forEach((region) => {
-			const start = region[0]
-			const end = region[1]
-			const lastRegionNextIndex = end + 1
-
-			content += [
-				inputText.substring(nextUnhighlightedRegionStartingIndex, start),
-				`<span class="${highlightClassName}">`,
-				inputText.substring(start, lastRegionNextIndex),
-				"</span>",
-			].join("")
-
-			nextUnhighlightedRegionStartingIndex = lastRegionNextIndex
-		})
-
-		content += inputText.substring(nextUnhighlightedRegionStartingIndex)
-
-		return content
-	}
-
-	return fuseSearchResult
-		.filter(({ matches }) => matches && matches.length)
-		.map(({ item, matches }) => {
-			const highlightedItem = { ...item }
-
-			matches?.forEach((match) => {
-				if (match.key && typeof match.value === "string" && match.indices) {
-					// Merge overlapping regions before generating highlighted text
-					const mergedIndices = mergeRegions([...match.indices])
-					set(highlightedItem, match.key, generateHighlightedText(match.value, mergedIndices))
-				}
-			})
-
-			return highlightedItem
-		})
-}
-
-export default memo(HistoryView)
+export default memo(HistoryView);

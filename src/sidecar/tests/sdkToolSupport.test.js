@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
 const { htmlToReadableText, normalizeCommandResultForSdk, normalizeHttpUrl, readPositiveIntEnv } = require("../dist/infrastructure/sdk/SdkToolSupport")
+const { boundToolOutput } = require("../dist/infrastructure/sdk/ClineSdkToolExecutorFactory")
 
 test("SDK command results preserve terminal metadata and bound output", () => {
 	const previous = process.env.VSCLINE_SDK_COMMAND_RESULT_CHARS
@@ -35,4 +36,13 @@ test("positive integer environment parsing rejects zero and malformed values", (
 		if (previous === undefined) delete process.env.LIGVS_TEST_POSITIVE_INT
 		else process.env.LIGVS_TEST_POSITIVE_INT = previous
 	}
+})
+
+test("large SDK tool output preserves bounded head and tail with retrieval guidance", () => {
+	const value = "head-" + "x".repeat(10_000) + "-tail"
+	const bounded = boundToolOutput(value, 2_000, "File output", "Read a range.")
+	assert.equal(bounded.length < 2_200, true)
+	assert.equal(bounded.startsWith("head-"), true)
+	assert.equal(bounded.endsWith("-tail"), true)
+	assert.match(bounded, /truncated: .*Read a range/)
 })

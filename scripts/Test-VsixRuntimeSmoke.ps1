@@ -142,11 +142,15 @@ function Invoke-RuntimeSmoke([string]$VsixPath, [string]$Label) {
 				if ([string]::IsNullOrWhiteSpace([string]$initialState.version) -or -not $initialState.apiConfiguration) {
 					Fail "$Label initial WebView state RPC returned an incomplete initial state."
 				}
+
+				$stopResult = Send-PipeRequest $reader $writer "stop-1" "upstream.stop" @{}
             }
             finally { $writer.Dispose(); $reader.Dispose() }
         }
         finally { $pipe.Dispose() }
-        Write-Host "$Label runtime health and initial WebView state smoke passed."
+		if (-not $process.WaitForExit(15000)) { Fail "$Label sidecar did not exit after upstream.stop." }
+		if ($process.ExitCode -ne 0) { Fail "$Label sidecar exited with code $($process.ExitCode) after upstream.stop." }
+		Write-Host "$Label runtime health, initial WebView state, and graceful shutdown smoke passed."
     }
     finally {
         if ($process -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }

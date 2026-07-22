@@ -2,6 +2,7 @@ import path from "node:path"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { VisualStudioHostBridgeClient } from "./VisualStudioHostBridgeClient"
 import type { JsonRpcConnection } from "../transport/JsonRpcConnection"
+import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
 export type VisualStudioHostProviderOptions = {
 	extensionFsPath: string
@@ -156,16 +157,6 @@ class VisualStudioWorkspaceClient {
 	openFolder(request: { folderPath?: string; path?: string; newWindow?: boolean }) {
 		return this.bridge.openFolder(request.folderPath || request.path || "", request.newWindow === true)
 	}
-}
-
-function readPositiveIntEnv(name: string, fallback: number) {
-	const raw = process.env[name]
-	if (!raw) {
-		return fallback
-	}
-
-	const value = Number.parseInt(raw, 10)
-	return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function clampLimit(value: number | undefined, fallback: number, max: number) {

@@ -1,4 +1,5 @@
 import { normalizeUsageSnapshot } from "./UsageNormalization"
+import { projectedTaskStorageBytes } from "../../features/taskHistory/TaskHistoryStorageSize"
 
 export function createId() {
 	return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
@@ -26,7 +27,7 @@ export function sdkSessionToHistoryItem(session: Record<string, unknown>) {
 		cacheReads: usage.cacheReadTokens || 0,
 		totalCost: getNumber(metadata, "totalCost") || usage.totalCost || 0,
 		isFavorited: metadata.isFavorited === true,
-		size: getNumber(session, "messageCount") || 0,
+		size: projectedTaskStorageBytes(session),
 		cwdOnTaskInitialization: getString(session, "cwd") || getString(metadata, "cwd") || process.cwd(),
 		modelId: getString(metadata, "modelId") || getString(session, "modelId") || "",
 		latestCheckpointRunCount: getNumber(latestCheckpoint, "runCount"),

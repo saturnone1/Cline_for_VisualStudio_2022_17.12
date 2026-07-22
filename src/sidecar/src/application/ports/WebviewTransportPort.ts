@@ -1,3 +1,3 @@
 export interface WebviewTransportPort {
-	send(method: string, params: unknown): Promise<unknown>
+	send(method: "webview.postMessage", params: unknown): Promise<unknown>
 }
