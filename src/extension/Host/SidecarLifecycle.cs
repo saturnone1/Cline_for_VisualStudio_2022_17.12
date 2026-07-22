@@ -45,7 +45,7 @@ namespace VsClineAgent.Host
                     AppDomain.CurrentDomain.BaseDirectory;
                 DisposeProcessQuietly();
                 _process = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                _setStatus("LIG VS 사이드카를 준비하는 중입니다...");
+                _setStatus("LIG VS 사이드카를 준비하는 중입니다. 처음 실행하거나 업데이트한 직후에는 의존성 구성에 시간이 걸릴 수 있습니다...");
 
                 var process = _process ?? throw new InvalidOperationException("Cline sidecar process was not created.");
                 var status = await Task.Run(() => process.EnsureStartedAsync(CancellationToken.None)).ConfigureAwait(false);

@@ -75,6 +75,20 @@ namespace VsClineAgent.Host.Tests
             Assert.DoesNotContain("TimeSpan.FromSeconds", source);
         }
 
+		[Fact]
+		public void ToolWindowPreparesTheSidecarBeforeCreatingWebViewAndCanRetryInitialization()
+		{
+			var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"));
+			var initializationMethod = source.IndexOf("private async Task<bool> InitializeWebViewAsync()", StringComparison.Ordinal);
+			Assert.True(initializationMethod >= 0);
+			var sidecarStart = source.IndexOf("await _sidecar.EnsureRunningAsync()", initializationMethod, StringComparison.Ordinal);
+			var webViewRuntimeResolution = source.IndexOf("WebView2RuntimeResolver.GetWebView2RuntimeCandidates", initializationMethod, StringComparison.Ordinal);
+
+			Assert.True(sidecarStart > initializationMethod && webViewRuntimeResolution > sidecarStart);
+			Assert.Contains("_initialized = await InitializeWebViewAsync()", source);
+			Assert.Contains("_initializing = false;", source);
+		}
+
         [Fact]
         public void ExtensionProjectCompilesCriticalHostLifecycleSources()
         {

@@ -61,6 +61,31 @@ namespace VsClineAgent.Host.Tests
 			}
 		}
 
+		[Fact]
+		public void InitializationDiagnosticDoesNotReportAnExistingFixedRuntimeAsMissing()
+		{
+			using (var directory = new TemporaryDirectory())
+			{
+				var runtime = Path.Combine(
+					directory.Path,
+					"WebView2Runtime",
+					"Microsoft.WebView2.FixedVersionRuntime.148.0.3967.96.x64");
+				Directory.CreateDirectory(runtime);
+				File.WriteAllBytes(Path.Combine(runtime, "msedgewebview2.exe"), new byte[] { 1 });
+
+				var diagnostic = WebView2RuntimeResolver.BuildWebView2InitializationError(
+					new InvalidOperationException("initialization failed"),
+					directory.Path,
+					"System Evergreen",
+					null,
+					Array.Empty<string>());
+
+				Assert.Contains("A Fixed Version Runtime was detected", diagnostic);
+				Assert.DoesNotContain("No WebView2 Fixed Version Runtime was detected", diagnostic);
+				Assert.Contains(runtime, diagnostic);
+			}
+		}
+
         private sealed class TemporaryDirectory : IDisposable
         {
             public TemporaryDirectory()

@@ -49,6 +49,8 @@ namespace VsClineAgent.ToolWindows
         private readonly ToolWindowLifetime _lifetime;
 		private readonly CancellationTokenSource _diagnosticCancellation = new CancellationTokenSource();
         private bool _loaded;
+        private bool _initializing;
+        private bool _initialized;
         internal bool IsDisposed => _lifetime.IsDisposed;
 
         public ChatToolWindowControl()
@@ -102,36 +104,46 @@ namespace VsClineAgent.ToolWindows
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+	            _loaded = true;
 	            _ = OnLoadedAsync();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
+	            _loaded = false;
 	            _webviewMessages.ScheduleFlush();
         }
 
         private async Task OnLoadedAsync()
         {
-            if (_loaded)
+            if (_initialized)
             {
                 await _sidecar.EnsureRunningAsync();
                 return;
             }
 
-            _loaded = true;
+            if (_initializing)
+                return;
+
+            _initializing = true;
 
             try
             {
                 SetStatus("WebView2를 초기화하는 중입니다...");
-                await InitializeWebViewAsync();
+                _initialized = await InitializeWebViewAsync();
             }
             catch (Exception ex)
             {
+                _initialized = false;
                 ShowError($"초기화에 실패했습니다:\n{ex.Message}");
+            }
+            finally
+            {
+                _initializing = false;
             }
         }
 
-        private async Task InitializeWebViewAsync()
+        private async Task<bool> InitializeWebViewAsync()
         {
             var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
                 ?? AppDomain.CurrentDomain.BaseDirectory;
@@ -143,6 +155,14 @@ namespace VsClineAgent.ToolWindows
 
             try
             {
+                SetStatus("LIG VS 사이드카를 준비하는 중입니다. 처음 실행하거나 업데이트한 직후에는 의존성 구성에 시간이 걸릴 수 있습니다...");
+                var sidecarStarted = await _sidecar.EnsureRunningAsync();
+                if (!sidecarStarted)
+                {
+                    ShowError(_sidecar.GetNotRunningMessage());
+                    return false;
+                }
+
                 SetStatus("WebView2 런타임을 준비하는 중입니다...");
                 await System.Windows.Threading.Dispatcher.Yield();
 
@@ -182,14 +202,6 @@ namespace VsClineAgent.ToolWindows
                     throw new InvalidOperationException(
                         "No WebView2 runtime could initialize.\n" + string.Join("\n", initializationFailures));
 
-                SetStatus("LIG VS 사이드카를 시작하는 중입니다...");
-                var sidecarStarted = await _sidecar.EnsureRunningAsync();
-                if (!sidecarStarted)
-                {
-                    ShowError(_sidecar.GetNotRunningMessage());
-                    return;
-                }
-
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(WebviewBootstrapScript.Source);
 
                 webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
@@ -212,9 +224,13 @@ namespace VsClineAgent.ToolWindows
                         webAppDirectory,
                         CoreWebView2HostResourceAccessKind.Allow);
                     webView.CoreWebView2.Navigate("https://vscline.local/index.html");
+                    return true;
                 }
                 else
+                {
                     ShowError($"WebApp not found at:\n{htmlPath}\n\nEnsure WebApp files are included in the VSIX.");
+                    return false;
+                }
             }
             catch (Exception ex)
             {
@@ -224,6 +240,7 @@ namespace VsClineAgent.ToolWindows
                     runtimeLabel,
                     browserExecutableFolder,
                     initializationFailures));
+                return false;
             }
         }
 
@@ -261,8 +278,11 @@ namespace VsClineAgent.ToolWindows
         private static bool ShouldRetryWebView2Initialization(Exception ex)
         {
             return ex.HResult == unchecked((int)0x80131509) ||
+                ex.HResult == unchecked((int)0x80131622) ||
                 ex.Message.IndexOf("pipe", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                ex.Message.IndexOf("파이프", StringComparison.OrdinalIgnoreCase) >= 0;
+                ex.Message.IndexOf("파이프", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                ex.Message.IndexOf("semaphore", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                ex.Message.IndexOf("세마포", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static void ResetDirectory(string directory)

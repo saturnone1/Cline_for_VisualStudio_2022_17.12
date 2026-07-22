@@ -22,24 +22,25 @@ namespace VsClineAgent.Host
                 "VsClineAgent",
                 "WebView2Runtime");
 
-            var detail = string.IsNullOrEmpty(browserExecutableFolder)
-                ? "No bundled WebView2 Fixed Version Runtime was detected."
-                : $"{runtimeLabel ?? "WebView2"} runtime was detected at:\n{browserExecutableFolder}";
+            var packagedRuntime = FindRuntimeFolder(bundledRuntimeRoot);
+            var localRuntime = FindRuntimeFolder(localRuntimeRoot);
+            var detail = !string.IsNullOrEmpty(browserExecutableFolder)
+                ? $"Last attempted runtime ({runtimeLabel ?? "WebView2"}):\n{browserExecutableFolder}"
+                : packagedRuntime != null || localRuntime != null
+                    ? "A Fixed Version Runtime was detected, but the last attempted candidate used the system runtime."
+                    : "No WebView2 Fixed Version Runtime was detected.";
             var failures = initializationFailures.Count == 0
                 ? string.Empty
                 : "\n\nAttempts:\n" + string.Join("\n", initializationFailures);
             var assembly = Assembly.GetExecutingAssembly();
             var assemblyVersion = GetDisplayAssemblyVersion(assembly);
             var assemblyLocation = assembly.Location;
-            var localRuntime = FindRuntimeFolder(localRuntimeRoot) ?? "(none)";
-            var packagedRuntime = FindRuntimeFolder(bundledRuntimeRoot) ?? "(none)";
-
             return
                 $"WebView2 init failed:\n{ex.Message}\nHRESULT: 0x{ex.HResult:X8}\n" +
                 $"VsClineAgent assembly: {assemblyVersion}\n{assemblyLocation}\n\n" +
                 $"{detail}\n\nDetected runtime folders:\n" +
-                $"Packaged: {packagedRuntime}\n" +
-                $"Local: {localRuntime}{failures}\n\n" +
+                $"Packaged: {packagedRuntime ?? "(none)"}\n" +
+                $"Local: {localRuntime ?? "(none)"}{failures}\n\n" +
                 "For air-gapped use, bundle or extract a WebView2 Fixed Version Runtime so msedgewebview2.exe exists under one of these locations:\n" +
                 $"{bundledRuntimeRoot}\\Microsoft.WebView2.FixedVersionRuntime.<version>.x64\\msedgewebview2.exe\n" +
                 $"{localRuntimeRoot}\\Microsoft.WebView2.FixedVersionRuntime.<version>.x64\\msedgewebview2.exe";
