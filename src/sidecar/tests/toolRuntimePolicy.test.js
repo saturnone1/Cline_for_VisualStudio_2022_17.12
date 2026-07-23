@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
 const { createToolPolicies, isStrictPlanModeBlockedTool } = require("../dist/infrastructure/configuration/ProviderConfiguration")
+const { mapToolName, shouldAutoApproveTool } = require("../dist/infrastructure/conversation/ToolCommandFormatting")
 
 test("all SDK default tools remain enabled unless an explicit setting disables them", async () => {
 	const sdk = await import("@cline/sdk")
@@ -35,4 +36,27 @@ test("Plan mode does not restrict tools unless Strict Plan Mode is enabled", () 
 	assert.equal(strictPolicies.use_mcp_server.enabled, true)
 	assert.equal(isStrictPlanModeBlockedTool("editor"), true)
 	assert.equal(isStrictPlanModeBlockedTool("run_commands"), false)
+})
+
+test("browser auto approval also applies to web fetch", () => {
+	const enabled = { enabled: true, actions: { useBrowser: true } }
+	const policies = createToolPolicies(enabled, { disableToolUse: false }, "act")
+	assert.equal(policies.fetch_web_content.autoApprove, true)
+
+	const notApproved = createToolPolicies({ enabled: true, actions: { useBrowser: false } }, { disableToolUse: false }, "act")
+	assert.equal(notApproved.fetch_web_content.autoApprove, false)
+})
+
+test("Yolo mode approves tools and removes the question tool", () => {
+	const policies = createToolPolicies({}, { disableToolUse: false }, "act", false, true)
+	assert.equal(policies["*"].autoApprove, true)
+	assert.equal(policies.fetch_web_content.autoApprove, true)
+	assert.equal(policies.ask_question.enabled, false)
+	assert.equal(shouldAutoApproveTool("run_commands", {}, true), true)
+	assert.equal(shouldAutoApproveTool("ask_question", {}, true), false)
+})
+
+test("generated MCP tool names share the MCP approval category", () => {
+	assert.equal(mapToolName("mcp-vs2022__document_read"), "useMcpServer")
+	assert.equal(shouldAutoApproveTool("mcp-vs2022__document_read", { enabled: true, actions: { useMcp: true } }), true)
 })

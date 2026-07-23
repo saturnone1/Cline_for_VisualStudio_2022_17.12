@@ -84,7 +84,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 	}, [selectedItems, tasks]);
 
 	return (
-		<div className="fixed overflow-hidden inset-0 flex min-w-0 flex-col w-full">
+		<div className="absolute overflow-hidden inset-0 flex min-w-0 flex-col w-full">
 			{/* HEADER */}
 			<ViewHeader environment={environment} onDone={onDone} title={t("history.title")} />
 

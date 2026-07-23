@@ -350,16 +350,16 @@ export function isAutoApprovalSettingsLike(record: Record<string, unknown>) {
 	return "actions" in record || "enabled" in record || "maxRequests" in record || "favorites" in record
 }
 
-export function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}, mode: unknown = "act", strictPlanModeEnabled = false) {
+export function createToolPolicies(autoApprovalSettings: unknown, browserSettings: unknown = {}, mode: unknown = "act", strictPlanModeEnabled = false, yoloMode = false) {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
-	const autoApproveAll = settings.enabled === true
+	const autoApproveAll = settings.enabled === true || yoloMode
 	const webFetchEnabled = isWebFetchEnabled(browserSettings)
-	const readAuto = autoApproveAll && actions.readFiles === true
-	const editAuto = autoApproveAll && actions.editFiles === true
-	const commandAuto = autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
-	const mcpAuto = autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
-	const browserAuto = autoApproveAll && actions.useBrowser === true
+	const readAuto = yoloMode || autoApproveAll && actions.readFiles === true
+	const editAuto = yoloMode || autoApproveAll && actions.editFiles === true
+	const commandAuto = yoloMode || autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
+	const mcpAuto = yoloMode || autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
+	const browserAuto = yoloMode || autoApproveAll && actions.useBrowser === true
 
 	const policy = {
 		readFile: { enabled: true, autoApprove: readAuto },
@@ -382,14 +382,15 @@ export function createToolPolicies(autoApprovalSettings: unknown, browserSetting
 		runCommand: { enabled: true, autoApprove: commandAuto },
 		run_command: { enabled: true, autoApprove: commandAuto },
 		run_commands: { enabled: true, autoApprove: commandAuto },
-		fetch_web_content: { enabled: webFetchEnabled, autoApprove: false },
+		fetch_web_content: { enabled: webFetchEnabled, autoApprove: browserAuto },
 		browser_action: { enabled: webFetchEnabled, autoApprove: browserAuto },
 		browser: { enabled: webFetchEnabled, autoApprove: browserAuto },
-		skills: { enabled: true, autoApprove: false },
+		skills: { enabled: true, autoApprove: yoloMode },
 		useMcpServer: { enabled: true, autoApprove: mcpAuto },
 		use_mcp_server: { enabled: true, autoApprove: mcpAuto },
-		ask_question: { enabled: true, autoApprove: true },
+		ask_question: { enabled: !yoloMode, autoApprove: true },
 		submit_and_exit: { enabled: true, autoApprove: true },
+		"*": { enabled: true, autoApprove: yoloMode },
 	}
 	if (mode === "plan" && strictPlanModeEnabled) {
 		const blockedTools: string[] = []

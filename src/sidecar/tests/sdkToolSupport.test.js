@@ -2,6 +2,7 @@ const assert = require("node:assert/strict")
 const test = require("node:test")
 const { htmlToReadableText, normalizeCommandResultForSdk, normalizeHttpUrl, readPositiveIntEnv } = require("../dist/infrastructure/sdk/SdkToolSupport")
 const { boundToolOutput } = require("../dist/infrastructure/sdk/ClineSdkToolExecutorFactory")
+const { mapToolName, shouldAutoApproveTool } = require("../dist/infrastructure/conversation/ToolCommandFormatting")
 
 test("SDK command results preserve terminal metadata and bound output", () => {
 	const previous = process.env.VSCLINE_SDK_COMMAND_RESULT_CHARS
@@ -23,6 +24,12 @@ test("SDK web support validates URLs and strips non-readable HTML", () => {
 	assert.equal(text.includes("secret"), false)
 	assert.match(text, /Title/)
 	assert.match(text, /A & B/)
+})
+
+test("web fetch shares the browser approval category", () => {
+	assert.equal(mapToolName("fetch_web_content"), "browser_action")
+	assert.equal(shouldAutoApproveTool("fetch_web_content", { enabled: true, actions: { useBrowser: true } }), true)
+	assert.equal(shouldAutoApproveTool("fetch_web_content", { enabled: true, actions: { useBrowser: false } }), false)
 })
 
 test("positive integer environment parsing rejects zero and malformed values", () => {

@@ -1,8 +1,9 @@
 import type { AgentStartRequest } from "../../application/ports/AgentEnginePort"
 
 const DEFAULT_SYSTEM_PROMPT = "You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths."
+export const MCP_AUTO_APPROVE_MARKER = "__ligVsAutoApprove"
 
-export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: string[], extraTools: unknown) {
+export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: string[], sessionExtraTools: unknown) {
 	const cwd = stringValue(request.cwd) || workspaceRoots[0] || process.cwd()
 	const config = asRecord(request.config)
 	const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
@@ -12,6 +13,8 @@ export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: s
 	const sessionMetadata = asRecord(request.sessionMetadata)
 	const baseSystemPrompt = stringValue(request.systemPrompt) || stringValue(config.systemPrompt) || DEFAULT_SYSTEM_PROMPT
 	const systemPrompt = appendCompactedContext(baseSystemPrompt, stringValue(sessionMetadata.ligVsCompactedContext))
+	const projectedExtraTools = projectExtraTools(sessionExtraTools)
+	const extraTools = projectedExtraTools.tools
 	const startInput: any = {
 			config: {
 				...config,
@@ -31,12 +34,27 @@ export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: s
 			prompt: stringValue(request.prompt) || "",
 			interactive: request.interactive !== false,
 			sessionMetadata,
-			toolPolicies: asRecord(request.toolPolicies),
+			toolPolicies: { ...asRecord(request.toolPolicies), ...projectedExtraTools.policies },
 			userImages: userImages.length > 0 ? userImages : undefined,
 			userFiles: userFiles.length > 0 ? userFiles : undefined,
 			initialMessages: initialMessages.length > 0 ? initialMessages : undefined,
 	}
 	return { requestedSessionId, startInput }
+}
+
+function projectExtraTools(value: unknown) {
+	if (!Array.isArray(value)) return { tools: value, policies: {} }
+	const policies: Record<string, unknown> = {}
+	const tools = value.map((entry) => {
+		const tool = asRecord(entry)
+		const { [MCP_AUTO_APPROVE_MARKER]: autoApprove, ...sdkTool } = tool
+		const name = stringValue(sdkTool.name)
+		if (name && autoApprove === true) {
+			policies[name] = { enabled: true, autoApprove: true }
+		}
+		return sdkTool
+	})
+	return { tools, policies }
 }
 
 function appendCompactedContext(basePrompt: string, compactedContext?: string) {

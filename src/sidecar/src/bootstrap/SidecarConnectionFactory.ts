@@ -58,7 +58,7 @@ export function createSidecarConnectionScope(connection: JsonRpcConnection, stat
 	const webview = new VisualStudioWebviewController(backend)
 	const browser = new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000))
 	const runtime = new ClineSdkRuntime(host, __dirname, (event) => webview.handleSdkEvent(event), (request) => webview.requestToolApproval(request), (question, options) => webview.requestQuestion(question, options), () => webview.isScheduledAgentsEnabled(), () => {
-		const tool = createBrowserAgentTool(browser, () => backend.getBrowserSettings())
+		const tool = createBrowserAgentTool(browser, () => backend.getBrowserSettings(), readPositiveIntEnv("VSCLINE_BROWSER_TOOL_TIMEOUT_MS", 30_000))
 		return tool ? [tool] : []
 	})
 	const worktrees = new NodeWorktreeOperationsAdapter(host), worktreeQueries = new WorktreeQueryHandler(worktrees, interactionLogger)

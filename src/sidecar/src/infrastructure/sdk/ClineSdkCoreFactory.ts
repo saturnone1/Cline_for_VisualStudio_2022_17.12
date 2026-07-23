@@ -37,6 +37,7 @@ export async function createClineSdkCore(dependencies: CoreFactoryDependencies):
 		getActiveSessionId: dependencies.getActiveSessionId,
 		onAskQuestion: dependencies.onAskQuestion,
 		onEvent: dependencies.onEvent,
+		log: (event, details) => dependencies.log("debug", event, details),
 	})
 	const core = await sdk.ClineCore.create({
 		clientName: "VsClineAgent",

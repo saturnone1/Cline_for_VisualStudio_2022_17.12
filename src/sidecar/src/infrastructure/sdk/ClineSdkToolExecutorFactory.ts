@@ -17,6 +17,7 @@ type ToolExecutorDependencies = {
 	getActiveSessionId: () => string | null
 	onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>
 	onEvent?: (event: AgentRuntimeEvent) => void
+	log?: (event: string, details: Record<string, unknown>) => void
 }
 
 export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: ToolExecutorDependencies) {
@@ -51,7 +52,7 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 			const commandText = typeof command === "string"
 				? normalizeCommandForPlatform(command, process.platform)
 				: normalizeCommandForPlatform([command.command, ...(command.args || []).map((argument) => normalizeCommandArgumentForPlatform(argument, process.platform))].filter(Boolean).join(" "), process.platform)
-			const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal }).abortSignal
+			const abortSignal = context.signal ?? (context as AgentToolContext & { abortSignal?: AbortSignal }).abortSignal
 			if (abortSignal?.aborted) throw new Error("Command was cancelled before it started.")
 
 			const abortHandler = () => { host.workspaceClient.cancelCommands().catch(() => undefined) }
@@ -74,7 +75,16 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				? typeof promptOrContext === "string" ? promptOrContext : ""
 				: stringValue(urlOrRequest.prompt) || ""
 			const toolContext = (typeof promptOrContext === "object" ? promptOrContext : context) as AgentToolContext | undefined
-			return fetchWebContentForSdk(url, prompt, toolContext)
+			const startedAt = Date.now()
+			dependencies.log?.("webFetch.started", { host: safeUrlHost(url) })
+			try {
+				const result = await fetchWebContentForSdk(url, prompt, toolContext)
+				dependencies.log?.("webFetch.completed", { host: safeUrlHost(url), durationMs: Date.now() - startedAt, resultChars: result.length })
+				return result
+			} catch (error) {
+				dependencies.log?.("webFetch.failed", { host: safeUrlHost(url), durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) })
+				throw error
+			}
 		},
 		editor: async (input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null }, cwd: string, context?: AgentToolContext) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
@@ -167,6 +177,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
 	return typeof value === "string" && value.trim().length > 0 ? value : undefined
+}
+
+function safeUrlHost(value: string) {
+	try { return new URL(value).host }
+	catch { return "invalid" }
 }
 
 export function boundToolOutput(value: string, maxChars: number, label: string, guidance = "") {

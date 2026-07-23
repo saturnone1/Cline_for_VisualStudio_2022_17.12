@@ -50,13 +50,6 @@ const agentFeatures: FeatureToggle[] = [
 		settingKey: "scheduledAgentsEnabled",
 	},
 	{
-		id: "native-tool-call",
-		label: "Native Tool Call",
-		description: "Use native function calling when available",
-		stateKey: "nativeToolCallSetting",
-		settingKey: "nativeToolCallEnabled",
-	},
-	{
 		id: "parallel-tool-calling",
 		label: "Parallel Tool Calling",
 		description: "Execute multiple tool calls simultaneously",
@@ -233,7 +226,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		worktreesEnabled,
 		focusChainSettings,
 		remoteConfigSettings,
-		nativeToolCallSetting,
 		enableParallelToolCalling,
 		backgroundEditEnabled,
 		doubleCheckCompletionEnabled,
@@ -257,7 +249,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 			const labels: Record<string, string> = {
 				subagents: "서브에이전트",
 				"scheduled-agents": "예약 에이전트",
-				"native-tool-call": "네이티브 도구 호출",
 				"parallel-tool-calling": "병렬 도구 호출",
 				"strict-plan-mode": "엄격한 Plan 모드",
 				"auto-compact": "자동 압축(사용량 필요)",
@@ -275,7 +266,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 			const descriptions: Record<string, string> = {
 				subagents: "코드베이스 탐색을 위해 집중 서브에이전트를 병렬로 실행합니다.",
 				"scheduled-agents": "로컬 .cline/cron 사양으로 SDK 작업 영역 자동화를 켭니다.",
-				"native-tool-call": "사용 가능한 경우 네이티브 함수 호출을 사용합니다.",
 				"parallel-tool-calling": "여러 도구 호출을 동시에 실행합니다.",
 				"strict-plan-mode": "Plan 모드에서 파일 편집을 막습니다.",
 				"auto-compact": "신뢰 가능한 컨텍스트 사용량이 있을 때 압축을 요청합니다. 사용량을 보고하지 않는 공급자에서는 사용할 수 없습니다.",
@@ -301,7 +291,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		enableCheckpointsSetting,
 		strictPlanModeEnabled,
 		hooksEnabled,
-		nativeToolCallSetting,
 		focusChainEnabled: focusChainSettings?.enabled,
 		useAutoCondense,
 		subagentsEnabled,

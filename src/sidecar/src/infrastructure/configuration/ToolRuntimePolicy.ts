@@ -6,6 +6,7 @@ type ToolRuntimePolicyDependencies = {
 	browserSettings: () => unknown
 	mode: () => "plan" | "act"
 	strictPlanModeEnabled: () => boolean
+	yoloMode: () => boolean
 	writeWebToolState: (state: Record<string, unknown>) => void
 	logger: InteractionLoggerPort
 }
@@ -16,7 +17,7 @@ export class ToolRuntimePolicy {
 	currentPolicies() {
 		const mode = this.dependencies.mode()
 		const strictPlanModeEnabled = this.dependencies.strictPlanModeEnabled()
-		const policies = createToolPolicies(this.dependencies.autoApprovalSettings(), this.dependencies.browserSettings(), mode, strictPlanModeEnabled)
+		const policies = createToolPolicies(this.dependencies.autoApprovalSettings(), this.dependencies.browserSettings(), mode, strictPlanModeEnabled, this.dependencies.yoloMode())
 		if (mode === "plan") this.dependencies.logger.log("sidecar", "sdkModePolicy.plan", { strictPlanModeEnabled })
 		return policies
 	}

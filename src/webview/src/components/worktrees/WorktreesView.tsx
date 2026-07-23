@@ -71,7 +71,7 @@ const WorktreesView: React.FC<WorktreesViewProps> = ({ onDone }) => {
 	} = controller;
 
 	return (
-		<div className="fixed inset-0 flex flex-col overflow-hidden">
+		<div className="absolute inset-0 flex flex-col overflow-hidden">
 			{/* Sticky Header with title and Done button */}
 			<div className="flex-none flex justify-between items-center px-5 py-3 border-b border-[var(--vscode-panel-border)]">
 				<h3 className="m-0" style={{ color: getEnvironmentColor(environment) }}>

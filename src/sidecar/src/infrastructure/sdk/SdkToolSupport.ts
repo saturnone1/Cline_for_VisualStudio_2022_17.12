@@ -1,5 +1,6 @@
 import type { AgentToolContext } from "@cline/shared"
 import { readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+import { BoundedFetchError, fetchBoundedText } from "../network/BoundedFetch"
 
 export { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
@@ -25,25 +26,20 @@ export async function fetchWebContentForSdk(url: string, prompt: string, context
 	if (!normalizedUrl) throw new Error(`Invalid URL for fetch_web_content: ${url}`)
 	const timeoutMs = readPositiveIntEnv("VSCLINE_WEB_FETCH_TIMEOUT_MS", RUNTIME_DEFAULTS.webFetchTimeoutMs)
 	const maxChars = readPositiveIntEnv("VSCLINE_WEB_FETCH_RESULT_CHARS", 20000)
-	const controller = new AbortController()
-	const abortSignal = (context as AgentToolContext & { abortSignal?: AbortSignal } | undefined)?.abortSignal
-	const abortHandler = () => controller.abort()
-	abortSignal?.addEventListener("abort", abortHandler, { once: true })
-	const timer = setTimeout(() => controller.abort(), timeoutMs)
+	const maximumBytes = readPositiveIntEnv("VSCLINE_WEB_FETCH_MAXIMUM_BYTES", 2_000_000)
+	const abortSignal = context?.signal ?? (context as AgentToolContext & { abortSignal?: AbortSignal } | undefined)?.abortSignal
 	try {
-		const response = await fetch(normalizedUrl, { signal: controller.signal, headers: { Accept: "text/html,text/plain,application/json,application/xml;q=0.8,*/*;q=0.4", "User-Agent": "LIG-VS/1.0 VisualStudio2022" } })
+		const { response, text: raw } = await fetchBoundedText(normalizedUrl, {
+			headers: { Accept: "text/html,text/plain,application/json,application/xml;q=0.8,*/*;q=0.4", "User-Agent": "LIG-VS/1.0 VisualStudio2022" },
+		}, { timeoutMs, maximumBytes, signal: abortSignal })
 		if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
 		const contentType = response.headers.get("content-type") || ""
-		const raw = await response.text()
 		const text = contentType.includes("html") ? htmlToReadableText(raw) : raw
 		const header = [`URL: ${normalizedUrl}`, contentType ? `Content-Type: ${contentType}` : "", prompt ? `Prompt: ${prompt}` : ""].filter(Boolean).join("\n")
 		return truncateText(`${header}\n\n${text.trim()}`, maxChars)
 	} catch (error) {
-		if (error instanceof Error && error.name === "AbortError") throw new Error(`Web fetch timed out after ${Math.round(timeoutMs / 1000)} seconds.`)
+		if (error instanceof BoundedFetchError) throw new Error(`Web fetch failed: ${error.message}`)
 		throw error
-	} finally {
-		clearTimeout(timer)
-		abortSignal?.removeEventListener("abort", abortHandler)
 	}
 }
 

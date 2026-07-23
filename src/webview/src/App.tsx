@@ -77,27 +77,17 @@ const AppContent = () => {
 	return (
 		<div className="flex h-screen w-full flex-col">
 			<BackgroundTaskStatus visible={showSettings || showHistory || showMcp || showAccount || showWorktrees} />
-			<Suspense fallback={<SecondaryViewFallback />}>
-				{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
-				{showHistory && <HistoryView onDone={hideHistory} />}
-				{showMcp && <McpView initialTab={mcpTab} onDone={closeMcpView} />}
-				{showAccount && (
-					<AccountView
-						activeOrganization={activeOrganization}
-						clineUser={clineUser}
-						onDone={hideAccount}
-						organizations={organizations}
-					/>
-				)}
-				{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
-			</Suspense>
-			{/* Do not conditionally load ChatView, it's expensive and there's state we don't want to lose (user input, disableInput, askResponse promise, etc.) */}
-			<ChatView
-				hideAnnouncement={hideAnnouncement}
-				isHidden={showSettings || showHistory || showMcp || showAccount || showWorktrees}
-				showAnnouncement={showAnnouncement}
-				showHistoryView={navigateToHistory}
-			/>
+			<div className="relative min-h-0 flex-1">
+				<Suspense fallback={<SecondaryViewFallback />}>
+					{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
+					{showHistory && <HistoryView onDone={hideHistory} />}
+					{showMcp && <McpView initialTab={mcpTab} onDone={closeMcpView} />}
+					{showAccount && <AccountView activeOrganization={activeOrganization} clineUser={clineUser} onDone={hideAccount} organizations={organizations} />}
+					{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
+				</Suspense>
+				{/* Keep ChatView mounted so drafts and stream state survive secondary navigation. */}
+				<ChatView hideAnnouncement={hideAnnouncement} isHidden={showSettings || showHistory || showMcp || showAccount || showWorktrees} showAnnouncement={showAnnouncement} showHistoryView={navigateToHistory} />
+			</div>
 		</div>
 	)
 }

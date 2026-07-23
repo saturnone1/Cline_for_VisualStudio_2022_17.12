@@ -33,13 +33,18 @@ export class AgentSdkConfigBuilder {
 		const thinking = resolveThinkingEnabled(apiConfig, modePrefix, providerId, reasoningEffort)
 		const contextWindowTokens = resolveConfiguredContextWindow(apiConfig, providerId, modePrefix, modelId)
 		const maxIterations = readOptionalPositiveIntEnv("VSCLINE_MAX_ITERATIONS")
-		const maxParallelToolCalls = readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS")
+		const maxParallelToolCalls = state.enableParallelToolCalling === true ? readOptionalPositiveIntEnv("VSCLINE_MAX_PARALLEL_TOOL_CALLS") : 1
 		const execution = buildOptionalExecutionConfig()
 		const subagentsEnabled = state.subagentsEnabled === true || process.env.VSCLINE_ENABLE_SUBAGENTS === "1"
 		const scheduledAgentsEnabled = this.callbacks.scheduledAgentsEnabled()
 		const preferredLanguage = normalizePreferredLanguage(readString(state.preferredLanguage))
 		const languageInstruction = preferredLanguage === "Korean - 한국어" ? "Reply to the user in Korean unless the user explicitly asks for another language." : "Reply to the user in English unless the user explicitly asks for another language."
-		const modeInstruction = mode === "plan" ? "You are in PLAN mode. Do not modify files, run terminal commands, launch browsers, or perform destructive/external actions. Use read-only inspection only when necessary, ask clarifying questions when the requested change is ambiguous, and return a concrete plan for the user to approve before implementation." : "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
+		const strictPlanMode = state.strictPlanModeEnabled === true
+		const modeInstruction = mode === "plan"
+			? strictPlanMode
+				? "You are in PLAN mode with Strict Plan Mode enabled. Do not modify files. Inspect as needed and return a concrete plan for the user to approve before implementation."
+				: "You are in PLAN mode. Use the tools allowed by the current settings to investigate the request, and return a concrete plan for the user to approve before implementation."
+			: "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
 		const customPrompt = readString(state.customPrompt).trim()
 		const systemPrompt = [`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`, customPrompt ? `Additional user-defined instructions:\n${customPrompt}` : ""].filter(Boolean).join("\n\n")
 		// ContextWindow and CompactSessionFlow own thresholding, confirmation, and durable summaries.

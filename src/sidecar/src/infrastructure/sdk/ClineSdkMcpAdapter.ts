@@ -2,6 +2,7 @@ import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import { readPositiveIntEnv } from "./SdkToolSupport"
 import { callMcpListMethod, getArrayProperty, isToolAutoApproved, normalizeMcpPrompts, normalizeMcpResources, normalizeMcpResourceTemplates, toDisplayMcpConfig, toProtoMcpStatus } from "./McpProjection"
 import { ClineSdkMcpSettingsStore } from "./ClineSdkMcpSettingsStore"
+import { MCP_AUTO_APPROVE_MARKER } from "./SdkSessionRequestBuilder"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 type McpManagerInstance = InstanceType<ClineSdkModule["InMemoryMcpManager"]>
@@ -364,6 +365,7 @@ export class ClineSdkMcpAdapter {
 	private async createMcpExtraTools() {
 		const sdk = await importClineSdk()
 		const manager = await this.ensureMcpManager()
+		const settings = this.settings.load(sdk)
 		const registrations = sdk.resolveMcpServerRegistrations({ filePath: this.settings.resolvePath(sdk) })
 		const tools = []
 		for (const registration of registrations) {
@@ -372,11 +374,23 @@ export class ClineSdkMcpAdapter {
 				continue
 			}
 			try {
+				const serverConfig = settings.mcpServers[registration.name] || {}
+				const createdTools = await sdk.createMcpTools({
+					serverName: registration.name,
+					provider: manager,
+					retryable: false,
+				})
 				tools.push(
-					...(await sdk.createMcpTools({
-						serverName: registration.name,
-						provider: manager,
-					})),
+					...createdTools.map((tool) => {
+						const record = tool as unknown as Record<string, unknown>
+						const generatedName = typeof record.name === "string" ? record.name : ""
+						const prefix = `${registration.name}__`
+						const configuredName = generatedName.startsWith(prefix) ? generatedName.slice(prefix.length) : generatedName
+						return {
+							...record,
+							[MCP_AUTO_APPROVE_MARKER]: isToolAutoApproved(serverConfig, configuredName),
+						}
+					}),
 				)
 				this.sessionToolErrors.delete(registration.name)
 			} catch (error) {

@@ -46,7 +46,7 @@ const AccountView = ({ onDone, clineUser, organizations, activeOrganization }: A
 	const { environment } = useExtensionState()
 
 	return (
-		<div className="fixed inset-0 flex flex-col overflow-hidden">
+		<div className="absolute inset-0 flex flex-col overflow-hidden">
 			<ViewHeader environment={environment} onDone={onDone} showEnvironmentSuffix title="Account" />
 			<div className="grow flex flex-col px-5 overflow-y-auto">
 				{clineUser?.uid ? (

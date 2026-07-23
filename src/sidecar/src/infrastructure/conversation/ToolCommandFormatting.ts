@@ -306,9 +306,10 @@ export function findLastIndex<T>(items: T[], predicate: (item: T) => boolean) {
 	return -1
 }
 
-export function shouldAutoApproveTool(toolName: string, autoApprovalSettings: unknown) {
+export function shouldAutoApproveTool(toolName: string, autoApprovalSettings: unknown, yoloMode = false) {
 	const settings = asRecord(autoApprovalSettings)
 	const actions = asRecord(settings.actions)
+	if (yoloMode) return mapToolName(toolName) !== "ask_question"
 	if (settings.enabled !== true) {
 		return false
 	}
@@ -326,11 +327,15 @@ export function shouldAutoApproveTool(toolName: string, autoApprovalSettings: un
 	if (mapped === "useMcpServer") {
 		return actions.useMcp === true || actions.useMcpServers === true
 	}
+	if (mapped === "browser_action") {
+		return actions.useBrowser === true
+	}
 
 	return false
 }
 
 export function mapToolName(toolName: string) {
+	if (/^[a-z0-9_.-]+__[a-z0-9_.-]+$/i.test(toolName)) return "useMcpServer"
 	switch (toolName) {
 		case "readFile":
 		case "read_file":
@@ -356,6 +361,11 @@ export function mapToolName(toolName: string) {
 		case "run_command":
 		case "run_commands":
 			return "executeCommand"
+		case "webFetch":
+		case "fetch_web_content":
+		case "browser":
+		case "browser_action":
+			return "browser_action"
 		case "use_mcp_server":
 		case "useMcpServer":
 			return "useMcpServer"

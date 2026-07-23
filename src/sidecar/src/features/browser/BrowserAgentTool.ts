@@ -1,7 +1,7 @@
 import type { BrowserHandler, BrowserSettings } from "./BrowserHandler"
 import { screenshotByteLength } from "./BrowserPolicy"
 
-export function createBrowserAgentTool(browser: BrowserHandler, settings: () => BrowserSettings) {
+export function createBrowserAgentTool(browser: BrowserHandler, settings: () => BrowserSettings, timeoutMs = 30_000) {
 	if (settings().disableToolUse) return undefined
 	return {
 		name: "browser_action",
@@ -19,7 +19,7 @@ export function createBrowserAgentTool(browser: BrowserHandler, settings: () => 
 			required: ["action"],
 			additionalProperties: false,
 		},
-		timeoutMs: 30_000,
+		timeoutMs,
 		execute: async (input: unknown) => compactBrowserAgentResult(await browser.performAction(input, settings())),
 	}
 }

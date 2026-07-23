@@ -3,7 +3,7 @@ import React, { forwardRef, HTMLAttributes, useCallback } from "react"
 type TabProps = HTMLAttributes<HTMLDivElement>
 
 export const Tab = ({ className, children, ...props }: TabProps) => (
-	<div className={`fixed inset-0 flex flex-col ${className}`} {...props}>
+	<div className={`absolute inset-0 flex flex-col ${className}`} {...props}>
 		{children}
 	</div>
 )

@@ -33,6 +33,11 @@ export class SettingsMutationHandler {
 			this.callbacks.refreshWebTools()
 			runtimeSettingsChanged = true
 		}
+		if (typeof request.clineWebToolsEnabled === "boolean") {
+			state.browserSettings = { ...asRecord(state.browserSettings), disableToolUse: request.clineWebToolsEnabled !== true }
+			this.callbacks.refreshWebTools()
+			runtimeSettingsChanged = true
+		}
 		if ("focusChainSettings" in request) state.focusChainSettings = { ...asRecord(state.focusChainSettings), ...asRecord(request.focusChainSettings) }
 		if ("mcpDisplayMode" in request) state.mcpDisplayMode = normalizeMcpDisplayMode(request.mcpDisplayMode, readString(state.mcpDisplayMode))
 		for (const key of SIMPLE_SETTING_KEYS) {
@@ -40,6 +45,7 @@ export class SettingsMutationHandler {
 			state[key === "nativeToolCallEnabled" ? "nativeToolCallSetting" : key] = request[key]
 			if (isRuntimeSettingsKey(key)) runtimeSettingsChanged = true
 		}
+		if (request.yoloModeToggled === true) state.mode = "act"
 		if ("apiConfigurationProfiles" in request) {
 			state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(request.apiConfigurationProfiles, asRecord(state.apiConfiguration), state.planActSeparateModelsSetting === true)
 			runtimeSettingsChanged = true

@@ -3,7 +3,7 @@ const test = require("node:test")
 const { buildSdkStartInput, normalizeAgentMode } = require("../dist/infrastructure/sdk/SdkSessionRequestBuilder")
 
 test("SDK start request builder translates product configuration at one boundary", () => {
-	const extraTools = [{ name: "mcp_tool" }]
+	const extraTools = [{ name: "mcp_tool", __ligVsAutoApprove: true }]
 	const { requestedSessionId, startInput } = buildSdkStartInput({
 		prompt: "inspect",
 		cwd: "",
@@ -26,7 +26,8 @@ test("SDK start request builder translates product configuration at one boundary
 	assert.equal(startInput.config.cwd, "C:\\workspace")
 	assert.equal(startInput.config.mode, "plan")
 	assert.equal(startInput.config.enableSpawnAgent, true)
-	assert.equal(startInput.config.extraTools, extraTools)
+	assert.deepEqual(startInput.config.extraTools, [{ name: "mcp_tool" }])
+	assert.deepEqual(startInput.toolPolicies.mcp_tool, { enabled: true, autoApprove: true })
 	assert.equal(startInput.interactive, false)
 	assert.deepEqual(startInput.userImages, ["image.png"])
 	assert.deepEqual(startInput.initialMessages, [{ role: "user", content: "previous" }])
