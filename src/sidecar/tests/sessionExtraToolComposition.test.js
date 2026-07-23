@@ -20,11 +20,13 @@ test("MCP setup failure does not block host tools or the conversation session", 
 test("session extra tools combine available MCP and host tools", async () => {
 	const mcpTool = { name: "mcp_tool" }
 	const hostTool = { name: "document_read" }
+	const productTool = { name: "ask_user" }
 	const tools = await createSessionExtraTools({
 		loadMcpTools: async () => [mcpTool],
 		loadHostTools: () => [hostTool],
+		loadProductTools: () => [productTool],
 		log: () => undefined,
 	})
 
-	assert.deepEqual(tools, [mcpTool, hostTool])
+	assert.deepEqual(tools, [mcpTool, hostTool, productTool])
 })

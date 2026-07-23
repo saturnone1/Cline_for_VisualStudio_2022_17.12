@@ -51,6 +51,7 @@ namespace VsClineAgent.ToolWindows
 		private readonly CancellationTokenSource _diagnosticCancellation = new CancellationTokenSource();
         private bool _loaded;
         private bool _initializing;
+        private int _webviewHydrated;
         private bool _initialized;
         internal bool IsDisposed => _lifetime.IsDisposed;
 
@@ -328,6 +329,11 @@ namespace VsClineAgent.ToolWindows
             }
 
             _webviewMessages.SetReady(false);
+            Volatile.Write(ref _webviewHydrated, 0);
+			_loadingPresenter.StartAnimation();
+			SetStatus("LIG VS를 준비하는 중입니다...");
+			loadingPanel.Visibility = Visibility.Visible;
+			webView.Visibility = Visibility.Collapsed;
         }
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -358,20 +364,9 @@ namespace VsClineAgent.ToolWindows
                 }
 
                 _webviewMessages.SetReady(true);
-				_loadingPresenter.StopAnimation();
-                if (Dispatcher.CheckAccess())
-                {
-                    loadingPanel.Visibility = Visibility.Collapsed;
-                    webView.Visibility = Visibility.Visible;
-                }
-                else
-                {
-                    await VisualStudioUiThread.InvokeAsync(() =>
-                    {
-                        loadingPanel.Visibility = Visibility.Collapsed;
-                        webView.Visibility = Visibility.Visible;
-                    });
-                }
+				SetStatus("홈 화면을 준비하는 중입니다...");
+				if (Volatile.Read(ref _webviewHydrated) != 0)
+					await RevealHydratedWebViewAsync();
 
 				_ = _sidecar.WarmSdkAsync(_diagnosticCancellation.Token);
 				await ReportBlankWebviewIfNeededAsync(_diagnosticCancellation.Token);
@@ -396,6 +391,8 @@ namespace VsClineAgent.ToolWindows
                 InteractionLog.Write("webview->host", "webview.message", webMessageAsJson);
 				if (TryHandleThemePreference(webMessageAsJson))
 					return;
+                if (TryHandleWebViewLifecycle(webMessageAsJson))
+                    return;
                 if (TryHandleHostDiagnostic(webMessageAsJson))
                     return;
 
@@ -418,7 +415,7 @@ namespace VsClineAgent.ToolWindows
                 var handledBySidecar = await _sidecar.TryHandleWebviewMessageAsync(
                     webMessageAsJson,
                     SendToWebViewAsync,
-                    CancellationToken.None);
+                    _diagnosticCancellation.Token);
 
                 if (!handledBySidecar)
                     await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, "Unhandled WebView RPC. The VSIX wrapper only routes through the LIG VS SDK sidecar."));
@@ -473,6 +470,29 @@ namespace VsClineAgent.ToolWindows
             }
         }
 
+        private bool TryHandleWebViewLifecycle(string rawJson)
+        {
+            if (!WebViewLifecycleMessage.IsHydrated(rawJson))
+                return false;
+
+            Volatile.Write(ref _webviewHydrated, 1);
+            _ = RevealHydratedWebViewAsync();
+            return true;
+        }
+
+        private async Task RevealHydratedWebViewAsync()
+        {
+            void Reveal()
+            {
+				_loadingPresenter.StopAnimation();
+                loadingPanel.Visibility = Visibility.Collapsed;
+                webView.Visibility = Visibility.Visible;
+            }
+
+            if (Dispatcher.CheckAccess()) Reveal();
+            else await VisualStudioUiThread.InvokeAsync(Reveal);
+        }
+
 		private async Task ReportBlankWebviewIfNeededAsync(CancellationToken cancellationToken)
         {
             try
@@ -514,6 +534,15 @@ namespace VsClineAgent.ToolWindows
 })()");
                 var json = JsonConvert.DeserializeObject<string>(result) ?? "{}";
                 var state = JObject.Parse(json);
+                if (Volatile.Read(ref _webviewHydrated) == 0)
+                {
+                    ShowError(HostDiagnosticReport.Create(
+                        "WebApp loaded but initial state hydration did not complete.",
+                        "The native loading screen remained visible because the WebApp did not confirm its initial StateService snapshot.",
+                        state,
+                        CreateDiagnosticContext()));
+                    return;
+                }
                 if (state.Value<bool?>("rootExists") == true &&
                     state.Value<int?>("rootHtmlLength") == 0 &&
                     state.Value<int?>("bodyTextLength") == 0)
@@ -574,7 +603,7 @@ namespace VsClineAgent.ToolWindows
             if (Dispatcher.CheckAccess())
                 ApplyError();
             else
-                VisualStudioUiThread.Post(ApplyError);
+                _ = VisualStudioUiThread.PostAsync(ApplyError);
         }
 
         private HostDiagnosticContext CreateDiagnosticContext()

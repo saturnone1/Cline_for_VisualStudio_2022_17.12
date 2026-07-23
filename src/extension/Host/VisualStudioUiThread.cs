@@ -6,14 +6,14 @@ namespace VsClineAgent.Host
 {
     internal static class VisualStudioUiThread
     {
-        public static void Post(Action action)
+        public static Task PostAsync(Action action)
         {
             if (action == null) throw new ArgumentNullException(nameof(action));
-            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            return ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 action();
-            });
+            }).Task;
         }
 
         public static Task InvokeAsync(Action action)

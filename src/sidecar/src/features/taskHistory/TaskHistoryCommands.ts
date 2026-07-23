@@ -27,17 +27,17 @@ export class TaskHistoryCommands {
 	async delete(taskIds: readonly string[]) {
 		const ids = new Set(taskIds.filter(Boolean))
 		if (!ids.size) return
+		const deletedIds = new Set<string>()
 		for (const id of ids) {
+			const deleted = await this.deleteRemote(id, "deleteSessionFailed")
+			if (!deleted) continue
+			deletedIds.add(id)
 			this.callbacks.markDeleted(id)
-			const deleted = await this.callbacks.deleteRemote(id).catch((error) => {
-				this.callbacks.log("deleteSessionFailed", { sessionId: id, error: stringify(error) })
-				return false
-			})
-			this.callbacks.log("deleteSessionRequested", { sessionId: id, deleted })
 			this.callbacks.forgetSnapshot(id)
+			this.callbacks.log("deleteSessionRequested", { sessionId: id, deleted: true })
 		}
 		this.callbacks.writeHistory(this.callbacks.removeDeleted(this.callbacks.readHistory()))
-		if (ids.has(taskId(this.callbacks.readCurrentTask()))) this.clearSelectedTask("deleteTasks")
+		if (deletedIds.has(taskId(this.callbacks.readCurrentTask()))) this.clearSelectedTask("deleteTasks")
 		this.callbacks.persist()
 	}
 
@@ -47,18 +47,28 @@ export class TaskHistoryCommands {
 			this.callbacks.log("deleteAllListHistoryFailed", { error: stringify(error) })
 			return []
 		})) ids.add(id)
+		const deletedIds = new Set<string>()
 		for (const id of ids) {
+			const deleted = await this.deleteRemote(id, "deleteAllSessionFailed")
+			if (!deleted) continue
+			deletedIds.add(id)
 			this.callbacks.markDeleted(id)
-			await this.callbacks.deleteRemote(id).catch((error) => {
-				this.callbacks.log("deleteAllSessionFailed", { sessionId: id, error: stringify(error) })
-				return false
-			})
+			this.callbacks.forgetSnapshot(id)
 		}
-		this.callbacks.clearSnapshots()
-		this.callbacks.writeHistory([])
-		if (ids.has(taskId(this.callbacks.readCurrentTask()))) this.clearSelectedTask("deleteAllTasks")
+		this.callbacks.writeHistory(this.callbacks.removeDeleted(this.callbacks.readHistory()))
+		if (deletedIds.has(taskId(this.callbacks.readCurrentTask()))) this.clearSelectedTask("deleteAllTasks")
 		if (!this.callbacks.readCurrentTask()) this.callbacks.clearMessages()
 		this.callbacks.persist()
+	}
+
+	private async deleteRemote(taskIdValue: string, failureEvent: string) {
+		try {
+			await this.callbacks.deleteRemote(taskIdValue)
+			return true
+		} catch (error) {
+			this.callbacks.log(failureEvent, { sessionId: taskIdValue, error: stringify(error) })
+			return false
+		}
 	}
 
 	async toggleFavorite(taskIdValue: string, isFavorited: boolean) {

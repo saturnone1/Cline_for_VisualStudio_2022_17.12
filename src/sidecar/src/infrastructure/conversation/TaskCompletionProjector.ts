@@ -38,12 +38,20 @@ export class TaskCompletionProjector {
 	}
 
 	finish(sessionId: string, status: string, text = "") {
-		this.callbacks.transition(terminalTaskOutcome(status) === "failed" ? "failed" : "completed", `finish:${status || "completed"}`)
-		this.callbacks.clearFinishStatus()
 		const activeText = text || this.callbacks.activeText()
-		this.callbacks.finishProgress()
 		const hasAssistant = this.hasAssistantAfterLastUser(), hasFinalAssistant = this.hasAssistantAfterLastBoundary()
+		const outcome = terminalTaskOutcome(status)
+		const toolSummaries = this.callbacks.recentToolSummaries()
+		if (outcome !== "failed" && outcome !== "cancelled" && !activeText && !hasFinalAssistant && toolSummaries.length === 0) {
+			this.callbacks.log("terminalWithoutCompletionEvidence", { status, hasAssistant, lastTaskActivityReason: this.callbacks.lastActivityReason() })
+			this.fail(sessionId, this.callbacks.language() === "ko" ? "모델 실행이 최종 응답이나 확인 가능한 작업 결과 없이 종료되었습니다." : "The model run ended without a final response or verifiable task result.")
+			return
+		}
+		this.callbacks.transition(outcome === "failed" ? "failed" : "completed", `finish:${status || "completed"}`)
+		this.callbacks.clearFinishStatus()
+		this.callbacks.finishProgress()
 		if (activeText) this.addAssistantText(activeText)
+		else if (!hasFinalAssistant && toolSummaries.length > 0) this.addAssistantText(this.terminalFallback(status, toolSummaries))
 		else if (!hasAssistant) {
 			this.callbacks.log("emptyDoneNoFinalAssistantText", { status, lastTaskActivityReason: this.callbacks.lastActivityReason() })
 		} else if (!hasFinalAssistant) this.callbacks.log("doneWithPreviousAssistantTextNoFinalText", { status, lastTaskActivityReason: this.callbacks.lastActivityReason() })
@@ -77,8 +85,8 @@ export class TaskCompletionProjector {
 	hasCompletionAfterLastUser() { return this.callbacks.messages().slice(this.lastUserIndex() + 1).some((message) => readString(message.say) === "completion_result" || readString(message.ask) === "completion_result") }
 	hasAssistantAfterLastUser() { return this.callbacks.messages().slice(this.lastUserIndex() + 1).some(isFinalAssistant) }
 
-	terminalFallback(status: string) {
-		const summary = this.callbacks.recentToolSummaries().join("\n"), outcome = terminalTaskOutcome(status), korean = this.callbacks.language() === "ko"
+	terminalFallback(status: string, summaries = this.callbacks.recentToolSummaries()) {
+		const summary = summaries.join("\n"), outcome = terminalTaskOutcome(status), korean = this.callbacks.language() === "ko"
 		const heading = outcome === "failed"
 			? korean ? "작업이 오류 상태로 종료되었습니다." : "Task ended with an error."
 			: outcome === "stalled"

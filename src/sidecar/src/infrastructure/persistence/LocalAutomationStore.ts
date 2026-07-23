@@ -3,6 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { buildScheduledAgentSpec, getScheduledSpecId, markdownBodyAfterFrontMatter, parseLooseKeyValueSpec, prependScheduledRun, safeFileStem } from "../../features/scheduledAgents/ScheduledAgentPolicy"
 import type { ScheduledAgentSpecInput } from "../../application/ports/ScheduledAgentStorePort"
+import { writeJsonAtomicSync } from "./AtomicFile"
 
 export function getSettingsPath() {
 	return path.join(getSettingsRoot(), "settings.json")
@@ -112,7 +113,7 @@ export function writeScheduledAgentSpec(workspaceRoot: string, request: Schedule
 	const filePath = path.join(directory, `${specId}.json`)
 	const existing = fs.existsSync(filePath) ? asRecord(tryParseJson(fs.readFileSync(filePath, "utf8")) ?? {}) : {}
 	const spec = buildScheduledAgentSpec(existing, request, specId, new Date().toISOString())
-	fs.writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf8")
+	writeJsonAtomicSync(filePath, spec)
 	return scheduledSpecFromFile(filePath, workspaceRoot) || { ...spec, filePath }
 }
 
@@ -141,8 +142,7 @@ export function readScheduledAgentRuns() {
 export function appendScheduledAgentRun(run: Record<string, unknown>) {
 	const runs = prependScheduledRun(readScheduledAgentRuns(), run, `scheduled-${createId()}`)
 	const entry = runs[0]
-	fs.mkdirSync(path.dirname(getSidecarDataPath("scheduled-runs.json")), { recursive: true })
-	fs.writeFileSync(getSidecarDataPath("scheduled-runs.json"), JSON.stringify(runs, null, 2), "utf8")
+	writeJsonAtomicSync(getSidecarDataPath("scheduled-runs.json"), runs)
 	return entry
 }
 

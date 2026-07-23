@@ -7,10 +7,12 @@ function createAdapter(coreOverrides = {}, adapterOverrides = {}) {
 	let getCoreCalls = 0
 	const calls = []
 	const core = {
-		start: async (request) => { calls.push(["start", request]); return { sessionId: "started-session" } },
+		start: async (request) => { calls.push(["start", request]); return { sessionId: "started-session", manifest: { status: "idle" } } },
+		get: async (sessionId) => { calls.push(["get", sessionId]); return { sessionId, status: "idle" } },
 		send: async (request) => { calls.push(["send", request]); return { accepted: true } },
 		stop: async (sessionId) => { calls.push(["stop", sessionId]) },
 		abort: async (sessionId) => { calls.push(["abort", sessionId]) },
+		subscribe: () => () => undefined,
 		delete: async (sessionId) => { calls.push(["delete", sessionId]); return true },
 		...coreOverrides,
 	}
@@ -58,21 +60,44 @@ test("SDK session adapter owns start and send session transitions", async () => 
 	}])
 })
 
-test("SDK session adapter compacts into a fresh session and removes the source transcript", async () => {
+test("SDK session adapter creates and validates a fresh session without deleting the source", async () => {
 	const fixture = createAdapter()
 	const result = await fixture.adapter.compact({ sourceSessionId: "source", cwd: "C:\\workspace", initialMessages: [{ role: "user", content: "summary" }], config: { sessionId: "source", providerId: "test" }, toolPolicies: {} })
 	assert.equal(result.sessionId, "started-session")
-	assert.equal(result.sourceSessionDeleted, true)
+	assert.equal(result.sourceSessionDeleted, false)
 	assert.equal(fixture.getActiveSessionId(), "started-session")
 	assert.equal(fixture.calls[0][1].config.sessionId, undefined)
-	assert.equal(fixture.calls[0][1].prompt, "")
+	assert.equal("prompt" in fixture.calls[0][1], false)
 	assert.equal(fixture.calls[0][1].initialMessages, undefined)
 	assert.match(fixture.calls[0][1].config.systemPrompt, /<lig-vs-compacted-context>/)
 	assert.match(fixture.calls[0][1].config.systemPrompt, /model-generated summary/)
 	assert.match(fixture.calls[0][1].sessionMetadata.ligVsCompactedContext, /model-generated summary/)
 	assert.match(result.compactionSummary, /model-generated summary/)
 	assert.ok(result.estimatedTokensAfter > 0)
-	assert.deepEqual(fixture.calls.slice(1), [["stop", "source"], ["delete", "source"]])
+	assert.deepEqual(fixture.calls.slice(1), [])
+})
+
+test("SDK session adapter accepts a created replacement independently of its runtime status", async () => {
+	const fixture = createAdapter({
+		start: async (request) => {
+			fixture.calls.push(["start", request])
+			return { sessionId: "busy-replacement", manifest: { status: "running" } }
+		},
+	})
+
+	const result = await fixture.adapter.compact({ sourceSessionId: "source", cwd: "C:\\workspace", initialMessages: [{ role: "user", content: "summary" }], config: { providerId: "test" }, toolPolicies: {} })
+	assert.equal(result.sessionId, "busy-replacement")
+	assert.equal(fixture.getActiveSessionId(), "busy-replacement")
+	assert.deepEqual(fixture.calls.slice(1), [])
+})
+
+test("SDK session adapter rejects an invalid replacement before touching the source", async () => {
+	const fixture = createAdapter({ start: async (request) => { fixture.calls.push(["start", request]); return { sessionId: "" } } })
+	await assert.rejects(
+		() => fixture.adapter.compact({ sourceSessionId: "source", cwd: "C:\\workspace", initialMessages: [{ role: "user", content: "summary" }], config: { providerId: "test" }, toolPolicies: {} }),
+		/valid replacement session/,
+	)
+	assert.deepEqual(fixture.calls.slice(1), [])
 })
 
 test("SDK session adapter preserves the source session when model summarization fails", async () => {

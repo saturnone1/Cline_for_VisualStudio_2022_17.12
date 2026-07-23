@@ -43,6 +43,10 @@ export function toolTranscriptToActivityEntries(text: string): ToolActivityEntry
 		const result = resultMatch[1].trim()
 		const parsed = tryParseJson(result)
 		const parsedRecord = asRecord(parsed)
+		const browserResult = browserActivityLabel(parsedRecord, true)
+		if (browserResult) {
+			return [{ kind: "tool", label: browserResult }]
+		}
 		const query = getString(parsedRecord, "query")
 		if (looksLikeCommandText(query)) {
 			return [{ kind: "command", label: summarizeCommandLabel(parsed ?? result) || query }]
@@ -65,6 +69,10 @@ export function toolTranscriptToActivityEntries(text: string): ToolActivityEntry
 
 	const mappedTool = mapToolName(toolMatch[1].trim())
 	const body = toolMatch[2].trim()
+	if (mappedTool === "browser_action") {
+		const browserInput = browserActivityLabel(asRecord(tryParseJson(body)), false)
+		return [{ kind: "tool", label: browserInput || "Browser action" }]
+	}
 	if (mappedTool === "searchFiles") {
 		return body ? [{ kind: "search", label: body, detail: "/" }] : []
 	}
@@ -76,6 +84,17 @@ export function toolTranscriptToActivityEntries(text: string): ToolActivityEntry
 	}
 	return body ? [{ kind: "tool", label: `${toolMatch[1].trim()}: ${body}` }] : [{ kind: "tool", label: toolMatch[1].trim() }]
 }
+
+function browserActivityLabel(value: Record<string, unknown>, completed: boolean) {
+	const action = getString(value, "action")
+	const sessionId = getString(value, "browserSessionId")
+	if (!action || (!sessionId && !BROWSER_ACTIONS.has(action))) return ""
+	const target = getString(value, "title") || getString(value, "currentUrl") || getString(value, "url")
+	const status = getString(value, "status")
+	return [completed ? `Browser ${action} ${status || "completed"}` : `Browser ${action}`, target].filter(Boolean).join(": ")
+}
+
+const BROWSER_ACTIONS = new Set(["launch", "navigate", "screenshot", "click", "type", "press_enter", "scroll_down", "scroll_up", "close"])
 
 export function buildGroupedToolActivityText(entries: ToolActivityEntry[], running: boolean, language: "en" | "ko" = "ko") {
 	const files = uniqueStrings(entries.filter((entry) => entry.kind === "file").map((entry) => entry.label))

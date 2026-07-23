@@ -1,3 +1,5 @@
+import { browserActionResultTextForSnapshot } from "../../features/browser/BrowserPolicy"
+
 export const TRANSCRIPT_SNAPSHOT_LIMITS = Object.freeze({
 	currentMessages: 600,
 	snapshotMessages: 300,
@@ -43,6 +45,10 @@ function selectMessages(messages: unknown[], limit: number) {
 function normalizeMessage(value: unknown) {
 	const message = { ...asRecord(value) }
 	for (const key of ["text", "reasoning"] as const) {
+		if (key === "text" && message.say === "browser_action_result" && typeof message[key] === "string") {
+			message[key] = browserActionResultTextForSnapshot(message[key])
+			continue
+		}
 		if (typeof message[key] === "string" && message[key].length > TRANSCRIPT_SNAPSHOT_LIMITS.messageTextChars) {
 			message[key] = `${message[key].slice(0, TRANSCRIPT_SNAPSHOT_LIMITS.messageTextChars)}\n[truncated in LIG VS transcript snapshot]`
 		}

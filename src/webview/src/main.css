@@ -123,9 +123,9 @@ body {
 }
 
 :root[data-vscline-theme="light"] {
-	--lig-bg: color-mix(in srgb, var(--vscode-editor-background, #ffffff) 92%, #dbeafe);
-	--lig-panel: color-mix(in srgb, var(--vscode-sideBar-background, #f3f6fb) 88%, #ffffff);
-	--lig-panel-raised: color-mix(in srgb, var(--vscode-editorWidget-background, #ffffff) 90%, #e2e8f0);
+	--lig-bg: color-mix(in srgb, var(--vscode-editor-background, #f5f6f7) 82%, #d7dce2);
+	--lig-panel: color-mix(in srgb, var(--vscode-sideBar-background, #eef1f4) 84%, #d9dee4);
+	--lig-panel-raised: color-mix(in srgb, var(--vscode-editorWidget-background, #f7f8f9) 76%, #dce1e6);
 	--lig-panel-soft: color-mix(in srgb, var(--vscode-toolbar-hoverBackground, #e2e8f0) 82%, transparent);
 	--lig-border: color-mix(in srgb, var(--vscode-panel-border, #cbd5e1) 88%, transparent);
 	--lig-border-strong: color-mix(in srgb, var(--vscode-focusBorder, #0969da) 48%, var(--lig-border));
@@ -134,14 +134,14 @@ body {
 	--lig-accent-muted: color-mix(in srgb, var(--lig-accent) 12%, transparent);
 	--lig-warning-muted: color-mix(in srgb, var(--vscode-editorWarning-foreground, #9a6700) 12%, transparent);
 	--lig-text-muted: color-mix(in srgb, var(--vscode-foreground) 74%, transparent);
-	--lig-message-background: color-mix(in srgb, var(--lig-panel) 72%, #ffffff);
-	--lig-user-message-background: color-mix(in srgb, var(--lig-accent-2) 11%, #ffffff);
+	--lig-message-background: color-mix(in srgb, var(--lig-panel) 76%, var(--lig-panel-raised));
+	--lig-user-message-background: color-mix(in srgb, var(--lig-accent-2) 10%, var(--lig-panel-raised));
 	--lig-user-message-border: color-mix(in srgb, var(--lig-accent-2) 52%, var(--lig-border));
 	--lig-user-message-foreground: var(--vscode-foreground);
 	--lig-code-background: color-mix(in srgb, var(--vscode-textCodeBlock-background, #f3f5f7) 82%, #e7ebf0);
 	--lig-code-border: color-mix(in srgb, var(--vscode-foreground) 24%, var(--lig-border));
-	--lig-quote-background: color-mix(in srgb, var(--lig-accent-2) 7%, #ffffff);
-	--lig-table-header-background: color-mix(in srgb, var(--lig-accent-2) 11%, #ffffff);
+	--lig-quote-background: color-mix(in srgb, var(--lig-accent-2) 7%, var(--lig-panel-raised));
+	--lig-table-header-background: color-mix(in srgb, var(--lig-accent-2) 11%, var(--lig-panel-raised));
 	--lig-mode-active-background: #111827;
 	--lig-mode-active-foreground: #ffffff;
 	--lig-shadow: 0 10px 24px rgba(31, 35, 40, 0.1);
@@ -739,7 +739,10 @@ vscode-dropdown::part(listbox) {
 	transition: none !important;
 }
 .lig-background-task-status {
+	position: relative;
+	z-index: 30;
 	display: flex;
+	flex: 0 0 auto;
 	align-items: center;
 	gap: 8px;
 	min-height: 34px;

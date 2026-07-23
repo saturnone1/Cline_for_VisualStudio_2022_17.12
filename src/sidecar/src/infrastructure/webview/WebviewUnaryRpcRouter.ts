@@ -63,13 +63,13 @@ export class WebviewUnaryRpcRouter {
 	constructor(private readonly dependencies: Dependencies) {
 		const d = dependencies
 		this.routes = {
-			settings: async (key, requestId, message) => {
+			settings: async (key, requestId, message, signal) => {
 				const command = decodeSettingsRpcCommand(key, message)
-				return command ? this.withOptionalState(requestId, await d.settings.handle(command)) : null
+				return command ? this.withOptionalState(requestId, await d.settings.handle(command, signal)) : null
 			},
-			account: async (key, requestId, message) => {
+			account: async (key, requestId, message, signal) => {
 				const command = decodeAccountRpcCommand(key, message)
-				return command ? this.withOptionalState(requestId, await d.account.handle(command)) : null
+				return command ? this.withOptionalState(requestId, await d.account.handle(command, signal)) : null
 			},
 			browser: async (key, requestId, message) => {
 				const command = decodeBrowserRpcCommand(key, message)
@@ -83,31 +83,31 @@ export class WebviewUnaryRpcRouter {
 				const command = decodeTaskRpcCommand(key, message)
 				return command ? this.withOptionalState(requestId, await d.task.handle(command, requestId, signal)) : null
 			},
-			checkpoint: async (key, requestId, message) => {
+			checkpoint: async (key, requestId, message, signal) => {
 				const command = decodeCheckpointRpcCommand(key, message)
-				return command ? this.withOptionalState(requestId, await d.checkpoint.handle(command)) : null
+				return command ? this.withOptionalState(requestId, await d.checkpoint.handle(command, signal)) : null
 			},
 			hook: async (key, requestId, message) => {
 				const command = decodeHookRpcCommand(key, message)
 				return command ? grpcHandled(grpcResponse(requestId, await d.hook.handle(command), false)) : null
 			},
-			scheduledAgent: async (key, requestId, message) => {
+			scheduledAgent: async (key, requestId, message, signal) => {
 				const command = decodeScheduledAgentRpcCommand(key, message)
-				return command ? this.withOptionalState(requestId, await d.scheduledAgent.handle(command)) : null
+				return command ? this.withOptionalState(requestId, await d.scheduledAgent.handle(command, signal)) : null
 			},
 			worktree: async (key, requestId, message) => {
 				const command = decodeWorktreeRpcCommand(key, message)
 				return command ? grpcHandled(grpcResponse(requestId, await d.worktree.handle(command), false)) : null
 			},
-			mcp: (key, requestId, message) => this.handleMcp(key, requestId, message),
+			mcp: (key, requestId, message, signal) => this.handleMcp(key, requestId, message, signal),
 			modelCatalog: async (key, requestId, message, signal) => {
 				const command = decodeModelCatalogRpcCommand(key, message)
 				return command ? grpcHandled(grpcResponse(requestId, await d.modelCatalog.handle(command, signal), false)) : null
 			},
 			file: (key, requestId, message) => this.handleFile(key, requestId, message),
-			instructionSettings: async (key, requestId, message) => {
+			instructionSettings: async (key, requestId, message, signal) => {
 				const command = decodeInstructionSettingsRpcCommand(key, message)
-				return command ? grpcHandled(grpcResponse(requestId, await d.instructionSettings.handle(command), false)) : null
+				return command ? grpcHandled(grpcResponse(requestId, await d.instructionSettings.handle(command, signal), false)) : null
 			},
 			uiWeb: async (key, requestId, message) => {
 				const command = decodeUiWebRpcCommand(key, message)
@@ -146,12 +146,14 @@ export class WebviewUnaryRpcRouter {
 	}
 
 	private executeControl<T>(action: () => Promise<T>, signal: AbortSignal, requestId: string) {
+		let started = false
 		const execution = this.controlTail.then(async () => {
 			if (signal.aborted) throw new WebviewRpcRequestCancelledError(requestId)
+			started = true
 			return action()
 		})
 		this.controlTail = execution.then(() => undefined, () => undefined)
-		return raceWithAbort(execution, signal, requestId)
+		return waitForControlExecution(execution, signal, requestId, () => started)
 	}
 
 	cancel(requestId: string) {
@@ -161,10 +163,10 @@ export class WebviewUnaryRpcRouter {
 		return true
 	}
 
-	private async handleMcp(key: string, requestId: string, message: unknown) {
+	private async handleMcp(key: string, requestId: string, message: unknown, signal: AbortSignal) {
 		const command = decodeMcpRpcCommand(key, message)
 		if (!command) return null
-		const result = await this.dependencies.mcp.handle(command)
+		const result = await this.dependencies.mcp.handle(command, signal)
 		if (result.error) return grpcHandled(grpcError(requestId, result.error, false))
 		return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.publishToStreams ? this.dependencies.mcpStreamMessages(result.payload) : []))
 	}
@@ -191,14 +193,16 @@ const CONTROL_ROUTES = new Set<UnaryRoute>([
 	"instructionSettings",
 ])
 
-function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal, requestId: string) {
+function waitForControlExecution<T>(operation: Promise<T>, signal: AbortSignal, requestId: string, hasStarted: () => boolean) {
 	if (signal.aborted) return Promise.reject(new WebviewRpcRequestCancelledError(requestId))
 	return new Promise<T>((resolve, reject) => {
-		const abort = () => reject(new WebviewRpcRequestCancelledError(requestId))
-		signal.addEventListener("abort", abort, { once: true })
+		const abortQueuedRequest = () => {
+			if (!hasStarted()) reject(new WebviewRpcRequestCancelledError(requestId))
+		}
+		signal.addEventListener("abort", abortQueuedRequest, { once: true })
 		operation.then(
-			(value) => { signal.removeEventListener("abort", abort); resolve(value) },
-			(error) => { signal.removeEventListener("abort", abort); reject(error) },
+			(value) => { signal.removeEventListener("abort", abortQueuedRequest); resolve(value) },
+			(error) => { signal.removeEventListener("abort", abortQueuedRequest); reject(error) },
 		)
 	})
 }

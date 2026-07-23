@@ -34,7 +34,7 @@ export function formatProviderErrorForTranscript(value: unknown, language: "en" 
 }
 
 export function formatSdkErrorForUi(error: unknown, language: "en" | "ko") {
-	const text = error instanceof Error ? error.message : String(error ?? "")
+	const text = stringify(error).trim()
 	if (text && text !== "[object Object]" && text !== "{}") return text
 	return language === "en"
 		? "The SDK request ended before a final response could be synchronized."

@@ -40,7 +40,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	dispose() { return this.composition.dispose() }
 	isScheduledAgentsEnabled() { return this.composition.isScheduledAgentsEnabled() }
 	requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult> { return this.composition.requestToolApproval(request) }
-	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> { return this.composition.requestQuestion(question, options) }
+	requestQuestion(question: string, options: string[], signal?: AbortSignal): Promise<AskQuestionResult> { return this.composition.requestQuestion(question, options, signal) }
 	handleSdkEvent(event: AgentRuntimeEvent) { this.composition.handleSdkEvent(event) }
 	handle(envelope: WebviewEnvelope) { return this.composition.handle(envelope) }
 	getUiLanguage() { return this.composition.getUiLanguage() }

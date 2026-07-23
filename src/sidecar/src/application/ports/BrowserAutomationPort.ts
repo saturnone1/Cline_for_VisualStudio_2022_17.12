@@ -14,7 +14,7 @@ export type BrowserDebugInfo = Readonly<{
 
 export interface BrowserAutomationPort {
 	resolveExecutablePath(configuredPath?: string): string
-	ensureAvailable(host: string, executablePath: string): Promise<BrowserDebugInfo>
+	ensureAvailable(host: string, executablePath: string, viewport?: BrowserViewport): Promise<BrowserDebugInfo>
 	fetchDebugInfo(host: string): Promise<BrowserDebugInfo>
 	listTabs(host: string): Promise<unknown>
 	runAction(host: string, request: BrowserAction): Promise<unknown>

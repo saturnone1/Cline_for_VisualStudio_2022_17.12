@@ -2,14 +2,14 @@ import fs from "node:fs"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import type { BrowserAutomationPort } from "../../application/ports/BrowserAutomationPort"
-import { normalizeBrowserActionName, normalizeBrowserDebugHost, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
+import { normalizeBrowserActionName, normalizeBrowserDebugHost, shouldCaptureBrowserPreview, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
 import { terminateChildProcessTree } from "../process/ChildProcessTree"
-import { readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+import { readBoundedPositiveIntEnv, readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
 
 export class BrowserDevToolsAdapter implements BrowserAutomationPort {
 	private readonly resources = new BrowserResourceRegistry()
 	resolveExecutablePath(configuredPath = "") { return resolveBrowserExecutablePath(configuredPath) }
-	ensureAvailable(host: string, executablePath: string) { return ensureBrowserDebugHost(host, executablePath, this.resources) }
+	ensureAvailable(host: string, executablePath: string, viewport?: BrowserViewport) { return ensureBrowserDebugHost(host, executablePath, this.resources, viewport) }
 	fetchDebugInfo(host: string) { return fetchBrowserDebugInfo(host) }
 	listTabs(host: string) { return listDevToolsTabs(host) }
 	runAction(host: string, request: BrowserAction) { return runBrowserActionViaDevTools(host, request, this.resources) }
@@ -33,7 +33,7 @@ class BrowserResourceRegistry {
 	}
 }
 
-export async function ensureBrowserDebugHost(host: string, executablePath: string, resources = new BrowserResourceRegistry()) {
+export async function ensureBrowserDebugHost(host: string, executablePath: string, resources = new BrowserResourceRegistry(), viewport?: BrowserViewport) {
 	const existing = await fetchBrowserDebugInfo(host)
 	if (existing.success) return existing
 	if (!executablePath || !fs.existsSync(executablePath)) {
@@ -50,6 +50,7 @@ export async function ensureBrowserDebugHost(host: string, executablePath: strin
 			`--user-data-dir=${profileRoot}`,
 			"--no-first-run",
 			"--no-default-browser-check",
+			...(viewport ? [`--window-size=${viewport.width},${viewport.height}`] : []),
 			"about:blank",
 		], { detached: false, stdio: "ignore", windowsHide: false })
 		child.once("error", (error) => { launchError = stringify(error) })
@@ -231,6 +232,7 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 			const loaded = client.waitForEvent("Page.loadEventFired", readPositiveIntEnv("VSCLINE_BROWSER_NAVIGATION_TIMEOUT_MS", 10000))
 			await client.send("Page.navigate", { url: normalizeBrowserNavigationUrl(request.url) })
 			await loaded.catch(() => waitForDevToolsSettle())
+			await waitForDevToolsSettle(250)
 		} else if (action === "click") {
 			request.onPhase?.({ phase: "clicking", action, tabId: tab.id, coordinate: request.coordinate })
 			const coordinate = parseBrowserCoordinate(request.coordinate, request.viewport)
@@ -274,7 +276,7 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 
 		request.onPhase?.({ phase: "capturing", action, tabId: tab.id })
 		const state = await readDevToolsPageState(client)
-		const screenshot = action === "screenshot" ? await captureDevToolsScreenshot(client) : ""
+		const screenshot = shouldCaptureBrowserPreview(action) ? await captureDevToolsScreenshot(client).catch(() => "") : ""
 		return {
 			success: true,
 			status: "ok",
@@ -297,7 +299,7 @@ async function executeBrowserActionOnDevToolsTab(host: string, tab: DevToolsTab,
 async function resolveDevToolsTab(host: string, request: BrowserAction): Promise<DevToolsTab> {
 	const action = normalizeBrowserActionName(request.action)
 	if ((action === "launch" || action === "navigate") && request.url && !request.tabId) {
-		const created = await createDevToolsTab(host, request.url).catch(() => undefined)
+		const created = await createDevToolsTab(host).catch(() => undefined)
 		if (created?.webSocketDebuggerUrl) {
 			return created
 		}
@@ -312,8 +314,8 @@ async function resolveDevToolsTab(host: string, request: BrowserAction): Promise
 	return tab
 }
 
-async function createDevToolsTab(host: string, url: string): Promise<DevToolsTab | undefined> {
-	const target = `${host}/json/new?${encodeURIComponent(normalizeBrowserNavigationUrl(url))}`
+async function createDevToolsTab(host: string): Promise<DevToolsTab | undefined> {
+	const target = `${host}/json/new?${encodeURIComponent("about:blank")}`
 	const response = await fetch(target, { method: "PUT" }).catch(() => fetch(target))
 	if (!response.ok) {
 		return undefined
@@ -332,11 +334,22 @@ async function createDevToolsTab(host: string, url: string): Promise<DevToolsTab
 	}
 }
 
-async function closeDevToolsTab(host: string, tabId: string) {
+export async function closeDevToolsTab(host: string, tabId: string) {
 	if (!tabId) {
-		return
+		throw new Error("A browser tab id is required to close the page.")
 	}
-	await fetch(`${host}/json/close/${encodeURIComponent(tabId)}`).catch(() => undefined)
+	const controller = new AbortController()
+	const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_ACTION_TIMEOUT_MS", 8000)
+	const timer = setTimeout(() => controller.abort(), timeoutMs)
+	try {
+		const response = await fetch(`${host}/json/close/${encodeURIComponent(tabId)}`, { signal: controller.signal })
+		if (!response.ok) throw new Error(`Browser tab close returned HTTP ${response.status}.`)
+	} catch (error) {
+		if (error instanceof Error && error.name === "AbortError") throw new Error(`Browser tab close timed out after ${timeoutMs}ms.`)
+		throw error
+	} finally {
+		clearTimeout(timer)
+	}
 }
 
 function connectDevTools(webSocketDebuggerUrl: string, resources: BrowserResourceRegistry) {
@@ -471,9 +484,10 @@ async function readDevToolsPageState(client: Awaited<ReturnType<typeof connectDe
 }
 
 async function captureDevToolsScreenshot(client: Awaited<ReturnType<typeof connectDevTools>>) {
-	const result = asRecord(await client.send("Page.captureScreenshot", { format: "png", fromSurface: true }))
+	const quality = readBoundedPositiveIntEnv("VSCLINE_BROWSER_SCREENSHOT_QUALITY", RUNTIME_DEFAULTS.browserScreenshotQuality, 25, 95)
+	const result = asRecord(await client.send("Page.captureScreenshot", { format: "jpeg", quality, fromSurface: true, optimizeForSpeed: true }))
 	const data = getString(result, "data")
-	return data ? `data:image/png;base64,${data}` : ""
+	return data ? `data:image/jpeg;base64,${data}` : ""
 }
 
 function parseBrowserCoordinate(coordinate: string | undefined, viewport: BrowserViewport) {

@@ -85,6 +85,30 @@ namespace VsClineAgent.Host.Tests
                     await writer.WriteLineAsync(new string('x', 65));
 
                 await Assert.ThrowsAsync<InvalidDataException>(() => request);
+                Assert.False(client.IsConnected);
+            }
+        }
+
+        [Fact]
+        public async Task ReceiveLoopFailureInvalidatesConnectionAndRaisesClosure()
+        {
+            var pipeName = "VsClineAgent-Test-" + Guid.NewGuid().ToString("N");
+            using (var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous))
+            using (var client = new NamedPipeJsonRpcClient(pipeName))
+            {
+                var accept = server.WaitForConnectionAsync();
+                await client.ConnectAsync(5000, CancellationToken.None);
+                await accept;
+
+                var closed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+                client.ConnectionClosed += error => closed.TrySetResult(error);
+                using (var writer = new StreamWriter(server, new UTF8Encoding(false), 1024, true) { AutoFlush = true })
+                    await writer.WriteLineAsync("{not-json");
+
+                var completed = await Task.WhenAny(closed.Task, Task.Delay(3000));
+                Assert.Same(closed.Task, completed);
+                Assert.IsType<Newtonsoft.Json.JsonReaderException>(await closed.Task);
+                Assert.False(client.IsConnected);
             }
         }
 

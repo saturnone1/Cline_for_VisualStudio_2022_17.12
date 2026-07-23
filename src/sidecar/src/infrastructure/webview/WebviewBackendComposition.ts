@@ -74,7 +74,7 @@ import { ConversationActivityProjector } from "../conversation/ConversationActiv
 import { HookLifecycleCoordinator } from "../../features/hooks/HookLifecycleCoordinator"
 import {
 	RESUMED_CONVERSATION_MAX_CHARS,
-	buildResumedConversationMessages,
+	buildResumedConversationContext,
 } from "../conversation/ResumedConversationProjection"
 import {
 	shouldAutoApproveTool,
@@ -113,6 +113,8 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 	private pendingQuestion:
 		| {
 				resolve: (value: AskQuestionResult) => void
+				reject: (error: Error) => void
+				dispose: () => void
 		  }
 		| null = null
 	private readonly conversationProjection = new ConversationProjectionState()
@@ -191,21 +193,21 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 		this.toolApproval = new ToolApprovalFlow({ mapToolName: (toolName) => mapToolName(toolName), isPlanModeBlocked: (mappedToolName) => this.toolRuntimePolicy.isBlockedInCurrentMode(mappedToolName), blockedReason: () => this.toolApprovalPrompts.blockedReason(this.getUiLanguage()), addInfo: (text) => { this.conversationMessages.add({ type: "say", say: "info", text }) }, currentSessionId: () => this.taskSession.currentSessionId, preToolUse: (context) => this.hookLifecycle.preToolUse(context), shouldAutoApprove: (toolName) => shouldAutoApproveTool(toolName, this.state.autoApprovalSettings, this.state.yoloModeToggled === true), notifyAutoApproved: (mappedToolName, input) => this.autoApprovalNotifier.notify(asRecord(this.state.autoApprovalSettings).enableNotifications === true, mappedToolName, input), buildPrompt: (mappedToolName, input, approvalRequest) => this.toolApprovalPrompts.build(mappedToolName, input, approvalRequest), beginApproval: () => { this.taskSession.transition("awaiting_user", "tool-approval"); this.taskSession.waitFor("tool_approval") }, addAsk: ({ ask, text }) => { this.conversationMessages.add({ type: "ask", ask, text }) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), requestApproval: () => this.approvals.request(), logRequest: (details) => this.logger.log("sdk->sidecar", "toolApproval.request", details), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.conversationMessages = new ConversationMessageStore({ read: () => this.state.clineMessages, write: (messages) => { this.state.clineMessages = messages }, persist: () => this.schedulePersistedStateSave(), publishPartial: (message) => this.sendPartialMessage(message), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.hookLifecycle = new HookLifecycleCoordinator({ execution: () => this.features.require("hookExecution"), workspaceRoot: () => this.getPrimaryWorkspaceRoot(), enabled: () => this.state.hooksEnabled !== false, addMessage: (message) => this.conversationMessages.add(message), nextTimestamp: () => this.conversationMessages.nextTimestamp(), upsertMessage: (timestamp, updates) => this.conversationMessages.upsert(timestamp, updates), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState().catch((error) => { console.error(error) }) })
-		this.cancelTaskWork = createTaskCancellationComposition({ abortAgent: async (sessionId) => { const handler = this.features.optional("cancelTask"); if (!handler) throw new Error("Agent cancellation handler is unavailable."); await handler.execute({ sessionId }) }, cancelTerminal: async () => { await this.host.workspaceClient.cancelCommands() }, cancelHooks: async () => { const execution = this.features.optional("hookExecution"); if (execution) await execution.cancelAll() }, cancelBrowser: async () => { const browser = this.features.optional("browser"); if (browser) await browser.cancelActive() }, timeoutMs: () => readPositiveIntEnv("VSCLINE_TASK_CANCEL_TIMEOUT_MS", RUNTIME_DEFAULTS.taskCancelTimeoutMs), log: (event, details) => this.logger.log("sidecar", event, details) })
-		this.clearTaskHandler = new ChatFlows.ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.taskSession.transition(status, source), currentStatus: () => this.taskSession.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.taskSession.currentSessionId, markClosing: (sessionId, closing = true) => { this.taskSession.markClosing(sessionId, closing) }, cancelWork: (sessionId) => this.cancelTaskWork(sessionId), failCancellation: () => { this.taskSession.transition("failed", "clear-task-cancel-failed") }, addError: (text) => { this.conversationMessages.add({ type: "say", say: "error", text }) }, rememberSnapshot: () => { this.taskState.capture() }, clearProjection: () => { this.conversationCleanup.clearProjection() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { this.taskSession.reset(source) }, persist: () => this.schedulePersistedStateSave(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.cancelTaskWork = createTaskCancellationComposition({ abortAgent: async (sessionId) => { const handler = this.features.optional("cancelTask"); if (!handler) throw new Error("Agent cancellation handler is unavailable."); await handler.execute({ sessionId }) }, cancelTerminal: async () => { await this.host.workspaceClient.cancelCommands() }, cancelHooks: async () => { const execution = this.features.optional("hookExecution"); if (execution) await execution.cancelAll() }, cancelBrowser: async () => { const browser = this.features.optional("browser"); if (browser) await browser.cancelActive() }, cancelInteraction: async () => { this.approvals.clear({ approved: false, reason: "Task cancellation requested." }); this.settlePendingQuestion("", createAbortError("Question was cancelled with the active task.")) }, timeoutMs: () => readPositiveIntEnv("VSCLINE_TASK_CANCEL_TIMEOUT_MS", RUNTIME_DEFAULTS.taskCancelTimeoutMs), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.clearTaskHandler = new ChatFlows.ClearTaskHandler(() => this.clineSdk, { transition: (status, source) => this.taskSession.transition(status, source), currentStatus: () => this.taskSession.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, currentSessionId: () => this.taskSession.currentSessionId, markClosing: (sessionId, closing = true) => { this.taskSession.markClosing(sessionId, closing) }, cancelWork: (sessionId) => this.cancelTaskWork(sessionId), failCancellation: () => { this.taskSession.transition("failed", "clear-task-cancel-failed") }, addError: (text) => { this.conversationMessages.add({ type: "say", say: "error", text }) }, rememberSnapshot: () => { this.taskState.capture() }, clearProjection: () => { this.conversationCleanup.clearProjection() }, clearInteractions: () => { this.approvals.clear({ approved: false, reason: "Task was closed." }); this.settlePendingQuestion("") }, clearTaskState: () => { this.state.currentTaskItem = null; this.state.clineMessages = [] }, resetLifecycle: (source) => { this.taskSession.reset(source) }, persist: () => this.schedulePersistedStateSave(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.cancelTaskFlow = new ChatFlows.CancelTaskFlow({ beginCancel: () => Boolean(this.taskSession.transition("cancelling", "cancel-request")), currentStatus: () => this.taskSession.status, advanceRunGeneration: () => { this.sdkRunGeneration++ }, hookSessionId: () => this.taskSession.currentSessionId, activeSessionId: () => this.taskSession.currentSessionId, cancelWork: (sessionId) => this.cancelTaskWork(sessionId), clearProjection: () => { this.conversationCleanup.clearProjection(); this.conversationCleanup.finalizeOpenPartials(); this.conversationMessages.removeTerminalAsks() }, addInfo: (text) => { this.conversationMessages.add({ type: "say", say: "info", text }) }, addError: (text) => { this.conversationMessages.add({ type: "say", say: "error", text }) }, updateTask: () => this.taskState.capture(), runHook: (sessionId) => this.hookLifecycle.run("TaskCancel", { sessionId }), completeCancel: () => { this.taskSession.transition("idle", "cancel-complete") }, failCancellation: () => { this.taskSession.transition("failed", "cancel-failed") }, quarantineSession: (sessionId) => { this.taskSession.markClosing(sessionId) }, broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.agentRunRecovery = new ChatFlows.AgentRunRecoveryFlow({ currentGeneration: () => this.sdkRunGeneration, isTerminal: () => this.taskSession.status === "completed" || this.taskSession.status === "failed", activeText: () => this.partialTextProjector.activeText(), hasAssistantText: () => this.taskCompletion.hasAssistantAfterLastUser(), hydrate: (sessionId, source) => this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, true), finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), projectFailure: (source, error) => { this.runtimeMonitoring.clearTaskActivity(); this.taskSession.transition("failed", `sdk-error:${source}`); this.runtimeMonitoring.clearPartialIdle(); this.conversationActivity.clearReasoning(); this.conversationMessages.add({ type: "say", say: "error", text: formatSdkErrorForUi(error, this.getUiLanguage()) }) }, log: (event, details) => this.logger.log("sidecar", event, details) }, { deadlineMs: readPositiveIntEnv("VSCLINE_RUN_RECOVERY_DEADLINE_MS", 15000), initialDelayMs: readPositiveIntEnv("VSCLINE_RUN_RECOVERY_INITIAL_DELAY_MS", 250), maxDelayMs: readPositiveIntEnv("VSCLINE_RUN_RECOVERY_MAX_DELAY_MS", 2000) })
 		this.agentRunCompletion = new ChatFlows.AgentRunCompletionFlow({ decode: (result, fallbackSessionId) => { const resultRecord = asRecord(result); const agentResult = asRecord(resultRecord.result ?? result); return { sessionId: getString(resultRecord, "sessionId") || fallbackSessionId || String(this.state.currentTaskItem?.id || ""), empty: Object.keys(agentResult).length === 0, text: extractCompletionTextFromResult(agentResult, resultRecord), finishReason: getString(agentResult, "finishReason") || getString(agentResult, "status") || "completed" } }, currentGeneration: () => this.sdkRunGeneration, currentTaskId: () => String(this.state.currentTaskItem?.id || ""), activeSessionId: () => this.taskSession.currentSessionId, bindSession: (sessionId) => this.taskSession.bindSession(sessionId), isCurrentSession: (sessionId) => this.taskSession.isCurrentResult(sessionId), hydrate: (sessionId, source) => this.taskTranscriptHydrator.hydrateCurrent(sessionId, source, true), activeText: () => this.partialTextProjector.activeText(), hasAssistantText: () => this.taskCompletion.hasAssistantAfterLastUser(), lastActivityReason: () => this.features.optional("taskActivity")?.reason || "", finishTask: (sessionId, status, text) => this.taskCompletion.finish(sessionId, status, text), failEmpty: (sessionId) => this.taskCompletion.fail(sessionId, formatEmptyModelResponseForUi(this.getUiLanguage())), finalizePartial: () => this.conversationCleanup.finalizeOpenPartials(), addCompletionMarker: (status) => this.taskCompletion.addMarker(status), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendOrResumeSession = new ChatFlows.SendOrResumeSessionFlow(() => this.clineSdk, { activeSettingsRevision: () => this.activeSessionRuntimeSettingsRevision, settingsRevision: () => this.runtimeSettingsRevision, requiresReplacement: (sessionId) => this.taskSession.isClosing(sessionId), bindSession: (sessionId) => this.taskSession.bindSession(sessionId), markClosing: (sessionId, closing) => { if (closing) this.taskSession.markClosing(sessionId); else this.taskSession.prepareActivation(sessionId) }, send: (command) => this.features.require("sendMessage").execute(command), resume: (sessionId, command, textLength) => this.resumeSession.execute(sessionId, command, textLength), markSend: (sessionId) => this.runtimeMonitoring.markSdkSend(sessionId), markError: (sessionId, error) => this.runtimeMonitoring.markError(sessionId, error), isSessionNotFound: (error) => isSessionNotFoundError(error), log: (event, details) => this.logger.log("sidecar", event, details) })
-		this.resumeSession = new ChatFlows.ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.modelContext.modelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.modelContext.modelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.hookLifecycle.run("TaskResume", context) }, buildInitialMessages: (prompt) => buildResumedConversationMessages(this.state.clineMessages, prompt, this.modelContext.resumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd) => this.sdkConfigBuilder.build(cwd), toolPolicies: () => this.toolRuntimePolicy.currentPolicies(), start: (command) => this.features.require("startTask").execute(command), beginReplacement: (sessionId) => this.taskSession.beginReplacement(sessionId), completeReplacement: (result) => this.taskSession.completeReplacement(getString(asRecord(result), "sessionId") || this.clineSdk?.status.activeSessionId || ""), cancelReplacement: () => this.taskSession.cancelReplacement(), markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.resumeSession = new ChatFlows.ResumeSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), currentCwd: () => String(this.state.currentTaskItem?.cwdOnTaskInitialization || ""), prepareTask: (sessionId, prompt, cwd) => { const taskItem = this.state.currentTaskItem || createHistoryItem(sessionId, prompt, cwd, this.modelContext.modelId()); this.state.currentTaskItem = { ...taskItem, id: sessionId, cwdOnTaskInitialization: cwd, modelId: String(taskItem.modelId || "") || this.modelContext.modelId() }; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, this.state.currentTaskItem); return { title: String(taskItem.task || "").trim() } }, noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), runResumeHook: (context) => { void this.hookLifecycle.run("TaskResume", context) }, buildContext: (prompt) => buildResumedConversationContext(this.state.clineMessages, prompt, this.modelContext.resumedConversationCharBudget()), normalizeImages: (images) => normalizeSdkImageInputs([...images]), buildConfig: (cwd) => this.sdkConfigBuilder.build(cwd), toolPolicies: () => this.toolRuntimePolicy.currentPolicies(), start: (command) => this.features.require("startTask").execute(command), beginReplacement: (sessionId) => { this.taskSession.beginReplacement(sessionId); this.runtimeEventIngress.beginReplacement(sessionId) }, completeReplacement: (result) => { const sessionId = getString(asRecord(result), "sessionId") || this.clineSdk?.status.activeSessionId || ""; this.taskSession.completeReplacement(sessionId); this.runtimeEventIngress.completeReplacement(sessionId) }, cancelReplacement: () => { this.runtimeEventIngress.cancelReplacement(); this.taskSession.cancelReplacement() }, markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.launchAgentSession = new ChatFlows.LaunchAgentSessionFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), buildConfig: (cwd, sessionId) => this.sdkConfigBuilder.build(cwd, sessionId), toolPolicies: () => this.toolRuntimePolicy.currentPolicies(), markSend: (sessionId) => this.runtimeMonitoring.markSdkSend(sessionId), nextGeneration: () => ++this.sdkRunGeneration, currentGeneration: () => this.sdkRunGeneration, start: (command) => this.features.require("startTask").execute(command), markSettingsRevisionActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision }, complete: (result, sessionId, source, generation) => this.agentRunCompletion.complete(result, sessionId, source, generation), recover: (sessionId, source, generation, error) => this.agentRunRecovery.recover(sessionId, source, generation, error), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.prepareNewTask = new ChatFlows.PrepareNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), workspaceRoots: () => this.host.workspaceClient.getWorkspacePaths({}), resolveWorkspacePath: (requestedPath) => requestedPath && fs.existsSync(requestedPath) ? path.resolve(requestedPath) : null, updateTask: () => this.taskState.update(), publishPreparing: () => this.sendPartialMessage(this.state.clineMessages.find((message) => message.ts === this.conversationProjection.activeReasoningTextTs)), activeSessionId: () => this.taskSession.currentSessionId, markClosing: (sessionId, closing = true) => { this.taskSession.markClosing(sessionId, closing) }, stopSession: (sessionId) => this.features.require("agentEngine").stop({ sessionId }), runHook: (name, context) => { void this.hookLifecycle.run(name, context) }, normalizeImages: (images) => normalizeSdkImageInputs(images), launch: (params, cwd, sessionId) => this.launchAgentSession.execute(params, cwd, sessionId, "startSession"), projectError: async (error) => { this.runtimeMonitoring.clearTaskActivity(); this.conversationMessages.add({ type: "say", say: "error", text: error instanceof Error ? error.message : String(error) }); this.taskState.update(); await this.broadcastState() }, log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.startNewTaskFlow = new ChatFlows.StartNewTaskFlow({ isRuntimeAvailable: () => Boolean(this.clineSdk), stopPrevious: () => this.prepareNewTask.stopPrevious(), transitionStarting: () => { this.taskSession.transition("starting", "start-new-task") }, createTask: (input) => createHistoryItem(createId(), input.text, input.initialCwd, this.modelContext.modelId()), startLatency: (requestId, taskId, textLength) => this.runtimeMonitoring.startLatency(requestId, "newTask", taskId, textLength), beginConversation: () => { this.state.clineMessages = []; this.conversationProjection.beginTask() }, selectTask: (task) => { this.state.currentTaskItem = task; this.state.taskHistory = upsertTaskHistoryItem(this.state.taskHistory, task) }, addUserTask: (text, images, files) => { this.conversationMessages.add({ type: "say", say: "task", text, images, files }) }, showPreparing: () => this.foldedProgressProjector.upsertReasoning(this.state.uiLanguage === "en" ? "Preparing response." : "응답을 준비하는 중입니다."), noteActivity: (reason) => this.runtimeMonitoring.noteActivity(reason), updateTask: () => this.taskState.capture(), persist: () => this.schedulePersistedStateSave(), broadcast: () => { this.broadcastState().catch((error) => console.error(error)) }, prepare: (input, task) => this.prepareNewTask.execute({ text: input.text, images: input.images, files: input.files, requestedWorkspacePath: input.requestedWorkspacePath, initialCwd: input.initialCwd, taskItem: task }) })
-		this.askResponseInteractions = new ChatFlows.AskResponseInteractionFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), takeApproval: () => this.approvals.take() ?? undefined, takeQuestion: () => { const pending = this.pendingQuestion; this.pendingQuestion = null; return pending?.resolve }, transitionStreaming: (source) => { this.taskSession.transition("streaming", source) }, removeFollowup: () => this.conversationMessages.removeAsks("followup"), addFeedback: (text, images, files) => { this.conversationMessages.add({ type: "say", say: "user_feedback", text, images, files }) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
+		this.askResponseInteractions = new ChatFlows.AskResponseInteractionFlow({ hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), takeApproval: () => this.approvals.take() ?? undefined, takeQuestion: () => this.pendingQuestion ? (value) => this.settlePendingQuestion(value) : undefined, transitionStreaming: (source) => { this.taskSession.transition("streaming", source) }, removeFollowup: () => this.conversationMessages.removeAsks("followup"), addFeedback: (text, images, files) => { this.conversationMessages.add({ type: "say", say: "user_feedback", text, images, files }) }, updateTask: () => this.taskState.update(), broadcast: () => this.broadcastState(), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.sendUserMessage = new ChatFlows.SendUserMessageFlow({
 			interactions: {
 				hasPending: () => this.approvals.hasPending || Boolean(this.pendingQuestion),
-				clear: () => { this.approvals.clear({ approved: false, reason: "Superseded by resumed chat message." }); this.pendingQuestion?.resolve(""); this.pendingQuestion = null },
+				clear: () => { this.approvals.clear({ approved: false, reason: "Superseded by resumed chat message." }); this.settlePendingQuestion("") },
 			},
 			newTask: { start: (input) => this.taskPrompts.start({ text: input.prompt, images: input.images, files: input.files }, { broadcast: true, requestId: input.requestId }) },
 			lifecycle: {
@@ -248,14 +250,14 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 			startProgress: (text) => { this.foldedProgressProjector.beginReasoning(); this.foldedProgressProjector.upsertReasoning(text) },
 			finishProgress: () => { this.foldedProgressProjector.finish() },
 			addMessage: (message) => { this.conversationMessages.add(message) },
-			markClosing: (sessionId) => { this.taskSession.markClosing(sessionId) },
+			markClosing: (sessionId, closing = true) => { this.taskSession.markClosing(sessionId, closing) },
 			bindSession: (sessionId) => { this.taskSession.bindSession(sessionId) },
+			restoreState: (task, messages) => { this.state.currentTaskItem = task as typeof this.state.currentTaskItem; this.state.clineMessages = messages },
 			advanceGeneration: () => { this.sdkRunGeneration++ },
 			markSettingsActive: () => { this.activeSessionRuntimeSettingsRevision = this.runtimeSettingsRevision },
 			updateTask: () => this.taskState.capture(),
-			persist: () => this.schedulePersistedStateSave(),
+			persist: () => this.flushPersistedStateSave(),
 			broadcast: () => this.broadcastState(),
-			formatError: (error) => formatSdkErrorForUi(error, this.getUiLanguage()),
 			log: (event, details) => this.logger.log("sidecar", event, details),
 		})
 		this.contextOverflowRecovery = new ChatFlows.ContextOverflowRecoveryFlow({
@@ -377,7 +379,7 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 		this.partialTextProjector = new PartialTextProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.conversationMessages.upsert(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.runtimeMonitoring.schedulePartialIdle(), () => this.runtimeMonitoring.clearPartialIdle(), () => this.runtimeMonitoring.clearPartialBroadcast(), () => this.runtimeMonitoring.broadcastPartialNow(), () => this.runtimeMonitoring.schedulePartialBroadcast())
 		this.foldedProgressProjector = new FoldedProgressProjector(this.conversationProjection, () => this.state.clineMessages, () => this.conversationMessages.nextTimestamp(), (timestamp, updates) => this.conversationMessages.upsert(timestamp, updates), (message) => this.sendPartialMessage(message), () => this.runtimeMonitoring.broadcastPartialNow(), () => this.runtimeMonitoring.schedulePartialBroadcast(), () => this.features.optional("terminalActivity")?.stop(), () => this.getUiLanguage())
 		this.conversationRuntime = new ConversationRuntimeProjector({ projection: this.conversationProjection, messages: () => this.state.clineMessages, messageStore: this.conversationMessages, partial: this.partialTextProjector, folded: this.foldedProgressProjector, language: () => this.getUiLanguage(), currentSessionId: () => this.taskSession.currentSessionId, markFirstAssistant: (sessionId, textLength) => this.runtimeMonitoring.markFirstAssistant(sessionId, textLength), schedulePartialIdle: () => this.runtimeMonitoring.schedulePartialIdle(), schedulePartialBroadcast: () => this.runtimeMonitoring.schedulePartialBroadcast(), addMessage: (message) => { this.conversationMessages.add(message) }, publishPartial: (message) => this.sendPartialMessage(message) })
-		this.conversationCleanup = new ConversationCleanupCoordinator({ projection: this.conversationProjection, messages: this.conversationMessages, partial: this.partialTextProjector, folded: this.foldedProgressProjector, runtime: this.conversationRuntime, monitoring: this.runtimeMonitoring, terminalActive: () => this.features.optional("terminalActivity")?.isActive === true, stopTerminal: () => { this.features.optional("terminalActivity")?.stop() }, hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), clearApproval: (reason) => { this.approvals.clear({ approved: false, reason }) }, clearQuestion: () => { this.pendingQuestion?.resolve(""); this.pendingQuestion = null }, logger: this.logger })
+		this.conversationCleanup = new ConversationCleanupCoordinator({ projection: this.conversationProjection, messages: this.conversationMessages, partial: this.partialTextProjector, folded: this.foldedProgressProjector, runtime: this.conversationRuntime, monitoring: this.runtimeMonitoring, terminalActive: () => this.features.optional("terminalActivity")?.isActive === true, stopTerminal: () => { this.features.optional("terminalActivity")?.stop() }, hasPendingApproval: () => this.approvals.hasPending, hasPendingQuestion: () => Boolean(this.pendingQuestion), clearApproval: (reason) => { this.approvals.clear({ approved: false, reason }) }, clearQuestion: () => { this.settlePendingQuestion("") }, logger: this.logger })
 		this.conversationActivity = new ConversationActivityProjector({ projection: this.conversationProjection, hasCurrentTask: () => Boolean(this.state.currentTaskItem), reasoningStatusIntervalMs: () => readPositiveIntEnv("VSCLINE_REASONING_STATUS_INTERVAL_MS", 2000), logger: this.logger })
 		this.taskCompletion = new TaskCompletionProjector({ messages: () => this.state.clineMessages, transition: (status, source) => { this.taskSession.transition(status, source) }, clearFinishStatus: () => { this.runtimeMonitoring.clearTaskActivity(); this.runtimeMonitoring.clearPartialIdle(); this.conversationActivity.clearReasoning() }, finishProgress: () => { this.conversationCleanup.finishProgress() }, prepareAssistant: () => { this.conversationCleanup.prepareAssistant() }, activeText: () => this.partialTextProjector.activeText(), addMessage: (message) => { this.conversationMessages.add(message) }, markAssistantLatency: (length) => this.runtimeMonitoring.markFirstAssistant(this.taskSession.currentSessionId, length), finalizeOpenPartial: () => this.conversationCleanup.finalizeOpenPartials(), lastActivityReason: () => this.features.optional("taskActivity")?.reason || "", runCompleteHook: (context) => { void this.hookLifecycle.run("TaskComplete", context) }, capture: () => this.taskState.capture(), persist: () => this.schedulePersistedStateSave(), language: () => this.getUiLanguage(), recentToolSummaries: () => this.conversationProjection.recentToolSummaries(5), log: (event, details) => this.logger.log("sidecar", event, details) })
 		this.runtimeEventIngress = createAgentEventProjectionComposition({
@@ -427,7 +429,10 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 	}
 	async publishChangeTranscript(text: string) { this.conversationMessages.add({ type: "say", say: "tool", text }); this.taskState.update(); await this.broadcastState() }
 	updateTerminalActivity(text: string) { this.conversationProjection.activeTerminalActivityText = text; this.foldedProgressProjector.refresh(); this.taskState.update() }
-	hasActiveTask() { return Boolean(this.state.currentTaskItem) }
+	hasActiveTask() {
+		return Boolean(this.state.currentTaskItem)
+			&& ["starting", "streaming", "awaiting_user", "cancelling"].includes(this.taskSession.status)
+	}
 	hasActivePartialText() { return Boolean(this.conversationProjection.activePartialTextTs) }
 	handleTaskIdleWaiting(idleForMs: number, reason: string) {
 		if (!this.hasActiveTask() || this.hasActivePartialText()) return
@@ -457,8 +462,7 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 		this.streamingRpcRouter.clear()
 		this.stateStreamRefresh.dispose()
 		this.approvals.clear({ approved: false, reason: "LIG VS webview router was disposed." })
-		this.pendingQuestion?.resolve("")
-		this.pendingQuestion = null
+		this.settlePendingQuestion("")
 		this.flushPersistedStateSave()
 		this.features.optional("oauthAuthorization")?.dispose()
 	}
@@ -471,15 +475,29 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 		return this.toolApproval.execute(request)
 	}
 
-	async requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> {
+	async requestQuestion(question: string, options: string[], signal?: AbortSignal): Promise<AskQuestionResult> {
+		if (signal?.aborted) throw createAbortError("Question was cancelled before it was shown.")
 		this.taskSession.transition("awaiting_user", "question")
 		this.taskSession.waitFor("question")
 		this.logger.log("sdk->sidecar", "question.request", { question, options })
-		if (this.pendingQuestion) {
-			this.pendingQuestion.resolve("")
-			this.pendingQuestion = null
-		}
+		this.settlePendingQuestion("")
 		this.conversationMessages.removeAsks("followup")
+		let resolveQuestion!: (value: AskQuestionResult) => void
+		let rejectQuestion!: (error: Error) => void
+		const result = new Promise<AskQuestionResult>((resolve, reject) => { resolveQuestion = resolve; rejectQuestion = reject })
+		void result.catch(() => undefined)
+		const onAbort = () => {
+			if (this.pendingQuestion !== pending) return
+			this.settlePendingQuestion("", createAbortError("Question was cancelled."))
+			this.conversationMessages.removeAsks("followup")
+		}
+		const pending = {
+			resolve: resolveQuestion,
+			reject: rejectQuestion,
+			dispose: () => signal?.removeEventListener("abort", onAbort),
+		}
+		this.pendingQuestion = pending
+		signal?.addEventListener("abort", onAbort, { once: true })
 
 		this.conversationMessages.add({
 			type: "ask",
@@ -490,11 +508,22 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 			}),
 		})
 		this.taskState.update()
-		await this.broadcastState()
+		try {
+			await this.broadcastState()
+		} catch (error) {
+			this.settlePendingQuestion("", error instanceof Error ? error : new Error(String(error)))
+			throw error
+		}
+		return result
+	}
 
-		return new Promise<AskQuestionResult>((resolve) => {
-			this.pendingQuestion = { resolve }
-		})
+	private settlePendingQuestion(value: AskQuestionResult, error?: Error) {
+		const pending = this.pendingQuestion
+		if (!pending) return
+		this.pendingQuestion = null
+		pending.dispose()
+		if (error) pending.reject(error)
+		else pending.resolve(value)
 	}
 
 	handleSdkEvent(event: AgentRuntimeEvent) {
@@ -579,4 +608,10 @@ export class WebviewBackendComposition implements WebviewApplicationPort {
 
 	private sendPartialMessage(message: Record<string, unknown> | undefined) { this.features.require("streamPublisher").sendPartial(message) }
 
+}
+
+function createAbortError(message: string) {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
 }

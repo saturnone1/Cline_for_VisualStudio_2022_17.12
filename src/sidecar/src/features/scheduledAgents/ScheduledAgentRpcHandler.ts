@@ -1,5 +1,6 @@
 import type { ScheduledAgentSpecInput } from "../../application/ports/ScheduledAgentStorePort"
 import type { ScheduledAgentHandler } from "./ScheduledAgentHandler"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 export type ScheduledAgentCommand =
 	| Readonly<{ type: "list" }>
@@ -18,8 +19,9 @@ type Callbacks = Readonly<{
 export class ScheduledAgentRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async handle(command: ScheduledAgentCommand): Promise<ScheduledAgentRpcResult> {
+	async handle(command: ScheduledAgentCommand, signal?: AbortSignal): Promise<ScheduledAgentRpcResult> {
 		const workspaceRoot = await this.callbacks.workspaceRoot()
+		throwIfOperationCancelled(signal)
 		switch (command.type) {
 			case "list": return { payload: this.callbacks.agents().list(workspaceRoot) }
 			case "save": return { payload: this.callbacks.agents().save(command.request, workspaceRoot) }

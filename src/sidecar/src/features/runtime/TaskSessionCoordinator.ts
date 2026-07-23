@@ -60,16 +60,6 @@ export class TaskSessionCoordinator {
 		this.markClosing(sourceSessionId)
 	}
 
-	adoptReplacement(sessionId: string) {
-		const sourceSessionId = this.replacementSourceSessionId
-		if (!sourceSessionId || !sessionId || sessionId === sourceSessionId) return false
-		this.replacementSourceSessionId = ""
-		this.replacementSourceWasClosing = false
-		this.markClosing(sourceSessionId, false)
-		this.bindSession(sessionId)
-		return true
-	}
-
 	completeReplacement(sessionId: string) {
 		const sourceSessionId = this.replacementSourceSessionId
 		if (!sourceSessionId) return

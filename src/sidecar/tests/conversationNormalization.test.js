@@ -15,6 +15,25 @@ const { createHistoryItem, removeDeletedHistoryItems, sdkSessionToHistoryItem } 
 const { completionCandidateToText, extractCompletionTextFromResult } = require("../dist/infrastructure/conversation/CompletionExtraction")
 const { isToolTranscript, looksLikeReasoningNarration, looksLikeTokenizedReasoning, mergeTextDelta, normalizeTranscriptText } = require("../dist/infrastructure/conversation/TranscriptTextPolicy")
 const { parseStructuredQuestion, projectAssistantTranscript } = require("../dist/infrastructure/conversation/StructuredAssistantResponse")
+const { toolTranscriptToActivityEntries } = require("../dist/infrastructure/conversation/ToolActivityFormatting")
+const { toProtoClineMessage } = require("../dist/infrastructure/conversation/ConversationMessageProjection")
+const { CLINE_ASK_KIND_MAP, CLINE_SAY_KIND_MAP } = require("../dist/application/dto/generated/ClineMessageKinds")
+
+test("every canonical conversation kind projects without falling back", () => {
+	for (const [kind, proto] of Object.entries(CLINE_ASK_KIND_MAP)) {
+		assert.equal(toProtoClineMessage({ type: "ask", ask: kind, text: "payload" }).ask, proto)
+	}
+	for (const [kind, proto] of Object.entries(CLINE_SAY_KIND_MAP)) {
+		assert.equal(toProtoClineMessage({ type: "say", say: kind, text: "payload" }).say, proto)
+	}
+	assert.equal(toProtoClineMessage({ type: "say", say: "future_sdk_kind", text: "payload" }).say, "TEXT")
+})
+
+test("browser transcript messages preserve their protocol kinds", () => {
+	assert.equal(toProtoClineMessage({ type: "say", say: "browser_action_launch", text: "https://example.com" }).say, "BROWSER_ACTION_LAUNCH_SAY")
+	assert.equal(toProtoClineMessage({ type: "say", say: "browser_action", text: "{}" }).say, "BROWSER_ACTION")
+	assert.equal(toProtoClineMessage({ type: "say", say: "browser_action_result", text: "{}" }).say, "BROWSER_ACTION_RESULT")
+})
 
 test("attachment normalization keeps transcript summaries bounded", () => {
 	assert.equal(formatAttachmentSummaryValue("data:image/png;base64,AAAA"), "[attached image/png]")
@@ -82,6 +101,15 @@ test("transcript text policy handles deltas, tools, reasoning, and Korean tokens
 	assert.equal(isToolTranscript("Tool: read_file"), true)
 	assert.equal(looksLikeReasoningNarration("We need to inspect the runtime"), true)
 	assert.equal(looksLikeTokenizedReasoning(["사용자", "요청을", "먼저", "확인", "해야", "합니다"]), true)
+})
+
+test("browser transcript activity is summarized without exposing raw JSON", () => {
+	assert.deepEqual(toolTranscriptToActivityEntries('Tool: browser_action\n{"action":"launch","url":"https://example.com"}'), [
+		{ kind: "tool", label: "Browser launch: https://example.com" },
+	])
+	assert.deepEqual(toolTranscriptToActivityEntries('Tool result: {"status":"ok","action":"screenshot","browserSessionId":"session-1","title":"Example Domain"}'), [
+		{ kind: "tool", label: "Browser screenshot ok: Example Domain" },
+	])
 })
 
 test("standalone structured questions project to the follow-up question UI contract", () => {

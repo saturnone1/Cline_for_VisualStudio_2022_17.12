@@ -1,4 +1,5 @@
 import type { McpHandler, McpMutationRequest } from "./McpHandler"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 export type McpCommand =
 	| Readonly<{ type: "list" }>
@@ -18,7 +19,8 @@ type Callbacks = Readonly<{
 export class McpRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async handle(command: McpCommand): Promise<McpRpcResult> {
+	async handle(command: McpCommand, signal?: AbortSignal): Promise<McpRpcResult> {
+		throwIfOperationCancelled(signal)
 		switch (command.type) {
 			case "list": return { payload: await this.callbacks.mcp().listServers() }
 			case "marketplace": return { payload: { catalog: { items: [] }, items: [] } }

@@ -15,7 +15,7 @@ type CoreFactoryDependencies = {
 	getActiveSessionId: () => string | null
 	onEvent?: (event: AgentRuntimeEvent) => void
 	onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>
-	onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>
+	onAskQuestion?: (question: string, options: string[], signal?: AbortSignal) => Promise<AskQuestionResult>
 	isAutomationEnabled?: () => boolean
 	log: (level: string, message: string, metadata?: unknown) => void
 }

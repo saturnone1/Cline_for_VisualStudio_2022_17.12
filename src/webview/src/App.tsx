@@ -9,6 +9,7 @@ import { useExtensionState } from "./context/ExtensionStateContext"
 import { Providers } from "./Providers"
 import { UiServiceClient } from "./services/grpcClient"
 import { applyLigTheme, getLigTheme } from "./utils/ligTheme"
+import { PLATFORM_CONFIG } from "./config/platform.config"
 
 const AccountView = lazy(() => import("./components/account/AccountView"))
 const HistoryView = lazy(() => import("./components/history/HistoryView"))
@@ -66,6 +67,14 @@ const AppContent = () => {
 		showUpdateAnnouncementModal()
 	}, [didHydrateState, showWelcome, shouldShowAnnouncement, showAnnouncement, showUpdateAnnouncementModal])
 
+	useEffect(() => {
+		if (!didHydrateState) return
+		PLATFORM_CONFIG.postMessage({
+			protocol_version: 1,
+			type: "vscline.webview.hydrated",
+		})
+	}, [didHydrateState])
+
 	if (!didHydrateState) {
 		return <LoadingScreen />
 	}
@@ -75,9 +84,9 @@ const AppContent = () => {
 	}
 
 	return (
-		<div className="flex h-screen w-full flex-col">
+		<div className="flex h-screen w-full flex-col overflow-hidden">
 			<BackgroundTaskStatus visible={showSettings || showHistory || showMcp || showAccount || showWorktrees} />
-			<div className="relative min-h-0 flex-1">
+			<div className="relative min-h-0 flex-1 overflow-hidden">
 				<Suspense fallback={<SecondaryViewFallback />}>
 					{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
 					{showHistory && <HistoryView onDone={hideHistory} />}

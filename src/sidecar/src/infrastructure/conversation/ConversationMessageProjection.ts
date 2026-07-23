@@ -1,4 +1,5 @@
 import { tryParseJson } from "./ToolCommandFormatting"
+import { CLINE_ASK_KIND_MAP, CLINE_SAY_KIND_MAP } from "../../application/dto/generated/ClineMessageKinds"
 
 export function normalizeClineMessagePayload(message: Record<string, unknown>) {
 	const normalized = { ...message }
@@ -143,50 +144,11 @@ export function toProtoClineMessage(message: Record<string, unknown>) {
 }
 
 export function toProtoAsk(ask: string) {
-	const mapping: Record<string, string> = {
-		followup: "FOLLOWUP",
-		plan_mode_respond: "PLAN_MODE_RESPOND",
-		act_mode_respond: "ACT_MODE_RESPOND",
-		command: "COMMAND",
-		command_output: "COMMAND_OUTPUT",
-		completion_result: "COMPLETION_RESULT",
-		tool: "TOOL",
-		api_req_failed: "API_REQ_FAILED",
-		resume_task: "RESUME_TASK",
-		resume_completed_task: "RESUME_COMPLETED_TASK",
-		mistake_limit_reached: "MISTAKE_LIMIT_REACHED",
-		browser_action_launch: "BROWSER_ACTION_LAUNCH",
-		use_mcp_server: "USE_MCP_SERVER",
-		new_task: "NEW_TASK",
-		condense: "CONDENSE",
-		summarize_task: "SUMMARIZE_TASK",
-		report_bug: "REPORT_BUG",
-		use_subagents: "USE_SUBAGENTS",
-	}
-	return mapping[ask] || "FOLLOWUP"
+	return readKind(CLINE_ASK_KIND_MAP, ask) || "FOLLOWUP"
 }
 
 export function toProtoSay(say: string) {
-	const mapping: Record<string, string> = {
-		task: "TASK",
-		error: "ERROR",
-		api_req_started: "API_REQ_STARTED",
-		api_req_finished: "API_REQ_FINISHED",
-		text: "TEXT",
-		reasoning: "REASONING",
-		completion_result: "COMPLETION_RESULT_SAY",
-		user_feedback: "USER_FEEDBACK",
-		user_feedback_diff: "USER_FEEDBACK_DIFF",
-		api_req_retried: "API_REQ_RETRIED",
-		command: "COMMAND_SAY",
-		command_output: "COMMAND_OUTPUT_SAY",
-		tool: "TOOL_SAY",
-		info: "INFO",
-		task_progress: "TASK_PROGRESS",
-		hook_status: "HOOK_STATUS",
-		hook_output_stream: "HOOK_OUTPUT_STREAM",
-	}
-	return mapping[say] || "TEXT"
+	return readKind(CLINE_SAY_KIND_MAP, say) || "TEXT"
 }
 
 export function getExternalUrlValue(message: unknown) {
@@ -210,3 +172,4 @@ export function stripLegacyMcpContext(value: string) {
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function getString(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "string" ? item : item == null ? "" : String(item) }
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
+function readKind(mapping: Readonly<Record<string, string>>, kind: string) { return mapping[kind] }

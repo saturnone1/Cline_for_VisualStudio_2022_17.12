@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
 
 namespace VsClineAgent.Host
@@ -10,6 +11,7 @@ namespace VsClineAgent.Host
         private readonly object _gate = new object();
         private readonly PendingWebviewMessageBuffer _pending = new PendingWebviewMessageBuffer();
         private readonly Func<CoreWebView2?> _getWebview;
+        private readonly Func<Action, Task> _postToUi;
         private bool _flushScheduled;
         private bool _ready;
         private bool _disposed;
@@ -21,9 +23,10 @@ namespace VsClineAgent.Host
 		private const int MaximumRetryDelayMilliseconds = 5000;
 		private const int MaximumRetryAttempts = 8;
 
-        public WebviewMessageQueue(Func<CoreWebView2?> getWebview)
+        public WebviewMessageQueue(Func<CoreWebView2?> getWebview, Func<Action, Task>? postToUi = null)
         {
             _getWebview = getWebview;
+            _postToUi = postToUi ?? VisualStudioUiThread.PostAsync;
         }
 
         public bool IsReady
@@ -74,13 +77,41 @@ namespace VsClineAgent.Host
             }
             try
             {
-                VisualStudioUiThread.Post(Flush);
+                ObserveFlushDispatch(_postToUi(Flush));
             }
             catch (Exception ex)
             {
                 lock (_gate) _flushScheduled = false;
                 InteractionLog.Write("host", "webview.queue.scheduleFailed", new { error = ex.Message });
+                ScheduleRetry();
             }
+        }
+
+        private void ObserveFlushDispatch(Task dispatch)
+        {
+            _ = dispatch.ContinueWith(
+                completed =>
+                {
+                    if (completed.IsCanceled)
+                        HandleFlushDispatchFailure(new TaskCanceledException("UI dispatch was cancelled."));
+                    else if (completed.IsFaulted)
+                        HandleFlushDispatchFailure(completed.Exception?.GetBaseException() ?? new InvalidOperationException("UI dispatch failed."));
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        private void HandleFlushDispatchFailure(Exception error)
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _flushScheduled = false;
+            }
+            InteractionLog.Write("host", "webview.queue.scheduleFailed", new { error = error.Message });
+            ScheduleRetry();
         }
 
         public void Clear()

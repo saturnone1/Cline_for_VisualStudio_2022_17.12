@@ -43,11 +43,16 @@ export async function summarizeCompactionContext(
 		for (let index = 0; index < sourceChunks.length; index++) {
 			summaries.push(await requestSummary(handler, buildSummaryPrompt(sourceChunks[index], index + 1, sourceChunks.length)))
 		}
+		const maximumMergeRounds = Math.ceil(Math.log2(Math.max(1, sourceChunks.length))) + 2
+		let mergeRound = 0
 		while (summaries.length > 1) {
+			if (mergeRound++ >= maximumMergeRounds) throw new Error("Context compaction summaries did not converge.")
+			const previousCount = summaries.length
 			const groups = chunkTextByTokenBudget(summaries.join("\n\n--- NEXT PART ---\n\n"), inputLimit)
 			if (groups.length === 1) return requestSummary(handler, buildMergePrompt(groups[0]))
 			const merged: string[] = []
 			for (const group of groups) merged.push(await requestSummary(handler, buildMergePrompt(group)))
+			assertCompactionConvergence(previousCount, merged.length)
 			summaries = merged
 		}
 		return summaries[0]
@@ -60,6 +65,10 @@ export async function summarizeCompactionContext(
 		externalSignal?.removeEventListener("abort", abortFromCaller)
 		handler.setAbortSignal?.(undefined)
 	}
+}
+
+export function assertCompactionConvergence(previousCount: number, nextCount: number) {
+	if (nextCount >= previousCount) throw new Error(`Context compaction summaries did not converge (${previousCount} -> ${nextCount}).`)
 }
 
 export function estimateCompactedTokens(messages: readonly unknown[]) {

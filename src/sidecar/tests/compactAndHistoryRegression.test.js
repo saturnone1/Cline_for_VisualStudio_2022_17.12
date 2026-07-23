@@ -12,10 +12,11 @@ const { TaskCompletionProjector } = require("../dist/infrastructure/conversation
 const { AgentRunRecoveryFlow } = require("../dist/features/chat/runtime/AgentRunRecoveryFlow")
 const { validateWebviewRpcPayload } = require("../dist/application/dto/generated/WebviewRpcContract")
 const { decodeTaskRpcCommand } = require("../dist/infrastructure/webview/TaskRpcDecoder")
+const { createContextCompactionFlow } = require("../dist/infrastructure/webview/ContextCompactionComposition")
 const { taskTranscriptStorageBytes } = require("../dist/features/taskHistory/TaskHistoryStorageSize")
 const { buildCompactedConversationMessages } = require("../dist/infrastructure/conversation/ResumedConversationProjection")
 const { RuntimeModelContext } = require("../dist/infrastructure/models/RuntimeModelContext")
-const { resolveCompactionBudget } = require("../dist/infrastructure/sdk/ClineSdkCompactionSummarizer")
+const { assertCompactionConvergence, resolveCompactionBudget } = require("../dist/infrastructure/sdk/ClineSdkCompactionSummarizer")
 
 test("compact and history requests satisfy their WebView RPC contracts", () => {
 	assert.deepEqual(validateWebviewRpcPayload("SlashService", "condense", "request", {}), { ok: true })
@@ -130,6 +131,7 @@ test("SDK history refresh preserves local tasks that are absent from the SDK res
 test("compact flow delegates validated summarization and creates a replacement SDK session", async () => {
 	let compactCommand
 	let applied
+	let cleanedSource
 	const flow = new CompactSessionFlow({
 		isRuntimeAvailable: () => true,
 		activeSessionId: () => "stale-session",
@@ -143,6 +145,7 @@ test("compact flow delegates validated summarization and creates a replacement S
 		compact: async (command) => { compactCommand = command; return { sessionId: "session-2" } },
 		result: (result) => ({ sessionId: result.sessionId, messagesAfter: result.compactedMessageCount || 3, estimatedTokensAfter: result.estimatedTokensAfter || 500, summary: result.compactionSummary || "stored summary" }),
 		applySuccess: async (...args) => { applied = args },
+		cleanupSource: async (sessionId) => { cleanedSource = sessionId },
 		applyFailure: async (error) => { throw error },
 		messageCount: () => 25,
 		log: () => {},
@@ -152,6 +155,42 @@ test("compact flow delegates validated summarization and creates a replacement S
 	assert.equal(compactCommand.sourceSessionId, "session-1")
 	assert.equal("prompt" in compactCommand, false)
 	assert.deepEqual(applied, ["session-1", { sessionId: "session-2", messagesAfter: 3, estimatedTokensAfter: 500, summary: "stored summary" }, 25, 3])
+	assert.equal(cleanedSource, "session-1")
+})
+
+test("compaction merge rejects a non-decreasing summary set", () => {
+	assert.doesNotThrow(() => assertCompactionConvergence(4, 2))
+	assert.throws(() => assertCompactionConvergence(2, 2), /did not converge/)
+})
+
+test("compaction preserves the source and restores visible state when commit persistence fails", async () => {
+	let task = { id: "source", task: "inspect", cwdOnTaskInitialization: "C:\\repo" }
+	let messages = [{ type: "say", say: "task", text: "inspect" }, { type: "say", say: "text", text: "result" }]
+	const runtimeCalls = []
+	const bound = []
+	let persistCalls = 0
+	const runtime = {
+		compactSession: async () => ({ sessionId: "replacement", compactedMessageCount: 0, estimatedTokensAfter: 20, compactionSummary: "A sufficiently detailed durable summary for the replacement session." }),
+		stop: async ({ sessionId }) => runtimeCalls.push(["stop", sessionId]),
+		deleteSession: async ({ sessionId }) => { runtimeCalls.push(["delete", sessionId]); return true },
+		activateSession: async (sessionId) => { runtimeCalls.push(["activate", sessionId]); return { sessionId } },
+	}
+	const flow = createContextCompactionFlow({
+		runtime: () => runtime, activeSessionId: () => "source", selectedSessionId: () => "source", language: () => "en",
+		currentTask: () => task, messages: () => messages, workspaceRoot: async () => "C:\\repo", buildConfig: async () => ({ providerId: "test", modelId: "model" }), toolPolicies: () => ({}),
+		setInProgress: () => {}, transition: () => {}, startProgress: () => {}, finishProgress: () => {},
+		addMessage: (message) => { messages = [...messages, message] }, markClosing: () => {},
+		bindSession: (sessionId) => { bound.push(sessionId); task = { ...task, id: sessionId } },
+		restoreState: (previousTask, previousMessages) => { task = previousTask; messages = previousMessages },
+		advanceGeneration: () => {}, markSettingsActive: () => {}, updateTask: () => {},
+		persist: () => { if (++persistCalls > 1) throw new Error("disk full") }, broadcast: async () => {}, log: () => {},
+	})
+
+	assert.equal(await flow.execute("request"), undefined)
+	assert.deepEqual(runtimeCalls, [["stop", "replacement"], ["delete", "replacement"], ["activate", "source"]])
+	assert.equal(task.id, "source")
+	assert.deepEqual(bound, ["replacement", "source"])
+	assert.match(messages.at(-1).text, /preserved/)
 })
 
 test("compaction preserves the latest user request and completed result under a small context budget", () => {
@@ -241,6 +280,33 @@ test("active transcript reconciliation appends a missed final response and repla
 	assert.deepEqual(result.messages, [current[0], { ...projected[1], partial: undefined }])
 })
 
+test("transcript reconciliation treats task and user feedback as the same user turn", () => {
+	const current = [
+		{ ts: 101, type: "say", say: "user_feedback", text: "기능을 다시 실행해" },
+		{ ts: 200, type: "say", say: "text", text: "실행 결과" },
+		{ ts: 201, type: "say", say: "completion_result", text: "완료" },
+	]
+	const projected = [
+		{ ts: 100, type: "say", say: "task", text: "기능을 다시 실행해" },
+		{ ts: 200, type: "say", say: "text", text: "실행 결과" },
+	]
+	const result = reconcileTranscriptMessages(current, projected)
+	assert.equal(result.changed, false)
+	assert.deepEqual(result.messages, current)
+})
+
+test("transcript reconciliation preserves repeated user turns by occurrence count", () => {
+	const current = [{ ts: 100, type: "say", say: "user_feedback", text: "다시 해봐" }]
+	const projected = [
+		{ ts: 100, type: "say", say: "task", text: "다시 해봐" },
+		{ ts: 200, type: "say", say: "user_feedback", text: "다시 해봐" },
+	]
+	const result = reconcileTranscriptMessages(current, projected)
+	assert.equal(result.changed, true)
+	assert.equal(result.messages.length, 2)
+	assert.equal(result.messages[1].ts, 200)
+})
+
 test("selected task refresh reconciles while an SDK session is active without marking completion", async () => {
 	let applied
 	let reconciledStatus
@@ -299,6 +365,63 @@ test("compacted SDK bootstrap messages stay out of the visible transcript", asyn
 
 	await hydrator.refreshSelected()
 	assert.deepEqual(projectedInput, [{ role: "user", content: "visible follow-up" }])
+})
+
+test("resumed SDK bootstrap history stays out of the visible transcript", async () => {
+	let projectedInput
+	const hydrator = new TaskTranscriptHydrator({
+		isAvailable: () => true,
+		readCurrentTask: () => ({ id: "replacement", task: "다시 해봐" }),
+		activeSessionId: () => "replacement",
+		hasLiveProjection: () => true,
+		readMessages: () => [],
+		loadTranscript: async () => ({
+			session: { sessionId: "replacement", status: "idle", prompt: "다시 해봐", metadata: { ligVsResumed: true, ligVsResumedFrom: "source" } },
+			messages: [
+				{ role: "user", content: "이전 요청" },
+				{ role: "assistant", content: "이전 응답" },
+				{ role: "user", content: [{ type: "text", text: '<user_input mode="act">다시 해봐</user_input>' }] },
+				{ role: "assistant", content: "새 응답" },
+			],
+		}),
+		activateTranscript: async () => { throw new Error("not used") },
+		getSnapshot: () => null,
+		prepareActivation: () => {}, clearLiveInteraction: () => {},
+		projectSession: () => ({ id: "replacement", task: "다시 해봐" }),
+		projectMessages: (messages) => { projectedInput = messages; return [] },
+		applySelected: () => {}, applyShown: () => {}, applyHydrated: () => {}, reconcileSession: () => {},
+		summarizeMessage: () => ({}), log: () => {}, broadcast: async () => {}, isSessionNotFound: () => false,
+	})
+
+	await hydrator.refreshSelected()
+	assert.deepEqual(projectedInput, [
+		{ role: "user", content: [{ type: "text", text: '<user_input mode="act">다시 해봐</user_input>' }] },
+		{ role: "assistant", content: "새 응답" },
+	])
+})
+
+test("legacy resume bootstrap detection does not mistake a later tool result for the current prompt", async () => {
+	let projectedInput
+	const hydrator = new TaskTranscriptHydrator({
+		isAvailable: () => true, readCurrentTask: () => ({ id: "replacement", task: "다시 해봐" }), activeSessionId: () => "replacement",
+		hasLiveProjection: () => true, readMessages: () => [],
+		loadTranscript: async () => ({
+			session: { sessionId: "replacement", status: "idle", prompt: "다시 해봐", metadata: { ligVsResumed: true } },
+			messages: [
+				{ role: "user", content: "이전 요청" },
+				{ role: "user", content: [{ type: "text", text: '<user_input mode="act">다시 해봐</user_input>' }] },
+				{ role: "assistant", content: "진행 중" },
+				{ role: "user", content: "Tool result: 사용자가 다시 해봐라고 요청함" },
+				{ role: "assistant", content: "최종 응답" },
+			],
+		}),
+		activateTranscript: async () => { throw new Error("not used") }, getSnapshot: () => null, prepareActivation: () => {}, clearLiveInteraction: () => {},
+		projectSession: () => ({ id: "replacement", task: "다시 해봐" }), projectMessages: (messages) => { projectedInput = messages; return [] },
+		applySelected: () => {}, applyShown: () => {}, applyHydrated: () => {}, reconcileSession: () => {}, summarizeMessage: () => ({}), log: () => {}, broadcast: async () => {}, isSessionNotFound: () => false,
+	})
+	await hydrator.refreshSelected()
+	assert.equal(projectedInput.length, 4)
+	assert.equal(projectedInput.at(-1).content, "최종 응답")
 })
 
 test("AgentError projects an error and terminates the task as failed", () => {
@@ -378,7 +501,7 @@ test("idle observations do not complete an active run", () => {
 	assert.equal(finishes, 0)
 })
 
-test("completion without final text still emits a terminal marker and completion hook", () => {
+test("completion without final text or tool evidence is not reported as success", () => {
 	const messages = [{ type: "say", say: "task", text: "hello" }]
 	let hooks = 0
 	const projector = new TaskCompletionProjector({
@@ -388,6 +511,21 @@ test("completion without final text still emits a terminal marker and completion
 		recentToolSummaries: () => [], log: () => {},
 	})
 	projector.finish("session-1", "completed")
-	assert.equal(messages.at(-1).say, "completion_result")
+	assert.equal(messages.at(-1).say, "error")
+	assert.match(messages.at(-1).text, /without a final response/)
 	assert.equal(hooks, 1)
+})
+
+test("completion after a tool result supplies a visible evidence summary when final text is missing", () => {
+	const messages = [{ type: "say", say: "task", text: "capture" }, { type: "say", say: "browser_action", text: "{}" }]
+	const projector = new TaskCompletionProjector({
+		messages: () => messages, transition: () => {}, clearFinishStatus: () => {}, finishProgress: () => {}, prepareAssistant: () => {},
+		activeText: () => "", addMessage: (message) => messages.push(message), markAssistantLatency: () => {}, finalizeOpenPartial: () => {},
+		lastActivityReason: () => "browser", runCompleteHook: () => {}, capture: () => {}, persist: () => {}, language: () => "en",
+		recentToolSummaries: () => ["Browser screenshot ok: Example"], log: () => {},
+	})
+	projector.finish("session-1", "completed")
+	assert.equal(messages.at(-2).say, "text")
+	assert.match(messages.at(-2).text, /Browser screenshot ok: Example/)
+	assert.equal(messages.at(-1).say, "completion_result")
 })

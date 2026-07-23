@@ -1,4 +1,5 @@
 import type { SdkSettingToggleRequest, SdkSettingsHandler } from "./SdkSettingsHandler"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 export type InstructionSettingsCommand =
 	| Readonly<{ type: "refreshInstructions" }>
@@ -18,8 +19,9 @@ type Callbacks = Readonly<{
 export class InstructionSettingsRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async handle(command: InstructionSettingsCommand) {
+	async handle(command: InstructionSettingsCommand, signal?: AbortSignal) {
 		const cwd = await this.callbacks.workspaceRoot()
+		throwIfOperationCancelled(signal)
 		if (command.type === "refreshInstructions") return this.refreshInstructions(cwd)
 		if (command.type === "refreshSkills") return this.refreshSkills(cwd)
 		const result = await this.callbacks.sdkSettings().toggle(command.settingType, command.request, cwd)

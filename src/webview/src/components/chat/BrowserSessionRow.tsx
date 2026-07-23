@@ -54,13 +54,13 @@ const imgScreenshotStyle: CSSProperties = {
 }
 const noScreenshotContainerStyle: CSSProperties = {
 	position: "absolute",
-	top: "50%",
-	left: "50%",
-	transform: "translate(-50%, -50%)",
-}
-const noScreenshotIconStyle: CSSProperties = {
-	fontSize: "80px",
+	inset: 0,
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "center",
+	gap: "8px",
 	color: "var(--vscode-descriptionForeground)",
+	fontSize: "12px",
 }
 const consoleLogsContainerStyle: CSSProperties = { width: "100%" }
 const consoleLogsTextStyle: CSSProperties = { fontSize: "0.8em" }
@@ -116,7 +116,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 		// Check if last api_req_started is cancelled
 		const lastApiReqStarted = [...messages].reverse().find((m) => m.say === "api_req_started")
 		if (lastApiReqStarted?.text != null) {
-			const info = JSON.parse(lastApiReqStarted.text)
+			const info = parseJsonRecord(lastApiReqStarted.text)
 			if (info.cancelReason != null) {
 				return true
 			}
@@ -135,8 +135,13 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 	}, [lastModifiedMessage?.ask])
 
 	const isBrowsing = useMemo(() => {
-		return isLast && messages.some((m) => m.say === "browser_action_result") && !isLastApiReqInterrupted // after user approves, browser_action_result with "" is sent to indicate that the session has started
+		const hasCompletedResult = messages.some((message) => message.say === "browser_action_result" && Boolean(message.text))
+		return isLast && !hasCompletedResult && !isLastApiReqInterrupted
 	}, [isLast, messages, isLastApiReqInterrupted])
+	const isCloseAction = useMemo(() => messages.some((message) => {
+		if (message.say !== "browser_action") return false
+		return parseJsonRecord(message.text).action === "close"
+	}), [messages])
 
 	// Organize messages into pages with current state and next action
 	const pages = useMemo(() => {
@@ -167,7 +172,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 				}
 				// Complete current state
 				currentStateMessages.push(message)
-				const resultData = JSON.parse(message.text || "{}") as BrowserActionResult
+				const resultData = parseJsonRecord(message.text) as BrowserActionResult
 
 				// Add page with current state and previous next actions
 				result.push({
@@ -325,7 +330,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 		for (let i = actions.length - 1; i >= 0; i--) {
 			const message = actions[i]
 			if (message.say === "browser_action") {
-				const browserAction = JSON.parse(message.text || "{}") as ClineSayBrowserAction
+				const browserAction = parseJsonRecord(message.text) as unknown as ClineSayBrowserAction
 				if (browserAction.action === "click" && browserAction.coordinate) {
 					return browserAction.coordinate
 				}
@@ -350,6 +355,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 	// Calculate maxWidth
 	const maxWidth = browserSettings.viewport.width < BROWSER_VIEWPORT_PRESETS["Small Desktop (900x600)"].width ? 200 : undefined
 	const { t } = useI18n()
+	const hasBrowserResult = messages.some((message) => message.say === "browser_action_result" && Boolean(message.text))
 
 	const [browserSessionRow, { height }] = useSize(
 		// We don't declare a constant for the inline style here because `useSize` will try to modify the style object
@@ -365,7 +371,8 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 					{isAutoApproved ? t("browser.using") : t("browser.wants")}
 				</span>
 			</div>
-			<div
+			{!isCloseAction && (
+				<div
 				style={{
 					borderRadius: 3,
 					border: "1px solid var(--vscode-editorGroup-border)",
@@ -412,7 +419,8 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 						/>
 					) : (
 						<div style={noScreenshotContainerStyle}>
-							<span className="codicon codicon-globe" style={noScreenshotIconStyle} />
+							<span className={cn("codicon", hasBrowserResult ? "codicon-warning" : "codicon-loading codicon-modifier-spin")} />
+							<span>{hasBrowserResult ? t("browser.previewUnavailable") : t("browser.previewLoading")}</span>
 						</div>
 					)}
 					{displayState.mousePosition && (
@@ -448,7 +456,8 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 						<CodeBlock source={`${"```"}shell\n${displayState.consoleLogs || "(No new logs)"}\n${"```"}`} />
 					)}
 				</div>
-			</div>
+				</div>
+			)}
 
 			{/* Action content with min height */}
 			<div style={{ minHeight: maxActionHeight }}>{actionContent}</div>
@@ -550,7 +559,7 @@ const BrowserSessionRowContent = memo(
 						)
 
 					case "browser_action":
-						const browserAction = JSON.parse(message.text || "{}") as ClineSayBrowserAction
+						const browserAction = parseJsonRecord(message.text) as unknown as ClineSayBrowserAction
 						return (
 							<BrowserActionBox
 								action={browserAction.action}
@@ -629,5 +638,15 @@ const BrowserSessionRowContainer = styled.div`
 	padding: 10px 6px 10px 15px;
 	position: relative;
 `
+
+function parseJsonRecord(value?: string): Record<string, unknown> {
+	if (!value) return {}
+	try {
+		const parsed: unknown = JSON.parse(value)
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
+	} catch {
+		return {}
+	}
+}
 
 export default BrowserSessionRow

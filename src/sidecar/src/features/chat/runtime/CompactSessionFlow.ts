@@ -15,6 +15,8 @@ type Callbacks = Readonly<{
 	compact: (request: AgentCompactSessionRequest) => Promise<unknown>
 	result: (result: unknown) => CompactionResult
 	applySuccess: (sourceSessionId: string, result: CompactionResult, messagesBefore: number, messagesAfter: number) => Promise<void>
+	cleanupSource: (sourceSessionId: string) => Promise<void>
+	rollbackReplacement: (sourceSessionId: string, replacementSessionId: string) => Promise<void>
 	applyFailure: (error: unknown) => Promise<void>
 	messageCount: () => number
 	log: (event: string, details: Record<string, unknown>) => void
@@ -40,6 +42,7 @@ export class CompactSessionFlow {
 		this.callbacks.showProgress(this.callbacks.language() === "en" ? "Compacting context..." : "컨텍스트 압축 중입니다.")
 		this.callbacks.persist()
 		await this.callbacks.broadcast()
+		let replacementSessionId = ""
 
 		try {
 			throwIfAborted(signal)
@@ -49,11 +52,24 @@ export class CompactSessionFlow {
 			const compacted = this.callbacks.result(result)
 			const sessionId = compacted.sessionId
 			if (!sessionId || sessionId === sourceSessionId) throw new Error("SDK did not create a replacement session for context compaction.")
+			replacementSessionId = sessionId
 			this.callbacks.log("contextCompactionSessionCreated", { requestId, sourceSessionId, sessionId, messagesBefore, initialMessages: command.initialMessages.length })
 			await this.callbacks.applySuccess(sourceSessionId, compacted, messagesBefore, compacted.messagesAfter)
+			try {
+				await this.callbacks.cleanupSource(sourceSessionId)
+			} catch (cleanupError) {
+				this.callbacks.log("contextCompactionSourceCleanupFailed", { requestId, sourceSessionId, sessionId, error: stringify(cleanupError) })
+			}
 			return sessionId
 		} catch (error) {
 			this.callbacks.log("contextCompactionFailed", { requestId, sourceSessionId, error: stringify(error) })
+			if (replacementSessionId) {
+				try {
+					await this.callbacks.rollbackReplacement(sourceSessionId, replacementSessionId)
+				} catch (rollbackError) {
+					this.callbacks.log("contextCompactionRollbackFailed", { requestId, sourceSessionId, replacementSessionId, error: stringify(rollbackError) })
+				}
+			}
 			await this.callbacks.applyFailure(error)
 			return undefined
 		} finally {

@@ -30,7 +30,7 @@ export type HookRuntimeEvent = { type: "hook"; sessionId: string; hookEventName:
 export type PendingPromptsRuntimeEvent = { type: "pending_prompts"; sessionId: string; count: number; payload: AgentEventPayload }
 export type PendingPromptSubmittedRuntimeEvent = { type: "pending_prompt_submitted"; sessionId: string; prompt: string; payload: AgentEventPayload }
 export type WorkspaceChange = Readonly<{ filePath: string; beforePath: string; afterPath: string; action: string; additions: number; deletions: number }>
-export type WorkspaceChangedRuntimeEvent = { type: "vscline_file_changed"; change: WorkspaceChange; payload: AgentEventPayload }
+export type WorkspaceChangedRuntimeEvent = { type: "vscline_file_changed"; sessionId: string; change: WorkspaceChange; payload: AgentEventPayload }
 
 export type AgentRuntimeEvent =
 	| { type: "agent_event"; sessionId: string; event: AgentEvent; payload: AgentEventPayload }

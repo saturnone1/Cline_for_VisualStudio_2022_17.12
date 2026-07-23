@@ -13,9 +13,10 @@ const NewTaskButton: React.FC<{
 	return (
 		<Tooltip>
 			<TooltipContent side="left">{label}</TooltipContent>
-			<TooltipTrigger className={cn("flex items-center", className)}>
+			<TooltipTrigger asChild>
 				<Button
 					aria-label={label}
+					className={cn("flex items-center", className)}
 					onClick={(e) => {
 						e.preventDefault()
 						e.stopPropagation()

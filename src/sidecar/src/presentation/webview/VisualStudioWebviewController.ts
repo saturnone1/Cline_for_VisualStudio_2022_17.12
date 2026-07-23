@@ -14,7 +14,7 @@ export class VisualStudioWebviewController {
 	dispose() { return this.application.dispose() }
 	isScheduledAgentsEnabled() { return this.application.isScheduledAgentsEnabled() }
 	requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult> { return this.application.requestToolApproval(request) }
-	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult> { return this.application.requestQuestion(question, options) }
+	requestQuestion(question: string, options: string[], signal?: AbortSignal): Promise<AskQuestionResult> { return this.application.requestQuestion(question, options, signal) }
 	handleSdkEvent(event: AgentRuntimeEvent) { this.application.handleSdkEvent(event) }
 	handle(params: unknown) {
 		try {

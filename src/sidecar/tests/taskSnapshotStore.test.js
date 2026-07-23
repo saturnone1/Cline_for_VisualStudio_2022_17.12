@@ -56,3 +56,13 @@ test("WebView state bounds a long transcript while preserving its compaction anc
 	assert.equal(projected.clineMessages.at(-1).ts, 700)
 	assert.ok(serialized.length < 4.2 * 1024 * 1024, `WebView transcript snapshot was ${serialized.length} chars`)
 })
+
+test("WebView state preserves a bounded browser preview instead of truncating its data URI", () => {
+	const state = createInitialState()
+	state.currentTaskItem = { id: "browser-task" }
+	const screenshot = `data:image/jpeg;base64,${"A".repeat(32 * 1024)}`
+	state.clineMessages = [{ ts: 1, type: "say", say: "browser_action_result", text: JSON.stringify({ screenshot, currentUrl: "https://example.com" }) }]
+
+	const projected = createWebviewStateSnapshot(state)
+	assert.equal(JSON.parse(projected.clineMessages[0].text).screenshot, screenshot)
+})

@@ -1,5 +1,3 @@
-import fs from "node:fs"
-import path from "node:path"
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult } from "../../application/ports/AgentInteraction"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
@@ -7,8 +5,9 @@ import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
 import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { normalizeAgentRuntimeEvent } from "./ClineSdkEventTranslator"
-import { getLocalAppDataRoot, resolveWorkspacePath, sanitizePathPart } from "./SdkEnvironment"
+import { resolveWorkspacePath } from "./SdkEnvironment"
 import { fetchWebContentForSdk, normalizeCommandResultForSdk, readPositiveIntEnv } from "./SdkToolSupport"
+import { writeChangeSnapshot as persistChangeSnapshot } from "./ChangeSnapshotStore"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 
@@ -103,7 +102,7 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				next = input.new_text
 			}
 
-			const beforePath = await writeChangeSnapshot(filePath, before, dependencies, context)
+			const beforePath = await persistChangeSnapshot(filePath, before, sessionIdFrom(context, dependencies) || "session")
 			await host.workspaceClient.writeTextFile({ path: filePath, content: next })
 			emitFileChanged(dependencies, {
 				sessionId: sessionIdFrom(context, dependencies),
@@ -124,7 +123,7 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd)
 				const current = asRecord(await host.workspaceClient.readTextFile({ path: beforeFilePath }))
 				const before = current.exists === true ? stringValue(current.content) || "" : ""
-				const beforePath = await writeChangeSnapshot(beforeFilePath, before, dependencies, context)
+				const beforePath = await persistChangeSnapshot(beforeFilePath, before, sessionIdFrom(context, dependencies) || "session")
 				snapshots.push({ ...change, beforeFilePath, afterFilePath, before, beforePath })
 			}
 
@@ -134,7 +133,7 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				const afterContent = after.exists === true ? stringValue(after.content) || "" : ""
 				const afterPath = after.exists === true
 					? snapshot.afterFilePath
-					: await writeChangeSnapshot(snapshot.afterFilePath, afterContent, dependencies, context, "after")
+					: await persistChangeSnapshot(snapshot.afterFilePath, afterContent, sessionIdFrom(context, dependencies) || "session", "after")
 				emitFileChanged(dependencies, {
 					sessionId: sessionIdFrom(context, dependencies),
 					filePath: snapshot.afterFilePath,
@@ -152,15 +151,6 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 		},
 		submit: async (summary: string, verified: boolean) => `${verified ? "Verified" : "Submitted"}: ${summary}`,
 	}
-}
-
-async function writeChangeSnapshot(filePath: string, content: string, dependencies: ToolExecutorDependencies, context?: AgentToolContext, suffix = "before") {
-	const sessionId = sessionIdFrom(context, dependencies) || "session"
-	const changeRoot = path.join(getLocalAppDataRoot(), "VsClineAgent", "changes", sanitizePathPart(sessionId))
-	await fs.promises.mkdir(changeRoot, { recursive: true })
-	const snapshotPath = path.join(changeRoot, `${Date.now()}-${sanitizePathPart(path.basename(filePath) || "file")}.${suffix}`)
-	await fs.promises.writeFile(snapshotPath, content, "utf8")
-	return snapshotPath
 }
 
 function emitFileChanged(dependencies: ToolExecutorDependencies, payload: Record<string, unknown>) {

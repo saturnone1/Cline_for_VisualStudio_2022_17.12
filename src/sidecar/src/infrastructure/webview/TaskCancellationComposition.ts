@@ -5,6 +5,7 @@ type Dependencies = Readonly<{
 	cancelTerminal: () => Promise<void>
 	cancelHooks: () => Promise<void>
 	cancelBrowser: () => Promise<void>
+	cancelInteraction: () => Promise<void>
 	timeoutMs: () => number
 	log: (event: string, details: Record<string, unknown>) => void
 }>
@@ -18,5 +19,6 @@ export function createTaskCancellationComposition(dependencies: Dependencies): C
 		{ name: "terminal", cancel: dependencies.cancelTerminal },
 		{ name: "hooks", cancel: dependencies.cancelHooks },
 		{ name: "browser", cancel: dependencies.cancelBrowser },
+		{ name: "pending-interaction", cancel: dependencies.cancelInteraction },
 	])
 }

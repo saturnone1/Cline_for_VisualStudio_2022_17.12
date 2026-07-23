@@ -27,6 +27,7 @@
     <Compile Include="..\..\src\extension\Host\InteractionCorrelation.cs" Link="Host\InteractionCorrelation.cs" />
     <Compile Include="..\..\src\extension\Host\InteractionLog.cs" Link="Host\InteractionLog.cs" />
     <Compile Include="..\..\src\extension\Host\PendingWebviewMessageBuffer.cs" Link="Host\PendingWebviewMessageBuffer.cs" />
+    <Compile Include="..\..\src\extension\Host\WebviewMessageQueue.cs" Link="Host\WebviewMessageQueue.cs" />
     <Compile Include="..\..\src\extension\Host\NamedPipeJsonRpcClient.cs" Link="Host\NamedPipeJsonRpcClient.cs" />
     <Compile Include="..\..\src\extension\Host\BoundedUtf8LineReader.cs" Link="Host\BoundedUtf8LineReader.cs" />
     <Compile Include="..\..\src\extension\Host\WindowsProcessJob.cs" Link="Host\WindowsProcessJob.cs" />
@@ -36,6 +37,7 @@
     <Compile Include="..\..\src\extension\Host\UiThemePreferenceStore.cs" Link="Host\UiThemePreferenceStore.cs" />
     <Compile Include="..\..\src\extension\Host\WebViewNavigationPolicy.cs" Link="Host\WebViewNavigationPolicy.cs" />
     <Compile Include="..\..\src\extension\Host\WebView2RuntimeResolver.cs" Link="Host\WebView2RuntimeResolver.cs" />
+    <Compile Include="..\..\src\extension\Host\WebViewLifecycleMessage.cs" Link="Host\WebViewLifecycleMessage.cs" />
     <Compile Include="..\..\src\extension\Host\ToolWindowLifetime.cs" Link="Host\ToolWindowLifetime.cs" />
     <Compile Include="..\..\src\extension\Services\TerminalCommandPolicy.cs" Link="Services\TerminalCommandPolicy.cs" />
     <Compile Include="..\..\src\extension\Services\CommandExecutionModels.cs" Link="Services\CommandExecutionModels.cs" />

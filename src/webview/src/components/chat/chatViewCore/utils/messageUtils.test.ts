@@ -138,6 +138,31 @@ describe("groupLowStakesTools", () => {
 		expect(grouped[1]).toBe(checkpoint)
 	})
 
+	it("keeps the conversation renderable when a browser event is truncated", () => {
+		const grouped = groupMessages([
+			{ type: "say", say: "browser_action_launch", text: "https://example.com", ts: 1 },
+			{ type: "say", say: "browser_action", text: '{"action":', ts: 2 },
+			{ type: "say", say: "browser_action_result", text: "{}", ts: 3 },
+		])
+
+		expect(grouped).toHaveLength(2)
+		expect(Array.isArray(grouped[0])).toBe(true)
+		expect((grouped[0] as ClineMessage[])).toHaveLength(1)
+		expect(Array.isArray(grouped[1])).toBe(true)
+		expect((grouped[1] as ClineMessage[])).toHaveLength(2)
+	})
+
+	it("groups a standalone browser close action with its result and no later chat text", () => {
+		const close = { type: "say", say: "browser_action", text: '{"action":"close"}', ts: 1 } as ClineMessage
+		const result = { type: "say", say: "browser_action_result", text: '{"status":"closed"}', ts: 2 } as ClineMessage
+		const laterText = { type: "say", say: "text", text: "닫기 완료", ts: 3 } as ClineMessage
+		const grouped = groupMessages([close, result, laterText])
+
+		expect(grouped).toHaveLength(2)
+		expect(grouped[0]).toEqual([close, result])
+		expect(grouped[1]).toBe(laterText)
+	})
+
 	it("compacts repeated completed progress rows by category", () => {
 		const grouped = groupLowStakesTools([
 			{

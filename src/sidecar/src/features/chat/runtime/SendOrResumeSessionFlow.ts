@@ -1,5 +1,6 @@
 import type { AgentEnginePort } from "../../../application/ports/AgentEnginePort"
 import type { SendMessageCommand } from "../sendMessage/SendMessageCommand"
+import { RESUMED_SESSION_FORMAT_VERSION } from "./ResumeSessionFlow"
 
 type Callbacks = Readonly<{
 	activeSettingsRevision: () => number
@@ -16,6 +17,8 @@ type Callbacks = Readonly<{
 }>
 
 export class SendOrResumeSessionFlow {
+	private readonly validatedSessions = new Set<string>()
+	private readonly maxValidatedSessions = 256
 	constructor(private readonly engine: () => AgentEnginePort | null, private readonly callbacks: Callbacks) {}
 
 	async execute(sessionId: string, command: SendMessageCommand, textLength: number) {
@@ -26,18 +29,33 @@ export class SendOrResumeSessionFlow {
 			return this.callbacks.resume(sessionId, command, textLength)
 		}
 		let activateMissing = false
+		let activatedSession: unknown
 		if (engine.status.activeSessionId !== sessionId) {
 			this.callbacks.log("sendAskResponse.activateSession", { from: engine.status.activeSessionId, to: sessionId })
-			const activated = await engine.activateSession(sessionId).catch((error) => {
+			activatedSession = await engine.activateSession(sessionId).catch((error) => {
 				if (!this.callbacks.isSessionNotFound(error)) throw error
 				activateMissing = true
 				this.callbacks.log("sendAskResponse.activateSessionMissing", { sessionId, error: stringify(error) })
 				return null
 			})
-			if (!activated) activateMissing = true
+			if (!activatedSession) activateMissing = true
 		}
 		try {
 			if (activateMissing) return await this.callbacks.resume(sessionId, command, textLength)
+			if (!this.validatedSessions.has(sessionId)) {
+				const session = activatedSession || await engine.getSession({ sessionId }).catch((error) => {
+					this.callbacks.log("sendAskResponse.sessionFormatInspectionFailed", { sessionId, error: stringify(error) })
+					return null
+				})
+				if (session) this.rememberValidatedSession(sessionId)
+				if (session && requiresResumeMigration(session)) {
+					this.callbacks.log("sendAskResponse.replaceLegacyResumedSession", { sessionId })
+					this.callbacks.markClosing(sessionId, true)
+					await engine.stop({ sessionId }).catch((error) => this.callbacks.log("sendAskResponse.stopLegacyResumeFailed", { sessionId, error: stringify(error) }))
+					this.callbacks.markClosing(sessionId, false)
+					return await this.callbacks.resume(sessionId, command, textLength)
+				}
+			}
 			this.callbacks.bindSession(sessionId)
 			const activeRevision = this.callbacks.activeSettingsRevision(), revision = this.callbacks.settingsRevision()
 			if (activeRevision !== revision) {
@@ -64,6 +82,21 @@ export class SendOrResumeSessionFlow {
 			}
 		}
 	}
+
+	private rememberValidatedSession(sessionId: string) {
+		this.validatedSessions.add(sessionId)
+		while (this.validatedSessions.size > this.maxValidatedSessions) {
+			const oldest = this.validatedSessions.values().next().value as string | undefined
+			if (!oldest) break
+			this.validatedSessions.delete(oldest)
+		}
+	}
 }
 
 function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }
+function requiresResumeMigration(value: unknown) {
+	const session = asRecord(asRecord(value).session ?? value)
+	const metadata = asRecord(session.metadata ?? session.sessionMetadata)
+	return metadata.ligVsResumed === true && metadata.ligVsResumeFormatVersion !== RESUMED_SESSION_FORMAT_VERSION
+}
+function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }

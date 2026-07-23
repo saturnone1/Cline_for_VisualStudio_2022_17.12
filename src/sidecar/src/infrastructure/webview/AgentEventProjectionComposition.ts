@@ -90,7 +90,9 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 			})
 		},
 		handleBrowser: (tool, input, error, output) => {
-			void deps.browserTools.execute(tool, input, error, output)
+			void deps.browserTools.execute(tool, input, error, output).catch((projectionError) => {
+				deps.logger.log("sidecar", "browserToolProjectionFailed", { tool, error: stringify(projectionError) })
+			})
 		},
 		shouldSuppressTrackedEdit: deps.shouldSuppressTrackedEdit,
 		rememberSummary: (tool, text) => deps.activity.rememberToolSummary(tool, text),
@@ -183,7 +185,6 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 	})
 	const runtimeEvents = new AgentRuntimeEventDispatcher({
 		transitionStreaming: (source) => deps.session.transition("streaming", source),
-		adoptReplacement: (sessionId) => deps.session.adoptReplacement(sessionId),
 		shouldIgnore: (sessionId) => deps.session.shouldIgnoreEvent(sessionId),
 		markFirstEvent: (sessionId, eventType) => deps.monitoring.markFirstSdkEvent(sessionId, eventType),
 		projectAgent: (event, sessionId) => semanticEvents.handle(event, sessionId),

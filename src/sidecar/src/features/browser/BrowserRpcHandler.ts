@@ -37,9 +37,15 @@ export class BrowserRpcHandler {
 			case "discover": return browser.discover(settings)
 			case "relaunchInstructions": return relaunchInstructions(settings.remoteBrowserHost)
 			case "listTabs": return browser.listTabs(settings)
-			case "captureScreenshot": return browser.captureScreenshot(command.request, settings)
-			case "performAction": return browser.performAction(command.request, settings)
+			case "captureScreenshot": return this.directResult(browser, browser.captureScreenshot(command.request, settings))
+			case "performAction": return this.directResult(browser, browser.performAction(command.request, settings))
 		}
+	}
+
+	private async directResult(browser: BrowserHandler, pending: Promise<unknown>) {
+		const result = await pending
+		browser.consumeDisplayResult(result)
+		return result
 	}
 }
 

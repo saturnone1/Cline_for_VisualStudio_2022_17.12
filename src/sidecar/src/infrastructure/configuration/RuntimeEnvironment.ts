@@ -14,6 +14,11 @@ export const RUNTIME_DEFAULTS = Object.freeze({
 	metadataResponseMaximumBytes: 4 * 1024 * 1024,
 	oauthResponseMaximumBytes: 256 * 1024,
 	historySyncEntries: 2_000,
+	browserScreenshotQuality: 75,
+	changeSnapshotRetentionDays: 30,
+	changeSnapshotMaximumFiles: 5_000,
+	changeSnapshotMaximumMiB: 512,
+	changeSnapshotCleanupIntervalMs: 60_000,
 })
 
 export function readPositiveIntEnv(name: string, fallback: number) {

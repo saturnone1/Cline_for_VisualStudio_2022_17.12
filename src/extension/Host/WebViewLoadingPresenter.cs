@@ -72,26 +72,26 @@ namespace VsClineAgent.Host
             void Apply()
             {
                 var isLight = string.Equals(theme, UiThemePreferenceStore.LightTheme, StringComparison.OrdinalIgnoreCase);
-                _owner.Background = Brush(isLight ? "#F7F8FA" : "#1E1E1E");
+				_owner.Background = Brush(isLight ? "#EFF1F4" : "#1E1E1E");
                 _title.Foreground = Brush(isLight ? "#172033" : "#CCCCCC");
                 _brand.Foreground = Brush(isLight ? "#4B5563" : "#888888");
                 _status.Foreground = Brush(isLight ? "#4B5563" : "#888888");
                 _progress.Foreground = Brush(isLight ? "#0969B7" : "#0E70C0");
                 _progress.Background = Brush(isLight ? "#D9DEE7" : "#333333");
                 _error.Foreground = Brush(isLight ? "#B42318" : "#F44747");
-                _error.Background = Brush(isLight ? "#FFFFFF" : "#1E1E1E");
+				_error.Background = Brush(isLight ? "#F5F6F8" : "#1E1E1E");
                 _error.BorderBrush = Brush(isLight ? "#C7CCD4" : "#3C3C3C");
                 ApplyGlowTheme(isLight);
             }
 
             if (_owner.Dispatcher.CheckAccess()) Apply();
-            else VisualStudioUiThread.Post(Apply);
+            else _ = VisualStudioUiThread.PostAsync(Apply);
         }
 
         internal void SetStatus(string message)
         {
             if (_owner.Dispatcher.CheckAccess()) _status.Text = message;
-            else VisualStudioUiThread.Post(() => _status.Text = message);
+            else _ = VisualStudioUiThread.PostAsync(() => _status.Text = message);
         }
 
         private static SolidColorBrush Brush(string color)

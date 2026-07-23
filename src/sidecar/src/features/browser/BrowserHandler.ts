@@ -1,5 +1,5 @@
 import type { BrowserAutomationPort } from "../../application/ports/BrowserAutomationPort"
-import { normalizeBrowserActionName, normalizeBrowserDebugHost, normalizeBrowserViewport, screenshotByteLength, type BrowserAction } from "./BrowserPolicy"
+import { normalizeBrowserActionName, normalizeBrowserDebugHost, normalizeBrowserUrl, normalizeBrowserViewport, screenshotByteLength, type BrowserAction } from "./BrowserPolicy"
 
 export type BrowserSettings = Readonly<{
 	remoteBrowserEnabled: boolean
@@ -26,11 +26,14 @@ type BrowserSessionRecord = {
 
 export class BrowserHandler {
 	private readonly sessions = new Map<string, BrowserSessionRecord>()
+	private readonly displayResults = new Map<string, { createdAt: number; bytes: number; value: Record<string, unknown> }>()
 
 	constructor(
 		private readonly automation: BrowserAutomationPort,
 		private readonly createId: () => string,
 		private readonly sessionTtlMs = 30 * 60 * 1000,
+		private readonly maxDisplayResults = 16,
+		private readonly maxDisplayResultBytes = 32 * 1024 * 1024,
 	) {}
 
 	getDetectedPath(settings: BrowserSettings) {
@@ -113,7 +116,7 @@ export class BrowserHandler {
 		if (config.disabled) return { success: false, status: "error", error: disabledMessage }
 		if (!settings.remoteBrowserEnabled) {
 			const executablePath = this.automation.resolveExecutablePath(settings.chromeExecutablePath)
-			const availability = await this.automation.ensureAvailable(config.host, executablePath)
+			const availability = await this.automation.ensureAvailable(config.host, executablePath, config.viewport)
 			if (!availability.success) return { success: false, status: "error", error: availability.error || "Browser is unavailable." }
 		}
 		const input = asRecord(params)
@@ -129,6 +132,15 @@ export class BrowserHandler {
 	}
 
 	cancelActive() { return this.automation.cancelActive() }
+
+	consumeDisplayResult(result: unknown) {
+		this.pruneSessions()
+		const actionId = getString(asRecord(result), "browserActionId")
+		if (!actionId) return undefined
+		const displayResult = this.displayResults.get(actionId)?.value
+		this.displayResults.delete(actionId)
+		return displayResult
+	}
 
 	private async runWithSession(host: string, request: BrowserAction) {
 		this.pruneSessions()
@@ -155,17 +167,33 @@ export class BrowserHandler {
 		})
 		const record = asRecord(result)
 		session.tabId = getString(record, "tabId") || session.tabId
-		session.url = getString(record, "currentUrl") || getString(record, "url") || session.url
+		session.url = normalizeBrowserUrl(getString(record, "currentUrl") || getString(record, "url")) || session.url
 		session.title = getString(record, "title") || session.title
 		session.reconnectReason = getString(record, "reconnectReason") || session.reconnectReason
 		session.lastPhase = getString(record, "status") || session.lastPhase
 		session.lastActionAt = Date.now()
-		return { ...record, browserSessionId: sessionId, browserActionId: actionId, phases, tabId: session.tabId || getString(record, "tabId"), currentUrl: session.url || getString(record, "currentUrl"), title: session.title || getString(record, "title"), screenshotBytes: screenshotByteLength(getString(record, "screenshot")) }
+		const completeResult = { ...record, browserSessionId: sessionId, browserActionId: actionId, phases, tabId: session.tabId || getString(record, "tabId"), currentUrl: session.url || getString(record, "currentUrl"), title: session.title || getString(record, "title"), screenshotBytes: screenshotByteLength(getString(record, "screenshot")) }
+		this.displayResults.set(actionId, { createdAt: Date.now(), bytes: screenshotByteLength(getString(record, "screenshot")), value: completeResult })
+		this.pruneDisplayResults()
+		return completeResult
 	}
 
 	private pruneSessions() {
 		const now = Date.now()
 		for (const [sessionId, session] of this.sessions) if (now - session.lastActionAt > this.sessionTtlMs) this.sessions.delete(sessionId)
+		for (const [actionId, result] of this.displayResults) if (now - result.createdAt > this.sessionTtlMs) this.displayResults.delete(actionId)
+		this.pruneDisplayResults()
+	}
+
+	private pruneDisplayResults() {
+		let bytes = 0
+		for (const result of this.displayResults.values()) bytes += result.bytes
+		while (this.displayResults.size > this.maxDisplayResults || bytes > this.maxDisplayResultBytes) {
+			const oldest = this.displayResults.entries().next().value as [string, { bytes: number }] | undefined
+			if (!oldest) break
+			this.displayResults.delete(oldest[0])
+			bytes -= oldest[1].bytes
+		}
 	}
 }
 

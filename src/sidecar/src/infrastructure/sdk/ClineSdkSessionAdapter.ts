@@ -75,18 +75,22 @@ export class ClineSdkSessionAdapter {
 		}, workspaceRoots, await this.dependencies.createExtraTools())
 
 		const result = await core.start(startInput)
+		const replacementSessionId = stringValue(result.sessionId)
+		if (!replacementSessionId || replacementSessionId === request.sourceSessionId) {
+			if (replacementSessionId && replacementSessionId !== request.sourceSessionId) await core.stop(replacementSessionId).catch(() => undefined)
+			throw new Error("SDK did not create a valid replacement session for context compaction.")
+		}
 		if (request.signal?.aborted) {
-			if (result.sessionId) await core.stop(result.sessionId).catch(() => undefined)
-			if (result.sessionId) await core.delete(result.sessionId).catch(() => false)
+			await core.stop(replacementSessionId).catch(() => undefined)
+			await core.delete(replacementSessionId).catch(() => false)
 			throw new Error("Context compaction was cancelled.")
 		}
-		this.dependencies.setActiveSessionId(result.sessionId)
-		await core.stop(request.sourceSessionId).catch(() => undefined)
-		const sourceSessionDeleted = await core.delete(request.sourceSessionId).catch(() => false)
+		this.dependencies.setActiveSessionId(replacementSessionId)
 		return {
 			...result,
+			sessionId: replacementSessionId,
 			compactedFrom: request.sourceSessionId,
-			sourceSessionDeleted,
+			sourceSessionDeleted: false,
 			compactedMessageCount: 0,
 			estimatedTokensAfter: estimateCompactedTokens([{ role: "context", content: summary }]),
 			compactionSummary: summary,

@@ -29,9 +29,11 @@ namespace VsClineAgent.Host
         private Task? _receiveLoopTask;
         private readonly SemaphoreSlim _inboundRequestSlots = new SemaphoreSlim(4, 4);
         private int _inboundRequests;
+        private int _receiveLoopRunning;
         private int _disposed;
 
         public event Func<string, JToken?, Task<JToken?>>? RequestReceived;
+        public event Action<Exception>? ConnectionClosed;
 
         public NamedPipeJsonRpcClient(
             string pipeName,
@@ -56,14 +58,20 @@ namespace VsClineAgent.Host
                 PipeOptions.Asynchronous);
         }
 
-        public bool IsConnected => _pipe.IsConnected && _reader != null && _writer != null;
+        public bool IsConnected =>
+            Volatile.Read(ref _disposed) == 0 &&
+            Volatile.Read(ref _receiveLoopRunning) != 0 &&
+            _pipe.IsConnected &&
+            _reader != null &&
+            _writer != null;
 
         public async Task ConnectAsync(int timeoutMilliseconds, CancellationToken cancellationToken)
         {
             await _pipe.ConnectAsync(timeoutMilliseconds, cancellationToken).ConfigureAwait(false);
             _reader = new BoundedUtf8LineReader(_pipe, _maximumFrameBytes);
             _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
-            _receiveLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _receiveLoopCancellation = new CancellationTokenSource();
+            Volatile.Write(ref _receiveLoopRunning, 1);
             _receiveLoopTask = Task.Run(() => ReceiveLoopAsync(_receiveLoopCancellation.Token));
         }
 
@@ -154,10 +162,17 @@ namespace VsClineAgent.Host
             }
             finally
             {
+                Volatile.Write(ref _receiveLoopRunning, 0);
                 if (terminalError != null)
                     FailAllPendingRequests(terminalError);
                 else if (cancellationToken.IsCancellationRequested)
                     FailAllPendingRequests(new OperationCanceledException("The LIG VS sidecar connection was closed."));
+
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    var closure = terminalError ?? new IOException("The LIG VS sidecar connection stopped receiving messages.");
+                    try { ConnectionClosed?.Invoke(closure); } catch { }
+                }
             }
         }
 
@@ -312,6 +327,7 @@ namespace VsClineAgent.Host
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
 
+            Volatile.Write(ref _receiveLoopRunning, 0);
             _receiveLoopCancellation?.Cancel();
             FailAllPendingRequests(new ObjectDisposedException(nameof(NamedPipeJsonRpcClient)));
             try { _pipe.Dispose(); } catch { }
@@ -321,6 +337,8 @@ namespace VsClineAgent.Host
             // Inbound handlers may still be unwinding after pipe disposal. Disposing their
             // semaphores here can turn a normal shutdown into an unobserved ObjectDisposedException.
             _receiveLoopTask = null;
+            ConnectionClosed = null;
+            RequestReceived = null;
         }
 
         private static string NormalizePipeName(string pipeName)

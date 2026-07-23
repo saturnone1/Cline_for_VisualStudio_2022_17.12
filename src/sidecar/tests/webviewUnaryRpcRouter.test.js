@@ -97,3 +97,28 @@ test("a queued control-plane RPC can be cancelled without running later", async 
 	await new Promise((resolve) => setImmediate(resolve))
 	assert.equal(taskCalls, 0)
 })
+
+test("an active control-plane RPC observes cancellation and remains serialized until it settles", async () => {
+	let releaseSettings
+	let observedSignal
+	let taskCalls = 0
+	const settingsGate = new Promise((resolve) => { releaseSettings = resolve })
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		settings: { handle: async (_command, signal) => { observedSignal = signal; await settingsGate; return { payload: {} } } },
+		task: { handle: async () => { taskCalls++; return { payload: {} } } },
+	}))
+
+	const settings = router.handle("StateService.dismissBanner", "settings-active", { value: "banner" })
+	await Promise.resolve()
+	assert.equal(router.cancel("settings-active"), true)
+	assert.equal(observedSignal.aborted, true)
+
+	const task = router.handle("TaskService.newTask", "task-after-cancel", { text: "hello" })
+	await Promise.resolve()
+	assert.equal(taskCalls, 0)
+
+	releaseSettings()
+	await assert.rejects(settings, WebviewRpcRequestCancelledError)
+	await task
+	assert.equal(taskCalls, 1)
+})

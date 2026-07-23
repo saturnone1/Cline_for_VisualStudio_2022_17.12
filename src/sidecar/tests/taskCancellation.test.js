@@ -4,6 +4,7 @@ const { TaskCancellationCoordinator } = require("../dist/features/runtime/TaskCa
 const { CancelTaskFlow } = require("../dist/features/chat/cancelTask/CancelTaskFlow")
 const { CancelTaskHandler } = require("../dist/features/chat/cancelTask/CancelTaskHandler")
 const { ClearTaskHandler } = require("../dist/features/chat/clearTask/ClearTaskHandler")
+const { createTaskCancellationComposition } = require("../dist/infrastructure/webview/TaskCancellationComposition")
 
 test("task cancellation waits for every participant and reports failures", async () => {
 	const events = []
@@ -53,6 +54,23 @@ test("cancel flow never projects success when owned work remains", async () => {
 	assert.equal(generations, 1)
 	assert.equal(messages.some((message) => message.kind === "info"), false)
 	assert.equal(messages.some((message) => message.kind === "error" && message.text.includes("terminal: alive")), true)
+})
+
+test("task cancellation releases pending user interaction alongside owned work", async () => {
+	const cancelled = []
+	const cancel = createTaskCancellationComposition({
+		abortAgent: async () => { cancelled.push("agent") },
+		cancelTerminal: async () => { cancelled.push("terminal") },
+		cancelHooks: async () => { cancelled.push("hooks") },
+		cancelBrowser: async () => { cancelled.push("browser") },
+		cancelInteraction: async () => { cancelled.push("interaction") },
+		timeoutMs: () => 100,
+		log: () => undefined,
+	})
+
+	const result = await cancel("session-1")
+	assert.equal(result.succeeded, true)
+	assert.deepEqual(new Set(cancelled), new Set(["agent", "terminal", "hooks", "browser", "interaction"]))
 })
 
 test("a failed cancellation hook cannot leave a successfully cancelled task stuck", async () => {

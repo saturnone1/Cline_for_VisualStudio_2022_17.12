@@ -7,7 +7,7 @@ export interface WebviewApplicationPort {
 	dispose(): Promise<void>
 	isScheduledAgentsEnabled(): boolean
 	requestToolApproval(request: ApprovalRequestedEvent): Promise<ToolApprovalResult>
-	requestQuestion(question: string, options: string[]): Promise<AskQuestionResult>
+	requestQuestion(question: string, options: string[], signal?: AbortSignal): Promise<AskQuestionResult>
 	handleSdkEvent(event: AgentRuntimeEvent): void
 	handle(envelope: WebviewEnvelope): Promise<unknown>
 }

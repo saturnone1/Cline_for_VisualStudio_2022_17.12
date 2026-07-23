@@ -1,6 +1,7 @@
 type Dependencies = Readonly<{
 	loadMcpTools: () => Promise<readonly unknown[] | undefined>
 	loadHostTools: () => readonly unknown[]
+	loadProductTools?: () => readonly unknown[]
 	log: (level: string, message: string, metadata?: unknown) => void
 }>
 
@@ -14,6 +15,6 @@ export async function createSessionExtraTools(dependencies: Dependencies) {
 		})
 	}
 
-	const combined = [...mcpTools, ...dependencies.loadHostTools()]
+	const combined = [...mcpTools, ...dependencies.loadHostTools(), ...(dependencies.loadProductTools?.() || [])]
 	return combined.length > 0 ? combined : undefined
 }

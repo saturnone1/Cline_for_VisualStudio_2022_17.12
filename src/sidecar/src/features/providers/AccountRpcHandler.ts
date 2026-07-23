@@ -4,6 +4,7 @@ import type { OAuthAuthorizationHandler } from "./OAuthAuthorizationHandler"
 import type { OAuthCallbackHandler } from "./OAuthCallbackHandler"
 import type { ProviderAuthActionHandler } from "./ProviderAuthActionHandler"
 import type { ProviderCredentialHandler, ProviderCredentialMutation } from "./ProviderCredentialHandler"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 type Payload = Record<string, unknown>
 
@@ -41,7 +42,8 @@ type Callbacks = Readonly<{
 export class AccountRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async handle(command: AccountCommand): Promise<AccountRpcResult> {
+	async handle(command: AccountCommand, signal?: AbortSignal): Promise<AccountRpcResult> {
+		throwIfOperationCancelled(signal)
 		switch (command.type) {
 			case "redirectUrl": return { payload: await this.createCallbackBridge(command.request, "account") }
 			case "organizations": return { payload: { organizations: [] } }
@@ -49,6 +51,7 @@ export class AccountRpcHandler {
 			case "unsupportedAccountMutation": return { payload: createVisualStudioAuthUnsupportedResponse("account") }
 			case "login":
 				if (command.clearCodexBefore) {
+					throwIfOperationCancelled(signal)
 					this.callbacks.setCodexAuthenticated(false)
 					await this.callbacks.broadcast()
 				}

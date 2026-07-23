@@ -1,5 +1,11 @@
 import { ClineAsk as AppClineAsk, ClineMessage as AppClineMessage, ClineSay as AppClineSay } from "@shared/ExtensionMessage"
 import { ClineAsk, ClineMessageType, ClineSay, ClineMessage as ProtoClineMessage } from "@shared/proto/cline/ui"
+import { CLINE_ASK_KIND_MAP, CLINE_SAY_KIND_MAP } from "./generated/clineMessageKinds"
+
+const ASK_KIND_MAP: Record<AppClineAsk, ClineAsk> = CLINE_ASK_KIND_MAP
+const SAY_KIND_MAP: Record<AppClineSay, ClineSay> = CLINE_SAY_KIND_MAP
+const ASK_KIND_REVERSE = reverseKindMap<AppClineAsk>(ASK_KIND_MAP)
+const SAY_KIND_REVERSE = reverseKindMap<AppClineSay>(SAY_KIND_MAP)
 
 // Helper function to convert ClineAsk string to enum
 function convertClineAskToProtoEnum(ask: AppClineAsk | undefined): ClineAsk | undefined {
@@ -7,31 +13,7 @@ function convertClineAskToProtoEnum(ask: AppClineAsk | undefined): ClineAsk | un
 		return undefined
 	}
 
-	const mapping: Record<AppClineAsk, ClineAsk> = {
-		followup: ClineAsk.FOLLOWUP,
-		plan_mode_respond: ClineAsk.PLAN_MODE_RESPOND,
-		act_mode_respond: ClineAsk.ACT_MODE_RESPOND,
-		command: ClineAsk.COMMAND,
-		command_output: ClineAsk.COMMAND_OUTPUT,
-		completion_result: ClineAsk.COMPLETION_RESULT,
-		tool: ClineAsk.TOOL,
-		api_req_failed: ClineAsk.API_REQ_FAILED,
-		resume_task: ClineAsk.RESUME_TASK,
-		resume_completed_task: ClineAsk.RESUME_COMPLETED_TASK,
-		mistake_limit_reached: ClineAsk.MISTAKE_LIMIT_REACHED,
-		browser_action_launch: ClineAsk.BROWSER_ACTION_LAUNCH,
-		use_mcp_server: ClineAsk.USE_MCP_SERVER,
-		new_task: ClineAsk.NEW_TASK,
-		condense: ClineAsk.CONDENSE,
-		summarize_task: ClineAsk.SUMMARIZE_TASK,
-		report_bug: ClineAsk.REPORT_BUG,
-		use_subagents: ClineAsk.USE_SUBAGENTS,
-	}
-
-	const result = mapping[ask]
-	if (result === undefined) {
-	}
-	return result
+	return ASK_KIND_MAP[ask]
 }
 
 // Helper function to convert ClineAsk enum to string
@@ -40,28 +22,7 @@ function convertProtoEnumToClineAsk(ask: ClineAsk): AppClineAsk | undefined {
 		return undefined
 	}
 
-	const mapping: Record<string, AppClineAsk> = {
-		[ClineAsk.FOLLOWUP]: "followup",
-		[ClineAsk.PLAN_MODE_RESPOND]: "plan_mode_respond",
-		[ClineAsk.ACT_MODE_RESPOND]: "act_mode_respond",
-		[ClineAsk.COMMAND]: "command",
-		[ClineAsk.COMMAND_OUTPUT]: "command_output",
-		[ClineAsk.COMPLETION_RESULT]: "completion_result",
-		[ClineAsk.TOOL]: "tool",
-		[ClineAsk.API_REQ_FAILED]: "api_req_failed",
-		[ClineAsk.RESUME_TASK]: "resume_task",
-		[ClineAsk.RESUME_COMPLETED_TASK]: "resume_completed_task",
-		[ClineAsk.MISTAKE_LIMIT_REACHED]: "mistake_limit_reached",
-		[ClineAsk.BROWSER_ACTION_LAUNCH]: "browser_action_launch",
-		[ClineAsk.USE_MCP_SERVER]: "use_mcp_server",
-		[ClineAsk.NEW_TASK]: "new_task",
-		[ClineAsk.CONDENSE]: "condense",
-		[ClineAsk.SUMMARIZE_TASK]: "summarize_task",
-		[ClineAsk.REPORT_BUG]: "report_bug",
-		[ClineAsk.USE_SUBAGENTS]: "use_subagents",
-	}
-
-	return mapping[ask as string]
+	return ASK_KIND_REVERSE[ask]
 }
 
 // Helper function to convert ClineSay string to enum
@@ -70,50 +31,7 @@ function convertClineSayToProtoEnum(say: AppClineSay | undefined): ClineSay | un
 		return undefined
 	}
 
-	const mapping: Record<AppClineSay, ClineSay> = {
-		task: ClineSay.TASK,
-		error: ClineSay.ERROR,
-		api_req_started: ClineSay.API_REQ_STARTED,
-		api_req_finished: ClineSay.API_REQ_FINISHED,
-		text: ClineSay.TEXT,
-		reasoning: ClineSay.REASONING,
-		completion_result: ClineSay.COMPLETION_RESULT_SAY,
-		user_feedback: ClineSay.USER_FEEDBACK,
-		user_feedback_diff: ClineSay.USER_FEEDBACK_DIFF,
-		api_req_retried: ClineSay.API_REQ_RETRIED,
-		command: ClineSay.COMMAND_SAY,
-		command_output: ClineSay.COMMAND_OUTPUT_SAY,
-		tool: ClineSay.TOOL_SAY,
-		shell_integration_warning: ClineSay.SHELL_INTEGRATION_WARNING,
-		shell_integration_warning_with_suggestion: ClineSay.SHELL_INTEGRATION_WARNING,
-		browser_action_launch: ClineSay.BROWSER_ACTION_LAUNCH_SAY,
-		browser_action: ClineSay.BROWSER_ACTION,
-		browser_action_result: ClineSay.BROWSER_ACTION_RESULT,
-		mcp_server_request_started: ClineSay.MCP_SERVER_REQUEST_STARTED,
-		mcp_server_response: ClineSay.MCP_SERVER_RESPONSE,
-		mcp_notification: ClineSay.MCP_NOTIFICATION,
-		use_mcp_server: ClineSay.USE_MCP_SERVER_SAY,
-		diff_error: ClineSay.DIFF_ERROR,
-		deleted_api_reqs: ClineSay.DELETED_API_REQS,
-		clineignore_error: ClineSay.CLINEIGNORE_ERROR,
-		command_permission_denied: ClineSay.COMMAND_PERMISSION_DENIED,
-		checkpoint_created: ClineSay.CHECKPOINT_CREATED,
-		load_mcp_documentation: ClineSay.LOAD_MCP_DOCUMENTATION,
-		info: ClineSay.INFO,
-		task_progress: ClineSay.TASK_PROGRESS,
-		error_retry: ClineSay.ERROR_RETRY,
-		hook_status: ClineSay.HOOK_STATUS,
-		hook_output_stream: ClineSay.HOOK_OUTPUT_STREAM,
-		conditional_rules_applied: ClineSay.CONDITIONAL_RULES_APPLIED,
-		subagent: ClineSay.SUBAGENT_STATUS,
-		use_subagents: ClineSay.USE_SUBAGENTS_SAY,
-		subagent_usage: ClineSay.SUBAGENT_USAGE,
-		generate_explanation: ClineSay.GENERATE_EXPLANATION,
-	}
-
-	const result = mapping[say]
-
-	return result
+	return SAY_KIND_MAP[say]
 }
 
 // Helper function to convert ClineSay enum to string
@@ -122,47 +40,13 @@ function convertProtoEnumToClineSay(say: ClineSay): AppClineSay | undefined {
 		return undefined
 	}
 
-	const mapping: Record<string, AppClineSay> = {
-		[ClineSay.TASK]: "task",
-		[ClineSay.ERROR]: "error",
-		[ClineSay.API_REQ_STARTED]: "api_req_started",
-		[ClineSay.API_REQ_FINISHED]: "api_req_finished",
-		[ClineSay.TEXT]: "text",
-		[ClineSay.REASONING]: "reasoning",
-		[ClineSay.COMPLETION_RESULT_SAY]: "completion_result",
-		[ClineSay.USER_FEEDBACK]: "user_feedback",
-		[ClineSay.USER_FEEDBACK_DIFF]: "user_feedback_diff",
-		[ClineSay.API_REQ_RETRIED]: "api_req_retried",
-		[ClineSay.COMMAND_SAY]: "command",
-		[ClineSay.COMMAND_OUTPUT_SAY]: "command_output",
-		[ClineSay.TOOL_SAY]: "tool",
-		[ClineSay.SHELL_INTEGRATION_WARNING]: "shell_integration_warning",
-		[ClineSay.BROWSER_ACTION_LAUNCH_SAY]: "browser_action_launch",
-		[ClineSay.BROWSER_ACTION]: "browser_action",
-		[ClineSay.BROWSER_ACTION_RESULT]: "browser_action_result",
-		[ClineSay.MCP_SERVER_REQUEST_STARTED]: "mcp_server_request_started",
-		[ClineSay.MCP_SERVER_RESPONSE]: "mcp_server_response",
-		[ClineSay.MCP_NOTIFICATION]: "mcp_notification",
-		[ClineSay.USE_MCP_SERVER_SAY]: "use_mcp_server",
-		[ClineSay.DIFF_ERROR]: "diff_error",
-		[ClineSay.DELETED_API_REQS]: "deleted_api_reqs",
-		[ClineSay.CLINEIGNORE_ERROR]: "clineignore_error",
-		[ClineSay.COMMAND_PERMISSION_DENIED]: "command_permission_denied",
-		[ClineSay.CHECKPOINT_CREATED]: "checkpoint_created",
-		[ClineSay.LOAD_MCP_DOCUMENTATION]: "load_mcp_documentation",
-		[ClineSay.INFO]: "info",
-		[ClineSay.TASK_PROGRESS]: "task_progress",
-		[ClineSay.ERROR_RETRY]: "error_retry",
-		[ClineSay.GENERATE_EXPLANATION]: "generate_explanation",
-		[ClineSay.HOOK_STATUS]: "hook_status",
-		[ClineSay.HOOK_OUTPUT_STREAM]: "hook_output_stream",
-		[ClineSay.CONDITIONAL_RULES_APPLIED]: "conditional_rules_applied",
-		[ClineSay.SUBAGENT_STATUS]: "subagent",
-		[ClineSay.USE_SUBAGENTS_SAY]: "use_subagents",
-		[ClineSay.SUBAGENT_USAGE]: "subagent_usage",
-	}
+	return SAY_KIND_REVERSE[say]
+}
 
-	return mapping[say as string]
+function reverseKindMap<T extends string>(mapping: Readonly<Record<T, string>>) {
+	const reversed: Record<string, T> = {}
+	for (const [kind, proto] of Object.entries(mapping) as Array<[T, string]>) reversed[proto] ??= kind
+	return reversed
 }
 
 /**

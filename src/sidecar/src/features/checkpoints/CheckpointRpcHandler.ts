@@ -1,4 +1,5 @@
 import type { CheckpointHandler, CheckpointTargetRequest } from "./CheckpointHandler"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 export type CheckpointCommand =
 	| Readonly<{ type: "restore"; target: CheckpointTargetRequest }>
@@ -24,9 +25,10 @@ type Callbacks = Readonly<{
 export class CheckpointRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
-	async handle(command: CheckpointCommand): Promise<CheckpointRpcResult> {
+	async handle(command: CheckpointCommand, signal?: AbortSignal): Promise<CheckpointRpcResult> {
+		throwIfOperationCancelled(signal)
 		if (command.type === "restore") {
-			await this.restore(command.target)
+			await this.restore(command.target, signal)
 			return { payload: { value: true } }
 		}
 		const description = this.callbacks.checkpoints().describe(command.target, { taskItem: this.callbacks.currentTask() || undefined, messages: this.callbacks.messages(), trackedChanges: this.callbacks.trackedChanges() })
@@ -37,12 +39,15 @@ export class CheckpointRpcHandler {
 		return { payload: description, includeStateMessages: true }
 	}
 
-	private async restore(target: CheckpointTargetRequest) {
+	private async restore(target: CheckpointTargetRequest, signal?: AbortSignal) {
 		const task = this.callbacks.currentTask()
 		if (!this.callbacks.available() || !task) throw new Error("No SDK-backed task is selected for checkpoint restore.")
 		const cwd = await this.callbacks.workspaceRoot()
+		throwIfOperationCancelled(signal)
 		const sessionId = readString(task.id)
-		const result = await this.callbacks.checkpoints().restore(target, { taskItem: task, messages: this.callbacks.messages(), cwd, config: await this.callbacks.buildConfig(cwd, sessionId), toolPolicies: this.callbacks.toolPolicies() })
+		const config = await this.callbacks.buildConfig(cwd, sessionId)
+		throwIfOperationCancelled(signal)
+		const result = await this.callbacks.checkpoints().restore(target, { taskItem: task, messages: this.callbacks.messages(), cwd, config, toolPolicies: this.callbacks.toolPolicies() })
 		if (result.restoredSessionId) await this.callbacks.showTask(result.restoredSessionId)
 		else {
 			this.callbacks.addInfo("Checkpoint workspace restore completed.")

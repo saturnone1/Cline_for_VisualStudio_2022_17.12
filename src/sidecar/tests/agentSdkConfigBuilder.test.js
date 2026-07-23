@@ -36,6 +36,8 @@ test("parallel tool calling and Plan instructions follow explicit settings", asy
 	const sequential = await builder.build("C:\\workspace")
 	assert.equal(sequential.maxParallelToolCalls, 1)
 	assert.match(sequential.systemPrompt, /tools allowed by the current settings/)
+	assert.match(sequential.systemPrompt, /until an actual tool result confirms it/)
+	assert.match(sequential.systemPrompt, /Do not end a turn immediately after announcing an action/)
 	assert.doesNotMatch(sequential.systemPrompt, /Do not modify files, run terminal commands/)
 
 	state.enableParallelToolCalling = true

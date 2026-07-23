@@ -1,4 +1,5 @@
 import { normalizeSdkProviderId } from "../../application/services/ProviderIdentity"
+import { AGENT_EXECUTION_EVIDENCE_INSTRUCTION } from "../../application/services/AgentExecutionContract"
 import { selectProvider } from "../../features/providers/ProviderSelection"
 import { normalizeOllamaOpenAiBaseUrl, normalizeOllamaRootBaseUrl } from "../models/ModelCatalog"
 import { normalizePreferredLanguage, resolveApiKey, resolveBaseUrl, resolveConfiguredContextWindow, resolveOAuthCredentials } from "./ProviderConfiguration"
@@ -46,7 +47,11 @@ export class AgentSdkConfigBuilder {
 				: "You are in PLAN mode. Use the tools allowed by the current settings to investigate the request, and return a concrete plan for the user to approve before implementation."
 			: "You are in ACT mode. You may implement approved changes using the available Visual Studio tools while keeping actions scoped to the user's request."
 		const customPrompt = readString(state.customPrompt).trim()
-		const systemPrompt = [`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`, customPrompt ? `Additional user-defined instructions:\n${customPrompt}` : ""].filter(Boolean).join("\n\n")
+		const systemPrompt = [
+			`You are LIG VS running inside Visual Studio 2022 through the VsClineAgent SDK wrapper. ${languageInstruction} ${modeInstruction} Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.`,
+			AGENT_EXECUTION_EVIDENCE_INSTRUCTION,
+			customPrompt ? `Additional user-defined instructions:\n${customPrompt}` : "",
+		].filter(Boolean).join("\n\n")
 		// ContextWindow and CompactSessionFlow own thresholding, confirmation, and durable summaries.
 		const sdkCompaction = { enabled: false } as const
 

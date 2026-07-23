@@ -10,7 +10,7 @@ export function normalizeAgentRuntimeEvent(value: unknown): AgentRuntimeEvent {
 		case "agent_event":
 			return { type: originalType, sessionId, event: translateClineAgentEvent(payload.event, sessionId), payload }
 		case "vscline_file_changed":
-			return { type: originalType, change: { filePath: readString(payload.filePath), beforePath: readString(payload.beforePath), afterPath: readString(payload.afterPath) || readString(payload.filePath), action: readString(payload.action) || "modified", additions: readNumber(payload.additions) || 0, deletions: readNumber(payload.deletions) || 0 }, payload }
+			return { type: originalType, sessionId, change: { filePath: readString(payload.filePath), beforePath: readString(payload.beforePath), afterPath: readString(payload.afterPath) || readString(payload.filePath), action: readString(payload.action) || "modified", additions: readNumber(payload.additions) || 0, deletions: readNumber(payload.deletions) || 0 }, payload }
 		case "chunk":
 			return { type: originalType, sessionId, stream: readString(payload.stream), chunk: payload.chunk, payload }
 		case "session_snapshot": {

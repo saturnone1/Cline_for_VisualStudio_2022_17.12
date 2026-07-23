@@ -31,6 +31,7 @@ namespace VsClineAgent.Host
         private readonly object _recentOutputLock = new object();
         private readonly Queue<string> _recentOutput = new Queue<string>();
         private string? _logFilePath;
+        private int _unavailableNotificationSent;
 
         public SidecarProcess(
             string assemblyDirectory,
@@ -181,8 +182,7 @@ namespace VsClineAgent.Host
                 if (OwnedJobs.TryRemove(startedProcess.Id, out var completedJob))
                     completedJob.Dispose();
                 CaptureSidecarLine("sidecar:exit", "exitCode=" + SafeExitCode(startedProcess));
-				try { Exited?.Invoke(this); }
-				catch (Exception ex) { CaptureSidecarLine("sidecar:exit-notification", ex.Message); }
+				SignalUnavailable("process-exited", null);
             };
             OwnedProcesses[startedProcess.Id] = startedProcess;
             OwnedInstances[this] = 0;
@@ -194,6 +194,7 @@ namespace VsClineAgent.Host
 
             _client = new NamedPipeJsonRpcClient(pipeName);
             _client.RequestReceived += HandleSidecarRequestAsync;
+            _client.ConnectionClosed += OnConnectionClosed;
             JToken? result;
             long pipeConnectMs = 0;
             long healthPingMs = 0;
@@ -284,6 +285,21 @@ namespace VsClineAgent.Host
             return await _hostRpcRouter.HandleAsync(method, parameters).ConfigureAwait(false);
         }
 
+        private void OnConnectionClosed(Exception error)
+        {
+            SignalUnavailable("transport-closed", error);
+        }
+
+        private void SignalUnavailable(string reason, Exception? error)
+        {
+            if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _unavailableNotificationSent, 1) != 0)
+                return;
+
+            CaptureSidecarLine("sidecar:unavailable", reason + (error == null ? string.Empty : ": " + error.Message));
+            try { Exited?.Invoke(this); }
+            catch (Exception ex) { CaptureSidecarLine("sidecar:exit-notification", ex.Message); }
+        }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -294,6 +310,8 @@ namespace VsClineAgent.Host
 
             var process = _process;
             var client = _client;
+            if (client != null)
+                client.ConnectionClosed -= OnConnectionClosed;
             if (client != null && process != null && !process.HasExited)
             {
                 try

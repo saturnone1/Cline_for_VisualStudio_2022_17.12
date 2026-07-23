@@ -1,6 +1,8 @@
 import type { SendMessageCommand } from "../sendMessage/SendMessageCommand"
 import type { StartTaskCommand } from "../startTask/StartTaskCommand"
 
+export const RESUMED_SESSION_FORMAT_VERSION = 2
+
 type PreparedTask = Readonly<{ title: string }>
 type Callbacks = Readonly<{
 	isRuntimeAvailable: () => boolean
@@ -11,7 +13,7 @@ type Callbacks = Readonly<{
 	updateTask: () => void
 	broadcast: () => Promise<void>
 	runResumeHook: (context: Record<string, unknown>) => void
-	buildInitialMessages: (prompt: string) => readonly unknown[]
+	buildContext: (prompt: string) => string
 	normalizeImages: (images: readonly string[]) => Promise<readonly string[]>
 	buildConfig: (cwd: string) => Promise<Readonly<Record<string, unknown>>>
 	toolPolicies: () => Readonly<Record<string, unknown>>
@@ -39,7 +41,15 @@ export class ResumeSessionFlow {
 		this.callbacks.runResumeHook({ prompt, cwd, userImages, userFiles, sessionId })
 		this.callbacks.beginReplacement(sessionId)
 		try {
-			const result = await this.callbacks.start({ prompt, cwd, userImages: await this.callbacks.normalizeImages(userImages), userFiles, interactive: true, initialMessages: this.callbacks.buildInitialMessages(prompt), sessionMetadata: task.title ? { title: task.title, ligVsResumed: true, ligVsResumedFrom: sessionId } : { ligVsResumed: true, ligVsResumedFrom: sessionId }, config: await this.callbacks.buildConfig(cwd), toolPolicies: this.callbacks.toolPolicies() })
+			const resumedContext = this.callbacks.buildContext(prompt)
+			const sessionMetadata = {
+				...(task.title ? { title: task.title } : {}),
+				ligVsResumed: true,
+				ligVsResumedFrom: sessionId,
+				ligVsResumeFormatVersion: RESUMED_SESSION_FORMAT_VERSION,
+				...(resumedContext ? { ligVsResumedContext: resumedContext } : {}),
+			}
+			const result = await this.callbacks.start({ prompt, cwd, userImages: await this.callbacks.normalizeImages(userImages), userFiles, interactive: true, sessionMetadata, config: await this.callbacks.buildConfig(cwd), toolPolicies: this.callbacks.toolPolicies() })
 			this.callbacks.completeReplacement(result)
 			this.callbacks.markSettingsRevisionActive()
 			return result

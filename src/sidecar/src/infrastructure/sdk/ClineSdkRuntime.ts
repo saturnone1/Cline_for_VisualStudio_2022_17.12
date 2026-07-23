@@ -10,6 +10,7 @@ import { ClineSdkProviderAdapter } from "./ClineSdkProviderAdapter"
 import { ClineSdkSessionAdapter, type ClineSdkCore } from "./ClineSdkSessionAdapter"
 import { summarizeCompactionContext } from "./ClineSdkCompactionSummarizer"
 import { createSessionExtraTools } from "./SessionExtraToolComposition"
+import { createAskQuestionAgentTool } from "./AskQuestionAgentTool"
 export type ClineSdkStatus = {
 	mode: "sdk"
 	packageName: string
@@ -36,7 +37,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly sidecarRoot: string,
 		private readonly onCoreEvent?: (event: AgentRuntimeEvent) => void,
 		private readonly onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>,
-		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
+		private readonly onAskQuestion?: (question: string, options: string[], signal?: AbortSignal) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
 		private readonly createHostExtraTools?: () => readonly unknown[],
 		private readonly coreFactory: typeof createClineSdkCore = createClineSdkCore,
@@ -51,6 +52,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			createExtraTools: () => createSessionExtraTools({
 				loadMcpTools: () => this.mcp.createExtraToolsForSession(),
 				loadHostTools: () => this.createHostExtraTools?.() || [],
+				loadProductTools: () => [createAskQuestionAgentTool(this.onAskQuestion)].filter(Boolean),
 				log: (level, message, metadata) => this.logSdkMessage(level, message, metadata),
 			}),
 			getStatus: () => this.status,

@@ -18,14 +18,14 @@ type Dependencies = Readonly<{
 	startProgress: (text: string) => void
 	finishProgress: () => void
 	addMessage: (message: Message) => void
-	markClosing: (sessionId: string) => void
+	markClosing: (sessionId: string, closing?: boolean) => void
 	bindSession: (sessionId: string) => void
+	restoreState: (task: Message | null, messages: Message[]) => void
 	advanceGeneration: () => void
 	markSettingsActive: () => void
 	updateTask: () => void
 	persist: () => void
 	broadcast: () => Promise<void>
-	formatError: (error: unknown) => string
 	log: (event: string, details: Record<string, unknown>) => void
 }>
 
@@ -48,6 +48,8 @@ export function createContextCompactionFlow(dependencies: Dependencies) {
 			summary: stringField(result, "compactionSummary"),
 		}),
 		applySuccess: async (sourceSessionId, result, messagesBefore, messagesAfter) => {
+			const previousTask = dependencies.currentTask()
+			const previousMessages = [...dependencies.messages()]
 			dependencies.setInProgress(false)
 			dependencies.advanceGeneration()
 			dependencies.markClosing(sourceSessionId)
@@ -57,13 +59,42 @@ export function createContextCompactionFlow(dependencies: Dependencies) {
 			dependencies.transition("completed", "compact-complete")
 			dependencies.markSettingsActive()
 			dependencies.updateTask()
-			dependencies.persist()
-			await dependencies.broadcast()
+			try {
+				dependencies.persist()
+			} catch (error) {
+				dependencies.restoreState(previousTask, previousMessages)
+				dependencies.bindSession(sourceSessionId)
+				dependencies.markClosing(sourceSessionId, false)
+				throw error
+			}
+			await dependencies.broadcast().catch((error) => dependencies.log("contextCompactionBroadcastFailed", { error: stringify(error) }))
+		},
+		cleanupSource: async (sourceSessionId) => {
+			const runtime = requireRuntime(dependencies)
+			await runtime.stop({ sessionId: sourceSessionId })
+			const deleted = await runtime.deleteSession({ sessionId: sourceSessionId })
+			if (deleted !== true) throw new Error(`Compacted source session was not deleted: ${sourceSessionId}`)
+		},
+		rollbackReplacement: async (sourceSessionId, replacementSessionId) => {
+			const runtime = requireRuntime(dependencies)
+			const failures: string[] = []
+			await runtime.stop({ sessionId: replacementSessionId }).catch((error) => failures.push(`stop: ${stringify(error)}`))
+			const deleted = await runtime.deleteSession({ sessionId: replacementSessionId }).catch((error) => { failures.push(`delete: ${stringify(error)}`); return false })
+			if (deleted !== true && !failures.some((failure) => failure.startsWith("delete:"))) failures.push("delete: replacement session was not deleted")
+			const source = await runtime.activateSession(sourceSessionId).catch((error) => { failures.push(`activate source: ${stringify(error)}`); return null })
+			if (!source && !failures.some((failure) => failure.startsWith("activate source:"))) failures.push("activate source: source session was not found")
+			if (failures.length > 0) throw new Error(failures.join("; "))
 		},
 		applyFailure: async (error) => {
 			dependencies.setInProgress(false)
 			dependencies.finishProgress()
-			dependencies.addMessage({ type: "say", say: "error", text: dependencies.formatError(error) })
+			dependencies.addMessage({
+				type: "say",
+				say: "error",
+				text: dependencies.language() === "en"
+					? "Context compaction could not be completed. The existing conversation was preserved."
+					: "컨텍스트 압축을 완료하지 못했습니다. 기존 대화는 그대로 유지됩니다.",
+			})
 			dependencies.transition("failed", "compact-failed")
 			dependencies.updateTask()
 			await dependencies.broadcast()
@@ -92,3 +123,4 @@ async function buildRequest(dependencies: Dependencies, sourceSessionId: string,
 function requireRuntime(dependencies: Dependencies) { const runtime = dependencies.runtime(); if (!runtime) throw new Error("LIG VS SDK runtime is not attached."); return runtime }
 function stringField(value: unknown, key: string) { if (!value || typeof value !== "object" || !(key in value)) return ""; const field = (value as Record<string, unknown>)[key]; return typeof field === "string" ? field : "" }
 function numberField(value: unknown, key: string) { if (!value || typeof value !== "object" || !(key in value)) return 0; const field = (value as Record<string, unknown>)[key]; return typeof field === "number" && Number.isFinite(field) ? field : 0 }
+function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }

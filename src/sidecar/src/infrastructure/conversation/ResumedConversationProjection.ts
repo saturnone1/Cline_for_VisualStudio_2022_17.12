@@ -70,6 +70,16 @@ export function buildResumedConversationMessages(
 	return restored
 }
 
+export function buildResumedConversationContext(
+	messages: Array<Record<string, unknown>>,
+	prompt: string,
+	maxChars = RESUMED_CONVERSATION_MAX_CHARS,
+) {
+	return buildResumedConversationMessages(messages, prompt, maxChars)
+		.map((message) => `[Previous ${message.role}]\n${message.content}`)
+		.join("\n\n")
+}
+
 export function clineMessageToResumedTranscriptEntry(message: Record<string, unknown>) {
 	const say = getString(message, "say")
 	const ask = getString(message, "ask")
@@ -84,7 +94,7 @@ export function clineMessageToResumedTranscriptEntry(message: Record<string, unk
 	if (say === "text") {
 		return { role: "Assistant", text }
 	}
-	if (say === "tool" || say === "command_output" || say === "browser_action" || ask === "tool" || ask === "command") {
+	if (say === "tool" || say === "command_output" || say === "browser_action_result" || ask === "tool" || ask === "command") {
 		return { role: "Tool", text }
 	}
 	if (ask === "followup" || ask === "plan_mode_respond" || ask === "act_mode_respond") {

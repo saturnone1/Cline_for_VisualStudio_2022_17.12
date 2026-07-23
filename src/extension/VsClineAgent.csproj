@@ -119,6 +119,7 @@
     <Compile Include="Host\VisualStudioOutputPaneWriter.cs" />
     <Compile Include="Host\WebView2RuntimeResolver.cs" />
     <Compile Include="Host\WebViewLoadingPresenter.cs" />
+    <Compile Include="Host\WebViewLifecycleMessage.cs" />
     <Compile Include="Host\ToolWindowLifetime.cs" />
     <Compile Include="Host\WindowsProcessJob.cs" />
     <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />

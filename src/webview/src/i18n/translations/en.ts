@@ -236,9 +236,11 @@ export const en = {
 	"mcp.local.descriptionTail":
 		"Specify the server name, command, arguments, and required environment variables in the JSON configuration. Learn more",
 	"mcp.local.openSettings": "Open cline_mcp_settings.json",
-	"browser.using": "LIG VS is using the browser:",
-	"browser.wants": "LIG VS wants to use the browser:",
+	"browser.using": "External Chrome/Edge automation preview:",
+	"browser.wants": "LIG VS wants to start external Chrome/Edge automation:",
 	"browser.screenshotAlt": "Browser screenshot",
+	"browser.previewLoading": "Loading page preview...",
+	"browser.previewUnavailable": "Page preview is unavailable.",
 	"browser.consoleLogs": "Console Logs",
 	"browser.sessionStarted": "Browser Session Started",
 	"browser.action": "Browse Action:",

@@ -1,4 +1,5 @@
 import { resolveRequestedPlanActMode } from "./PlanActMode"
+import { throwIfOperationCancelled } from "../../application/services/OperationCancellation"
 
 type State = Record<string, unknown>
 
@@ -29,7 +30,8 @@ type SettingsRpcCallbacks = Readonly<{
 export class SettingsRpcHandler {
 	constructor(private readonly callbacks: SettingsRpcCallbacks) {}
 
-	async handle(command: SettingsCommand): Promise<SettingsRpcResult> {
+	async handle(command: SettingsCommand, signal?: AbortSignal): Promise<SettingsRpcResult> {
+		throwIfOperationCancelled(signal)
 		const state = this.callbacks.state()
 		switch (command.type) {
 			case "apply":
@@ -63,6 +65,7 @@ export class SettingsRpcHandler {
 				toggleFavoriteModel(state, command.modelId)
 				return this.broadcastEmpty()
 			case "reset":
+				throwIfOperationCancelled(signal)
 				this.callbacks.clearPersistedState()
 				this.callbacks.resetState()
 				await this.callbacks.clearTask()
