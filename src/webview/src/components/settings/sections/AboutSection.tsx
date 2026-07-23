@@ -10,6 +10,65 @@ interface AboutSectionProps {
 	renderSectionHeader: (tabId: string) => JSX.Element | null
 }
 
+type PatchNote = Readonly<{
+	version: string
+	ko: readonly string[]
+	en: readonly string[]
+}>
+
+const patchNotes: readonly PatchNote[] = [
+	{
+		version: "2.2.2",
+		ko: [
+			"초기 로딩과 WebApp 상태 복원 사이의 화면 전환을 하나로 통합하고, 준비 완료 신호가 오기 전에는 기존 로딩 화면을 유지합니다.",
+			"밝은 테마의 배경·패널·메시지·코드 블록과 로딩 화면을 부드러운 회색 계열로 조정했습니다.",
+		],
+		en: [
+			"Unified the transition between native startup and WebApp state hydration, keeping one loading view visible until readiness is confirmed.",
+			"Softened the light theme across backgrounds, panels, messages, code blocks, and the loading view.",
+		],
+	},
+	{
+		version: "2.2.1",
+		ko: [
+			"대화 재개·취소·완료 이벤트와 오래된 세션 이벤트 처리를 보강해 UI와 SDK 상태가 어긋나는 경우를 줄였습니다.",
+			"브라우저 결과 표시, 도구 정책, 질문 UI, 작업 기록·압축·첨부 처리의 회귀 문제를 수정했습니다.",
+			"WebView 메시지 큐, named pipe 종료 감지, sidecar 종료 및 저장 파일의 원자성을 강화했습니다.",
+		],
+		en: [
+			"Hardened conversation resume, cancellation, completion, and stale-session event handling to keep UI and SDK state aligned.",
+			"Fixed regressions in browser result rendering, tool policy, question UI, history, compaction, and attachments.",
+			"Improved WebView queueing, named-pipe closure detection, sidecar shutdown, and atomic persistence.",
+		],
+	},
+	{
+		version: "2.2.0",
+		ko: [
+			"Visual Studio 2022 17.0·17.12를 한 소스 트리에서 빌드하는 공통 패키징과 런타임 스모크 검증을 정립했습니다.",
+			"RPC 계약, 기능 레지스트리, sidecar 서비스 경계와 대화·설정·탐색 상태를 기능 단위로 분리했습니다.",
+			"체크포인트, 컨텍스트 사용량·압축, 작업 기록, 브라우저·MCP 도구와 프로세스 수명 주기를 안정화했습니다.",
+		],
+		en: [
+			"Established shared packaging and runtime smoke validation for Visual Studio 2022 17.0 and 17.12 from one source tree.",
+			"Separated RPC contracts, capability registration, sidecar boundaries, and conversation, settings, and navigation state by feature.",
+			"Stabilized checkpoints, context usage and compaction, history, browser and MCP tools, and process lifetime management.",
+		],
+	},
+	{
+		version: "2.1.x",
+		ko: [
+			"Cline SDK와 Visual Studio WebView·sidecar 호스트를 연결하고 대화, 파일 편집, 터미널, 브라우저 및 MCP의 기본 기능을 구축했습니다.",
+			"밝은·어두운 테마, 한국어 UI, 작업 기록, 설정 저장, 컨텍스트 표시와 수동 압축의 초기 버전을 도입했습니다.",
+			"17.0 호환 패키지와 오프라인 배포 자산을 마련하고 이후 통합 아키텍처로 이전할 기반을 정리했습니다.",
+		],
+		en: [
+			"Connected the Cline SDK to the Visual Studio WebView and sidecar host, establishing chat, file editing, terminal, browser, and MCP foundations.",
+			"Introduced light and dark themes, Korean UI, task history, settings persistence, context display, and initial manual compaction.",
+			"Added the 17.0-compatible package and offline deployment assets, preparing the foundation for the unified architecture.",
+		],
+	},
+]
+
 const AboutSection = ({ version, renderSectionHeader }: AboutSectionProps) => {
 	const { language } = useI18n()
 
@@ -73,6 +132,21 @@ const AboutSection = ({ version, renderSectionHeader }: AboutSectionProps) => {
 						<li>{language === "ko" ? "작업 기록, 체크포인트, 설정 저장 및 진단 로그" : "Task history, checkpoints, settings persistence, and diagnostic logs"}</li>
 						<li>{language === "ko" ? "Visual Studio 2022 17.0·17.12 공통 WebView/sidecar 기반 VSIX" : "A shared WebView and sidecar VSIX for Visual Studio 2022 17.0 and 17.12"}</li>
 					</ul>
+
+					<h3 className="text-md font-semibold">{language === "ko" ? "패치노트" : "Patch Notes"}</h3>
+					<div className="flex flex-col gap-2">
+						{patchNotes.map((note, index) => (
+							<details
+								className="rounded border border-[var(--lig-border)] bg-[var(--lig-panel)] px-3 py-2"
+								key={note.version}
+								open={index === 0}>
+								<summary className="cursor-pointer select-none text-sm font-semibold">v{note.version}</summary>
+								<ul className="mb-0 mt-2 pl-5 text-xs text-description">
+									{(language === "ko" ? note.ko : note.en).map((item) => <li key={item}>{item}</li>)}
+								</ul>
+							</details>
+						))}
+					</div>
 
 					<h3 className="text-md font-semibold">
 						{language === "ko" ? "앞으로 구현할 부분 및 미진한 부분" : "Planned and Partial Areas"}
