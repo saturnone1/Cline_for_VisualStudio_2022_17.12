@@ -35,8 +35,18 @@ export function resolveConfiguredContextWindow(
 ) {
 	const providerInfoFields: Record<string, string> = {
 		openrouter: `${modePrefix}OpenRouterModelInfo`,
+		cline: `${modePrefix}ClineModelInfo`,
 		openai: `${modePrefix}OpenAiModelInfo`,
 		"openai-compatible": `${modePrefix}OpenAiModelInfo`,
+		requesty: `${modePrefix}RequestyModelInfo`,
+		litellm: `${modePrefix}LiteLlmModelInfo`,
+		groq: `${modePrefix}GroqModelInfo`,
+		huggingface: `${modePrefix}HuggingFaceModelInfo`,
+		baseten: `${modePrefix}BasetenModelInfo`,
+		"huawei-cloud-maas": `${modePrefix}HuaweiCloudMaasModelInfo`,
+		"vercel-ai-gateway": `${modePrefix}VercelAiGatewayModelInfo`,
+		oca: `${modePrefix}OcaModelInfo`,
+		hicap: `${modePrefix}HicapModelInfo`,
 		aihubmix: `${modePrefix}AihubmixModelInfo`,
 		anthropic: `${modePrefix}ApiModelInfo`,
 	}

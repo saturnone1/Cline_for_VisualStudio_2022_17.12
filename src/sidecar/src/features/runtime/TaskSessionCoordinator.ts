@@ -21,6 +21,7 @@ type TaskSessionDependencies = {
 export class TaskSessionCoordinator {
 	private readonly closingSessionIds = new Set<string>()
 	private replacementSourceSessionId = ""
+	private replacementSourceWasClosing = false
 
 	constructor(private readonly dependencies: TaskSessionDependencies) {}
 
@@ -48,11 +49,14 @@ export class TaskSessionCoordinator {
 		else this.closingSessionIds.delete(sessionId)
 	}
 
+	isClosing(sessionId: string) { return Boolean(sessionId && this.closingSessionIds.has(sessionId)) }
+
 	prepareActivation(sessionId: string) { this.markClosing(sessionId, false) }
 
 	beginReplacement(sourceSessionId: string) {
 		this.cancelReplacement()
 		this.replacementSourceSessionId = sourceSessionId
+		this.replacementSourceWasClosing = this.isClosing(sourceSessionId)
 		this.markClosing(sourceSessionId)
 	}
 
@@ -60,6 +64,7 @@ export class TaskSessionCoordinator {
 		const sourceSessionId = this.replacementSourceSessionId
 		if (!sourceSessionId || !sessionId || sessionId === sourceSessionId) return false
 		this.replacementSourceSessionId = ""
+		this.replacementSourceWasClosing = false
 		this.markClosing(sourceSessionId, false)
 		this.bindSession(sessionId)
 		return true
@@ -69,13 +74,15 @@ export class TaskSessionCoordinator {
 		const sourceSessionId = this.replacementSourceSessionId
 		if (!sourceSessionId) return
 		this.replacementSourceSessionId = ""
+		this.replacementSourceWasClosing = false
 		this.markClosing(sourceSessionId, false)
 		if (sessionId) this.bindSession(sessionId)
 	}
 
 	cancelReplacement() {
-		if (this.replacementSourceSessionId) this.markClosing(this.replacementSourceSessionId, false)
+		if (this.replacementSourceSessionId && !this.replacementSourceWasClosing) this.markClosing(this.replacementSourceSessionId, false)
 		this.replacementSourceSessionId = ""
+		this.replacementSourceWasClosing = false
 	}
 
 	shouldIgnoreEvent(sessionId: string) {

@@ -307,6 +307,45 @@
       },
       "allowAdditionalFields": true
     },
+    "RuleFileRequest": {
+      "fields": {
+        "isGlobal": { "type": "boolean", "required": true },
+        "filename": { "type": "string" },
+        "rulePath": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    },
+    "CreateSkillRequest": {
+      "fields": {
+        "skillName": { "type": "string", "required": true },
+        "isGlobal": { "type": "boolean", "required": true }
+      }
+    },
+    "DeleteSkillRequest": {
+      "fields": {
+        "skillPath": { "type": "string", "required": true },
+        "isGlobal": { "type": "boolean", "required": true }
+      }
+    },
+    "FileSearchRequest": {
+      "fields": {
+        "query": {
+          "type": "string",
+          "required": true
+        },
+        "mentionsRequestId": {
+          "type": "string"
+        },
+        "selectedType": {
+          "type": "string",
+          "values": ["FILE", "FOLDER"]
+        },
+        "workspaceHint": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
     "TerminalTargetRequest": {
       "fields": {
         "terminalId": {
@@ -1992,8 +2031,8 @@
       "kind": "unary",
       "client": true,
       "sidecar": true,
-      "requestShape": "FlexibleObject",
-      "responseShape": "FlexibleObject",
+      "requestShape": "RuleFileRequest",
+      "responseShape": "Empty",
       "route": "file"
     },
     {
@@ -2002,8 +2041,8 @@
       "kind": "unary",
       "client": true,
       "sidecar": true,
-      "requestShape": "FlexibleObject",
-      "responseShape": "FlexibleObject",
+      "requestShape": "CreateSkillRequest",
+      "responseShape": "Empty",
       "route": "file"
     },
     {
@@ -2022,8 +2061,8 @@
       "kind": "unary",
       "client": true,
       "sidecar": true,
-      "requestShape": "FlexibleObject",
-      "responseShape": "FlexibleObject",
+      "requestShape": "RuleFileRequest",
+      "responseShape": "Empty",
       "route": "file"
     },
     {
@@ -2032,8 +2071,8 @@
       "kind": "unary",
       "client": true,
       "sidecar": true,
-      "requestShape": "FlexibleObject",
-      "responseShape": "FlexibleObject",
+      "requestShape": "DeleteSkillRequest",
+      "responseShape": "Empty",
       "route": "file"
     },
     {
@@ -2182,7 +2221,7 @@
       "kind": "unary",
       "client": true,
       "sidecar": true,
-      "requestShape": "StringValueRequest",
+      "requestShape": "FileSearchRequest",
       "responseShape": "FileSearchResponse",
       "route": "file"
     },

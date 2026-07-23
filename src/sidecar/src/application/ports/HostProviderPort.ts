@@ -3,6 +3,7 @@ export type TerminalCommandRequest = Readonly<{ terminalId?: string; commandId?:
 
 export interface WorkspacePort {
 	getWorkspacePaths(request: unknown): Promise<string[]>
+	listFiles(request: HostResponse): Promise<unknown>
 	searchFiles(request: HostResponse): Promise<unknown>
 	executeCommandInTerminal(request: HostResponse): Promise<unknown>
 	cancelCommands(): Promise<unknown>

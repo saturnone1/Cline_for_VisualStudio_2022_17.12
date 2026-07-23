@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -12,6 +13,28 @@ namespace VsClineAgent.Host.Adapters
 {
     internal sealed class FileSystemHostRpcAdapter : IHostRpcAdapter
     {
+        private const long DefaultMaximumReadBytes = 8L * 1024L * 1024L;
+        private const int DefaultMaximumScannedEntries = 50000;
+        private const int DefaultTraversalTimeoutMilliseconds = 5000;
+        private readonly long _maximumReadBytes;
+        private readonly int _maximumScannedEntries;
+        private readonly int _traversalTimeoutMilliseconds;
+
+        public FileSystemHostRpcAdapter()
+            : this(
+                ReadPositiveLongEnvironment("VSCLINE_HOST_MAX_READ_BYTES", DefaultMaximumReadBytes),
+                ReadPositiveIntEnvironment("VSCLINE_HOST_MAX_SCANNED_ENTRIES", DefaultMaximumScannedEntries),
+                ReadPositiveIntEnvironment("VSCLINE_HOST_FS_TIMEOUT_MS", DefaultTraversalTimeoutMilliseconds))
+        {
+        }
+
+        internal FileSystemHostRpcAdapter(long maximumReadBytes, int maximumScannedEntries, int traversalTimeoutMilliseconds)
+        {
+            _maximumReadBytes = Math.Max(1, maximumReadBytes);
+            _maximumScannedEntries = Math.Max(1, maximumScannedEntries);
+            _traversalTimeoutMilliseconds = Math.Max(1, traversalTimeoutMilliseconds);
+        }
+
         public bool CanHandle(string method)
         {
             switch (method)
@@ -70,11 +93,15 @@ namespace VsClineAgent.Host.Adapters
             return Task.FromResult<JToken?>(result);
         }
 
-        private static JObject ReadTextFile(JToken? parameters)
+        private JObject ReadTextFile(JToken? parameters)
         {
             var path = GetString(parameters, "path");
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                 return new JObject { ["exists"] = false, ["content"] = "" };
+
+            var length = new FileInfo(path).Length;
+            if (length > _maximumReadBytes)
+                throw new InvalidOperationException($"The requested file is too large to read safely ({length} bytes; limit {_maximumReadBytes} bytes).");
 
             return new JObject { ["exists"] = true, ["content"] = File.ReadAllText(path) };
         }
@@ -113,7 +140,7 @@ namespace VsClineAgent.Host.Adapters
             return new JObject { ["success"] = true };
         }
 
-        private static JObject ListFiles(JToken? parameters)
+        private JObject ListFiles(JToken? parameters)
         {
             var root = GetString(parameters, "path");
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -127,42 +154,60 @@ namespace VsClineAgent.Host.Adapters
 
             var recursive = parameters is JObject obj && obj.Value<bool?>("recursive") == true;
             var limit = Math.Max(1, GetInt(parameters, "limit") ?? 1500);
-            var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = new JArray();
+            var directories = new JArray();
             var ignoreRules = LoadClineIgnoreRules(root);
             var count = 0;
             var truncated = false;
+            var budget = new TraversalBudget(_maximumScannedEntries, _traversalTimeoutMilliseconds);
+            var pendingDirectories = new Stack<string>();
+            pendingDirectories.Push(root);
 
-            try
+            while (pendingDirectories.Count > 0 && !truncated)
             {
-                foreach (var entry in Directory.EnumerateFileSystemEntries(root, "*", option))
+                var directory = pendingDirectories.Pop();
+                VisitDirectoryEntries(directory, entry =>
                 {
+                    if (!budget.TryVisit())
+                    {
+                        truncated = true;
+                        return false;
+                    }
+
                     if (ShouldSkipPath(entry) || IsIgnoredByClineIgnore(root, entry, ignoreRules))
-                        continue;
+                        return true;
 
                     if (count >= limit)
                     {
                         truncated = true;
-                        break;
+                        return false;
                     }
 
                     files.Add(entry);
+                    var isDirectory = Directory.Exists(entry);
+                    if (isDirectory)
+                    {
+                        directories.Add(entry);
+                        if (recursive)
+                            pendingDirectories.Push(entry);
+                    }
                     count++;
-                }
-            }
-            catch
-            {
-                truncated = true;
+                    return true;
+                }, ref truncated);
+
+                if (!recursive)
+                    break;
             }
 
             return new JObject
             {
                 ["files"] = files,
+                ["directories"] = directories,
                 ["truncated"] = truncated
             };
         }
 
-        private static JObject SearchFiles(JToken? parameters)
+        private JObject SearchFiles(JToken? parameters)
         {
             var root = GetString(parameters, "path");
             var query = GetString(parameters, "query");
@@ -180,31 +225,44 @@ namespace VsClineAgent.Host.Adapters
             var ignoreRules = LoadClineIgnoreRules(root);
             var count = 0;
             var truncated = false;
+            var budget = new TraversalBudget(_maximumScannedEntries, _traversalTimeoutMilliseconds);
+            var pendingDirectories = new Stack<string>();
+            pendingDirectories.Push(root);
 
-            try
+            while (pendingDirectories.Count > 0 && !truncated)
             {
-                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                var directory = pendingDirectories.Pop();
+                VisitDirectoryEntries(directory, entry =>
                 {
-                    if (ShouldSkipPath(file) || IsIgnoredByClineIgnore(root, file, ignoreRules))
-                        continue;
+                    if (!budget.TryVisit())
+                    {
+                        truncated = true;
+                        return false;
+                    }
+
+                    if (ShouldSkipPath(entry) || IsIgnoredByClineIgnore(root, entry, ignoreRules))
+                        return true;
+
+                    if (Directory.Exists(entry))
+                    {
+                        pendingDirectories.Push(entry);
+                        return true;
+                    }
 
                     if (count >= limit)
                     {
                         truncated = true;
-                        break;
+                        return false;
                     }
 
-                    if (Path.GetFileName(file).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        FileContains(file, query))
+                    if (Path.GetFileName(entry).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        FileContains(entry, query))
                     {
-                        matches.Add(file);
+                        matches.Add(entry);
                         count++;
                     }
-                }
-            }
-            catch
-            {
-                truncated = true;
+                    return true;
+                }, ref truncated);
             }
 
             return new JObject
@@ -275,6 +333,44 @@ namespace VsClineAgent.Host.Adapters
             catch
             {
                 return false;
+            }
+        }
+
+        private static void VisitDirectoryEntries(string directory, Func<string, bool> visitor, ref bool truncated)
+        {
+            try
+            {
+                using (var entries = Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly).GetEnumerator())
+                {
+                    while (entries.MoveNext())
+                    {
+                        if (!visitor(entries.Current))
+                            return;
+                    }
+                }
+            }
+            catch
+            {
+                truncated = true;
+            }
+        }
+
+        private sealed class TraversalBudget
+        {
+            private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+            private readonly int _maximumEntries;
+            private readonly int _timeoutMilliseconds;
+            private int _visited;
+
+            public TraversalBudget(int maximumEntries, int timeoutMilliseconds)
+            {
+                _maximumEntries = maximumEntries;
+                _timeoutMilliseconds = timeoutMilliseconds;
+            }
+
+            public bool TryVisit()
+            {
+                return ++_visited <= _maximumEntries && _stopwatch.ElapsedMilliseconds <= _timeoutMilliseconds;
             }
         }
 
@@ -450,6 +546,16 @@ namespace VsClineAgent.Host.Adapters
         private static int? GetInt(JToken? parameters, string name)
         {
             return parameters is JObject values ? values.Value<int?>(name) : null;
+        }
+
+        private static int ReadPositiveIntEnvironment(string name, int fallback)
+        {
+            return int.TryParse(Environment.GetEnvironmentVariable(name), out var value) && value > 0 ? value : fallback;
+        }
+
+        private static long ReadPositiveLongEnvironment(string name, long fallback)
+        {
+            return long.TryParse(Environment.GetEnvironmentVariable(name), out var value) && value > 0 ? value : fallback;
         }
 
         private static bool GetBool(JToken? parameters, string name)

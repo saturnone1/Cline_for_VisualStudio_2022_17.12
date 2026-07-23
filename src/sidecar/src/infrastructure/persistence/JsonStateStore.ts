@@ -2,6 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import type { StateStorePort } from "../../application/ports/StateStorePort"
+import { projectTranscriptMessages, TRANSCRIPT_SNAPSHOT_LIMITS } from "../conversation/TranscriptSnapshotPolicy"
 
 export class JsonStateStore implements StateStorePort {
 	private revision = 0
@@ -88,9 +89,7 @@ export class JsonStateStore implements StateStorePort {
 
 const TRANSCRIPT_KEYS = ["taskSnapshots", "currentTaskItem", "clineMessages"] as const
 const MAX_SNAPSHOTS = 50
-const MAX_MESSAGES_PER_SNAPSHOT = 300
-const MAX_CURRENT_MESSAGES = 600
-const MAX_MESSAGE_TEXT_CHARS = 64 * 1024
+const MAX_SNAPSHOT_CACHE_CHARS = 8 * 1024 * 1024
 
 const GENERATION_KEY = "__ligVsStateGeneration"
 type SnapshotPair = { snapshot: Record<string, unknown>; generation: number; fromBackup: boolean }
@@ -99,7 +98,7 @@ function splitStateSnapshot(snapshot: Record<string, unknown>, generation: numbe
 	const settings: Record<string, unknown> = { ...snapshot, [GENERATION_KEY]: generation }
 	const transcripts: Record<string, unknown> = { [GENERATION_KEY]: generation }
 	for (const key of TRANSCRIPT_KEYS) if (key in settings) { transcripts[key] = settings[key]; delete settings[key] }
-	if ("clineMessages" in transcripts) transcripts.clineMessages = boundMessages(transcripts.clineMessages, MAX_CURRENT_MESSAGES)
+	if ("clineMessages" in transcripts) transcripts.clineMessages = projectTranscriptMessages(transcripts.clineMessages, TRANSCRIPT_SNAPSHOT_LIMITS.currentMessages)
 	if ("taskSnapshots" in transcripts) transcripts.taskSnapshots = boundSnapshots(transcripts.taskSnapshots, snapshot.taskHistory, String(asRecord(snapshot.currentTaskItem).id || ""))
 	return { settings, transcripts }
 }
@@ -125,36 +124,17 @@ function boundSnapshots(value: unknown, historyValue: unknown, currentTaskId: st
 	if (currentTaskId) priorityIds.unshift(currentTaskId)
 	for (const id of Object.keys(snapshots)) if (!priorityIds.includes(id)) priorityIds.push(id)
 	const bounded: Record<string, unknown> = {}
+	let usedChars = 2
 	for (const id of [...new Set(priorityIds)].slice(0, MAX_SNAPSHOTS)) {
 		const snapshot = asRecord(snapshots[id])
-		if (Object.keys(snapshot).length) bounded[id] = { ...snapshot, messages: boundMessages(snapshot.messages, MAX_MESSAGES_PER_SNAPSHOT) }
+		if (!Object.keys(snapshot).length) continue
+		const candidate = { ...snapshot, messages: projectTranscriptMessages(snapshot.messages, TRANSCRIPT_SNAPSHOT_LIMITS.snapshotMessages) }
+		const candidateSize = JSON.stringify(candidate).length
+		if (usedChars > 2 && usedChars + candidateSize > MAX_SNAPSHOT_CACHE_CHARS) break
+		bounded[id] = candidate
+		usedChars += id.length + candidateSize + 4
 	}
 	return bounded
-}
-
-function boundMessages(value: unknown, limit: number) {
-	if (!Array.isArray(value)) return []
-	const selected = selectMessagesForPersistence(value, limit)
-	return selected.map((item) => {
-		const message = { ...asRecord(item) }
-		for (const key of ["text", "reasoning"] as const) if (typeof message[key] === "string" && message[key].length > MAX_MESSAGE_TEXT_CHARS) message[key] = `${message[key].slice(0, MAX_MESSAGE_TEXT_CHARS)}\n[truncated in local transcript cache]`
-		if (Array.isArray(message.images)) message.images = message.images.slice(0, 4).map((image) => typeof image === "string" && image.startsWith("data:") ? "[image omitted from local transcript cache]" : image)
-		return message
-	})
-}
-
-function selectMessagesForPersistence(messages: unknown[], limit: number) {
-	if (messages.length <= limit) return messages
-	const anchorIndexes = new Set<number>([0])
-	for (let index = messages.length - 1; index >= 0; index--) {
-		if (asRecord(messages[index]).contextCompaction) {
-			anchorIndexes.add(index)
-			break
-		}
-	}
-	const selectedIndexes = new Set<number>(anchorIndexes)
-	for (let index = messages.length - 1; index >= 0 && selectedIndexes.size < limit; index--) selectedIndexes.add(index)
-	return [...selectedIndexes].sort((left, right) => left - right).map((index) => messages[index])
 }
 
 function writeAtomicJson(filePath: string, value: Record<string, unknown>) {
@@ -183,10 +163,11 @@ async function writeTemporaryJson(filePath: string, value: Record<string, unknow
 function temporaryPath(filePath: string, revision: number) { return `${filePath}.${process.pid}.${revision}.tmp` }
 function generationOf(value: Record<string, unknown> | null) { const generation = value?.[GENERATION_KEY]; return typeof generation === "number" && Number.isFinite(generation) ? generation : 0 }
 function backupCurrentPair(settingsPath: string, transcriptPath: string, settingsBackupPath: string, transcriptBackupPath: string) {
-	if (readSnapshot(settingsPath) && readSnapshot(transcriptPath)) {
-		fs.copyFileSync(settingsPath, settingsBackupPath)
-		fs.copyFileSync(transcriptPath, transcriptBackupPath)
-	}
+	const settings = readSnapshot(settingsPath)
+	const transcripts = readSnapshot(transcriptPath)
+	if (!settings || !transcripts || !pairSnapshots(settings, transcripts, false)) return
+	fs.copyFileSync(settingsPath, settingsBackupPath)
+	fs.copyFileSync(transcriptPath, transcriptBackupPath)
 }
 
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }

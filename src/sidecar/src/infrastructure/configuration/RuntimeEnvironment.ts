@@ -3,9 +3,17 @@ export const RUNTIME_DEFAULTS = Object.freeze({
 	webFetchTimeoutMs: 15_000,
 	imageProbeTimeoutMs: 5_000,
 	openGraphTimeoutMs: 15_000,
+	hostFileRequestTimeoutMs: 15_000,
 	taskOperationHistoryEntries: 2_048,
 	taskCancelTimeoutMs: 4_000,
 	shutdownGraceMs: 5_000,
+	rpcMaximumFrameBytes: 32 * 1024 * 1024,
+	rpcMaximumConcurrentRequests: 32,
+	rpcMaximumQueuedRequests: 256,
+	metadataRequestTimeoutMs: 15_000,
+	metadataResponseMaximumBytes: 4 * 1024 * 1024,
+	oauthResponseMaximumBytes: 256 * 1024,
+	historySyncEntries: 2_000,
 })
 
 export function readPositiveIntEnv(name: string, fallback: number) {

@@ -3,7 +3,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import Fuse from "fuse.js"
 import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 
 interface ModelAutocompleteProps {
 	models: Record<string, ModelInfo>
@@ -61,7 +61,7 @@ export const ModelAutocomplete = ({
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

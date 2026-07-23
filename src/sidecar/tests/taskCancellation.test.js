@@ -36,22 +36,81 @@ test("cancel flow never projects success when owned work remains", async () => {
 		advanceRunGeneration: () => { generations++ },
 		hookSessionId: () => "session-1",
 		activeSessionId: () => "session-1",
-		cancelWork: async () => ({ succeeded: false, failures: [{ name: "terminal", reason: "alive", timedOut: false }] }),
+		cancelWork: async () => ({ succeeded: false, completed: ["agent-and-mcp"], failures: [{ name: "terminal", reason: "alive", timedOut: false }] }),
 		clearProjection: () => undefined,
 		addInfo: (text) => messages.push({ kind: "info", text }),
 		addError: (text) => messages.push({ kind: "error", text }),
 		updateTask: () => undefined,
 		runHook: async () => undefined,
 		completeCancel: () => { status = "idle" },
-		restoreLifecycle: (previous) => { status = previous },
+		failCancellation: () => { status = "failed" },
+		quarantineSession: () => undefined,
 		broadcast: async () => undefined,
 		log: () => undefined,
 	})
 	await assert.rejects(() => flow.execute(), /cancellation operations failed/)
-	assert.equal(status, "streaming")
-	assert.equal(generations, 0)
+	assert.equal(status, "failed")
+	assert.equal(generations, 1)
 	assert.equal(messages.some((message) => message.kind === "info"), false)
 	assert.equal(messages.some((message) => message.kind === "error" && message.text.includes("terminal: alive")), true)
+})
+
+test("a failed cancellation hook cannot leave a successfully cancelled task stuck", async () => {
+	const events = []
+	let status = "streaming"
+	let broadcasts = 0
+	const flow = new CancelTaskFlow({
+		beginCancel: () => { status = "cancelling"; return true },
+		currentStatus: () => status,
+		advanceRunGeneration: () => undefined,
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: async () => ({ succeeded: true, completed: ["agent-and-mcp", "terminal", "hooks", "browser"], failures: [] }),
+		clearProjection: () => undefined,
+		addInfo: () => undefined,
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => { throw new Error("hook failed") },
+		completeCancel: () => { status = "idle" },
+		failCancellation: () => { status = "failed" },
+		quarantineSession: () => undefined,
+		broadcast: async () => { broadcasts++ },
+		log: (event, details) => events.push({ event, details }),
+	})
+
+	await flow.execute()
+	assert.equal(status, "idle")
+	assert.equal(broadcasts, 1)
+	assert.equal(events.some(({ event }) => event === "cancelHookFailed"), true)
+})
+
+test("a timed-out cancellation quarantines the old run instead of restoring streaming", async () => {
+	let status = "streaming"
+	let generations = 0
+	let quarantined = ""
+	const flow = new CancelTaskFlow({
+		beginCancel: () => { status = "cancelling"; return true },
+		currentStatus: () => status,
+		advanceRunGeneration: () => { generations++ },
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: async () => ({ succeeded: false, completed: [], failures: [{ name: "agent", reason: "timeout", timedOut: true }] }),
+		clearProjection: () => undefined,
+		addInfo: () => undefined,
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => undefined,
+		completeCancel: () => { status = "idle" },
+		failCancellation: () => { status = "failed" },
+		quarantineSession: (sessionId) => { quarantined = sessionId },
+		broadcast: async () => undefined,
+		log: () => undefined,
+	})
+
+	await assert.rejects(() => flow.execute(), /cancellation operations failed/)
+	assert.equal(status, "failed")
+	assert.equal(generations, 1)
+	assert.equal(quarantined, "session-1")
 })
 
 test("cancel handler marks a session inactive only after SDK abort succeeds", async () => {
@@ -82,8 +141,8 @@ test("leaving a task preserves the visible session when cancellation is incomple
 		advanceRunGeneration: () => { generations++ },
 		currentSessionId: () => "session-1",
 		markClosing: (_sessionId, value = true) => { closing = value },
-		cancelWork: async () => ({ succeeded: false, failures: [{ name: "hook", reason: "alive", timedOut: false }] }),
-		restoreLifecycle: (previous) => { status = previous },
+		cancelWork: async () => ({ succeeded: false, completed: ["agent-and-mcp"], failures: [{ name: "hook", reason: "alive", timedOut: false }] }),
+		failCancellation: () => { status = "failed" },
 		addError: () => undefined,
 		rememberSnapshot: () => undefined,
 		clearProjection: () => { cleared = true },
@@ -96,9 +155,9 @@ test("leaving a task preserves the visible session when cancellation is incomple
 	})
 	await assert.rejects(() => handler.execute(), /could not be cancelled/)
 	assert.equal(cleared, false)
-	assert.equal(closing, false)
-	assert.equal(status, "streaming")
-	assert.equal(generations, 0)
+	assert.equal(closing, true)
+	assert.equal(status, "failed")
+	assert.equal(generations, 1)
 })
 
 test("leaving a completed task skips active-work cancellation", async () => {
@@ -111,8 +170,8 @@ test("leaving a completed task skips active-work cancellation", async () => {
 		advanceRunGeneration: () => undefined,
 		currentSessionId: () => "session-1",
 		markClosing: () => undefined,
-		cancelWork: async () => { cancelCalls++; return { succeeded: true, failures: [] } },
-		restoreLifecycle: (previous) => { status = previous },
+		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: [], failures: [] } },
+		failCancellation: () => { status = "failed" },
 		addError: () => undefined,
 		rememberSnapshot: () => undefined,
 		clearProjection: () => { cleared = true },
@@ -127,4 +186,60 @@ test("leaving a completed task skips active-work cancellation", async () => {
 	assert.equal(cancelCalls, 0)
 	assert.equal(cleared, true)
 	assert.equal(status, "idle")
+})
+
+test("leaving a failed task skips active-work cancellation", async () => {
+	let cancelCalls = 0
+	let status = "failed"
+	const handler = new ClearTaskHandler(() => null, {
+		transition: (next) => { status = next },
+		currentStatus: () => status,
+		advanceRunGeneration: () => undefined,
+		currentSessionId: () => "session-1",
+		markClosing: () => undefined,
+		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: [], failures: [] } },
+		failCancellation: () => { status = "failed" },
+		addError: () => undefined,
+		rememberSnapshot: () => undefined,
+		clearProjection: () => undefined,
+		clearInteractions: () => undefined,
+		clearTaskState: () => undefined,
+		resetLifecycle: () => { status = "idle" },
+		persist: () => undefined,
+		broadcast: async () => undefined,
+		log: () => undefined,
+	})
+
+	await handler.execute()
+	assert.equal(cancelCalls, 0)
+	assert.equal(status, "idle")
+})
+
+test("leaving a task after cancellation timeout keeps the session quarantined and failed", async () => {
+	let closing = false
+	let status = "streaming"
+	let generations = 0
+	const handler = new ClearTaskHandler(() => null, {
+		transition: (next) => { status = next },
+		currentStatus: () => status,
+		advanceRunGeneration: () => { generations++ },
+		currentSessionId: () => "session-1",
+		markClosing: (_sessionId, value = true) => { closing = value },
+		cancelWork: async () => ({ succeeded: false, completed: [], failures: [{ name: "agent", reason: "timeout", timedOut: true }] }),
+		failCancellation: () => { status = "failed" },
+		addError: () => undefined,
+		rememberSnapshot: () => undefined,
+		clearProjection: () => undefined,
+		clearInteractions: () => undefined,
+		clearTaskState: () => undefined,
+		resetLifecycle: () => undefined,
+		persist: () => undefined,
+		broadcast: async () => undefined,
+		log: () => undefined,
+	})
+
+	await assert.rejects(() => handler.execute(), /could not be cancelled/)
+	assert.equal(status, "failed")
+	assert.equal(closing, true)
+	assert.equal(generations, 1)
 })

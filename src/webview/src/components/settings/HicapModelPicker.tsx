@@ -6,7 +6,7 @@ import React, { KeyboardEvent, useEffect, useMemo, useRef, useState } from "reac
 import { useMount } from "react-use"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { StateServiceClient } from "@/services/grpcClient"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 import { getModeSpecificFields } from "./utils/providerUtils"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
 
@@ -86,7 +86,7 @@ const HicapModelPicker: React.FC<HicapModelPickerProps> = ({ isPopup, currentMod
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

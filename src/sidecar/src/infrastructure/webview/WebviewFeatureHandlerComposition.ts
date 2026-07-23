@@ -33,6 +33,7 @@ type Options = Readonly<{
 }>
 
 export function createWebviewFeatureHandlers(options: Options) {
+	const instructionSettings = new InstructionSettingsRpcHandler(options.instructionSettings)
 	return {
 		settings: new SettingsRpcHandler(options.settings),
 		account: new AccountRpcHandler(options.account),
@@ -45,8 +46,8 @@ export function createWebviewFeatureHandlers(options: Options) {
 		worktree: new WorktreeRpcHandler(options.worktree),
 		mcp: new McpRpcHandler(options.mcp),
 		modelCatalog: new ModelCatalogRpcHandler(options.modelCatalog),
-		file: new FileRpcHandler(options.file),
-		instructionSettings: new InstructionSettingsRpcHandler(options.instructionSettings),
+		file: new FileRpcHandler({ ...options.file, refreshInstructions: (kind) => instructionSettings.refresh(kind) }),
+		instructionSettings,
 		uiWeb: new UiWebRpcHandler(options.uiWeb),
 		plugin: new PluginRpcHandler(options.plugin),
 	}

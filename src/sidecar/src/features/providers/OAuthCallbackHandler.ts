@@ -38,7 +38,7 @@ export class OAuthCallbackHandler {
 		const result = this.callbacks.record(parsedUrl.toString())
 		const hash = new URLSearchParams(parsedUrl.hash.replace(/^#/, ""))
 		const provider = normalizeProviderValue(parsedUrl.searchParams.get("provider") || hash.get("provider") || readString(request.provider) || "account")
-		const session = this.callbacks.latest(provider)
+		const session = result.session || this.callbacks.latest(provider)
 		if (result.success && session) {
 			const completion = await this.complete(session, applyMutation)
 			return {

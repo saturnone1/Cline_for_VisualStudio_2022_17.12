@@ -3,7 +3,6 @@ import type { SdkSettingToggleRequest, SdkSettingsHandler } from "./SdkSettingsH
 export type InstructionSettingsCommand =
 	| Readonly<{ type: "refreshInstructions" }>
 	| Readonly<{ type: "refreshSkills" }>
-	| Readonly<{ type: "noop" }>
 	| Readonly<{ type: "toggle"; settingType: "rules" | "workflows" | "skills"; request: SdkSettingToggleRequest }>
 
 type ToggleMap = Record<string, boolean>
@@ -20,13 +19,18 @@ export class InstructionSettingsRpcHandler {
 	constructor(private readonly callbacks: Callbacks) {}
 
 	async handle(command: InstructionSettingsCommand) {
-		if (command.type === "noop") return {}
 		const cwd = await this.callbacks.workspaceRoot()
 		if (command.type === "refreshInstructions") return this.refreshInstructions(cwd)
 		if (command.type === "refreshSkills") return this.refreshSkills(cwd)
 		const result = await this.callbacks.sdkSettings().toggle(command.settingType, command.request, cwd)
 		if (!result.success) this.callbacks.addError(result.error)
 		return command.settingType === "skills" ? this.refreshSkills(cwd) : this.refreshInstructions(cwd)
+	}
+
+	async refresh(kind: "instructions" | "skills") {
+		const cwd = await this.callbacks.workspaceRoot()
+		if (kind === "skills") await this.refreshSkills(cwd)
+		else await this.refreshInstructions(cwd)
 	}
 
 	private async refreshInstructions(cwd: string) {

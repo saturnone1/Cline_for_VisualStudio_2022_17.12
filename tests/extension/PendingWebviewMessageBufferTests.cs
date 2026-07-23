@@ -39,6 +39,18 @@ namespace VsClineAgent.Host.Tests
             Assert.Equal(new[] { "ordinary-1", "ordinary-2" }, pending.Where(item => item.StartsWith("ordinary-")));
         }
 
+		[Fact]
+		public void StateMessagesCoalesceBeforeTheCountLimit()
+		{
+			var buffer = new PendingWebviewMessageBuffer(100);
+			var oldState = State("state-1", "old");
+			var newState = State("state-1", "new");
+			buffer.Enqueue(oldState);
+			buffer.Enqueue(newState);
+
+			Assert.Equal(new[] { newState }, buffer.TakeAll());
+		}
+
         [Fact]
         public void ClearDropsAllPendingMessages()
         {
@@ -72,6 +84,17 @@ namespace VsClineAgent.Host.Tests
 			buffer.Enqueue("response-4");
 
 			Assert.Equal(new[] { "response-2", "response-3", "response-4" }, buffer.TakeAll());
+			Assert.Equal(1, buffer.TakeDroppedCount());
+		}
+
+		[Fact]
+		public void HardByteLimitBoundsNonReplaceableResponses()
+		{
+			var buffer = new PendingWebviewMessageBuffer(100, 100, 10, 15);
+			buffer.Enqueue("12345678");
+			buffer.Enqueue("abcdefgh");
+
+			Assert.Equal(new[] { "abcdefgh" }, buffer.TakeAll());
 			Assert.Equal(1, buffer.TakeDroppedCount());
 		}
 

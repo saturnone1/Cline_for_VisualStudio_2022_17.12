@@ -337,6 +337,69 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 		},
 		"allowAdditionalFields": true
 	},
+	"RuleFileRequest": {
+		"fields": {
+			"isGlobal": {
+				"type": "boolean",
+				"required": true
+			},
+			"filename": {
+				"type": "string"
+			},
+			"rulePath": {
+				"type": "string"
+			},
+			"type": {
+				"type": "string"
+			}
+		}
+	},
+	"CreateSkillRequest": {
+		"fields": {
+			"skillName": {
+				"type": "string",
+				"required": true
+			},
+			"isGlobal": {
+				"type": "boolean",
+				"required": true
+			}
+		}
+	},
+	"DeleteSkillRequest": {
+		"fields": {
+			"skillPath": {
+				"type": "string",
+				"required": true
+			},
+			"isGlobal": {
+				"type": "boolean",
+				"required": true
+			}
+		}
+	},
+	"FileSearchRequest": {
+		"fields": {
+			"query": {
+				"type": "string",
+				"required": true
+			},
+			"mentionsRequestId": {
+				"type": "string"
+			},
+			"selectedType": {
+				"type": "string",
+				"values": [
+					"FILE",
+					"FOLDER"
+				]
+			},
+			"workspaceHint": {
+				"type": "string"
+			}
+		},
+		"allowAdditionalFields": true
+	},
 	"TerminalTargetRequest": {
 		"fields": {
 			"terminalId": {
@@ -1980,16 +2043,16 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"client": true,
 		"sidecar": true,
 		"route": "file",
-		"requestShape": "FlexibleObject",
-		"responseShape": "FlexibleObject"
+		"requestShape": "RuleFileRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.createSkillFile": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
 		"route": "file",
-		"requestShape": "FlexibleObject",
-		"responseShape": "FlexibleObject"
+		"requestShape": "CreateSkillRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.deleteHook": {
 		"kind": "unary",
@@ -2004,16 +2067,16 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"client": true,
 		"sidecar": true,
 		"route": "file",
-		"requestShape": "FlexibleObject",
-		"responseShape": "FlexibleObject"
+		"requestShape": "RuleFileRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.deleteSkillFile": {
 		"kind": "unary",
 		"client": true,
 		"sidecar": true,
 		"route": "file",
-		"requestShape": "FlexibleObject",
-		"responseShape": "FlexibleObject"
+		"requestShape": "DeleteSkillRequest",
+		"responseShape": "Empty"
 	},
 	"FileService.getRelativePaths": {
 		"kind": "unary",
@@ -2132,7 +2195,7 @@ export const WEBVIEW_RPC_OPERATIONS = {
 		"client": true,
 		"sidecar": true,
 		"route": "file",
-		"requestShape": "StringValueRequest",
+		"requestShape": "FileSearchRequest",
 		"responseShape": "FileSearchResponse"
 	},
 	"FileService.selectFiles": {
@@ -3339,6 +3402,27 @@ export type WebviewRpcPayloadShapeMap = {
 	}
 	"RelativePathsRequest": {
 		"uris": string[]
+		[key: string]: unknown
+	}
+	"RuleFileRequest": {
+		"isGlobal": boolean
+		"filename"?: string
+		"rulePath"?: string
+		"type"?: string
+	}
+	"CreateSkillRequest": {
+		"skillName": string
+		"isGlobal": boolean
+	}
+	"DeleteSkillRequest": {
+		"skillPath": string
+		"isGlobal": boolean
+	}
+	"FileSearchRequest": {
+		"query": string
+		"mentionsRequestId"?: string
+		"selectedType"?: "FILE" | "FOLDER"
+		"workspaceHint"?: string
 		[key: string]: unknown
 	}
 	"TerminalTargetRequest": {

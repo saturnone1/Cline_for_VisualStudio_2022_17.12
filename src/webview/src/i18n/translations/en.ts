@@ -306,6 +306,7 @@ export const en = {
 	"rules.newHook": "New hook...",
 	"rules.skillNameError": "Skill name can only contain letters, numbers, dashes, and underscores",
 	"rules.skillCreateFailed": "Failed to create skill",
+	"rules.ruleCreateFailed": "Failed to create rule file",
 	"rules.extensionError": "Only .md, .txt, or no file extension allowed",
 	"rules.workflowPlaceholder": "workflow-name (.md, .txt, or no extension)",
 	"rules.skillPlaceholder": "skill-name (letters, numbers, dashes, underscores)",

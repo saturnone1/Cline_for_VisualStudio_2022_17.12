@@ -4,6 +4,8 @@ import type { SendMessageCommand } from "../sendMessage/SendMessageCommand"
 type Callbacks = Readonly<{
 	activeSettingsRevision: () => number
 	settingsRevision: () => number
+	requiresReplacement: (sessionId: string) => boolean
+	bindSession: (sessionId: string) => void
 	markClosing: (sessionId: string, closing: boolean) => void
 	send: (command: SendMessageCommand) => Promise<unknown>
 	resume: (sessionId: string, command: SendMessageCommand, textLength: number) => Promise<unknown>
@@ -19,6 +21,10 @@ export class SendOrResumeSessionFlow {
 	async execute(sessionId: string, command: SendMessageCommand, textLength: number) {
 		const engine = this.engine()
 		if (!engine) throw new Error("LIG VS SDK runtime is not attached.")
+		if (this.callbacks.requiresReplacement(sessionId)) {
+			this.callbacks.log("sendAskResponse.replaceQuarantinedSession", { sessionId })
+			return this.callbacks.resume(sessionId, command, textLength)
+		}
 		let activateMissing = false
 		if (engine.status.activeSessionId !== sessionId) {
 			this.callbacks.log("sendAskResponse.activateSession", { from: engine.status.activeSessionId, to: sessionId })
@@ -32,6 +38,7 @@ export class SendOrResumeSessionFlow {
 		}
 		try {
 			if (activateMissing) return await this.callbacks.resume(sessionId, command, textLength)
+			this.callbacks.bindSession(sessionId)
 			const activeRevision = this.callbacks.activeSettingsRevision(), revision = this.callbacks.settingsRevision()
 			if (activeRevision !== revision) {
 				this.callbacks.log("sendAskResponse.restartForSettingsChange", { sessionId, activeSessionRuntimeSettingsRevision: activeRevision, runtimeSettingsRevision: revision })

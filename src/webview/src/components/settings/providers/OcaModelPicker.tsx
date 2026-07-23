@@ -2,6 +2,7 @@ import type { ApiConfiguration, OcaModelInfo } from "@shared/api"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import React, { useMemo } from "react"
+import DOMPurify from "dompurify"
 import { VSC_BUTTON_BACKGROUND, VSC_BUTTON_FOREGROUND, VSC_DESCRIPTION_FOREGROUND, VSC_FOREGROUND } from "@/utils/vscStyles"
 import { ModelInfoView } from "../common/ModelInfoView"
 import ThinkingBudgetSlider from "../ThinkingBudgetSlider"
@@ -236,7 +237,16 @@ export default OcaModelPicker
 const OcaRestrictivePopup: React.FC<{
 	onAcknowledge: () => void
 	bannerText?: string | null
-}> = React.memo(({ onAcknowledge, bannerText }) => (
+}> = React.memo(({ onAcknowledge, bannerText }) => {
+	const safeBannerText = useMemo(
+		() => DOMPurify.sanitize(bannerText || "", {
+			ALLOWED_TAGS: ["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a", "code"],
+			ALLOWED_ATTR: ["href", "title", "target", "rel"],
+			ALLOW_DATA_ATTR: false,
+		}),
+		[bannerText],
+	)
+	return (
 	<div className="fixed top-0 left-0 w-screen h-screen z-2000 [background:rgba(0,0,0,0.25)] flex items-center justify-center">
 		<div
 			aria-labelledby="oca-popup-title"
@@ -250,7 +260,7 @@ const OcaRestrictivePopup: React.FC<{
 				Disclaimer: Prohibited Data Submission
 			</h4>
 			<div className="overflow-y-auto flex-1 pr-2 mb-4 text-[13px] leading-normal text-(--vscode-foreground,#222) mask-[linear-gradient(to_bottom,black_96%,transparent_100%)]">
-				{bannerText && <div dangerouslySetInnerHTML={{ __html: bannerText }} />}
+				{safeBannerText && <div dangerouslySetInnerHTML={{ __html: safeBannerText }} />}
 			</div>
 			<div className="text-right">
 				<VSCodeButton
@@ -265,4 +275,5 @@ const OcaRestrictivePopup: React.FC<{
 			</div>
 		</div>
 	</div>
-))
+	)
+})

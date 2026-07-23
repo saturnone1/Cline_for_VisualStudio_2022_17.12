@@ -10,7 +10,7 @@ import { useMount } from "react-use"
 import styled from "styled-components"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { StateServiceClient } from "@/services/grpcClient"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 import { ContextWindowSwitcher } from "./common/ContextWindowSwitcher"
 import { ModelInfoView } from "./common/ModelInfoView"
 import ReasoningEffortSelector from "./ReasoningEffortSelector"
@@ -115,7 +115,7 @@ const OpenRouterModelPicker: React.FC<OpenRouterModelPickerProps> = ({ isPopup, 
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

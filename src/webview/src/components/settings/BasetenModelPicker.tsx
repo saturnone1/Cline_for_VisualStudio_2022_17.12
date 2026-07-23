@@ -4,7 +4,7 @@ import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import Fuse from "fuse.js"
 import React, { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useExtensionState } from "../../context/ExtensionStateContext"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 import { ModelInfoView } from "./common/ModelInfoView"
 import { getModeSpecificFields, normalizeApiConfiguration } from "./utils/providerUtils"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
@@ -90,7 +90,7 @@ const BasetenModelPicker: React.FC<BasetenModelPickerProps> = ({ isPopup, curren
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

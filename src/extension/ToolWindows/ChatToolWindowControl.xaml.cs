@@ -10,6 +10,7 @@ using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using VsClineAgent.Host;
+using VsClineAgent.Host.Generated;
 using VsClineAgent.Services;
 
 namespace VsClineAgent.ToolWindows
@@ -66,6 +67,8 @@ namespace VsClineAgent.ToolWindows
                 new VsEditorService(),
                 new VsCommandExecutionService(new VisualStudioOutputPaneWriter()),
                 SetStatus);
+			_sidecar.ReadyGenerationChanged += OnSidecarReadyGenerationChanged;
+			_sidecar.TransportUnavailable += OnSidecarTransportUnavailable;
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
             _lifetime = new ToolWindowLifetime(
@@ -73,6 +76,8 @@ namespace VsClineAgent.ToolWindows
                 {
                     Loaded -= OnLoaded;
                     Unloaded -= OnUnloaded;
+					_sidecar.ReadyGenerationChanged -= OnSidecarReadyGenerationChanged;
+					_sidecar.TransportUnavailable -= OnSidecarTransportUnavailable;
                     DetachWebViewEventHandlers();
                 },
                 () => _webviewMessages.Dispose(),
@@ -108,6 +113,26 @@ namespace VsClineAgent.ToolWindows
 	            _ = OnLoadedAsync();
         }
 
+		private void OnSidecarReadyGenerationChanged(int generation)
+		{
+			_ = SendToWebViewAsync(new
+			{
+				protocol_version = WebviewRpcContract.ProtocolVersion,
+				type = "vscline_transport_reset",
+				generation
+			});
+		}
+
+		private void OnSidecarTransportUnavailable(int generation)
+		{
+			_ = SendToWebViewAsync(new
+			{
+				protocol_version = WebviewRpcContract.ProtocolVersion,
+				type = "vscline_transport_unavailable",
+				generation
+			});
+		}
+
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
 	            _loaded = false;
@@ -118,7 +143,7 @@ namespace VsClineAgent.ToolWindows
         {
             if (_initialized)
             {
-                await _sidecar.EnsureRunningAsync();
+                await _sidecar.EnsureRunningAsync(_diagnosticCancellation.Token);
                 return;
             }
 
@@ -156,7 +181,7 @@ namespace VsClineAgent.ToolWindows
             try
             {
                 SetStatus("LIG VS 사이드카를 준비하는 중입니다. 처음 실행하거나 업데이트한 직후에는 의존성 구성에 시간이 걸릴 수 있습니다...");
-                var sidecarStarted = await _sidecar.EnsureRunningAsync();
+                var sidecarStarted = await _sidecar.EnsureRunningAsync(_diagnosticCancellation.Token);
                 if (!sidecarStarted)
                 {
                     ShowError(_sidecar.GetNotRunningMessage());
@@ -348,6 +373,7 @@ namespace VsClineAgent.ToolWindows
                     });
                 }
 
+				_ = _sidecar.WarmSdkAsync(_diagnosticCancellation.Token);
 				await ReportBlankWebviewIfNeededAsync(_diagnosticCancellation.Token);
             }
             catch (Exception ex)
@@ -371,10 +397,6 @@ namespace VsClineAgent.ToolWindows
 				if (TryHandleThemePreference(webMessageAsJson))
 					return;
                 if (TryHandleHostDiagnostic(webMessageAsJson))
-                    return;
-
-                if (!_sidecar.IsRunning &&
-                    WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
                     return;
 
                 if (!_sidecar.IsRunning)
@@ -404,9 +426,6 @@ namespace VsClineAgent.ToolWindows
             catch (Exception ex)
             {
                 _sidecar.RecordError(ex);
-                if (WebviewGrpcFallback.IsPassiveStreamingSubscription(webMessageAsJson))
-                    return;
-
                 await SendToWebViewAsync(WebviewGrpcFallback.CreateErrorResponse(webMessageAsJson, ex.Message));
             }
         }

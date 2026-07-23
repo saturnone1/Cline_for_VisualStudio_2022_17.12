@@ -26,6 +26,7 @@ export class StateStreamRefreshCoordinator {
 		this.refreshTimer = setTimeout(() => {
 			this.refreshTimer = null
 			if (!this.dependencies.shouldSkipScheduledRefresh()) this.refreshInBackground()
+			else if (!this.disposed && this.dependencies.shouldContinueScheduledRefresh()) this.schedule()
 		}, this.dependencies.delayMs())
 		this.refreshTimer.unref?.()
 	}

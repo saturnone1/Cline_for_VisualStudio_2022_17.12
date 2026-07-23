@@ -97,6 +97,7 @@
     <Compile Include="Commands\OpenChatWindowCommand.cs" />
     <Compile Include="Guids.cs" />
     <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
+    <Compile Include="Host\BoundedUtf8LineReader.cs" />
     <Compile Include="Host\InteractionLog.cs" />
     <Compile Include="Host\InteractionCorrelation.cs" />
     <Compile Include="Host\InteractionLogSanitizer.cs" />

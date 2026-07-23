@@ -62,17 +62,6 @@ const formatCount = (value: number | undefined): string => {
 	return Intl.NumberFormat("en-US").format(value || 0)
 }
 
-const formatCost = (value: number | undefined): string => {
-	const normalized = Number.isFinite(value) ? Math.max(0, value || 0) : 0
-	const maximumFractionDigits = normalized >= 0.01 ? 2 : 4
-	return Intl.NumberFormat("en-US", {
-		style: "currency",
-		currency: "USD",
-		minimumFractionDigits: 2,
-		maximumFractionDigits,
-	}).format(normalized)
-}
-
 function parseSubagentRowData(message: ClineMessage): SubagentRowData | null {
 	if (!message.text) {
 		return null
@@ -231,7 +220,7 @@ export default function SubagentStatusRow({ message, isLast, lastModifiedMessage
 					const isStreamingPromptUnderConstruction =
 						isPromptConstructionRow && message.partial === true && index === data.items.length - 1
 					const shouldShowStats = !isStreamingPromptUnderConstruction
-					const statsText = `${formatCount(entry.toolCalls)} tools called · ${formatCount(entry.contextTokens)} tokens · ${formatCost(entry.totalCost)}`
+					const statsText = `${formatCount(entry.toolCalls)} tools called · ${formatCount(entry.contextTokens)} tokens`
 					const latestToolCallText = entry.latestToolCall?.trim() || ""
 					return (
 						<div

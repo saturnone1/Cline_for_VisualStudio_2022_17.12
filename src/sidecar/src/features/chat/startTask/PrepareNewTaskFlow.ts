@@ -6,7 +6,7 @@ type Callbacks = Readonly<{
 	updateTask: () => void
 	publishPreparing: () => void
 	activeSessionId: () => string
-	markClosing: (sessionId: string) => void
+	markClosing: (sessionId: string, closing?: boolean) => void
 	stopSession: (sessionId: string) => Promise<unknown>
 	runHook: (name: "TaskStart" | "UserPromptSubmit", context: Record<string, unknown>) => void
 	normalizeImages: (images: string[]) => Promise<readonly string[]>
@@ -18,6 +18,19 @@ type Callbacks = Readonly<{
 export class PrepareNewTaskFlow {
 	constructor(private readonly callbacks: Callbacks) {}
 
+	async stopPrevious() {
+		const previousSessionId = this.callbacks.activeSessionId()
+		if (!previousSessionId) return
+		this.callbacks.markClosing(previousSessionId)
+		try {
+			await this.callbacks.stopSession(previousSessionId)
+		} catch (error) {
+			this.callbacks.markClosing(previousSessionId, false)
+			this.callbacks.log("startNewTask.stopPreviousFailed", { sessionId: previousSessionId, error: stringify(error) })
+			throw error
+		}
+	}
+
 	async execute(input: Input) {
 		if (!this.callbacks.isRuntimeAvailable()) return
 		let cwd = input.initialCwd
@@ -28,11 +41,6 @@ export class PrepareNewTaskFlow {
 			if (input.requestedWorkspacePath) { input.taskItem.workspacePath = cwd; input.taskItem.worktreePath = cwd }
 			this.callbacks.updateTask()
 			this.callbacks.publishPreparing()
-			const previousSessionId = this.callbacks.activeSessionId()
-			if (previousSessionId) {
-				this.callbacks.markClosing(previousSessionId)
-				await this.callbacks.stopSession(previousSessionId).catch((error) => this.callbacks.log("startNewTask.stopPreviousFailed", { sessionId: previousSessionId, error: stringify(error) }))
-			}
 			const sessionId = String(input.taskItem.id || ""), context = { prompt: input.text, cwd, files: input.files, images: input.images, sessionId }
 			this.callbacks.runHook("TaskStart", context)
 			this.callbacks.runHook("UserPromptSubmit", context)

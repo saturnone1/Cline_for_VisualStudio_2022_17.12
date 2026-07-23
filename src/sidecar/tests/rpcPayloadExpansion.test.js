@@ -10,12 +10,18 @@ const { decodeFileRpcCommand } = require("../dist/infrastructure/webview/FileRpc
 const { decodeSettingsRpcCommand } = require("../dist/infrastructure/webview/SettingsRpcDecoder")
 
 test("file search commands preserve their distinct response contracts", async () => {
-	const handler = new FileRpcHandler({})
-	const files = decodeFileRpcCommand("FileService.searchFiles", { value: "src" })
+	const handler = new FileRpcHandler({
+		host: { workspaceClient: { getWorkspacePaths: async () => [], listFiles: async () => ({ files: [] }) } },
+		workspaceRoot: async () => "",
+		baseName: () => "",
+		searchCommits: async () => ({ success: false, stdout: "" }),
+	})
+	const files = decodeFileRpcCommand("FileService.searchFiles", { query: "src", selectedType: "FILE" })
 	const commits = decodeFileRpcCommand("FileService.searchCommits", { value: "fix" })
 
 	assert.deepEqual(await handler.handle(files), { payload: { results: [], values: [] } })
 	assert.deepEqual(await handler.handle(commits), { payload: { commits: [], values: [] } })
+	assert.deepEqual(files, { type: "searchFiles", query: "src", selectedType: "FILE", workspaceHint: "" })
 })
 
 test("terminal timeout decoder accepts the WebView timeoutMs field", () => {

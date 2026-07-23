@@ -50,7 +50,11 @@ import type { RuntimeWebviewFeatures } from "../infrastructure/webview/WebviewFe
 
 export function createSidecarConnectionScope(connection: JsonRpcConnection, stateStore: JsonStateStore) {
 	const host = VisualStudioHostProvider.create(connection), transport = new JsonRpcWebviewTransport(connection)
-	const backend = new VisualStudioWebviewBackend(host, transport, interactionLogger, new StatePersistenceUseCase(stateStore, readPositiveIntEnv("VSCLINE_STATE_SAVE_DEBOUNCE_MS", 250)), new TaskLifecycleUseCase())
+	const backend = new VisualStudioWebviewBackend(host, transport, interactionLogger, new StatePersistenceUseCase(
+		stateStore,
+		readPositiveIntEnv("VSCLINE_STATE_SAVE_DEBOUNCE_MS", 250),
+		readPositiveIntEnv("VSCLINE_STATE_SAVE_MAX_WAIT_MS", 5_000),
+	), new TaskLifecycleUseCase())
 	const webview = new VisualStudioWebviewController(backend)
 	const browser = new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000))
 	const runtime = new ClineSdkRuntime(host, __dirname, (event) => webview.handleSdkEvent(event), (request) => webview.requestToolApproval(request), (question, options) => webview.requestQuestion(question, options), () => webview.isScheduledAgentsEnabled(), () => {

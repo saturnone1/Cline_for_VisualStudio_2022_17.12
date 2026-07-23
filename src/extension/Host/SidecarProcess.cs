@@ -26,6 +26,7 @@ namespace VsClineAgent.Host
         private static readonly ConcurrentDictionary<SidecarProcess, byte> OwnedInstances = new ConcurrentDictionary<SidecarProcess, byte>();
         private readonly WindowsProcessJob _processJob = new WindowsProcessJob();
         private int _disposed;
+		public event Action<SidecarProcess>? Exited;
         private Func<object, Task>? _postToWebviewAsync;
         private readonly object _recentOutputLock = new object();
         private readonly Queue<string> _recentOutput = new Queue<string>();
@@ -105,10 +106,12 @@ namespace VsClineAgent.Host
             if (IsRunning)
                 return "already-running";
 
+            cancellationToken.ThrowIfCancellationRequested();
             var stopwatch = Stopwatch.StartNew();
             var pipeName = @"\\.\pipe\VsClineAgent-" + Guid.NewGuid().ToString("N");
             var sidecarDirectory = Path.Combine(_assemblyDirectory, "Sidecar");
             var runtimePreparation = _runtimeInstaller.Prepare(sidecarDirectory);
+			cancellationToken.ThrowIfCancellationRequested();
 			WriteSlowTrace("sidecar.runtime.prepare.slow", runtimePreparation.TotalMs, new JObject
 			{
 				["runtime"] = runtimePreparation.RuntimeDirectory,
@@ -127,6 +130,8 @@ namespace VsClineAgent.Host
 
             if (!File.Exists(scriptPath))
                 throw new FileNotFoundException(SidecarRuntimeInstaller.BuildMissingEntrypointDiagnostic(sidecarDirectory, runtimeDirectory), scriptPath);
+
+			cancellationToken.ThrowIfCancellationRequested();
 
             CaptureSidecarLine("sidecar:start", "node=" + nodePath);
             CaptureSidecarLine("sidecar:start", "script=" + scriptPath);
@@ -176,6 +181,8 @@ namespace VsClineAgent.Host
                 if (OwnedJobs.TryRemove(startedProcess.Id, out var completedJob))
                     completedJob.Dispose();
                 CaptureSidecarLine("sidecar:exit", "exitCode=" + SafeExitCode(startedProcess));
+				try { Exited?.Invoke(this); }
+				catch (Exception ex) { CaptureSidecarLine("sidecar:exit-notification", ex.Message); }
             };
             OwnedProcesses[startedProcess.Id] = startedProcess;
             OwnedInstances[this] = 0;
@@ -190,7 +197,6 @@ namespace VsClineAgent.Host
             JToken? result;
             long pipeConnectMs = 0;
             long healthPingMs = 0;
-            long sdkWarmupMs = 0;
             try
             {
                 var pipeStopwatch = Stopwatch.StartNew();
@@ -210,17 +216,6 @@ namespace VsClineAgent.Host
                 healthStopwatch.Stop();
                 healthPingMs = healthStopwatch.ElapsedMilliseconds;
 
-                var sdkWarmupStopwatch = Stopwatch.StartNew();
-                using (var sdkWarmupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    sdkWarmupTimeout.CancelAfter(ReadSdkWarmupTimeoutMilliseconds());
-                    await _client.SendRequestAsync(
-                        "upstream.start",
-                        new { reason = "visual_studio_webview_startup" },
-                        sdkWarmupTimeout.Token).ConfigureAwait(false);
-                }
-                sdkWarmupStopwatch.Stop();
-                sdkWarmupMs = sdkWarmupStopwatch.ElapsedMilliseconds;
             }
             catch (Exception ex)
             {
@@ -242,11 +237,33 @@ namespace VsClineAgent.Host
                 ["nodeModulesExtractMs"] = runtimePreparation.NodeModulesExtractMs,
                 ["nodeModulesExtractReason"] = runtimePreparation.NodeModulesExtractReason,
                 ["pipeConnectMs"] = pipeConnectMs,
-                ["healthPingMs"] = healthPingMs,
-                ["sdkWarmupMs"] = sdkWarmupMs
+                ["healthPingMs"] = healthPingMs
             }, 1500);
             return ((JObject?)result)?["status"]?.ToString() ?? "unknown";
         }
+
+		public async Task<string> WarmSdkAsync(CancellationToken cancellationToken)
+		{
+			var client = _client;
+			if (!IsRunning || client == null)
+				throw new InvalidOperationException("The LIG VS sidecar is not running.");
+
+			var stopwatch = Stopwatch.StartNew();
+			using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+			{
+				timeout.CancelAfter(ReadSdkWarmupTimeoutMilliseconds());
+				var result = await client.SendRequestAsync(
+					"upstream.start",
+					new { reason = "visual_studio_webview_ready" },
+					timeout.Token).ConfigureAwait(false) as JObject;
+				stopwatch.Stop();
+				WriteSlowTrace("sidecar.sdkWarmup.slow", stopwatch.ElapsedMilliseconds, new JObject
+				{
+					["status"] = result?["status"]?.ToString() ?? "unknown"
+				}, 1500);
+				return result?["status"]?.ToString() ?? "unknown";
+			}
+		}
 
         private static void WriteSlowTrace(string eventName, long durationMs, JObject payload, int thresholdMs = 750)
         {
@@ -271,6 +288,7 @@ namespace VsClineAgent.Host
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
+			Exited = null;
 
             OwnedInstances.TryRemove(this, out _);
 

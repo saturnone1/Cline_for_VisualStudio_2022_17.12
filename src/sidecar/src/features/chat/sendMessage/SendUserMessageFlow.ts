@@ -1,4 +1,5 @@
 import type { SendMessageCommand } from "./SendMessageCommand"
+import { resolveUserActionSessionId } from "../../runtime/UserActionSessionTarget"
 
 export type SendUserMessageInput = Readonly<{ requestId: string; prompt: string; transcriptText: string; images: string[]; files: string[]; delivery?: "queue" | "steer"; mode: "plan" | "act"; activeSessionId: string; selectedSessionId: string }>
 type Dependencies = Readonly<{
@@ -25,7 +26,7 @@ export class SendUserMessageFlow {
 			this.dependencies.log("sendAskResponse.stalePendingIgnored", { activeSessionId: input.activeSessionId, selectedSessionId: input.selectedSessionId })
 			this.dependencies.interactions.clear()
 		}
-		const sessionId = input.activeSessionId || input.selectedSessionId
+		const sessionId = resolveUserActionSessionId(input.selectedSessionId, input.activeSessionId)
 		if (!sessionId) {
 			this.dependencies.log("sendAskResponse.startNewTask", { textLength: input.transcriptText.length })
 			await this.dependencies.newTask.start(input)

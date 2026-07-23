@@ -303,6 +303,7 @@ export const ko: Record<keyof typeof en, string> = {
 	"rules.newHook": "새 훅...",
 	"rules.skillNameError": "스킬 이름에는 영문, 숫자, 대시, 밑줄만 사용할 수 있습니다",
 	"rules.skillCreateFailed": "스킬 생성 실패",
+	"rules.ruleCreateFailed": "규칙 파일 생성 실패",
 	"rules.extensionError": ".md, .txt 또는 확장자 없는 파일만 허용됩니다",
 	"rules.workflowPlaceholder": "workflow-name (.md, .txt 또는 확장자 없음)",
 	"rules.skillPlaceholder": "skill-name (영문, 숫자, 대시, 밑줄)",

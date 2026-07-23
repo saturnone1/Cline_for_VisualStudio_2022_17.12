@@ -30,17 +30,31 @@ const setNestedValue = (target: Record<string, any>, path: string, value: any) =
 	parent[segments[segments.length - 1]] = value
 }
 
+const escapeHtml = (value: string) =>
+	value.replace(/[&<>"']/g, (character) => {
+		switch (character) {
+			case "&": return "&amp;"
+			case "<": return "&lt;"
+			case ">": return "&gt;"
+			case '"': return "&quot;"
+			default: return "&#39;"
+		}
+	})
+
 const renderHighlightedText = (text: string, regions: [number, number][], className: string) => {
 	let content = ""
 	let cursor = 0
+	const safeClassName = escapeHtml(className)
 
 	for (const [start, end] of mergeRegions(regions)) {
-		content += `${text.substring(cursor, start)}<span class="${className}">${text.substring(start, end + 1)}</span>`
+		content += `${escapeHtml(text.substring(cursor, start))}<span class="${safeClassName}">${escapeHtml(text.substring(start, end + 1))}</span>`
 		cursor = end + 1
 	}
 
-	return content + text.substring(cursor)
+	return content + escapeHtml(text.substring(cursor))
 }
+
+export const escapeSearchResultText = escapeHtml
 
 export const highlightSearchResults = <T extends Record<string, any>>(
 	results: FuseResult<T>[],

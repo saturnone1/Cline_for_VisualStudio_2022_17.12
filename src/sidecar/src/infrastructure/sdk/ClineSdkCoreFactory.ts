@@ -12,7 +12,6 @@ type ClineSdkModule = typeof import("@cline/sdk")
 
 type CoreFactoryDependencies = {
 	host: HostProviderPort
-	ensureMcpStarted: () => Promise<void>
 	getActiveSessionId: () => string | null
 	onEvent?: (event: AgentRuntimeEvent) => void
 	onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>
@@ -24,7 +23,6 @@ type CoreFactoryDependencies = {
 export async function createClineSdkCore(dependencies: CoreFactoryDependencies): Promise<ClineSdkCore> {
 	ensureUsableHomeEnvironment()
 	const sdk = await importClineSdk()
-	await dependencies.ensureMcpStarted()
 	const workspaceRoots = await dependencies.host.workspaceClient.getWorkspacePaths({}).catch(() => [] as string[])
 	const workspaceRoot = workspaceRoots[0] || process.cwd()
 	const automationEnabled = dependencies.isAutomationEnabled?.() === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"

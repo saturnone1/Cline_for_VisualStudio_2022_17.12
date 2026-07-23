@@ -4,6 +4,7 @@ import type { SidecarConnectionScope } from "../../application/ports/SidecarConn
 import type { JsonRpcConnection } from "./JsonRpcConnection"
 import { readBoundedPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
 import { tryWriteJsonLine } from "./JsonRpcSocketWriter"
+import { BoundedAsyncRequestQueue, JsonLineFrameDecoder } from "./JsonRpcIngressLimits"
 
 type JsonRpcRequest = {
 	id?: string | null
@@ -52,23 +53,25 @@ export class SidecarRpcServer {
 		const connection: JsonRpcConnection = { socket, nextId: 1, pending: new Map() }
 		const scope = this.createScope(connection)
 		this.scopes.add(scope)
-		let buffer = ""
+		const frames = new JsonLineFrameDecoder(readRpcMaximumFrameBytes())
+		const requests = new BoundedAsyncRequestQueue(readRpcMaximumConcurrentRequests(), readRpcMaximumQueuedRequests())
 
 		socket.on("data", (chunk) => {
-			buffer += chunk
-			for (;;) {
-				const newlineIndex = buffer.indexOf("\n")
-				if (newlineIndex < 0) break
-				const line = buffer.slice(0, newlineIndex).trim()
-				buffer = buffer.slice(newlineIndex + 1)
-				if (line) {
-					this.logger.log("host->sidecar", "jsonrpc.line", line)
-					this.handleMessage(connection, scope, line)
-				}
+			const decoded = frames.push(String(chunk))
+			if (decoded.overflow) {
+				this.logger.log("sidecar", "hostPipeFrameRejected", { maximumBytes: readRpcMaximumFrameBytes() })
+				this.write(socket, { id: null, error: { code: "frame_too_large", message: "JSON-RPC message exceeds the configured size limit." } })
+				socket.end()
+				return
+			}
+			for (const line of decoded.lines) {
+				this.logger.log("host->sidecar", "jsonrpc.line", line)
+				this.handleMessage(connection, scope, requests, line)
 			}
 		})
 
 		socket.on("close", () => {
+			requests.dispose()
 			this.sockets.delete(socket)
 			for (const pending of connection.pending.values()) pending.reject(new Error("Host pipe closed."))
 			connection.pending.clear()
@@ -76,7 +79,7 @@ export class SidecarRpcServer {
 		})
 	}
 
-	private handleMessage(connection: JsonRpcConnection, scope: SidecarConnectionScope, line: string) {
+	private handleMessage(connection: JsonRpcConnection, scope: SidecarConnectionScope, requests: BoundedAsyncRequestQueue, line: string) {
 		let request: JsonRpcRequest
 		try {
 			request = JSON.parse(line) as JsonRpcRequest
@@ -90,7 +93,7 @@ export class SidecarRpcServer {
 
 		if (request.method) {
 			this.logger.log("host->sidecar", request.method, { id: request.id, params: request.params })
-			Promise.resolve(this.dispatch(scope, request.method, request.params))
+			const accepted = requests.schedule(() => Promise.resolve(this.dispatch(scope, request.method!, request.params))
 				.then((result) => {
 					this.logger.log("sidecar->host", `${request.method}.result`, { id: request.id, result })
 					this.write(connection.socket, { id: request.id, result })
@@ -106,7 +109,8 @@ export class SidecarRpcServer {
 						id: request.id,
 						error: { code: "request_failed", message: error instanceof Error ? error.message : String(error) },
 					})
-				})
+				}))
+			if (!accepted) this.write(connection.socket, { id: request.id, error: { code: "server_busy", message: "The sidecar request queue is full." } })
 			return
 		}
 
@@ -205,6 +209,18 @@ function errorMessage(error: unknown) {
 
 function readShutdownGraceMs() {
 	return readBoundedPositiveIntEnv("VSCLINE_SIDECAR_SHUTDOWN_GRACE_MS", RUNTIME_DEFAULTS.shutdownGraceMs, 1_000, 15_000)
+}
+
+function readRpcMaximumFrameBytes() {
+	return readBoundedPositiveIntEnv("VSCLINE_RPC_MAX_FRAME_BYTES", RUNTIME_DEFAULTS.rpcMaximumFrameBytes, 1024 * 1024, 128 * 1024 * 1024)
+}
+
+function readRpcMaximumConcurrentRequests() {
+	return readBoundedPositiveIntEnv("VSCLINE_RPC_MAX_CONCURRENT_REQUESTS", RUNTIME_DEFAULTS.rpcMaximumConcurrentRequests, 1, 128)
+}
+
+function readRpcMaximumQueuedRequests() {
+	return readBoundedPositiveIntEnv("VSCLINE_RPC_MAX_QUEUED_REQUESTS", RUNTIME_DEFAULTS.rpcMaximumQueuedRequests, 1, 2048)
 }
 
 function shutdownGraceFromRequest(value: unknown) {

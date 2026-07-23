@@ -9,7 +9,7 @@ import { useMount } from "react-use"
 import styled from "styled-components"
 import { useExtensionState } from "../../context/ExtensionStateContext"
 import { ModelsServiceClient } from "../../services/grpcClient"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 import { ModelInfoView } from "./common/ModelInfoView"
 import ThinkingBudgetSlider from "./ThinkingBudgetSlider"
 import { getModeSpecificFields, normalizeApiConfiguration } from "./utils/providerUtils"
@@ -95,7 +95,7 @@ const RequestyModelPicker: React.FC<RequestyModelPickerProps> = ({ isPopup, base
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

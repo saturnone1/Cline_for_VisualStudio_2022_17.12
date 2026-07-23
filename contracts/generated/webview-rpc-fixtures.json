@@ -847,7 +847,9 @@
   },
   {
     "operation": "FileService.createRuleFile",
-    "request": {},
+    "request": {
+      "isGlobal": false
+    },
     "response": {},
     "envelope": {
       "protocol_version": 1,
@@ -857,13 +859,18 @@
         "method": "createRuleFile",
         "request_id": "contract-50",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "isGlobal": false
+        }
       }
     }
   },
   {
     "operation": "FileService.createSkillFile",
-    "request": {},
+    "request": {
+      "skillName": "fixture",
+      "isGlobal": false
+    },
     "response": {},
     "envelope": {
       "protocol_version": 1,
@@ -873,7 +880,10 @@
         "method": "createSkillFile",
         "request_id": "contract-51",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "skillName": "fixture",
+          "isGlobal": false
+        }
       }
     }
   },
@@ -895,7 +905,9 @@
   },
   {
     "operation": "FileService.deleteRuleFile",
-    "request": {},
+    "request": {
+      "isGlobal": false
+    },
     "response": {},
     "envelope": {
       "protocol_version": 1,
@@ -905,13 +917,18 @@
         "method": "deleteRuleFile",
         "request_id": "contract-53",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "isGlobal": false
+        }
       }
     }
   },
   {
     "operation": "FileService.deleteSkillFile",
-    "request": {},
+    "request": {
+      "skillPath": "fixture",
+      "isGlobal": false
+    },
     "response": {},
     "envelope": {
       "protocol_version": 1,
@@ -921,7 +938,10 @@
         "method": "deleteSkillFile",
         "request_id": "contract-54",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "skillPath": "fixture",
+          "isGlobal": false
+        }
       }
     }
   },
@@ -1165,7 +1185,9 @@
   },
   {
     "operation": "FileService.searchFiles",
-    "request": {},
+    "request": {
+      "query": "fixture"
+    },
     "response": {
       "results": []
     },
@@ -1177,7 +1199,9 @@
         "method": "searchFiles",
         "request_id": "contract-69",
         "is_streaming": false,
-        "message": {}
+        "message": {
+          "query": "fixture"
+        }
       }
     }
   },

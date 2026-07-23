@@ -132,7 +132,7 @@ test("compact flow delegates validated summarization and creates a replacement S
 	let applied
 	const flow = new CompactSessionFlow({
 		isRuntimeAvailable: () => true,
-		activeSessionId: () => "session-1",
+		activeSessionId: () => "stale-session",
 		selectedSessionId: () => "session-1",
 		language: () => "ko",
 		transitionStarting: () => {},
@@ -384,7 +384,7 @@ test("completion without final text still emits a terminal marker and completion
 	const projector = new TaskCompletionProjector({
 		messages: () => messages, transition: () => {}, clearFinishStatus: () => {}, finishProgress: () => {}, prepareAssistant: () => {},
 		activeText: () => "", addMessage: (message) => messages.push(message), markAssistantLatency: () => {}, finalizeOpenPartial: () => {},
-		lastActivityReason: () => "ended", runCompleteHook: () => { hooks++ }, persist: () => {}, language: () => "en",
+		lastActivityReason: () => "ended", runCompleteHook: () => { hooks++ }, capture: () => {}, persist: () => {}, language: () => "en",
 		recentToolSummaries: () => [], log: () => {},
 	})
 	projector.finish("session-1", "completed")

@@ -1,5 +1,7 @@
 import type { OAuthAuthorizationCodeRequest, OAuthRefreshTokenRequest, OAuthTokenResult } from "../../application/dto/OAuthContracts"
 import type { OAuthTokenExchangePort } from "../../application/ports/OAuthTokenExchangePort"
+import { RUNTIME_DEFAULTS, readBoundedPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+import { fetchBoundedText } from "../network/BoundedFetch"
 
 export class FetchOAuthTokenExchangeAdapter implements OAuthTokenExchangePort {
 	async exchangeAuthorizationCode(request: OAuthAuthorizationCodeRequest): Promise<OAuthTokenResult> {
@@ -23,8 +25,14 @@ export class FetchOAuthTokenExchangeAdapter implements OAuthTokenExchangePort {
 }
 
 async function requestToken(tokenUrl: string, headers: Record<string, string>, body: URLSearchParams, fallbackRefreshToken = ""): Promise<OAuthTokenResult> {
-	const response = await fetch(tokenUrl, { method: "POST", headers, body })
-	const text = await response.text()
+	const { response, text } = await fetchBoundedText(
+		tokenUrl,
+		{ method: "POST", headers, body },
+		{
+			timeoutMs: readBoundedPositiveIntEnv("VSCLINE_OAUTH_TOKEN_TIMEOUT_MS", RUNTIME_DEFAULTS.metadataRequestTimeoutMs, 1_000, 120_000),
+			maximumBytes: readBoundedPositiveIntEnv("VSCLINE_OAUTH_RESPONSE_MAX_BYTES", RUNTIME_DEFAULTS.oauthResponseMaximumBytes, 1_024, 4 * 1024 * 1024),
+		},
+	)
 	const parsed = parseRecord(text)
 	if (!response.ok) { const detail = readString(parsed.error_description) || readString(parsed.error) || text.slice(0, 500); throw new Error(`Token endpoint returned HTTP ${response.status}: ${detail || response.statusText}`) }
 	const accessToken = readString(parsed.access_token) || readString(parsed.token)

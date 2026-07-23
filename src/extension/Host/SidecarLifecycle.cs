@@ -13,8 +13,11 @@ namespace VsClineAgent.Host
         private readonly VsCommandExecutionService _commandExecutionService;
         private readonly Action<string> _setStatus;
         private readonly SemaphoreSlim _startLock = new SemaphoreSlim(1, 1);
+        private readonly CancellationTokenSource _shutdownCancellation = new CancellationTokenSource();
         private SidecarProcess? _process;
-        private bool _disposed;
+        private int _disposed;
+		private int _readyGeneration;
+		private int _transportGeneration;
 
         public SidecarLifecycle(
             VsEditorService editorService,
@@ -29,41 +32,86 @@ namespace VsClineAgent.Host
         public string? AssemblyDirectory { get; set; }
         public string? LastError { get; private set; }
         public bool IsRunning => _process != null && _process.IsRunning;
+		public event Action<int>? ReadyGenerationChanged;
+		public event Action<int>? TransportUnavailable;
 
-        public async Task<bool> EnsureRunningAsync()
+        public async Task<bool> EnsureRunningAsync(CancellationToken cancellationToken = default)
         {
-            await _startLock.WaitAsync().ConfigureAwait(false);
-            try
+            using (var startupCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _shutdownCancellation.Token))
             {
-                if (_disposed)
+                var lockTaken = false;
+                try
+                {
+                    await _startLock.WaitAsync(startupCancellation.Token).ConfigureAwait(false);
+                    lockTaken = true;
+                    if (Volatile.Read(ref _disposed) != 0)
+                        return false;
+                    if (IsRunning)
+                        return true;
+
+                    var assemblyDirectory = AssemblyDirectory ??
+                        Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ??
+                        AppDomain.CurrentDomain.BaseDirectory;
+                    DisposeProcessQuietly();
+                    startupCancellation.Token.ThrowIfCancellationRequested();
+                    _process = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
+					_process.Exited += OnSidecarProcessExited;
+                    _setStatus("LIG VS 사이드카를 준비하는 중입니다. 처음 실행하거나 업데이트한 직후에는 의존성 구성에 시간이 걸릴 수 있습니다...");
+
+                    var process = _process ?? throw new InvalidOperationException("Cline sidecar process was not created.");
+                    var status = await Task.Run(
+                        () => process.EnsureStartedAsync(startupCancellation.Token),
+                        startupCancellation.Token).ConfigureAwait(false);
+                    LastError = null;
+                    _setStatus("LIG VS 사이드카: " + status);
+					if (IsRunning)
+					{
+						var generation = Interlocked.Increment(ref _readyGeneration);
+						try { ReadyGenerationChanged?.Invoke(generation); }
+						catch (Exception ex) { InteractionLog.Write("host", "sidecar.readyNotificationFailed", new { error = ex.Message }); }
+					}
+                    return IsRunning;
+                }
+                catch (OperationCanceledException) when (startupCancellation.IsCancellationRequested)
+                {
+                    DisposeProcessQuietly();
                     return false;
-                if (IsRunning)
-                    return true;
-
-                var assemblyDirectory = AssemblyDirectory ??
-                    Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ??
-                    AppDomain.CurrentDomain.BaseDirectory;
-                DisposeProcessQuietly();
-                _process = new SidecarProcess(assemblyDirectory, _editorService, _commandExecutionService);
-                _setStatus("LIG VS 사이드카를 준비하는 중입니다. 처음 실행하거나 업데이트한 직후에는 의존성 구성에 시간이 걸릴 수 있습니다...");
-
-                var process = _process ?? throw new InvalidOperationException("Cline sidecar process was not created.");
-                var status = await Task.Run(() => process.EnsureStartedAsync(CancellationToken.None)).ConfigureAwait(false);
-                LastError = null;
-                _setStatus("LIG VS 사이드카: " + status);
-                return IsRunning;
-            }
-            catch (Exception ex)
-            {
-                LastError = "LIG VS 사이드카를 시작하지 못했습니다: " + ex.Message;
-                _setStatus(LastError);
-                return false;
-            }
-            finally
-            {
-                _startLock.Release();
+                }
+                catch (Exception ex)
+                {
+                    LastError = "LIG VS 사이드카를 시작하지 못했습니다: " + ex.Message;
+                    _setStatus(LastError);
+                    return false;
+                }
+                finally
+                {
+                    if (lockTaken)
+                        _startLock.Release();
+                }
             }
         }
+
+		public async Task WarmSdkAsync(CancellationToken cancellationToken = default)
+		{
+			var process = _process;
+			if (process == null || !process.IsRunning)
+				return;
+
+			try
+			{
+				var status = await process.WarmSdkAsync(cancellationToken).ConfigureAwait(false);
+				InteractionLog.Write("host", "sidecar.sdkWarmupCompleted", new { status });
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+			}
+			catch (Exception ex)
+			{
+				InteractionLog.Write("host", "sidecar.sdkWarmupFailed", new { error = ex.Message });
+			}
+		}
 
         public Task<bool> TryHandleWebviewMessageAsync(
             string rawJson,
@@ -88,18 +136,32 @@ namespace VsClineAgent.Host
 
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
-            _disposed = true;
+            _shutdownCancellation.Cancel();
+			ReadyGenerationChanged = null;
+			TransportUnavailable = null;
             DisposeProcessQuietly();
             try { _commandExecutionService.Dispose(); } catch { }
-            _startLock.Dispose();
         }
 
         private void DisposeProcessQuietly()
         {
-            try { _process?.Dispose(); } catch { }
-            finally { _process = null; }
+			var process = _process;
+			_process = null;
+			if (process == null)
+				return;
+			process.Exited -= OnSidecarProcessExited;
+			try { process.Dispose(); } catch { }
         }
+
+		private void OnSidecarProcessExited(SidecarProcess process)
+		{
+			if (Volatile.Read(ref _disposed) != 0 || !ReferenceEquals(_process, process))
+				return;
+			var generation = Interlocked.Increment(ref _transportGeneration);
+			try { TransportUnavailable?.Invoke(generation); }
+			catch (Exception ex) { InteractionLog.Write("host", "sidecar.exitNotificationFailed", new { error = ex.Message }); }
+		}
     }
 }

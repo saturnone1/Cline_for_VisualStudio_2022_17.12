@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 
 namespace VsClineAgent.Host
 {
@@ -40,6 +41,9 @@ namespace VsClineAgent.Host
                 throw new ArgumentException("Packaged sidecar directory is required.", nameof(packagedSidecarDirectory));
 
             var totalStopwatch = Stopwatch.StartNew();
+            using var preparationLock = AcquirePreparationLock(
+                _cacheBaseDirectory,
+                TimeSpan.FromMilliseconds(ReadPreparationLockTimeoutMilliseconds()));
             var nodeModulesZip = Path.Combine(packagedSidecarDirectory, "node_modules.zip");
             var runtimeSourceDirectory = ResolvePackagedRuntimeDirectory(packagedSidecarDirectory);
             var cacheRoot = Path.Combine(_cacheBaseDirectory, _runtimeVersion);
@@ -105,6 +109,35 @@ namespace VsClineAgent.Host
             return preparation;
         }
 
+        internal static IDisposable AcquirePreparationLock(string cacheBaseDirectory, TimeSpan timeout)
+        {
+            if (string.IsNullOrWhiteSpace(cacheBaseDirectory))
+                throw new ArgumentException("Sidecar cache directory is required.", nameof(cacheBaseDirectory));
+            if (timeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(timeout));
+
+            Directory.CreateDirectory(cacheBaseDirectory);
+            var lockPath = Path.Combine(cacheBaseDirectory, ".prepare.lock");
+            var stopwatch = Stopwatch.StartNew();
+            IOException? lastError = null;
+            while (stopwatch.Elapsed < timeout)
+            {
+                try
+                {
+                    return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                }
+                catch (IOException ex)
+                {
+                    lastError = ex;
+                    Thread.Sleep(100);
+                }
+            }
+
+            throw new TimeoutException(
+                "Timed out waiting for another Visual Studio instance to finish preparing the LIG VS sidecar runtime.",
+                lastError);
+        }
+
         public static string ResolvePackagedRuntimeDirectory(string packagedSidecarDirectory)
         {
             var rootEntrypoint = Path.Combine(packagedSidecarDirectory, "cline-sidecar.js");
@@ -139,6 +172,14 @@ namespace VsClineAgent.Host
         {
             var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_CACHE_KEY");
             return string.IsNullOrWhiteSpace(configured) ? GetDefaultRuntimeCacheVersion() : configured!;
+        }
+
+        private static int ReadPreparationLockTimeoutMilliseconds()
+        {
+            var configured = Environment.GetEnvironmentVariable("VSCLINE_SIDECAR_PREPARE_LOCK_TIMEOUT_MS");
+            return int.TryParse(configured, out var value) && value >= 1000 && value <= 600000
+                ? value
+                : 180000;
         }
 
         private static string GetDefaultRuntimeCacheVersion()

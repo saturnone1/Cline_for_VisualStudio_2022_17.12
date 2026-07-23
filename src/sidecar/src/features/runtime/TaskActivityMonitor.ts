@@ -17,6 +17,7 @@ export class TaskActivityMonitor {
 	) {}
 
 	get reason() { return this.lastReason }
+	get idleForMs() { return this.lastActivityAt > 0 ? Math.max(0, Date.now() - this.lastActivityAt) : Number.POSITIVE_INFINITY }
 
 	note(reason: string, terminal = false) {
 		if (!this.isTaskActive()) return

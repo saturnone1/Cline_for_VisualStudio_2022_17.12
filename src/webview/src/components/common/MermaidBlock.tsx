@@ -1,6 +1,7 @@
 import { StringRequest } from "@shared/proto/cline/common"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import mermaid from "mermaid"
+import DOMPurify from "dompurify"
 import { useEffect, useRef, useState } from "react"
 import styled from "styled-components"
 import { FileServiceClient } from "@/services/grpcClient"
@@ -38,7 +39,7 @@ const MERMAID_THEME = {
 
 mermaid.initialize({
 	startOnLoad: false,
-	securityLevel: "loose",
+	securityLevel: "strict",
 	theme: "dark",
 	themeVariables: {
 		...MERMAID_THEME,
@@ -106,7 +107,9 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
 				})
 				.then(({ svg }) => {
 					if (containerRef.current) {
-						containerRef.current.innerHTML = svg
+						containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
+							USE_PROFILES: { svg: true, svgFilters: true },
+						})
 					}
 				})
 				.catch((err) => {

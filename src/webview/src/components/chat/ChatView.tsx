@@ -326,17 +326,6 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		textAreaRef.current?.focus();
 	});
 
-	useEffect(() => {
-		const timer = setTimeout(() => {
-			if (!isHidden && !sendingDisabled && !enableButtons) {
-				textAreaRef.current?.focus();
-			}
-		}, 50);
-		return () => {
-			clearTimeout(timer);
-		};
-	}, [isHidden, sendingDisabled, enableButtons]);
-
 	const visibleMessages = useMemo(() => {
 		return filterVisibleMessages(modifiedMessages);
 	}, [modifiedMessages]);

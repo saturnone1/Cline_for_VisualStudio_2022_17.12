@@ -16,23 +16,36 @@ export type JsonRpcConnection = {
 	pending: Map<string, PendingRequest>
 }
 
-export function sendHostRequest(connection: JsonRpcConnection, method: HostRpcMethodName, params: unknown): Promise<unknown> {
+export type HostRequestOptions = Readonly<{ timeoutMs?: number }>
+
+export function sendHostRequest(connection: JsonRpcConnection, method: HostRpcMethodName, params: unknown, options: HostRequestOptions = {}): Promise<unknown> {
 	const id = String(connection.nextId++)
 	const startedAt = Date.now()
 	logInteraction("sidecar->host", method, { id, params })
 
 	return new Promise((resolve, reject) => {
+		let timeout: NodeJS.Timeout | undefined
 		const pending: PendingRequest = {
 			resolve: (value) => {
+				if (timeout) clearTimeout(timeout)
 				logSlowHostRequest(method, id, startedAt)
 				resolve(value)
 			},
 			reject: (error) => {
+				if (timeout) clearTimeout(timeout)
 				logSlowHostRequest(method, id, startedAt)
 				reject(error)
 			},
 		}
 		connection.pending.set(id, pending)
+		if (options.timeoutMs && options.timeoutMs > 0) {
+			timeout = setTimeout(() => {
+				if (connection.pending.get(id) !== pending) return
+				connection.pending.delete(id)
+				pending.reject(new Error(`Host request timed out after ${options.timeoutMs}ms: ${method}`))
+			}, options.timeoutMs)
+			timeout.unref?.()
+		}
 		const failWrite = (error: unknown) => {
 			if (connection.pending.get(id) !== pending) return
 			connection.pending.delete(id)

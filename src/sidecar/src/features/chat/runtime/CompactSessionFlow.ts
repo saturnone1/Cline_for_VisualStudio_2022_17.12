@@ -1,4 +1,5 @@
 import type { AgentCompactSessionRequest } from "../../../application/ports/AgentEnginePort"
+import { resolveUserActionSessionId } from "../../runtime/UserActionSessionTarget"
 
 type CompactionResult = Readonly<{ sessionId: string; messagesAfter: number; estimatedTokensAfter: number; summary: string }>
 type Callbacks = Readonly<{
@@ -27,7 +28,7 @@ export class CompactSessionFlow {
 	async execute(requestId: string, excludeTrailingUserText = "", signal?: AbortSignal): Promise<string | undefined> {
 		if (this.inFlight) return undefined
 		if (!this.callbacks.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
-		const sourceSessionId = this.callbacks.activeSessionId() || this.callbacks.selectedSessionId()
+		const sourceSessionId = resolveUserActionSessionId(this.callbacks.selectedSessionId(), this.callbacks.activeSessionId())
 		if (!sourceSessionId) {
 			await this.callbacks.applyFailure(new Error(this.callbacks.language() === "en" ? "No active session to compact." : "압축할 활성 세션이 없습니다."))
 			return undefined

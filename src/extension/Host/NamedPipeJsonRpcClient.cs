@@ -13,23 +13,41 @@ namespace VsClineAgent.Host
 {
     internal sealed class NamedPipeJsonRpcClient : IDisposable
     {
+        private const int DefaultMaximumFrameBytes = 32 * 1024 * 1024;
+        private const int DefaultMaximumInboundRequests = 128;
         private readonly NamedPipeClientStream _pipe;
         private readonly SemaphoreSlim _writeLock = new SemaphoreSlim(1, 1);
         private readonly object _pendingLock = new object();
         private readonly Dictionary<string, TaskCompletionSource<JToken?>> _pendingRequests =
             new Dictionary<string, TaskCompletionSource<JToken?>>();
-        private StreamReader? _reader;
+        private readonly int _maximumFrameBytes;
+        private readonly int _maximumInboundRequests;
+        private BoundedUtf8LineReader? _reader;
         private StreamWriter? _writer;
         private int _nextId;
         private CancellationTokenSource? _receiveLoopCancellation;
         private Task? _receiveLoopTask;
         private readonly SemaphoreSlim _inboundRequestSlots = new SemaphoreSlim(4, 4);
+        private int _inboundRequests;
         private int _disposed;
 
         public event Func<string, JToken?, Task<JToken?>>? RequestReceived;
 
-        public NamedPipeJsonRpcClient(string pipeName)
+        public NamedPipeJsonRpcClient(
+            string pipeName,
+            int? maximumFrameBytes = null,
+            int? maximumInboundRequests = null)
         {
+            var resolvedMaximumFrameBytes = maximumFrameBytes ?? ReadBoundedPositiveIntEnvironment(
+                "VSCLINE_RPC_MAX_FRAME_BYTES", DefaultMaximumFrameBytes, 1024 * 1024, 128 * 1024 * 1024);
+            var resolvedMaximumInboundRequests = maximumInboundRequests ?? ReadBoundedPositiveIntEnvironment(
+                "VSCLINE_HOST_MAX_INBOUND_REQUESTS", DefaultMaximumInboundRequests, 1, 2048);
+            if (resolvedMaximumFrameBytes < 1)
+                throw new ArgumentOutOfRangeException(nameof(maximumFrameBytes));
+            if (resolvedMaximumInboundRequests < 1)
+                throw new ArgumentOutOfRangeException(nameof(maximumInboundRequests));
+            _maximumFrameBytes = resolvedMaximumFrameBytes;
+            _maximumInboundRequests = resolvedMaximumInboundRequests;
             var normalizedPipeName = NormalizePipeName(pipeName);
             _pipe = new NamedPipeClientStream(
                 ".",
@@ -43,7 +61,7 @@ namespace VsClineAgent.Host
         public async Task ConnectAsync(int timeoutMilliseconds, CancellationToken cancellationToken)
         {
             await _pipe.ConnectAsync(timeoutMilliseconds, cancellationToken).ConfigureAwait(false);
-            _reader = new StreamReader(_pipe, new UTF8Encoding(false));
+            _reader = new BoundedUtf8LineReader(_pipe, _maximumFrameBytes);
             _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
             _receiveLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _receiveLoopTask = Task.Run(() => ReceiveLoopAsync(_receiveLoopCancellation.Token));
@@ -94,7 +112,7 @@ namespace VsClineAgent.Host
                 var reader = _reader ?? throw new IOException("Pipe reader was not initialized.");
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    var line = await reader.ReadLineAsync().ConfigureAwait(false);
+                    var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                     if (line == null)
                     {
                         terminalError = new EndOfStreamException("The LIG VS sidecar closed the named pipe.");
@@ -108,7 +126,21 @@ namespace VsClineAgent.Host
                     var method = (string?)message["method"];
                     if (!string.IsNullOrEmpty(method))
                     {
-                        _ = Task.Run(() => HandleMessageAsync(message, cancellationToken), cancellationToken);
+                        if (Interlocked.Increment(ref _inboundRequests) > _maximumInboundRequests)
+                        {
+                            Interlocked.Decrement(ref _inboundRequests);
+                            await WriteMessageAsync(new JObject
+                            {
+                                ["id"] = message["id"],
+                                ["error"] = new JObject
+                                {
+                                    ["code"] = "host_busy",
+                                    ["message"] = "The Visual Studio host request queue is full."
+                                }
+                            }, cancellationToken).ConfigureAwait(false);
+                            continue;
+                        }
+                        _ = Task.Run(() => RunInboundMessageAsync(message, cancellationToken));
                     }
                     else
                     {
@@ -126,6 +158,25 @@ namespace VsClineAgent.Host
                     FailAllPendingRequests(terminalError);
                 else if (cancellationToken.IsCancellationRequested)
                     FailAllPendingRequests(new OperationCanceledException("The LIG VS sidecar connection was closed."));
+            }
+        }
+
+        private async Task RunInboundMessageAsync(JObject message, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await HandleMessageAsync(message, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch
+            {
+                // The receive loop owns connection failure. Inbound request failures are returned by the handler.
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inboundRequests);
             }
         }
 
@@ -266,7 +317,6 @@ namespace VsClineAgent.Host
             try { _pipe.Dispose(); } catch { }
             _receiveLoopCancellation?.Dispose();
             try { _writer?.Dispose(); } catch { }
-            try { _reader?.Dispose(); } catch { }
 
             // Inbound handlers may still be unwinding after pipe disposal. Disposing their
             // semaphores here can turn a normal shutdown into an unobserved ObjectDisposedException.
@@ -279,6 +329,15 @@ namespace VsClineAgent.Host
             return pipeName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
                 ? pipeName.Substring(prefix.Length)
                 : pipeName;
+        }
+
+        private static int ReadBoundedPositiveIntEnvironment(string name, int fallback, int minimum, int maximum)
+        {
+            int parsed;
+            var value = Environment.GetEnvironmentVariable(name);
+            if (!int.TryParse(value, out parsed) || parsed < 1)
+                parsed = fallback;
+            return Math.Min(maximum, Math.Max(minimum, parsed));
         }
     }
 }

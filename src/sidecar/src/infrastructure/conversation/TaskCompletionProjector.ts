@@ -16,6 +16,7 @@ type Callbacks = Readonly<{
 	finalizeOpenPartial: () => void
 	lastActivityReason: () => string
 	runCompleteHook: (context: Record<string, unknown>) => void
+	capture: () => void
 	persist: () => void
 	language: () => "en" | "ko"
 	recentToolSummaries: () => string[]
@@ -50,6 +51,7 @@ export class TaskCompletionProjector {
 		this.callbacks.finalizeOpenPartial()
 		this.addMarker(status)
 		this.callbacks.runCompleteHook({ sessionId, status, text: activeText })
+		this.callbacks.capture()
 		this.callbacks.persist()
 	}
 
@@ -60,6 +62,7 @@ export class TaskCompletionProjector {
 		this.callbacks.finalizeOpenPartial()
 		this.callbacks.addMessage({ type: "say", say: "error", text })
 		this.callbacks.runCompleteHook({ sessionId, status: "failed", text })
+		this.callbacks.capture()
 		this.callbacks.persist()
 	}
 

@@ -59,3 +59,17 @@ test("unrelated failures are not treated as context overflow", async () => {
 	assert.equal(await flow.execute(input, 1, new Error("network unavailable")), false)
 	assert.equal(compacted, false)
 })
+
+test("context overflow diagnostics identify the selected task when the SDK active session is stale", async () => {
+	let loggedSessionId = ""
+	const flow = new ContextOverflowRecoveryFlow({
+		compact: async () => undefined,
+		nextGeneration: () => 1, transitionStarting: () => {}, showRetrying: () => {}, broadcast: async () => {},
+		normalizeImages: async () => [], send: async () => ({}), resultSessionId: (_result, fallback) => fallback,
+		complete: async () => {}, recover: async () => {},
+		log: (_event, details) => { loggedSessionId = details.sessionId },
+	})
+
+	await flow.execute({ ...input, activeSessionId: "stale-active", selectedSessionId: "selected-history" }, 1, new Error("maximum context length exceeded"))
+	assert.equal(loggedSessionId, "selected-history")
+})

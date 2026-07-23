@@ -71,6 +71,7 @@ export class SettingsRpcHandler {
 	}
 
 	private async broadcastEmpty(): Promise<SettingsRpcResult> {
+		this.callbacks.persist()
 		await this.callbacks.broadcast()
 		return { payload: {} }
 	}

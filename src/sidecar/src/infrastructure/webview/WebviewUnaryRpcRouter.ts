@@ -58,6 +58,7 @@ export function isWebviewRpcRequestCancelledError(error: unknown): error is Webv
 export class WebviewUnaryRpcRouter {
 	private readonly routes: UnaryRouteRegistry
 	private readonly activeRequests = new Map<string, AbortController>()
+	private controlTail: Promise<void> = Promise.resolve()
 
 	constructor(private readonly dependencies: Dependencies) {
 		const d = dependencies
@@ -99,9 +100,9 @@ export class WebviewUnaryRpcRouter {
 				return command ? grpcHandled(grpcResponse(requestId, await d.worktree.handle(command), false)) : null
 			},
 			mcp: (key, requestId, message) => this.handleMcp(key, requestId, message),
-			modelCatalog: async (key, requestId, message) => {
+			modelCatalog: async (key, requestId, message, signal) => {
 				const command = decodeModelCatalogRpcCommand(key, message)
-				return command ? grpcHandled(grpcResponse(requestId, await d.modelCatalog.handle(command), false)) : null
+				return command ? grpcHandled(grpcResponse(requestId, await d.modelCatalog.handle(command, signal), false)) : null
 			},
 			file: (key, requestId, message) => this.handleFile(key, requestId, message),
 			instructionSettings: async (key, requestId, message) => {
@@ -128,7 +129,10 @@ export class WebviewUnaryRpcRouter {
 		this.activeRequests.get(requestId)?.abort()
 		this.activeRequests.set(requestId, controller)
 		try {
-			const result = await this.routes[route](key, requestId, message, controller.signal)
+			const execute = () => this.routes[route](key, requestId, message, controller.signal)
+			const result = CONTROL_ROUTES.has(route)
+				? await this.executeControl(execute, controller.signal, requestId)
+				: await execute()
 			if (controller.signal.aborted) throw new WebviewRpcRequestCancelledError(requestId)
 			return result
 		} catch (error) {
@@ -139,6 +143,15 @@ export class WebviewUnaryRpcRouter {
 		} finally {
 			if (this.activeRequests.get(requestId) === controller) this.activeRequests.delete(requestId)
 		}
+	}
+
+	private executeControl<T>(action: () => Promise<T>, signal: AbortSignal, requestId: string) {
+		const execution = this.controlTail.then(async () => {
+			if (signal.aborted) throw new WebviewRpcRequestCancelledError(requestId)
+			return action()
+		})
+		this.controlTail = execution.then(() => undefined, () => undefined)
+		return raceWithAbort(execution, signal, requestId)
 	}
 
 	cancel(requestId: string) {
@@ -166,4 +179,26 @@ export class WebviewUnaryRpcRouter {
 	private withOptionalState(requestId: string, result: { payload: unknown; includeStateMessages?: boolean }) {
 		return grpcHandled(grpcResponse(requestId, result.payload, false), ...(result.includeStateMessages ? this.dependencies.stateMessages() : []))
 	}
+}
+
+const CONTROL_ROUTES = new Set<UnaryRoute>([
+	"settings",
+	"account",
+	"task",
+	"checkpoint",
+	"scheduledAgent",
+	"mcp",
+	"instructionSettings",
+])
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal, requestId: string) {
+	if (signal.aborted) return Promise.reject(new WebviewRpcRequestCancelledError(requestId))
+	return new Promise<T>((resolve, reject) => {
+		const abort = () => reject(new WebviewRpcRequestCancelledError(requestId))
+		signal.addEventListener("abort", abort, { once: true })
+		operation.then(
+			(value) => { signal.removeEventListener("abort", abort); resolve(value) },
+			(error) => { signal.removeEventListener("abort", abort); reject(error) },
+		)
+	})
 }

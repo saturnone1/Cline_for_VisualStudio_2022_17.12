@@ -12,6 +12,7 @@ export function resolveModelId(apiConfig: Record<string, unknown>, providerId: s
 	const providerModelFields: Record<string, string> = {
 		anthropic: `${modePrefix}ApiModelId`,
 		openrouter: `${modePrefix}OpenRouterModelId`,
+		cline: `${modePrefix}ClineModelId`,
 		openai: `${modePrefix}OpenAiModelId`,
 		"openai-compatible": `${modePrefix}OpenAiModelId`,
 		gemini: `${modePrefix}GeminiModelId`,
@@ -24,10 +25,13 @@ export function resolveModelId(apiConfig: Record<string, unknown>, providerId: s
 		groq: `${modePrefix}GroqModelId`,
 		baseten: `${modePrefix}BasetenModelId`,
 		huggingface: `${modePrefix}HuggingFaceModelId`,
+		"huawei-cloud-maas": `${modePrefix}HuaweiCloudMaasModelId`,
+		sapaicore: `${modePrefix}SapAiCoreModelId`,
 		"vercel-ai-gateway": `${modePrefix}VercelAiGatewayModelId`,
 		aihubmix: `${modePrefix}AihubmixModelId`,
 		hicap: `${modePrefix}HicapModelId`,
 		oca: `${modePrefix}OcaModelId`,
+		nousResearch: `${modePrefix}NousResearchModelId`,
 	}
 	const providerSpecific = readString(apiConfig[providerModelFields[providerId]])
 	if (providerSpecific) return providerSpecific

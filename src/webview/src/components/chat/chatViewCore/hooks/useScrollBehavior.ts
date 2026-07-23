@@ -278,23 +278,14 @@ export function useScrollBehavior(
 
 	useEffect(() => {
 		if (!disableAutoScrollRef.current) {
-			scrollToBottomSmooth()
-			const settleTimer = setTimeout(() => {
+			const frame = requestAnimationFrame(() => {
 				if (!disableAutoScrollRef.current) {
 					scrollToBottomAuto()
 				}
-			}, 40)
-			const finalTimer = setTimeout(() => {
-				if (!disableAutoScrollRef.current) {
-					scrollToBottomAuto()
-				}
-			}, 70)
-			return () => {
-				clearTimeout(settleTimer)
-				clearTimeout(finalTimer)
-			}
+			})
+			return () => cancelAnimationFrame(frame)
 		}
-	}, [groupedMessages.length, scrollToBottomSmooth, scrollToBottomAuto])
+	}, [groupedMessages.length, scrollToBottomAuto])
 
 	useEffect(() => {
 		if (pendingScrollToMessage !== null) {

@@ -28,9 +28,10 @@ export class TaskCancellationCoordinator {
 	private async cancelOne(participant: CancellationParticipant) {
 		const timeoutMs = Math.max(250, this.timeoutMs())
 		let timer: NodeJS.Timeout | undefined
+		const operation = Promise.resolve().then(() => participant.cancel())
 		try {
 			await Promise.race([
-				participant.cancel(),
+				operation,
 				new Promise<never>((_, reject) => {
 					timer = setTimeout(() => reject(new CancellationTimeoutError(participant.name, timeoutMs)), timeoutMs)
 				}),
@@ -38,6 +39,12 @@ export class TaskCancellationCoordinator {
 			return { name: participant.name }
 		} catch (error) {
 			const timedOut = error instanceof CancellationTimeoutError
+			if (timedOut) {
+				void operation.then(
+					() => this.log("taskCancellationSettledAfterTimeout", { participant: participant.name, outcome: "completed" }),
+					(lateError) => this.log("taskCancellationSettledAfterTimeout", { participant: participant.name, outcome: "failed", reason: stringify(lateError) }),
+				)
+			}
 			return { name: participant.name, failure: { name: participant.name, reason: stringify(error), timedOut } }
 		} finally {
 			if (timer) clearTimeout(timer)

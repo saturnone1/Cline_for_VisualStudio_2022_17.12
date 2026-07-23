@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
@@ -26,6 +28,7 @@
     <Compile Include="..\..\src\extension\Host\InteractionLog.cs" Link="Host\InteractionLog.cs" />
     <Compile Include="..\..\src\extension\Host\PendingWebviewMessageBuffer.cs" Link="Host\PendingWebviewMessageBuffer.cs" />
     <Compile Include="..\..\src\extension\Host\NamedPipeJsonRpcClient.cs" Link="Host\NamedPipeJsonRpcClient.cs" />
+    <Compile Include="..\..\src\extension\Host\BoundedUtf8LineReader.cs" Link="Host\BoundedUtf8LineReader.cs" />
     <Compile Include="..\..\src\extension\Host\WindowsProcessJob.cs" Link="Host\WindowsProcessJob.cs" />
     <Compile Include="..\..\src\extension\Host\SidecarRuntimeFingerprint.cs" Link="Host\SidecarRuntimeFingerprint.cs" />
 	<Compile Include="..\..\src\extension\Host\SidecarRuntimeInstaller.cs" Link="Host\SidecarRuntimeInstaller.cs" />
@@ -35,5 +38,10 @@
     <Compile Include="..\..\src\extension\Host\WebView2RuntimeResolver.cs" Link="Host\WebView2RuntimeResolver.cs" />
     <Compile Include="..\..\src\extension\Host\ToolWindowLifetime.cs" Link="Host\ToolWindowLifetime.cs" />
     <Compile Include="..\..\src\extension\Services\TerminalCommandPolicy.cs" Link="Services\TerminalCommandPolicy.cs" />
+    <Compile Include="..\..\src\extension\Services\CommandExecutionModels.cs" Link="Services\CommandExecutionModels.cs" />
+    <Compile Include="..\..\src\extension\Services\ICommandOutputWriter.cs" Link="Services\ICommandOutputWriter.cs" />
+    <Compile Include="..\..\src\extension\Services\VsCommandExecutionService.cs" Link="Services\VsCommandExecutionService.cs" />
+    <Compile Include="..\..\src\extension\Host\Adapters\IHostRpcAdapter.cs" Link="Host\Adapters\IHostRpcAdapter.cs" />
+    <Compile Include="..\..\src\extension\Host\Adapters\FileSystemHostRpcAdapter.cs" Link="Host\Adapters\FileSystemHostRpcAdapter.cs" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 import type { TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
 import { capabilityRegistry } from "../../application/services/CapabilityRegistry"
 import { normalizeClineMessagePayload, normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
+import { projectTranscriptMessages, TRANSCRIPT_SNAPSHOT_LIMITS } from "../conversation/TranscriptSnapshotPolicy"
 import {
 	isWebFetchEnabled,
 	normalizeApiConfiguration,
@@ -209,6 +210,14 @@ export function createPersistedStateSnapshot(state: ReturnType<typeof createInit
 		taskSnapshots: state.taskSnapshots,
 		currentTaskItem: state.currentTaskItem,
 		clineMessages: state.currentTaskItem ? state.clineMessages : [],
+	}
+}
+
+export function createWebviewStateSnapshot(state: ReturnType<typeof createInitialState>) {
+	const { taskSnapshots: _taskSnapshots, ...webviewState } = state
+	return {
+		...webviewState,
+		clineMessages: projectTranscriptMessages(state.clineMessages, TRANSCRIPT_SNAPSHOT_LIMITS.currentMessages),
 	}
 }
 

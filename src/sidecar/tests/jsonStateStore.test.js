@@ -116,3 +116,46 @@ test("deferred state save writes the latest snapshot without blocking the caller
 		fs.rmSync(directory, { recursive: true, force: true })
 	}
 })
+
+test("backup recovery never replaces the last valid pair with mismatched primary files", () => {
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "vscline-state-backup-pair-"))
+	const filePath = path.join(directory, "settings.json")
+	const transcriptPath = path.join(directory, "transcripts.json")
+	try {
+		const store = new JsonStateStore(filePath)
+		store.save({ mode: "act", currentTaskItem: { id: "one" }, clineMessages: [{ text: "one" }] })
+		store.save({ mode: "plan", currentTaskItem: { id: "two" }, clineMessages: [{ text: "two" }] })
+
+		fs.copyFileSync(`${transcriptPath}.bak`, transcriptPath)
+		assert.equal(store.load().currentTaskItem.id, "one")
+
+		const backupSettings = JSON.parse(fs.readFileSync(`${filePath}.bak`, "utf8"))
+		const backupTranscripts = JSON.parse(fs.readFileSync(`${transcriptPath}.bak`, "utf8"))
+		assert.equal(backupSettings.__ligVsStateGeneration, backupTranscripts.__ligVsStateGeneration)
+
+		fs.writeFileSync(filePath, "{", "utf8")
+		assert.equal(new JsonStateStore(filePath).load().currentTaskItem.id, "one")
+	} finally {
+		fs.rmSync(directory, { recursive: true, force: true })
+	}
+})
+
+test("transcript snapshot cache has a total serialization budget", () => {
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "vscline-state-budget-"))
+	const filePath = path.join(directory, "settings.json")
+	const store = new JsonStateStore(filePath)
+	try {
+		const largeText = "x".repeat(32 * 1024)
+		const taskSnapshots = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+			`task-${index}`,
+			{ taskItem: { id: `task-${index}` }, messages: Array.from({ length: 30 }, () => ({ type: "say", text: largeText })) },
+		]))
+		const taskHistory = Array.from({ length: 20 }, (_, index) => ({ id: `task-${index}`, ts: 20 - index }))
+		store.save({ currentTaskItem: { id: "task-0" }, taskHistory, taskSnapshots })
+		const transcriptSize = fs.statSync(path.join(directory, "transcripts.json")).size
+		assert.ok(transcriptSize < 10 * 1024 * 1024, `transcript cache was ${transcriptSize} bytes`)
+		assert.ok(store.load().taskSnapshots["task-0"])
+	} finally {
+		fs.rmSync(directory, { recursive: true, force: true })
+	}
+})

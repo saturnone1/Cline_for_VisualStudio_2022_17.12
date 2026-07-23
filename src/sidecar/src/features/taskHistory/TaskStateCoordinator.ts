@@ -19,6 +19,14 @@ export class TaskStateCoordinator {
 	constructor(private readonly dependencies: TaskStateDependencies) {}
 
 	update(updates: TaskRecord = {}) {
+		this.write(updates, false)
+	}
+
+	capture(updates: TaskRecord = {}) {
+		this.write(updates, true)
+	}
+
+	private write(updates: TaskRecord, capture: boolean) {
 		const currentTask = this.dependencies.readCurrentTask()
 		if (!currentTask) return
 		const messages = this.dependencies.readMessages()
@@ -26,11 +34,13 @@ export class TaskStateCoordinator {
 			...currentTask,
 			...updates,
 			ts: (this.dependencies.now ?? Date.now)(),
-			size: taskTranscriptStorageBytes(messages),
+			...(capture ? { size: taskTranscriptStorageBytes(messages) } : {}),
 		}
 		this.dependencies.writeCurrentTask(task)
 		this.dependencies.writeHistory(upsertTaskHistoryItem(this.dependencies.readHistory(), task))
-		this.remember(String(task.id || ""), task, messages)
+		const taskId = String(task.id || "")
+		if (capture) this.remember(taskId, task, messages)
+		else this.dependencies.snapshots.rememberLive(taskId, task, messages)
 		this.dependencies.schedulePersist()
 	}
 

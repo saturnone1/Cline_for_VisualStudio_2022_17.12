@@ -8,7 +8,7 @@ import React, { KeyboardEvent, useEffect, useMemo, useRef, useState } from "reac
 import { useMount } from "react-use"
 import { useExtensionState } from "../../context/ExtensionStateContext"
 import { ModelsServiceClient } from "../../services/grpcClient"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 import { ModelInfoView } from "./common/ModelInfoView"
 import { getModeSpecificFields, normalizeApiConfiguration } from "./utils/providerUtils"
 import { useApiConfigurationHandlers } from "./utils/useApiConfigurationHandlers"
@@ -105,7 +105,7 @@ const GroqModelPicker: React.FC<GroqModelPickerProps> = ({ isPopup, currentMode 
 	const searchableItems = useMemo(() => {
 		return modelIds.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [modelIds])
 

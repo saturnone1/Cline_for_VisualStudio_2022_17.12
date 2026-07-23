@@ -1,3 +1,6 @@
+import { RUNTIME_DEFAULTS, readBoundedPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+import { fetchBoundedText } from "../network/BoundedFetch"
+
 export function normalizeOllamaRootBaseUrl(baseUrl: string) {
 	return (baseUrl || "http://localhost:11434").replace(/\/+$/, "").replace(/\/v1$/i, "")
 }
@@ -230,46 +233,41 @@ export function parseModelPrice(value: unknown) {
 	return numeric > 0 && numeric < 0.001 ? numeric * 1_000_000 : numeric
 }
 
-export async function getOllamaModels(baseUrl: string) {
+export async function getOllamaModels(baseUrl: string, signal?: AbortSignal) {
 	const endpoint = `${normalizeOllamaRootBaseUrl(baseUrl)}/api/tags`
-	const controller = new AbortController()
-	const timeout = setTimeout(() => controller.abort(), 2000)
 	try {
-		const response = await fetch(endpoint, { signal: controller.signal })
+		const { response, text } = await fetchBoundedText(endpoint, {}, catalogFetchOptions(2_000, signal))
 		if (!response.ok) {
 			return []
 		}
 
-		const body = asRecord(await response.json())
+		const body = parseRecord(text)
 		const models = Array.isArray(body.models) ? body.models : []
 		return models
 			.map((model) => getString(model, "name"))
 			.filter((name): name is string => name.length > 0)
 	} catch {
 		return []
-	} finally {
-		clearTimeout(timeout)
 	}
 }
 
 export async function getOpenAiCompatibleModels(
 	baseUrl: string,
 	apiKey: string,
+	signal?: AbortSignal,
 ): Promise<{ ids: string[]; modelInfoById: Record<string, Record<string, unknown>>; error: string }> {
 	const endpoint = `${normalizeOpenAiCompatibleBaseUrl(baseUrl)}/models`
-	const controller = new AbortController()
-	const timeout = setTimeout(() => controller.abort(), 3000)
 	try {
 		const headers: Record<string, string> = {}
 		if (apiKey) {
 			headers.Authorization = `Bearer ${apiKey}`
 		}
-		const response = await fetch(endpoint, { headers, signal: controller.signal })
+		const { response, text } = await fetchBoundedText(endpoint, { headers }, catalogFetchOptions(3_000, signal))
 		if (!response.ok) {
 			return { ids: [], modelInfoById: {}, error: `Model endpoint returned HTTP ${response.status}.` }
 		}
 
-		const body = asRecord(await response.json())
+		const body = parseRecord(text)
 		const candidates = Array.isArray(body.data)
 			? body.data
 			: Array.isArray(body.models)
@@ -294,14 +292,19 @@ export async function getOpenAiCompatibleModels(
 			? "Model endpoint timed out."
 			: `Model endpoint could not be reached: ${stringify(error)}`
 		return { ids: [], modelInfoById: {}, error: message }
-	} finally {
-		clearTimeout(timeout)
 	}
 }
 
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
+function parseRecord(text: string) { try { return asRecord(JSON.parse(text)) } catch { return {} } }
 function getString(record: Record<string, unknown>, key: string) { const value = record[key]; return typeof value === "string" ? value : value == null ? "" : String(value) }
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
 function booleanValue(value: unknown) { return typeof value === "boolean" ? value : undefined }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
-import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+function catalogFetchOptions(fallbackTimeoutMs: number, signal?: AbortSignal) {
+	return {
+		timeoutMs: readBoundedPositiveIntEnv("VSCLINE_MODEL_CATALOG_TIMEOUT_MS", fallbackTimeoutMs, 500, 120_000),
+		maximumBytes: readBoundedPositiveIntEnv("VSCLINE_MODEL_CATALOG_MAX_BYTES", RUNTIME_DEFAULTS.metadataResponseMaximumBytes, 4_096, 32 * 1024 * 1024),
+		signal,
+	}
+}

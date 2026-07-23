@@ -1,3 +1,5 @@
+import { WEBVIEW_RPC_PROTOCOL_VERSION } from "./generated/WebviewRpcContract";
+
 export interface StreamSubscriptionCallbacks<T> {
 	onResponse: (response: T) => void;
 	onError: (error: Error) => void;
@@ -24,6 +26,29 @@ export function superviseStreamSubscription<T>(options: StreamSubscriptionSuperv
 	let retryAttempt = 0;
 	let retryTimer: ReturnType<typeof setTimeout> | undefined;
 	let unsubscribe: (() => void) | undefined;
+
+	const restartImmediately = () => {
+		if (disposed) {
+			return;
+		}
+		generation++;
+		if (retryTimer) {
+			clearTimeout(retryTimer);
+			retryTimer = undefined;
+		}
+		stopCurrent();
+		retryAttempt = 0;
+		start();
+	};
+
+	const onTransportReset = (event: MessageEvent<unknown>) => {
+		const message = asRecord(event.data);
+		if (message.protocol_version !== WEBVIEW_RPC_PROTOCOL_VERSION ||
+			(message.type !== "vscline_transport_reset" && message.type !== "vscline_transport_unavailable")) {
+			return;
+		}
+		restartImmediately();
+	};
 
 	const stopCurrent = () => {
 		const current = unsubscribe;
@@ -82,6 +107,7 @@ export function superviseStreamSubscription<T>(options: StreamSubscriptionSuperv
 		unsubscribe = candidate;
 	};
 
+	window.addEventListener("message", onTransportReset);
 	start();
 	return () => {
 		if (disposed) {
@@ -93,10 +119,15 @@ export function superviseStreamSubscription<T>(options: StreamSubscriptionSuperv
 			clearTimeout(retryTimer);
 			retryTimer = undefined;
 		}
+		window.removeEventListener("message", onTransportReset);
 		stopCurrent();
 	};
 }
 
 function toError(value: unknown): Error {
 	return value instanceof Error ? value : new Error(String(value));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
 }

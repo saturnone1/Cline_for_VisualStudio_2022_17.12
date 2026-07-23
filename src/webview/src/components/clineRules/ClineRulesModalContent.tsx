@@ -145,7 +145,7 @@ export function ClineRulesModalContent({
 							listGap="small"
 							rules={agentsRules}
 							ruleType={"agents"}
-							showNewRule={true}
+							showNewRule={false}
 							showNoRules={false}
 							toggleRule={toggleAgentsRule}
 						/>

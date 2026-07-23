@@ -10,6 +10,8 @@ type McpOperation = "connecting" | "restarting" | "deleting" | "authenticating" 
 export class ClineSdkMcpAdapter {
 	private manager: McpManagerInstance | null = null
 	private starting: Promise<McpManagerInstance> | null = null
+	private lifecycleGeneration = 0
+	private disposed = false
 	private readonly settings = new ClineSdkMcpSettingsStore()
 	private readonly operationStates = new Map<string, McpOperation>()
 	private readonly operationErrors = new Map<string, string>()
@@ -19,6 +21,7 @@ export class ClineSdkMcpAdapter {
 		private readonly host: HostProviderPort,
 		private readonly readSdkVersion: () => string | null,
 		private readonly log: (level: string, message: string, metadata?: unknown) => void,
+		private readonly managerFactory?: () => Promise<McpManagerInstance>,
 	) {}
 
 	async ensureStarted() { await this.ensureMcpManager() }
@@ -396,24 +399,34 @@ export class ClineSdkMcpAdapter {
 	}
 
 	private async ensureMcpManager() {
+		if (this.disposed) throw new Error("The LIG VS MCP runtime has been disposed.")
 		if (this.manager) {
 			return this.manager
 		}
 		if (!this.starting) {
-			this.starting = this.createMcpManager()
-				.then((manager) => {
+			const generation = this.lifecycleGeneration
+			const starting = this.createMcpManager()
+				.then(async (manager) => {
+					if (this.disposed || generation !== this.lifecycleGeneration) {
+						await manager.dispose().catch(() => undefined)
+						throw new Error("The LIG VS MCP runtime was disposed during startup.")
+					}
 					this.manager = manager
 					return manager
 				})
 				.catch((error) => {
-					this.starting = null
 					throw error
 				})
+				.finally(() => {
+					if (this.starting === starting) this.starting = null
+				})
+			this.starting = starting
 		}
 		return this.starting
 	}
 
 	private async createMcpManager() {
+		if (this.managerFactory) return this.managerFactory()
 		const sdk = await importClineSdk()
 		const settingsPath = this.settings.resolvePath(sdk)
 		const manager = new sdk.InMemoryMcpManager({
@@ -449,11 +462,16 @@ export class ClineSdkMcpAdapter {
 	}
 
 	async dispose() {
+		if (this.disposed) return
+		this.disposed = true
+		this.lifecycleGeneration++
 		const manager = this.manager
+		const starting = this.starting
 		this.manager = null
 		this.starting = null
 		this.sessionToolErrors.clear()
 		if (manager) await manager.dispose().catch(() => undefined)
+		await starting?.catch(() => undefined)
 	}
 
 	private logSdkMessage(level: string, message: string, metadata?: unknown) { this.log(level, message, metadata) }

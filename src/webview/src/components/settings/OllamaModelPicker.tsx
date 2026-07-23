@@ -2,7 +2,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import Fuse from "fuse.js"
 import React, { KeyboardEvent, memo, useEffect, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
-import { highlightSearchResults as highlight } from "@/utils/searchHighlight"
+import { escapeSearchResultText, highlightSearchResults as highlight } from "@/utils/searchHighlight"
 
 export const OLLAMA_MODEL_PICKER_Z_INDEX = 1_000
 
@@ -47,7 +47,7 @@ const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
 	const searchableItems = useMemo(() => {
 		return ollamaModels.map((id) => ({
 			id,
-			html: id,
+			html: escapeSearchResultText(id),
 		}))
 	}, [ollamaModels])
 

@@ -9,6 +9,7 @@ import { ClineSdkMcpAdapter } from "./ClineSdkMcpAdapter"
 import { ClineSdkProviderAdapter } from "./ClineSdkProviderAdapter"
 import { ClineSdkSessionAdapter, type ClineSdkCore } from "./ClineSdkSessionAdapter"
 import { summarizeCompactionContext } from "./ClineSdkCompactionSummarizer"
+import { createSessionExtraTools } from "./SessionExtraToolComposition"
 export type ClineSdkStatus = {
 	mode: "sdk"
 	packageName: string
@@ -22,6 +23,8 @@ export type ClineSdkStatus = {
 export class ClineSdkRuntime implements AgentEnginePort {
 	private core: ClineSdkCore | null = null
 	private starting: Promise<ClineSdkCore> | null = null
+	private lifecycleGeneration = 0
+	private disposed = false
 	private readonly mcp: ClineSdkMcpAdapter
 	private readonly providers = new ClineSdkProviderAdapter()
 	private readonly sessions: ClineSdkSessionAdapter
@@ -36,6 +39,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
 		private readonly createHostExtraTools?: () => readonly unknown[],
+		private readonly coreFactory: typeof createClineSdkCore = createClineSdkCore,
 	) {
 		this.mcp = new ClineSdkMcpAdapter(host, () => this.readSdkVersion(), (level, message, metadata) => this.logSdkMessage(level, message, metadata))
 		this.sessions = new ClineSdkSessionAdapter({
@@ -44,12 +48,11 @@ export class ClineSdkRuntime implements AgentEnginePort {
 			getActiveSessionId: () => this.activeSessionId,
 			setActiveSessionId: (sessionId) => { this.activeSessionId = sessionId },
 			getWorkspacePaths: () => this.host.workspaceClient.getWorkspacePaths({}),
-			createExtraTools: async () => {
-				const mcpTools = await this.mcp.createExtraToolsForSession()
-				const hostTools = [...(this.createHostExtraTools?.() || [])]
-				const combined = [...(Array.isArray(mcpTools) ? mcpTools : []), ...hostTools]
-				return combined.length > 0 ? combined : undefined
-			},
+			createExtraTools: () => createSessionExtraTools({
+				loadMcpTools: () => this.mcp.createExtraToolsForSession(),
+				loadHostTools: () => this.createHostExtraTools?.() || [],
+				log: (level, message, metadata) => this.logSdkMessage(level, message, metadata),
+			}),
 			getStatus: () => this.status,
 			summarizeCompaction: summarizeCompactionContext,
 		})
@@ -156,42 +159,55 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	async toggleMcpToolAutoApprove(params: unknown) { return this.mcp.toggleMcpToolAutoApprove(params) }
 
 	async dispose() {
+		if (this.disposed) return
+		this.disposed = true
+		this.lifecycleGeneration++
 		const core = this.core
+		const starting = this.starting
 		this.core = null
 		this.starting = null
 		this.activeSessionId = null
 		if (core) {
 			await core.dispose("Visual Studio sidecar disconnected")
 		}
+		await starting?.catch(() => undefined)
 		await this.mcp.dispose()
 	}
 
 	private async getCore() {
+		if (this.disposed) throw new Error("The LIG VS SDK runtime has been disposed.")
 		if (this.core) {
 			return this.core
 		}
 
 		if (!this.starting) {
-			this.starting = this.createCore()
-				.then((core) => {
+			const generation = this.lifecycleGeneration
+			const starting = this.createCore()
+				.then(async (core) => {
+					if (this.disposed || generation !== this.lifecycleGeneration) {
+						await core.dispose("LIG VS SDK startup completed after runtime disposal").catch(() => undefined)
+						throw new Error("The LIG VS SDK runtime was disposed during startup.")
+					}
 					this.core = core
 					this.lastError = undefined
 					return core
 				})
 				.catch((error) => {
-					this.starting = null
 					this.lastError = error instanceof Error ? error.message : String(error)
 					throw error
 				})
+				.finally(() => {
+					if (this.starting === starting) this.starting = null
+				})
+			this.starting = starting
 		}
 
 		return this.starting
 	}
 
 	private async createCore() {
-		return createClineSdkCore({
+		return this.coreFactory({
 			host: this.host,
-			ensureMcpStarted: () => this.mcp.ensureStarted(),
 			getActiveSessionId: () => this.activeSessionId,
 			onEvent: this.onCoreEvent,
 			onToolApproval: this.onToolApproval,

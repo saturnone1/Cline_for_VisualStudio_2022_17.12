@@ -2,6 +2,7 @@ export type StartNewTaskInput = Readonly<{ text: string; images: string[]; files
 
 type Callbacks = Readonly<{
 	isRuntimeAvailable: () => boolean
+	stopPrevious: () => Promise<void>
 	transitionStarting: () => void
 	createTask: (input: StartNewTaskInput) => Record<string, unknown>
 	startLatency: (requestId: string, taskId: string, textLength: number) => void
@@ -21,6 +22,7 @@ export class StartNewTaskFlow {
 
 	async execute(input: StartNewTaskInput) {
 		if (!this.callbacks.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
+		await this.callbacks.stopPrevious()
 		this.callbacks.transitionStarting()
 		const task = this.callbacks.createTask(input)
 		this.callbacks.startLatency(input.requestId, String(task.id || ""), input.text.length)

@@ -150,13 +150,22 @@ export async function executeHookScript(hook: HookScript, context: Record<string
 				return
 			}
 			settled = true
-			void terminateChildProcessTree(child).catch(() => undefined)
-			resolve({
-				exitCode: -1,
-				stdout: truncateText(stdout, outputLimit),
-				stderr: truncateText(stderr, outputLimit),
-				error: `Hook timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
-			})
+			void (async () => {
+				let terminationError = ""
+				try {
+					await terminateChildProcessTree(child)
+				} catch (error) {
+					terminationError = error instanceof Error ? error.message : String(error)
+				} finally {
+					registry.untrack(child)
+				}
+				resolve({
+					exitCode: -1,
+					stdout: truncateText(stdout, outputLimit),
+					stderr: truncateText(stderr, outputLimit),
+					error: `Hook timed out after ${Math.round(timeoutMs / 1000)} seconds.${terminationError ? ` Process termination failed: ${terminationError}` : ""}`,
+				})
+			})()
 		}, timeoutMs)
 
 		child.stdout?.on("data", (chunk) => {

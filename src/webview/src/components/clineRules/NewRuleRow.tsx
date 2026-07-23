@@ -140,6 +140,8 @@ const NewRuleRow: React.FC<NewRuleRowProps> = ({
 				)
 			} catch (err) {
 				console.error("Error creating rule file:", err)
+				setError(err instanceof Error ? err.message : t("rules.ruleCreateFailed"))
+				return
 			}
 
 			setFilename("")

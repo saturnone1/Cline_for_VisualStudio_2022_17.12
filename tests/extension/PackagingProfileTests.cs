@@ -81,12 +81,63 @@ namespace VsClineAgent.Host.Tests
 			var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"));
 			var initializationMethod = source.IndexOf("private async Task<bool> InitializeWebViewAsync()", StringComparison.Ordinal);
 			Assert.True(initializationMethod >= 0);
-			var sidecarStart = source.IndexOf("await _sidecar.EnsureRunningAsync()", initializationMethod, StringComparison.Ordinal);
+			var sidecarStart = source.IndexOf("await _sidecar.EnsureRunningAsync(_diagnosticCancellation.Token)", initializationMethod, StringComparison.Ordinal);
 			var webViewRuntimeResolution = source.IndexOf("WebView2RuntimeResolver.GetWebView2RuntimeCandidates", initializationMethod, StringComparison.Ordinal);
 
 			Assert.True(sidecarStart > initializationMethod && webViewRuntimeResolution > sidecarStart);
 			Assert.Contains("_initialized = await InitializeWebViewAsync()", source);
 			Assert.Contains("_initializing = false;", source);
+			Assert.Contains("EnsureRunningAsync(_diagnosticCancellation.Token)", source);
+		}
+
+		[Fact]
+		public void WebViewVisibilityDoesNotWaitForSdkAndMcpWarmup()
+		{
+			var root = FindRepositoryRoot();
+			var process = File.ReadAllText(Path.Combine(root, "src", "extension", "Host", "SidecarProcess.cs"));
+			var toolWindow = File.ReadAllText(Path.Combine(root, "src", "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"));
+			var ensureStart = process.IndexOf("public async Task<string> EnsureStartedAsync", StringComparison.Ordinal);
+			var warmupStart = process.IndexOf("public async Task<string> WarmSdkAsync", StringComparison.Ordinal);
+			var navigationComplete = toolWindow.IndexOf("private async Task OnNavigationCompletedAsync", StringComparison.Ordinal);
+			var showWebView = toolWindow.IndexOf("webView.Visibility = Visibility.Visible", navigationComplete, StringComparison.Ordinal);
+			var warmupCall = toolWindow.IndexOf("_sidecar.WarmSdkAsync", navigationComplete, StringComparison.Ordinal);
+
+			Assert.True(ensureStart >= 0 && warmupStart > ensureStart);
+			Assert.DoesNotContain("upstream.start", process.Substring(ensureStart, warmupStart - ensureStart));
+			Assert.Contains("upstream.start", process.Substring(warmupStart));
+			Assert.True(showWebView > navigationComplete && warmupCall > showWebView);
+		}
+
+		[Fact]
+		public void SidecarRestartNotifiesWebViewStreamsToResubscribe()
+		{
+			var root = FindRepositoryRoot();
+			var lifecycle = File.ReadAllText(Path.Combine(root, "src", "extension", "Host", "SidecarLifecycle.cs"));
+			var toolWindow = File.ReadAllText(Path.Combine(root, "src", "extension", "ToolWindows", "ChatToolWindowControl.xaml.cs"));
+
+			Assert.Contains("ReadyGenerationChanged?.Invoke(generation)", lifecycle);
+			Assert.Contains("TransportUnavailable?.Invoke(generation)", lifecycle);
+			Assert.Contains("type = \"vscline_transport_reset\"", toolWindow);
+			Assert.Contains("type = \"vscline_transport_unavailable\"", toolWindow);
+			Assert.Contains("ReadyGenerationChanged -= OnSidecarReadyGenerationChanged", toolWindow);
+			Assert.Contains("TransportUnavailable -= OnSidecarTransportUnavailable", toolWindow);
+		}
+
+		[Fact]
+		public void Sidecar_startup_is_cancelled_without_disposing_its_active_gate()
+		{
+			var root = FindRepositoryRoot();
+			var lifecycle = File.ReadAllText(Path.Combine(root, "src", "extension", "Host", "SidecarLifecycle.cs"));
+			var process = File.ReadAllText(Path.Combine(root, "src", "extension", "Host", "SidecarProcess.cs"));
+
+			Assert.Contains("_shutdownCancellation.Cancel();", lifecycle);
+			Assert.Contains("CreateLinkedTokenSource", lifecycle);
+			Assert.DoesNotContain("_startLock.Dispose();", lifecycle);
+			Assert.Contains("runtimePreparation = _runtimeInstaller.Prepare(sidecarDirectory);", process);
+			var preparation = process.IndexOf("runtimePreparation = _runtimeInstaller.Prepare(sidecarDirectory);", StringComparison.Ordinal);
+			var cancellation = process.IndexOf("cancellationToken.ThrowIfCancellationRequested();", preparation, StringComparison.Ordinal);
+			var launch = process.IndexOf("Process.Start(startInfo)", preparation, StringComparison.Ordinal);
+			Assert.True(preparation >= 0 && cancellation > preparation && launch > cancellation);
 		}
 
         [Fact]

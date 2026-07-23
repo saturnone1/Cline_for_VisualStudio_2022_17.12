@@ -122,7 +122,6 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							if (
 								value === "newest" ||
 								value === "oldest" ||
-								value === "mostExpensive" ||
 								value === "mostTokens" ||
 								value === "mostRelevant"
 							) {

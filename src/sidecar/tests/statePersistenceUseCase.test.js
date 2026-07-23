@@ -35,3 +35,50 @@ test("state persistence surfaces synchronous disk failures to the caller", () =>
 	assert.throws(() => useCase.flush(() => ({ version: 1 })), /disk is read-only/)
 	assert.equal(useCase.persistenceError, failure)
 })
+
+test("deferred persistence keeps only the latest snapshot while a write is active", async () => {
+	const writes = []
+	let releaseFirst
+	const firstWrite = new Promise((resolve) => { releaseFirst = resolve })
+	const store = {
+		load: () => null,
+		save: () => {}, clear: () => {},
+		saveDeferred: async (value) => {
+			writes.push(value)
+			if (writes.length === 1) await firstWrite
+		},
+	}
+	const useCase = new StatePersistenceUseCase(store, 1)
+	let version = 1
+	useCase.schedule(() => ({ version }))
+	await new Promise((resolve) => setTimeout(resolve, 5))
+	version = 2
+	useCase.schedule(() => ({ version }))
+	await new Promise((resolve) => setTimeout(resolve, 5))
+	version = 3
+	useCase.schedule(() => ({ version }))
+	await new Promise((resolve) => setTimeout(resolve, 5))
+	releaseFirst()
+	await new Promise((resolve) => setTimeout(resolve, 5))
+
+	assert.deepEqual(writes, [{ version: 1 }, { version: 3 }])
+})
+
+test("continuous state changes use trailing debounce with a bounded maximum wait", async () => {
+	const writes = []
+	const store = { load: () => null, save: (value) => writes.push(value), clear() {} }
+	const useCase = new StatePersistenceUseCase(store, 30, 70)
+	let version = 0
+	const interval = setInterval(() => {
+		version++
+		useCase.schedule(() => ({ version }))
+	}, 10)
+
+	await new Promise((resolve) => setTimeout(resolve, 85))
+	clearInterval(interval)
+	assert.equal(writes.length, 1)
+	assert.ok(writes[0].version >= 5)
+
+	await new Promise((resolve) => setTimeout(resolve, 40))
+	assert.equal(writes.at(-1).version, version)
+})

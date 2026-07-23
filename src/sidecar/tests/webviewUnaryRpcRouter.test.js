@@ -60,3 +60,40 @@ test("unary RPC router aborts active work and discards its late response", async
 	release()
 	await assert.rejects(pending, WebviewRpcRequestCancelledError)
 })
+
+test("control-plane RPCs preserve arrival order across settings and task routes", async () => {
+	const order = []
+	let releaseSettings
+	const settingsGate = new Promise((resolve) => { releaseSettings = resolve })
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		settings: { handle: async () => { order.push("settings:start"); await settingsGate; order.push("settings:end"); return { payload: {} } } },
+		task: { handle: async () => { order.push("task"); return { payload: {} } } },
+	}))
+
+	const settings = router.handle("StateService.dismissBanner", "settings-ordered", { value: "banner" })
+	const task = router.handle("TaskService.newTask", "task-ordered", { text: "hello" })
+	await Promise.resolve()
+	assert.deepEqual(order, ["settings:start"])
+	releaseSettings()
+	await Promise.all([settings, task])
+	assert.deepEqual(order, ["settings:start", "settings:end", "task"])
+})
+
+test("a queued control-plane RPC can be cancelled without running later", async () => {
+	let releaseSettings
+	let taskCalls = 0
+	const settingsGate = new Promise((resolve) => { releaseSettings = resolve })
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		settings: { handle: async () => { await settingsGate; return { payload: {} } } },
+		task: { handle: async () => { taskCalls++; return { payload: {} } } },
+	}))
+
+	const settings = router.handle("StateService.dismissBanner", "settings-blocking", { value: "banner" })
+	const task = router.handle("TaskService.newTask", "task-cancelled", { text: "hello" })
+	assert.equal(router.cancel("task-cancelled"), true)
+	await assert.rejects(task, WebviewRpcRequestCancelledError)
+	releaseSettings()
+	await settings
+	await new Promise((resolve) => setImmediate(resolve))
+	assert.equal(taskCalls, 0)
+})

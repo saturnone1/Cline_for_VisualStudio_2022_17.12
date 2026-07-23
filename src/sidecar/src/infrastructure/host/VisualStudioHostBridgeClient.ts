@@ -1,4 +1,12 @@
 import { JsonRpcConnection, sendHostRequest } from "../transport/JsonRpcConnection"
+import { readBoundedPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+
+const hostFileRequestTimeoutMs = readBoundedPositiveIntEnv(
+	"VSCLINE_HOST_FILE_REQUEST_TIMEOUT_MS",
+	RUNTIME_DEFAULTS.hostFileRequestTimeoutMs,
+	1_000,
+	120_000,
+)
 
 export type WorkspaceRoot = {
 	path: string
@@ -128,7 +136,7 @@ export class VisualStudioHostBridgeClient {
 	}
 
 	async readTextFile(path: string): Promise<{ exists: boolean; content: string }> {
-		return (await sendHostRequest(this.connection, "workspace.readTextFile", { path })) as {
+		return (await sendHostRequest(this.connection, "workspace.readTextFile", { path }, { timeoutMs: hostFileRequestTimeoutMs })) as {
 			exists: boolean
 			content: string
 		}
@@ -147,14 +155,14 @@ export class VisualStudioHostBridgeClient {
 	}
 
 	async listFiles(path: string, recursive = false, limit = 1500): Promise<{ files: string[]; truncated: boolean }> {
-		return (await sendHostRequest(this.connection, "workspace.listFiles", { path, recursive, limit })) as {
+		return (await sendHostRequest(this.connection, "workspace.listFiles", { path, recursive, limit }, { timeoutMs: hostFileRequestTimeoutMs })) as {
 			files: string[]
 			truncated: boolean
 		}
 	}
 
 	async searchFiles(path: string, query: string, limit = 200): Promise<{ matches: string[]; truncated: boolean }> {
-		return (await sendHostRequest(this.connection, "workspace.searchFiles", { path, query, limit })) as {
+		return (await sendHostRequest(this.connection, "workspace.searchFiles", { path, query, limit }, { timeoutMs: hostFileRequestTimeoutMs })) as {
 			matches: string[]
 			truncated: boolean
 		}

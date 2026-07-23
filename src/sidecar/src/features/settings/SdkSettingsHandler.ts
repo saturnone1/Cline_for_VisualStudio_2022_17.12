@@ -27,7 +27,7 @@ export type SdkSettingToggleRequest = Readonly<{ path: string; enabled: boolean 
 function records(value: unknown) { return Array.isArray(value) ? value.map(asRecord) : [] }
 function toggleMap(items: Record<string, unknown>[], scope: "global" | "local") { return Object.fromEntries(items.filter((item) => scope === "global" ? isGlobal(item) : !isGlobal(item)).map((item) => [key(item), item.enabled !== false])) }
 function isGlobal(item: Record<string, unknown>) { const source = readString(item.source); return source === "global" || source === "global-plugin" || readString(item.path).toLowerCase().includes("\\cline\\") }
-function key(item: Record<string, unknown>) { return readString(item.path) || readString(item.id) || readString(item.name) || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}` }
+function key(item: Record<string, unknown>) { return readString(item.path) || readString(item.id) || readString(item.name) }
 function toSkill(item: Record<string, unknown>) { return { name: readString(item.name) || key(item), path: key(item), enabled: item.enabled !== false, description: readString(item.description) } }
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }

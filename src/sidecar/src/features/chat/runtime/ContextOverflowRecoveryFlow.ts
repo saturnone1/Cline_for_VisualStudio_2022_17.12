@@ -1,6 +1,7 @@
 import type { SendUserMessageInput } from "../sendMessage/SendUserMessageFlow"
 import type { SendMessageCommand } from "../sendMessage/SendMessageCommand"
 import { isContextOverflowError } from "./ContextOverflowError"
+import { resolveUserActionSessionId } from "../../runtime/UserActionSessionTarget"
 
 type Callbacks = Readonly<{
 	compact: (requestId: string, transcriptText: string) => Promise<string | undefined>
@@ -22,7 +23,7 @@ export class ContextOverflowRecoveryFlow {
 	async execute(input: SendUserMessageInput, failedGeneration: number, error: unknown) {
 		if (!isContextOverflowError(error)) return false
 		this.callbacks.log("contextOverflowRecoveryStarted", {
-			sessionId: input.activeSessionId || input.selectedSessionId,
+			sessionId: resolveUserActionSessionId(input.selectedSessionId, input.activeSessionId),
 			failedGeneration,
 			error: stringify(error),
 		})

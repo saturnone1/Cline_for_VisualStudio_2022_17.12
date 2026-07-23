@@ -34,7 +34,15 @@ export class OAuthCallbackCoordinator {
 	}
 
 	find(state: string, provider = "") {
-		return (state && this.sessions.get(state)) || this.latest(provider)
+		return state ? this.sessions.get(state) : this.latest(provider)
+	}
+
+	private findPendingCallback(state: string, provider: string) {
+		this.prune()
+		if (!state) return undefined
+		const session = this.sessions.get(state)
+		if (!session || session.status !== "pending") return undefined
+		return provider && session.provider !== provider ? undefined : session
 	}
 
 	latest(provider: string) {
@@ -47,8 +55,8 @@ export class OAuthCallbackCoordinator {
 		try { url = new URL(callbackUrl) } catch { return { success: false, message: "OAuth callback URL is invalid." } }
 		const hash = new URLSearchParams(url.hash.replace(/^#/, ""))
 		const state = url.searchParams.get("state") || hash.get("state") || ""
-		const provider = normalizeProviderValue(url.searchParams.get("provider") || hash.get("provider") || "") || "account"
-		const session = this.find(state, provider)
+		const provider = normalizeProviderValue(url.searchParams.get("provider") || hash.get("provider") || "")
+		const session = this.findPendingCallback(state, provider)
 		if (!session) return { success: false, message: "No matching LIG VS OAuth callback request is pending." }
 		const code = url.searchParams.get("code") || hash.get("code") || ""
 		const token = first(url.searchParams, hash, ["access_token", "token", "api_key", "key"])

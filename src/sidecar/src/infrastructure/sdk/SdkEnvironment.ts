@@ -4,14 +4,15 @@ import path from "node:path"
 
 export function resolveWorkspacePath(inputPath: string, workspaceRoots: string[], basePath?: string) {
 	if (!inputPath || inputPath.trim().length === 0) throw new Error("Path is required.")
-	const roots = workspaceRoots.map((root) => path.resolve(root))
+	const roots = workspaceRoots.map(canonicalizeWorkspaceRoot)
 	const base = basePath && basePath.trim().length > 0 ? path.resolve(basePath) : roots[0]
 	const normalizedInputPath = expandTildePath(inputPath)
 	const resolved = path.resolve(path.isAbsolute(normalizedInputPath) ? normalizedInputPath : path.join(base || process.cwd(), normalizedInputPath))
-	if (!roots.some((root) => isPathInsideOrEqual(resolved, root))) {
+	const canonical = canonicalizePathForAccess(resolved)
+	if (!roots.some((root) => isPathInsideOrEqual(canonical, root))) {
 		throw new Error(`Access denied: path outside Visual Studio workspace: ${inputPath}`)
 	}
-	return resolved
+	return canonical
 }
 
 export function ensureUsableHomeEnvironment() {
@@ -69,4 +70,39 @@ function isUsableHomePath(value: string | undefined) {
 function isPathInsideOrEqual(candidate: string, root: string) {
 	const relative = path.relative(root, candidate)
 	return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+function canonicalizeWorkspaceRoot(root: string) {
+	try {
+		return fs.realpathSync.native(path.resolve(root))
+	} catch {
+		throw new Error(`Visual Studio workspace root is unavailable: ${root}`)
+	}
+}
+
+function canonicalizePathForAccess(targetPath: string) {
+	let cursor = path.resolve(targetPath)
+	const missingSegments: string[] = []
+	for (;;) {
+		try {
+			fs.lstatSync(cursor)
+		} catch (error) {
+			if (!isMissingPathError(error)) throw new Error(`Access denied: path could not be inspected: ${targetPath}`)
+			const parent = path.dirname(cursor)
+			if (parent === cursor) throw new Error(`Access denied: path could not be resolved: ${targetPath}`)
+			missingSegments.unshift(path.basename(cursor))
+			cursor = parent
+			continue
+		}
+
+		try {
+			return path.resolve(fs.realpathSync.native(cursor), ...missingSegments)
+		} catch {
+			throw new Error(`Access denied: path contains an unresolved link: ${targetPath}`)
+		}
+	}
+}
+
+function isMissingPathError(error: unknown) {
+	return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
 }

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Threading.Tasks;
 using VsClineAgent.Host;
 using Xunit;
 
@@ -102,6 +103,30 @@ namespace VsClineAgent.Host.Tests
 				Assert.True(Directory.Exists(Path.Combine(cache, "old-3")));
 				Assert.False(Directory.Exists(Path.Combine(cache, "old-1")));
 				Assert.False(Directory.Exists(Path.Combine(cache, "old-2")));
+            }
+        }
+
+        [Fact]
+        public async Task RuntimePreparationIsSerializedAcrossCallersSharingACache()
+        {
+            using (var directory = new TemporaryDirectory())
+            using (var first = SidecarRuntimeInstaller.AcquirePreparationLock(directory.Path, TimeSpan.FromSeconds(2)))
+            {
+                var acquisitionStarted = new TaskCompletionSource<bool>();
+                var secondTask = Task.Run(() =>
+                {
+                    acquisitionStarted.SetResult(true);
+                    return SidecarRuntimeInstaller.AcquirePreparationLock(directory.Path, TimeSpan.FromSeconds(2));
+                });
+
+                await acquisitionStarted.Task;
+                Assert.NotSame(secondTask, await Task.WhenAny(secondTask, Task.Delay(200)));
+                first.Dispose();
+
+                using (await secondTask)
+                {
+                    Assert.Equal(TaskStatus.RanToCompletion, secondTask.Status);
+                }
             }
         }
 

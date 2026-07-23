@@ -4,6 +4,7 @@ import { TaskHistoryCommands } from "../../features/taskHistory/TaskHistoryComma
 import { TaskHistorySync } from "../../features/taskHistory/TaskHistorySync"
 import type { TaskStateCoordinator } from "../../features/taskHistory/TaskStateCoordinator"
 import { sdkSessionToHistoryItem } from "../conversation/TaskHistoryProjection"
+import { RUNTIME_DEFAULTS, readBoundedPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
 type Task = Record<string, unknown>
 type Dependencies = Readonly<{
@@ -60,4 +61,6 @@ export function createTaskHistoryComposition(dependencies: Dependencies) {
 
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function stringField(value: unknown, key: string) { const field = asRecord(value)[key]; return typeof field === "string" ? field : "" }
-function readHistoryLimit() { const value = Number(process.env.VSCLINE_HISTORY_SYNC_LIMIT); return Number.isSafeInteger(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER }
+export function readHistoryLimit() {
+	return readBoundedPositiveIntEnv("VSCLINE_HISTORY_SYNC_LIMIT", RUNTIME_DEFAULTS.historySyncEntries, 1, 10_000)
+}
