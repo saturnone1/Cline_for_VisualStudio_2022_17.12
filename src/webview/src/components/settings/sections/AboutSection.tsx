@@ -18,6 +18,17 @@ type PatchNote = Readonly<{
 
 const patchNotes: readonly PatchNote[] = [
 	{
+		version: "2.2.3",
+		ko: [
+			"WebView 초기 상태 복원을 고정 시간 제한으로 실패 처리하지 않도록 변경하고, 상태 복원 완료 뒤 SDK 워밍업을 시작해 시작 경합을 제거했습니다.",
+			"호스트 진단 보고서에 포함되는 상태와 WebView 메시지에서 API 키 등 민감정보를 마스킹합니다.",
+		],
+		en: [
+			"Removed fixed-time WebView hydration failure detection and deferred SDK warmup until state hydration completes, eliminating the startup race.",
+			"Redacted API keys and other sensitive values from host diagnostic state and WebView message snapshots.",
+		],
+	},
+	{
 		version: "2.2.2",
 		ko: [
 			"초기 로딩과 WebApp 상태 복원 사이의 화면 전환을 하나로 통합하고, 준비 완료 신호가 오기 전에는 기존 로딩 화면을 유지합니다.",

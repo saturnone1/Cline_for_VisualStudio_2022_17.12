@@ -52,6 +52,7 @@ namespace VsClineAgent.ToolWindows
         private bool _loaded;
         private bool _initializing;
         private int _webviewHydrated;
+		private int _sdkWarmupStarted;
         private bool _initialized;
         internal bool IsDisposed => _lifetime.IsDisposed;
 
@@ -116,6 +117,7 @@ namespace VsClineAgent.ToolWindows
 
 		private void OnSidecarReadyGenerationChanged(int generation)
 		{
+			Interlocked.Exchange(ref _sdkWarmupStarted, 0);
 			_ = SendToWebViewAsync(new
 			{
 				protocol_version = WebviewRpcContract.ProtocolVersion,
@@ -366,10 +368,10 @@ namespace VsClineAgent.ToolWindows
                 _webviewMessages.SetReady(true);
 				SetStatus("홈 화면을 준비하는 중입니다...");
 				if (Volatile.Read(ref _webviewHydrated) != 0)
+				{
 					await RevealHydratedWebViewAsync();
-
-				_ = _sidecar.WarmSdkAsync(_diagnosticCancellation.Token);
-				await ReportBlankWebviewIfNeededAsync(_diagnosticCancellation.Token);
+					StartSdkWarmup();
+				}
             }
             catch (Exception ex)
             {
@@ -477,8 +479,16 @@ namespace VsClineAgent.ToolWindows
 
             Volatile.Write(ref _webviewHydrated, 1);
             _ = RevealHydratedWebViewAsync();
+			StartSdkWarmup();
             return true;
         }
+
+		private void StartSdkWarmup()
+		{
+			if (Interlocked.Exchange(ref _sdkWarmupStarted, 1) != 0)
+				return;
+			_ = _sidecar.WarmSdkAsync(_diagnosticCancellation.Token);
+		}
 
         private async Task RevealHydratedWebViewAsync()
         {
@@ -491,77 +501,6 @@ namespace VsClineAgent.ToolWindows
 
             if (Dispatcher.CheckAccess()) Reveal();
             else await VisualStudioUiThread.InvokeAsync(Reveal);
-        }
-
-		private async Task ReportBlankWebviewIfNeededAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-				await Task.Delay(_loadingPresenter.BlankDiagnosticDelay, cancellationToken).ConfigureAwait(true);
-				cancellationToken.ThrowIfCancellationRequested();
-                if (webView.CoreWebView2 == null)
-                    return;
-
-                var result = await webView.CoreWebView2.ExecuteScriptAsync(@"
-(function () {
-    var root = document.getElementById('root');
-    var bodyText = (document.body && document.body.innerText || '').trim();
-    var rootHtml = root && root.innerHTML ? root.innerHTML.trim() : '';
-    var diagnostics = window.__vsClineDiagnostics || {};
-    var scripts = Array.prototype.map.call(document.scripts || [], function (script) {
-        return script.src || '[inline]';
-    });
-    var stylesheets = Array.prototype.map.call(document.styleSheets || [], function (sheet) {
-        try { return sheet.href || '[inline]'; }
-        catch (_) { return '[inaccessible]'; }
-    });
-    return JSON.stringify({
-        title: document.title,
-        location: location.href,
-        readyState: document.readyState,
-        scriptCount: document.scripts.length,
-        stylesheetCount: document.styleSheets.length,
-        scripts: scripts,
-        stylesheets: stylesheets,
-        rootExists: !!root,
-        rootHtmlLength: rootHtml.length,
-        rootHtmlPreview: rootHtml.slice(0, 2000),
-        bodyTextLength: bodyText.length,
-        bodyText: bodyText.slice(0, 2000),
-        userAgent: navigator.userAgent,
-        diagnostics: diagnostics
-    });
-})()");
-                var json = JsonConvert.DeserializeObject<string>(result) ?? "{}";
-                var state = JObject.Parse(json);
-                if (Volatile.Read(ref _webviewHydrated) == 0)
-                {
-                    ShowError(HostDiagnosticReport.Create(
-                        "WebApp loaded but initial state hydration did not complete.",
-                        "The native loading screen remained visible because the WebApp did not confirm its initial StateService snapshot.",
-                        state,
-                        CreateDiagnosticContext()));
-                    return;
-                }
-                if (state.Value<bool?>("rootExists") == true &&
-                    state.Value<int?>("rootHtmlLength") == 0 &&
-                    state.Value<int?>("bodyTextLength") == 0)
-                {
-                    ShowError(HostDiagnosticReport.Create(
-                        "WebApp loaded but rendered no UI.",
-                        "This usually means the LIG VS WebApp did not receive its initial StateService hydration response.",
-                        state,
-                        CreateDiagnosticContext()));
-                }
-            }
-			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-			{
-				// The ToolWindow was closed before the delayed diagnostic was needed.
-			}
-			catch (Exception ex)
-            {
-                ShowError("WebApp diagnostics failed:\n" + ex.Message);
-            }
         }
 
         public Task SendToWebViewAsync(object payload)

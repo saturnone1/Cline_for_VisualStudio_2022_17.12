@@ -44,5 +44,19 @@ namespace VsClineAgent.Host.Tests
             Assert.Equal("[truncated 10 items]", sanitizedArray[50]?.Value<string>());
             Assert.Contains("[truncated 904 chars]", sanitizedText);
         }
+
+		[Fact]
+		public void RedactsSecretsInsideSerializedStateStrings()
+		{
+			var value = new JObject
+			{
+				["stateJson"] = "{\"ollamaApiKey\":\"nvapi-abcdefghijklmnop\"}"
+			};
+
+			var sanitized = InteractionLogSanitizer.Sanitize(value).ToString();
+
+			Assert.DoesNotContain("nvapi-abcdefghijklmnop", sanitized);
+			Assert.Contains("nvap...mnop", sanitized);
+		}
     }
 }

@@ -99,17 +99,21 @@ namespace VsClineAgent.Host.Tests
 			var ensureStart = process.IndexOf("public async Task<string> EnsureStartedAsync", StringComparison.Ordinal);
 			var warmupStart = process.IndexOf("public async Task<string> WarmSdkAsync", StringComparison.Ordinal);
 			var navigationComplete = toolWindow.IndexOf("private async Task OnNavigationCompletedAsync", StringComparison.Ordinal);
-			var warmupCall = toolWindow.IndexOf("_sidecar.WarmSdkAsync", navigationComplete, StringComparison.Ordinal);
 			var lifecycleHandler = toolWindow.IndexOf("private bool TryHandleWebViewLifecycle", StringComparison.Ordinal);
 			var revealMethod = toolWindow.IndexOf("private async Task RevealHydratedWebViewAsync", StringComparison.Ordinal);
+			var warmupMethod = toolWindow.IndexOf("private void StartSdkWarmup", lifecycleHandler, StringComparison.Ordinal);
 			var showWebView = toolWindow.IndexOf("webView.Visibility = Visibility.Visible", revealMethod, StringComparison.Ordinal);
 
 			Assert.True(ensureStart >= 0 && warmupStart > ensureStart);
 			Assert.DoesNotContain("upstream.start", process.Substring(ensureStart, warmupStart - ensureStart));
 			Assert.Contains("upstream.start", process.Substring(warmupStart));
-			Assert.Contains("_ = _sidecar.WarmSdkAsync", toolWindow.Substring(navigationComplete, warmupCall - navigationComplete + 30));
 			Assert.True(lifecycleHandler > navigationComplete && revealMethod > lifecycleHandler && showWebView > revealMethod);
 			Assert.Contains("WebViewLifecycleMessage.IsHydrated", toolWindow.Substring(lifecycleHandler, revealMethod - lifecycleHandler));
+			Assert.Contains("StartSdkWarmup();", toolWindow.Substring(lifecycleHandler, revealMethod - lifecycleHandler));
+			Assert.True(warmupMethod > lifecycleHandler);
+			Assert.Contains("_ = _sidecar.WarmSdkAsync", toolWindow.Substring(warmupMethod));
+			Assert.DoesNotContain("ReportBlankWebviewIfNeededAsync", toolWindow);
+			Assert.DoesNotContain("BlankDiagnosticDelay", toolWindow);
 		}
 
 		[Fact]

@@ -41,7 +41,7 @@ namespace VsClineAgent.Host
             if (webState != null)
             {
                 builder.AppendLine("=== WebView State ===");
-                builder.AppendLine(webState.ToString(Formatting.Indented));
+                builder.AppendLine(InteractionLogSanitizer.Sanitize(webState).ToString(Formatting.Indented));
                 builder.AppendLine();
             }
 
@@ -95,8 +95,7 @@ namespace VsClineAgent.Host
         {
             if (string.IsNullOrWhiteSpace(value))
                 return "(none)";
-            try { return JToken.Parse(value!).ToString(Formatting.Indented); }
-            catch { return value!; }
+            return InteractionLogSanitizer.Sanitize(value).ToString(Formatting.Indented);
         }
 
         private static string ReadSidecarLogTail()

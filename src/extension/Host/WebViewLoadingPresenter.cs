@@ -10,7 +10,6 @@ namespace VsClineAgent.Host
 {
     internal sealed class WebViewLoadingPresenter
     {
-		internal TimeSpan BlankDiagnosticDelay { get; } = ResolveBlankDiagnosticDelay();
         private readonly Control _owner;
         private readonly Image _logo;
         private readonly TextBlock _title;
@@ -117,13 +116,5 @@ namespace VsClineAgent.Host
             return (Color)ColorConverter.ConvertFromString(color);
         }
 
-		private static TimeSpan ResolveBlankDiagnosticDelay()
-		{
-			const int defaultMilliseconds = 15000;
-			var configured = Environment.GetEnvironmentVariable("VSCLINE_WEBVIEW_DIAGNOSTIC_DELAY_MS");
-			return int.TryParse(configured, out var milliseconds) && milliseconds >= 1000 && milliseconds <= 120000
-				? TimeSpan.FromMilliseconds(milliseconds)
-				: TimeSpan.FromMilliseconds(defaultMilliseconds);
-		}
     }
 }
