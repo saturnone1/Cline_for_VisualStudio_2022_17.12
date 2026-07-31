@@ -39,7 +39,7 @@ test("cancel flow never projects success when owned work remains", async () => {
 		activeSessionId: () => "session-1",
 		cancelWork: async () => ({ succeeded: false, completed: ["agent-and-mcp"], failures: [{ name: "terminal", reason: "alive", timedOut: false }] }),
 		clearProjection: () => undefined,
-		addInfo: (text) => messages.push({ kind: "info", text }),
+		addCancellationMarker: () => messages.push({ kind: "cancelled" }),
 		addError: (text) => messages.push({ kind: "error", text }),
 		updateTask: () => undefined,
 		runHook: async () => undefined,
@@ -52,7 +52,7 @@ test("cancel flow never projects success when owned work remains", async () => {
 	await flow.execute()
 	assert.equal(status, "failed")
 	assert.equal(generations, 1)
-	assert.equal(messages.some((message) => message.kind === "info"), false)
+	assert.equal(messages.some((message) => message.kind === "cancelled"), false)
 	assert.equal(messages.some((message) => message.kind === "error" && message.text.includes("terminal: alive")), true)
 })
 
@@ -69,7 +69,7 @@ test("task cancellation proceeds when the cancelling-state broadcast fails", asy
 		activeSessionId: () => "session-1",
 		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: ["agent"], failures: [] } },
 		clearProjection: () => undefined,
-		addInfo: () => undefined,
+		addCancellationMarker: () => undefined,
 		addError: () => undefined,
 		updateTask: () => undefined,
 		runHook: async () => undefined,
@@ -84,6 +84,43 @@ test("task cancellation proceeds when the cancelling-state broadcast fails", asy
 	assert.equal(cancelCalls, 1)
 	assert.equal(status, "idle")
 	assert.equal(logged.includes("cancelStateBroadcastFailed"), true)
+})
+
+test("successful cancellation projects one canonical marker and ignores a duplicate request", async () => {
+	let status = "streaming"
+	let releaseCancellation
+	let markers = 0
+	const flow = new CancelTaskFlow({
+		beginCancel: () => {
+			if (status !== "streaming") return false
+			status = "cancelling"
+			return true
+		},
+		currentStatus: () => status,
+		advanceRunGeneration: () => undefined,
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: () => new Promise((resolve) => { releaseCancellation = () => resolve({ succeeded: true, completed: ["agent"], failures: [] }) }),
+		clearProjection: () => undefined,
+		addCancellationMarker: () => { markers++ },
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => undefined,
+		completeCancel: () => { status = "idle" },
+		failCancellation: () => { status = "failed" },
+		quarantineSession: () => undefined,
+		broadcast: async () => undefined,
+		log: () => undefined,
+	})
+
+	const first = flow.execute()
+	await new Promise((resolve) => setImmediate(resolve))
+	await flow.execute()
+	releaseCancellation()
+	await first
+
+	assert.equal(status, "idle")
+	assert.equal(markers, 1)
 })
 
 test("task cancellation releases pending user interaction alongside owned work", async () => {
@@ -115,7 +152,7 @@ test("a failed cancellation hook cannot leave a successfully cancelled task stuc
 		activeSessionId: () => "session-1",
 		cancelWork: async () => ({ succeeded: true, completed: ["agent-and-mcp", "terminal", "hooks", "browser"], failures: [] }),
 		clearProjection: () => undefined,
-		addInfo: () => undefined,
+		addCancellationMarker: () => undefined,
 		addError: () => undefined,
 		updateTask: () => undefined,
 		runHook: async () => { throw new Error("hook failed") },
@@ -144,7 +181,7 @@ test("a timed-out cancellation quarantines the old run instead of restoring stre
 		activeSessionId: () => "session-1",
 		cancelWork: async () => ({ succeeded: false, completed: [], failures: [{ name: "agent", reason: "timeout", timedOut: true }] }),
 		clearProjection: () => undefined,
-		addInfo: () => undefined,
+		addCancellationMarker: () => undefined,
 		addError: () => undefined,
 		updateTask: () => undefined,
 		runHook: async () => undefined,

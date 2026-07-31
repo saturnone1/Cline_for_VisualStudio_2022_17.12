@@ -5,8 +5,7 @@ import { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning, shouldD
 import { toolActivityEntriesFromMessage, toolTranscriptToActivityEntries, buildGroupedToolActivityText, formatToolActivitySection, buildTerminalActivityText, formatCompletedCommandActivity, normalizeTerminalOutputText, toolActivityEntryKey, uniqueToolActivityEntries, splitToolPaths, looksLikeCommandText, uniqueStrings } from "./ToolActivityFormatting"
 import type { ToolActivityEntry } from "./ToolActivityFormatting"
 import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
-import { contentToText, sdkContentToReasoningText, sdkContentToToolActivityEntries, sdkContentToVisibleAssistantText } from "./SdkContentConversion"
-import { unwrapSdkUserInputEnvelope } from "../../application/services/SdkUserInputEnvelope"
+import { sdkContentToReasoningText, sdkContentToToolActivityEntries, sdkContentToUserProjection, sdkContentToVisibleAssistantText } from "./SdkContentConversion"
 
 export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, unknown>) {
 	if (!Array.isArray(messages)) {
@@ -70,16 +69,17 @@ export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<s
 		const ts = sdkMessageTimestamp(record, taskItem, messageIndex++)
 		let partOffset = 0
 		if (role === "user") {
-			const text = stripLegacyMcpContext(unwrapSdkUserInputEnvelope(contentToText(record.content)))
+			const userContent = sdkContentToUserProjection(record.content)
+			const text = stripLegacyMcpContext(userContent.text)
 			const entries = sdkContentToToolActivityEntries(record.content)
 			if (result.length === 0) {
-				result.push({ ts: ts + partOffset++, type: "say", say: "task", text })
+				result.push({ ts: ts + partOffset++, type: "say", say: "task", text, images: userContent.images, files: userContent.files })
 			} else if (entries.length > 0) {
 				toolEntries.push(...entries)
-			} else if (text.trim()) {
+			} else if (text.trim() || userContent.images.length > 0 || userContent.files.length > 0) {
 				flushToolEntries(ts + partOffset++)
 				flushReasoning(ts + partOffset++)
-				result.push({ ts: ts + partOffset++, type: "say", say: "user_feedback", text })
+				result.push({ ts: ts + partOffset++, type: "say", say: "user_feedback", text, images: userContent.images, files: userContent.files })
 			}
 		} else if (role === "assistant") {
 			const metrics = asRecord(record.metrics)

@@ -5,6 +5,10 @@ const STALLED_TASK_STATUSES = new Set(["stalled", "idle-timeout"])
 
 export type TaskLifecycleStatus = "idle" | "starting" | "streaming" | "awaiting_user" | "cancelling" | "completed" | "failed"
 
+export function isAgentRunActive(status: TaskLifecycleStatus) {
+	return status === "starting" || status === "streaming"
+}
+
 const ALLOWED_TRANSITIONS: Record<TaskLifecycleStatus, ReadonlySet<TaskLifecycleStatus>> = {
 	idle: new Set(["starting", "streaming", "awaiting_user"]),
 	starting: new Set(["streaming", "awaiting_user", "cancelling", "completed", "failed"]),

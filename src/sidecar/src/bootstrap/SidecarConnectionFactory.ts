@@ -84,7 +84,7 @@ export function createSidecarConnectionScope(connection: JsonRpcConnection, stat
 		hookExecution: new HookExecutionHandler(hooks, new ProcessHookExecutionAdapter(), interactionLogger),
 		checkpoints: new CheckpointHandler(runtime),
 		terminalActivity: new TerminalActivityMonitor(host.workspaceClient, interactionLogger, (text) => backend.updateTerminalActivity(text), () => backend.getUiLanguage()),
-		taskActivity: new TaskActivityMonitor(interactionLogger, () => backend.hasActiveTask(), () => backend.hasActivePartialText(), (idleForMs, reason) => backend.handleTaskIdleWaiting(idleForMs, reason), () => backend.handleTaskIdleLongRunning(), readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000), readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)),
+		taskActivity: new TaskActivityMonitor(interactionLogger, () => backend.hasActiveAgentRun(), () => backend.hasActivePartialText(), (idleForMs, reason) => backend.handleTaskIdleWaiting(idleForMs, reason), () => backend.handleTaskIdleLongRunning(), readPositiveIntEnv("VSCLINE_TASK_IDLE_NOTICE_MS", 30000), readPositiveIntEnv("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000)),
 		partialState: new PartialStateScheduler(interactionLogger, () => backend.hasStateSubscribers(), () => backend.getActivePartialSnapshot(), () => backend.handlePartialIdle(), () => backend.requestStateBroadcast(), readPositiveIntEnv("VSCLINE_PARTIAL_IDLE_COMPLETE_MS", 45000), readPositiveIntEnv("VSCLINE_PARTIAL_STATE_BROADCAST_MS", 5000)),
 		sendLatency: new SendLatencyMonitor(interactionLogger),
 		changeTracking: new ChangeTrackingHandler(host.workspaceClient, (text) => backend.publishChangeTranscript(text)),

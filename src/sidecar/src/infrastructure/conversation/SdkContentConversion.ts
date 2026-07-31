@@ -5,6 +5,7 @@ import { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning, shouldD
 import { toolActivityEntriesFromMessage, toolTranscriptToActivityEntries, buildGroupedToolActivityText, formatToolActivitySection, buildTerminalActivityText, formatCompletedCommandActivity, normalizeTerminalOutputText, toolActivityEntryKey, uniqueToolActivityEntries, splitToolPaths, looksLikeCommandText, uniqueStrings } from "./ToolActivityFormatting"
 import type { ToolActivityEntry } from "./ToolActivityFormatting"
 import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
+import { unwrapSdkUserInputEnvelope } from "../../application/services/SdkUserInputEnvelope"
 
 export function sdkContentToVisibleAssistantText(content: unknown): string {
 	if (typeof content === "string") {
@@ -64,16 +65,49 @@ export function sdkContentToToolActivityEntries(content: unknown): ToolActivityE
 		if (type === "tool_result") {
 			return toolTranscriptToActivityEntries(`Tool result: ${toolResultToText(record.content)}`)
 		}
-		if (type === "file") {
-			const pathValue = getString(record, "path")
-			return pathValue ? [{ kind: "file", label: pathValue }] : []
-		}
 		if (type === "text") {
 			const text = getString(record, "text")
 			return isToolTranscript(text) ? toolTranscriptToActivityEntries(text) : []
 		}
 		return []
 	})
+}
+
+export function sdkContentToUserProjection(content: unknown) {
+	if (!Array.isArray(content)) {
+		return { text: unwrapSdkUserInputEnvelope(contentToText(content)), images: [] as string[], files: [] as string[] }
+	}
+
+	const textParts: string[] = []
+	const images: string[] = []
+	const files: string[] = []
+	for (const block of content) {
+		const record = asRecord(block)
+		switch (getString(record, "type")) {
+			case "text": {
+				const text = getString(record, "text")
+				if (text) textParts.push(text)
+				break
+			}
+			case "image": {
+				const data = getString(record, "data").trim()
+				const mediaType = getString(record, "mediaType").trim().toLowerCase()
+				if (data && mediaType.startsWith("image/")) images.push(data.startsWith("data:image/") ? data : `data:${mediaType};base64,${data}`)
+				break
+			}
+			case "file": {
+				const pathValue = getString(record, "path").trim()
+				if (pathValue) files.push(pathValue)
+				break
+			}
+		}
+	}
+
+	return {
+		text: unwrapSdkUserInputEnvelope(textParts.join("\n\n")),
+		images: uniqueStrings(images),
+		files: uniqueStrings(files),
+	}
 }
 
 export function contentToText(content: unknown): string {

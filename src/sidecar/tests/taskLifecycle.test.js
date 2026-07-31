@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
-const { canTransitionTask, isTerminalTaskStatus, terminalTaskOutcome, TaskLifecycleMachine } = require("../dist/domain/task/TaskLifecycle")
+const { canTransitionTask, isAgentRunActive, isTerminalTaskStatus, terminalTaskOutcome, TaskLifecycleMachine } = require("../dist/domain/task/TaskLifecycle")
 
 test("task lifecycle accepts expected streaming and cancellation transitions", () => {
 	assert.equal(canTransitionTask("idle", "starting"), true)
@@ -26,4 +26,11 @@ test("terminal SDK statuses remain normalized", () => {
 	assert.equal(isTerminalTaskStatus("mistake_limit"), true)
 	assert.equal(terminalTaskOutcome("mistake_limit"), "failed")
 	assert.equal(isTerminalTaskStatus("streaming"), false)
+})
+
+test("only model-producing phases are active agent runs", () => {
+	assert.equal(isAgentRunActive("starting"), true)
+	assert.equal(isAgentRunActive("streaming"), true)
+	assert.equal(isAgentRunActive("awaiting_user"), false)
+	assert.equal(isAgentRunActive("cancelling"), false)
 })

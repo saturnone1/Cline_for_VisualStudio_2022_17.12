@@ -18,6 +18,21 @@ type PatchNote = Readonly<{
 
 const patchNotes: readonly PatchNote[] = [
 	{
+		version: "3.0.5",
+		ko: [
+			"선택형 질문과 승인 대기 상태를 모델 응답 실행 상태와 분리해, 사용자가 응답하지 않았는데 대기 안내가 나타나는 문제를 수정했습니다.",
+			"선택지 및 재시도 응답의 중복 전송을 차단하고 취소 결과를 하나의 완료 마커로 통합해 중복 대화와 취소 메시지를 줄였습니다.",
+			"SDK 대화 기록을 다시 열 때 이미지와 파일 첨부를 구조화된 데이터로 복원하고 내부 사용자 입력 태그가 대화에 노출되지 않도록 수정했습니다.",
+			"전용 구조화 도구와 일반 브라우저·웹 도구가 함께 제공될 때 작업 목적에 맞는 도구를 우선 고려하도록 에이전트 실행 원칙을 보강했습니다.",
+		],
+		en: [
+			"Separated question and approval waiting states from active model execution so idle notices no longer appear before the user responds.",
+			"Prevented duplicate option and retry responses and unified cancellation into one completion marker to reduce duplicated turns and notices.",
+			"Restored image and file attachments as structured data when reopening SDK transcripts without exposing internal user-input tags in chat.",
+			"Improved the agent execution contract to prefer a purpose-built structured tool when it is more appropriate than a generic browser or web tool.",
+		],
+	},
+	{
 		version: "3.0.4",
 		ko: [
 			"대화 중 변경한 모델, API 연결, 컨텍스트 창 및 추론 설정을 현재 응답 완료 후 활성 SDK 세션에 반영하도록 수정했습니다.",

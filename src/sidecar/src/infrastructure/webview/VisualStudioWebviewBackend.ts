@@ -31,7 +31,7 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 	serializeState() { return this.composition.serializeState() }
 	publishChangeTranscript(text: string) { return this.composition.publishChangeTranscript(text) }
 	updateTerminalActivity(text: string) { this.composition.updateTerminalActivity(text) }
-	hasActiveTask() { return this.composition.hasActiveTask() }
+	hasActiveAgentRun() { return this.composition.hasActiveAgentRun() }
 	hasActivePartialText() { return this.composition.hasActivePartialText() }
 	handleTaskIdleLongRunning() { this.composition.handleTaskIdleLongRunning() }
 	handleTaskIdleWaiting(idleForMs: number, reason: string) { this.composition.handleTaskIdleWaiting(idleForMs, reason) }

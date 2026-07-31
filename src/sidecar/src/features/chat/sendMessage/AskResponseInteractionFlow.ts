@@ -9,6 +9,7 @@ type Callbacks = Readonly<{
 	takeApproval: () => ApprovalResolver | undefined
 	takeQuestion: () => QuestionResolver | undefined
 	transitionStreaming: (source: string) => void
+	noteActivity: (reason: string) => void
 	removeFollowup: () => void
 	addFeedback: (text: string, images: string[], files: string[]) => void
 	updateTask: () => void
@@ -22,6 +23,7 @@ export class AskResponseInteractionFlow {
 	async handle(input: AskResponseInteractionInput) {
 		if (this.callbacks.hasPendingApproval() && input.activeSessionId) {
 			this.callbacks.transitionStreaming("approval-response")
+			this.callbacks.noteActivity("approval-response")
 			const approved = input.responseType === "yesButtonClicked", feedback = input.text.trim(), pending = this.callbacks.takeApproval()
 			this.callbacks.log("sendAskResponse.pendingApproval", { approved, activeSessionId: input.activeSessionId })
 			this.callbacks.addFeedback(feedback || (approved ? "승인됨" : "거부됨"), input.images, input.files)
@@ -32,6 +34,7 @@ export class AskResponseInteractionFlow {
 		}
 		if (this.callbacks.hasPendingQuestion() && input.activeSessionId) {
 			this.callbacks.transitionStreaming("question-response")
+			this.callbacks.noteActivity("question-response")
 			const pending = this.callbacks.takeQuestion()
 			this.callbacks.log("sendAskResponse.pendingQuestion", { activeSessionId: input.activeSessionId, answerLength: input.answerText.length })
 			this.callbacks.removeFollowup()

@@ -8,7 +8,7 @@ type Callbacks = Readonly<{
 	activeSessionId: () => string
 	cancelWork: (sessionId: string) => Promise<{ succeeded: boolean; completed: readonly string[]; failures: ReadonlyArray<{ name: string; reason: string; timedOut: boolean }> }>
 	clearProjection: () => void
-	addInfo: (text: string) => void
+	addCancellationMarker: () => void
 	updateTask: () => void
 	runHook: (sessionId: string) => Promise<unknown>
 	completeCancel: () => void
@@ -51,7 +51,7 @@ export class CancelTaskFlow {
 		}
 		this.callbacks.advanceRunGeneration()
 		this.callbacks.clearProjection()
-		this.callbacks.addInfo("현재 진행 중인 요청을 취소했습니다. 이전 대화와 세션은 유지됩니다.")
+		this.callbacks.addCancellationMarker()
 		this.callbacks.updateTask()
 		try {
 			await this.callbacks.runHook(hookSessionId)

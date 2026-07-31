@@ -329,6 +329,24 @@ test("SDK user input envelopes project as the original user text", () => {
 	assert.equal(messages[0].text, "?")
 })
 
+test("SDK transcript hydration keeps user attachments out of the visible text", () => {
+	const messages = sdkMessagesToClineMessages([
+		{
+			role: "user",
+			content: [
+				{ type: "text", text: '<user_input mode="act">이미지와 파일을 검토해줘</user_input>' },
+				{ type: "image", data: "aW1hZ2U=", mediaType: "image/png" },
+				{ type: "file", path: "C:\\workspace\\notes.txt", content: "notes" },
+			],
+		},
+	], { id: "session-attachments", task: "이미지와 파일을 검토해줘" })
+
+	assert.equal(messages.length, 1)
+	assert.equal(messages[0].text, "이미지와 파일을 검토해줘")
+	assert.deepEqual(messages[0].images, ["data:image/png;base64,aW1hZ2U="])
+	assert.deepEqual(messages[0].files, ["C:\\workspace\\notes.txt"])
+})
+
 test("transcript reconciliation repairs previously persisted SDK user input envelopes", () => {
 	const result = reconcileTranscriptMessages(
 		[{ type: "say", say: "user_feedback", text: '<user_input mode="act">?</user_input>' }],

@@ -1,9 +1,10 @@
 import { AskResponseRequest } from "@shared/proto/cline/task"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import VSCodeButtonLink from "@/components/common/VSCodeButtonLink"
 import { useClineAuth } from "@/context/ClineAuthContext"
 import { AccountServiceClient, TaskServiceClient } from "@/services/grpcClient"
+import { createClientOperationId } from "@/services/grpcClientBase"
 
 interface CreditLimitErrorProps {
 	currentBalance: number
@@ -27,6 +28,8 @@ const CreditLimitError: React.FC<CreditLimitErrorProps> = ({
 }) => {
 	const { activeOrganization } = useClineAuth()
 	const [fullBuyCreditsUrl, setFullBuyCreditsUrl] = useState<string>("")
+	const [retrying, setRetrying] = useState(false)
+	const retryInFlightRef = useRef(false)
 
 	const dashboardUrl = useMemo(() => {
 		return buyCreditsUrl ?? (activeOrganization?.organizationId ? DEFAULT_BUY_CREDITS_URL.ORG : DEFAULT_BUY_CREDITS_URL.USER)
@@ -74,15 +77,25 @@ const CreditLimitError: React.FC<CreditLimitErrorProps> = ({
 			<VSCodeButton
 				appearance="secondary"
 				className="w-full"
+				disabled={retrying}
 				onClick={async () => {
+					if (retryInFlightRef.current) {
+						return
+					}
+					retryInFlightRef.current = true
+					setRetrying(true)
 					try {
 						await TaskServiceClient.askResponse(
 							AskResponseRequest.create({
 								responseType: "yesButtonClicked",
+								clientOperationId: createClientOperationId(),
 							}),
 						)
 					} catch (error) {
 						console.error("Error invoking action:", error)
+					} finally {
+						retryInFlightRef.current = false
+						setRetrying(false)
 					}
 				}}>
 				<span className="codicon codicon-refresh mr-1.5" />
