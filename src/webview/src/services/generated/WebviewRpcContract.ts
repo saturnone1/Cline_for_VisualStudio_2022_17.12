@@ -556,18 +556,10 @@ export const WEBVIEW_RPC_PAYLOAD_SHAPES = {
 	"ModeRequest": {
 		"fields": {
 			"mode": {
-				"type": "string",
-				"values": [
-					"plan",
-					"act"
-				]
+				"type": "string"
 			},
 			"value": {
-				"type": "string",
-				"values": [
-					"plan",
-					"act"
-				]
+				"type": "string"
 			}
 		},
 		"allowAdditionalFields": true
@@ -3481,8 +3473,8 @@ export type WebviewRpcPayloadShapeMap = {
 		[key: string]: unknown
 	}
 	"ModeRequest": {
-		"mode"?: "plan" | "act"
-		"value"?: "plan" | "act"
+		"mode"?: string
+		"value"?: string
 		[key: string]: unknown
 	}
 	"ModeResponse": {

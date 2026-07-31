@@ -17,3 +17,21 @@ test("host request timeout rejects and removes the pending request", async () =>
 	)
 	assert.equal(connection.pending.size, 0)
 })
+
+test("host requests preserve valid falsy payloads", async () => {
+	let written = ""
+	const socket = {
+		destroyed: false,
+		writable: true,
+		writableEnded: false,
+		write: (line, callback) => { written = line; callback?.(); return true },
+	}
+	const connection = { socket, nextId: 1, pending: new Map() }
+	const request = sendHostRequest(connection, "workspace.readTextFile", false)
+
+	assert.equal(JSON.parse(written).params, false)
+	const pending = connection.pending.get("1")
+	connection.pending.delete("1")
+	pending.resolve({ ok: true })
+	assert.deepEqual(await request, { ok: true })
+})

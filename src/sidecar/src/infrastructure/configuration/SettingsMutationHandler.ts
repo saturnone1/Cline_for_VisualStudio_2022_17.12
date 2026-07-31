@@ -8,6 +8,7 @@ type Callbacks = Readonly<{
 	profiles: ApiConfigurationProfileManager
 	refreshWebTools: () => void
 	runtimeChanged: () => void
+	connectionChanged: () => void
 }>
 
 export class SettingsMutationHandler {
@@ -16,11 +17,12 @@ export class SettingsMutationHandler {
 	apply(message: unknown) {
 		const request = asRecord(message), state = this.callbacks.state()
 		let runtimeSettingsChanged = false
+		let connectionSettingsChanged = false
 		const apiConfigurationUpdate = extractApiConfigurationUpdate(request)
 		if (Object.keys(apiConfigurationUpdate).length > 0) {
 			state.apiConfiguration = normalizeApiConfiguration({ ...asRecord(state.apiConfiguration), ...compactApiConfiguration(apiConfigurationUpdate) })
 			this.callbacks.profiles.syncActive()
-			runtimeSettingsChanged = true
+			connectionSettingsChanged = true
 		}
 		const autoApprovalUpdate = extractAutoApprovalSettingsUpdate(request)
 		if (Object.keys(autoApprovalUpdate).length > 0) {
@@ -42,26 +44,28 @@ export class SettingsMutationHandler {
 		if ("mcpDisplayMode" in request) state.mcpDisplayMode = normalizeMcpDisplayMode(request.mcpDisplayMode, readString(state.mcpDisplayMode))
 		for (const key of SIMPLE_SETTING_KEYS) {
 			if (!(key in request) || key === "apiConfiguration" || key === "autoApprovalSettings") continue
-			state[key === "nativeToolCallEnabled" ? "nativeToolCallSetting" : key] = request[key]
+			state[key] = request[key]
 			if (isRuntimeSettingsKey(key)) runtimeSettingsChanged = true
 		}
+		if (typeof request.useAutoCondense === "boolean") state.autoCondensePreferenceVersion = 1
 		if (request.yoloModeToggled === true) state.mode = "act"
 		if ("apiConfigurationProfiles" in request) {
 			state.apiConfigurationProfiles = normalizeApiConfigurationProfiles(request.apiConfigurationProfiles, asRecord(state.apiConfiguration), state.planActSeparateModelsSetting === true)
-			runtimeSettingsChanged = true
+			connectionSettingsChanged = true
 		}
 		if ("activeApiConfigurationProfileId" in request) {
 			this.callbacks.profiles.activate(readString(request.activeApiConfigurationProfileId))
-			runtimeSettingsChanged = true
+			connectionSettingsChanged = true
 		} else if ("apiConfigurationProfiles" in request) this.callbacks.profiles.ensure()
 		if ("planActSeparateModelsSetting" in request && !("activeApiConfigurationProfileId" in request)) {
 			this.callbacks.profiles.syncActive()
-			runtimeSettingsChanged = true
+			connectionSettingsChanged = true
 		}
+		if (connectionSettingsChanged) this.callbacks.connectionChanged()
 		if (runtimeSettingsChanged) this.callbacks.runtimeChanged()
 	}
 }
 
-const SIMPLE_SETTING_KEYS = ["apiConfiguration", "autoApprovalSettings", "mode", "planActSeparateModelsSetting", "uiLanguage", "preferredLanguage", "telemetrySetting", "subagentsEnabled", "scheduledAgentsEnabled", "hooksEnabled", "showFeatureTips", "backgroundEditEnabled", "enableCheckpointsSetting", "yoloModeToggled", "doubleCheckCompletionEnabled", "lazyTeammateModeEnabled", "mcpResponsesCollapsed", "enableParallelToolCalling", "nativeToolCallEnabled", "strictPlanModeEnabled", "useAutoCondense", "customPrompt"] as const
+const SIMPLE_SETTING_KEYS = ["apiConfiguration", "autoApprovalSettings", "mode", "planActSeparateModelsSetting", "uiLanguage", "preferredLanguage", "telemetrySetting", "subagentsEnabled", "scheduledAgentsEnabled", "hooksEnabled", "showFeatureTips", "backgroundEditEnabled", "enableCheckpointsSetting", "yoloModeToggled", "lazyTeammateModeEnabled", "mcpResponsesCollapsed", "enableParallelToolCalling", "strictPlanModeEnabled", "useAutoCondense", "customPrompt", "terminalReuseEnabled", "terminalOutputLineLimit", "defaultTerminalProfile"] as const
 function asRecord(value: unknown): State { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as State : {} }
 function readString(value: unknown) { return typeof value === "string" ? value : "" }

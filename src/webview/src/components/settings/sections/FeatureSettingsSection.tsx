@@ -65,8 +65,8 @@ const agentFeatures: FeatureToggle[] = [
 	},
 	{
 		id: "auto-compact",
-		label: "Auto Compact (requires usage)",
-		description: "Ask to compact when reliable context usage is available. Providers that do not report usage keep this unavailable.",
+		label: "SDK Auto Compact",
+		description: "Let the Cline SDK compact the active session before model requests when its full context approaches the model limit.",
 		stateKey: "useAutoCondense",
 		settingKey: "useAutoCondense",
 	},
@@ -126,14 +126,6 @@ const experimentalFeatures: FeatureToggle[] = [
 			"Execute tasks without user's confirmation. Auto-switches from Plan to Act mode and disables the ask question tool. Use with extreme caution.",
 		stateKey: "yoloModeToggled",
 		settingKey: "yoloModeToggled",
-	},
-	{
-		id: "double-check-completion",
-		label: "Double-Check Completion",
-		description:
-			"Rejects the first completion attempt and asks the model to re-verify its work against the original task requirements before accepting.",
-		stateKey: "doubleCheckCompletionEnabled",
-		settingKey: "doubleCheckCompletionEnabled",
 	},
 	{
 		id: "lazy-teammate",
@@ -228,7 +220,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		remoteConfigSettings,
 		enableParallelToolCalling,
 		backgroundEditEnabled,
-		doubleCheckCompletionEnabled,
 		lazyTeammateModeEnabled,
 		showFeatureTips,
 	} = useExtensionState()
@@ -251,7 +242,7 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 				"scheduled-agents": "예약 에이전트",
 				"parallel-tool-calling": "병렬 도구 호출",
 				"strict-plan-mode": "엄격한 Plan 모드",
-				"auto-compact": "자동 압축(사용량 필요)",
+				"auto-compact": "SDK 자동 압축",
 				"focus-chain": "Focus Chain",
 				"show-feature-tips": "기능 팁",
 				"background-edit": "백그라운드 편집",
@@ -259,7 +250,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 				"cline-web-tools": "LIG VS 웹 도구",
 				worktrees: "워크트리",
 				yolo: "Yolo 모드",
-				"double-check-completion": "완료 재확인",
 				"lazy-teammate": "느슨한 팀메이트 모드",
 				hooks: "훅",
 			}
@@ -268,7 +258,7 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 				"scheduled-agents": "로컬 .cline/cron 사양으로 SDK 작업 영역 자동화를 켭니다.",
 				"parallel-tool-calling": "여러 도구 호출을 동시에 실행합니다.",
 				"strict-plan-mode": "Plan 모드에서 파일 편집을 막습니다.",
-				"auto-compact": "신뢰 가능한 컨텍스트 사용량이 있을 때 압축을 요청합니다. 사용량을 보고하지 않는 공급자에서는 사용할 수 없습니다.",
+				"auto-compact": "전체 모델 요청이 컨텍스트 한도에 가까워지면 Cline SDK가 현재 세션을 자동으로 압축합니다.",
 				"focus-chain": "상호작용 사이의 컨텍스트 집중도를 유지합니다.",
 				"show-feature-tips": "모델이 생각하는 동안 LIG VS 기능 팁을 표시합니다.",
 				"background-edit": "에디터 포커스를 빼앗지 않고 편집합니다.",
@@ -276,7 +266,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 				"cline-web-tools": "웹 탐색과 검색 기능을 사용할 수 있게 합니다.",
 				worktrees: "병렬 LIG VS 작업을 위한 git worktree 관리를 켭니다.",
 				yolo: "사용자 확인 없이 작업을 실행합니다. Plan에서 Act로 자동 전환하며 질문 도구를 비활성화합니다. 매우 주의해서 사용하세요.",
-				"double-check-completion": "첫 완료 시도를 거부하고 원래 요구사항 기준으로 작업을 재검증하게 합니다.",
 				"lazy-teammate": "가벼운 재미용 모드입니다.",
 				hooks: "작업 실행 중 생명주기 및 도구 훅을 켭니다.",
 			}
@@ -299,7 +288,6 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		worktreesEnabled: worktreesEnabled?.user,
 		enableParallelToolCalling,
 		backgroundEditEnabled,
-		doubleCheckCompletionEnabled,
 		lazyTeammateModeEnabled,
 		yoloModeToggled: isYoloRemoteLocked ? remoteConfigSettings?.yoloModeToggled : yoloModeToggled,
 	}

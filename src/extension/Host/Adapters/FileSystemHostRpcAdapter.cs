@@ -16,6 +16,7 @@ namespace VsClineAgent.Host.Adapters
         private const long DefaultMaximumReadBytes = 8L * 1024L * 1024L;
         private const int DefaultMaximumScannedEntries = 50000;
         private const int DefaultTraversalTimeoutMilliseconds = 5000;
+        private static readonly TimeSpan SearchRegexTimeout = TimeSpan.FromMilliseconds(250);
         private readonly long _maximumReadBytes;
         private readonly int _maximumScannedEntries;
         private readonly int _traversalTimeoutMilliseconds;
@@ -55,8 +56,9 @@ namespace VsClineAgent.Host.Adapters
             }
         }
 
-        public Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             JToken result;
             switch (method)
             {
@@ -78,10 +80,10 @@ namespace VsClineAgent.Host.Adapters
                     result = CreateDirectory(parameters);
                     break;
                 case "workspace.listFiles":
-                    result = ListFiles(parameters);
+                    result = ListFiles(parameters, cancellationToken);
                     break;
                 case "workspace.searchFiles":
-                    result = SearchFiles(parameters);
+                    result = SearchFiles(parameters, cancellationToken);
                     break;
                 case "workspace.selectFiles":
                     result = SelectFiles(parameters);
@@ -140,7 +142,7 @@ namespace VsClineAgent.Host.Adapters
             return new JObject { ["success"] = true };
         }
 
-        private JObject ListFiles(JToken? parameters)
+        private JObject ListFiles(JToken? parameters, System.Threading.CancellationToken cancellationToken)
         {
             var root = GetString(parameters, "path");
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -165,9 +167,11 @@ namespace VsClineAgent.Host.Adapters
 
             while (pendingDirectories.Count > 0 && !truncated)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var directory = pendingDirectories.Pop();
                 VisitDirectoryEntries(directory, entry =>
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!budget.TryVisit())
                     {
                         truncated = true;
@@ -207,7 +211,7 @@ namespace VsClineAgent.Host.Adapters
             };
         }
 
-        private JObject SearchFiles(JToken? parameters)
+        private JObject SearchFiles(JToken? parameters, System.Threading.CancellationToken cancellationToken)
         {
             var root = GetString(parameters, "path");
             var query = GetString(parameters, "query");
@@ -221,6 +225,19 @@ namespace VsClineAgent.Host.Adapters
             }
 
             var limit = Math.Max(1, GetInt(parameters, "limit") ?? 200);
+            Regex searchPattern;
+            try
+            {
+                searchPattern = new Regex(
+                    query,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    SearchRegexTimeout);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidOperationException($"Invalid search regular expression: {ex.Message}", ex);
+            }
+
             var matches = new JArray();
             var ignoreRules = LoadClineIgnoreRules(root);
             var count = 0;
@@ -231,9 +248,11 @@ namespace VsClineAgent.Host.Adapters
 
             while (pendingDirectories.Count > 0 && !truncated)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var directory = pendingDirectories.Pop();
                 VisitDirectoryEntries(directory, entry =>
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!budget.TryVisit())
                     {
                         truncated = true;
@@ -255,8 +274,8 @@ namespace VsClineAgent.Host.Adapters
                         return false;
                     }
 
-                    if (Path.GetFileName(entry).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        FileContains(entry, query))
+                    if (searchPattern.IsMatch(Path.GetFileName(entry)) ||
+                        FileContains(entry, searchPattern))
                     {
                         matches.Add(entry);
                         count++;
@@ -319,7 +338,7 @@ namespace VsClineAgent.Host.Adapters
                    extension == ".bmp";
         }
 
-        private static bool FileContains(string filePath, string query)
+        private static bool FileContains(string filePath, Regex searchPattern)
         {
             try
             {
@@ -327,8 +346,11 @@ namespace VsClineAgent.Host.Adapters
                 if (info.Length > 1024 * 1024)
                     return false;
 
-                return File.ReadAllText(filePath)
-                    .IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+                return searchPattern.IsMatch(File.ReadAllText(filePath));
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                throw;
             }
             catch
             {
@@ -338,20 +360,37 @@ namespace VsClineAgent.Host.Adapters
 
         private static void VisitDirectoryEntries(string directory, Func<string, bool> visitor, ref bool truncated)
         {
+            IEnumerator<string> entries;
             try
             {
-                using (var entries = Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly).GetEnumerator())
-                {
-                    while (entries.MoveNext())
-                    {
-                        if (!visitor(entries.Current))
-                            return;
-                    }
-                }
+                entries = Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly).GetEnumerator();
             }
             catch
             {
                 truncated = true;
+                return;
+            }
+
+            using (entries)
+            {
+                while (true)
+                {
+                    string entry;
+                    try
+                    {
+                        if (!entries.MoveNext())
+                            break;
+                        entry = entries.Current;
+                    }
+                    catch
+                    {
+                        truncated = true;
+                        return;
+                    }
+
+                    if (!visitor(entry))
+                        return;
+                }
             }
         }
 
@@ -380,14 +419,11 @@ namespace VsClineAgent.Host.Adapters
             return parts.Any(part =>
                 string.Equals(part, ".git", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, ".vs", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(part, ".vscode", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "node_modules", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "bin", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "obj", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(part, "dist", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(part, "coverage", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(part, "WebView2Runtime", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(part, "Sidecar", StringComparison.OrdinalIgnoreCase));
+                string.Equals(part, "coverage", StringComparison.OrdinalIgnoreCase));
         }
 
         private sealed class ClineIgnoreRule

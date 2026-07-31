@@ -130,7 +130,7 @@ export class SidecarRpcServer {
 		const runtime = scope.runtime
 		switch (method) {
 			case "health.ping":
-				return { status: "ok", sidecar: "cline-sidecar", protocol: 1, node: process.version, clineSdk: runtime.status, received: params || null }
+				return { status: "ok", sidecar: "cline-sidecar", protocol: 1, node: process.version, clineSdk: runtime.status, received: params ?? null }
 			case "host.roundtripTest":
 				return { ...asRecord(await scope.roundtrip()), clineSdk: await runtime.ensureStarted() }
 			case "sdk.status": return runtime.status

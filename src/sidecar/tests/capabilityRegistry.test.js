@@ -14,6 +14,7 @@ test("capability registry is the single runtime source for WebView coverage", ()
 
 test("capability registry exposes stable support queries", () => {
 	assert.equal(capabilityRegistry.isSupported("sessions"), true)
+	assert.equal(capabilityRegistry.isSupported("sdk-checkpoint-diff-streams"), true)
 	assert.equal(capabilityRegistry.isSupported("mcp-marketplace"), false)
 	assert.equal(capabilityRegistry.get("mcp-marketplace").status, "partial")
 	assert.match(capabilityRegistry.get("vscode-auth").reason, /Visual Studio 2022/)

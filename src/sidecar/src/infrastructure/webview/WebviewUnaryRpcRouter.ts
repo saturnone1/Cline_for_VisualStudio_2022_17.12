@@ -57,7 +57,7 @@ export function isWebviewRpcRequestCancelledError(error: unknown): error is Webv
 
 export class WebviewUnaryRpcRouter {
 	private readonly routes: UnaryRouteRegistry
-	private readonly activeRequests = new Map<string, AbortController>()
+	private readonly activeRequests = new Map<string, Readonly<{ key: string; controller: AbortController }>>()
 	private controlTail: Promise<void> = Promise.resolve()
 
 	constructor(private readonly dependencies: Dependencies) {
@@ -125,12 +125,13 @@ export class WebviewUnaryRpcRouter {
 		const operation = separator > 0 ? webviewRpcOperation(key.slice(0, separator), key.slice(separator + 1)) : undefined
 		const route = operation && "route" in operation ? operation.route : undefined
 		if (!route || route === "stream") return null
+		if (TASK_INTERRUPT_KEYS.has(key)) this.abortActiveTaskOperations(requestId)
 		const controller = new AbortController()
-		this.activeRequests.get(requestId)?.abort()
-		this.activeRequests.set(requestId, controller)
+		this.activeRequests.get(requestId)?.controller.abort()
+		this.activeRequests.set(requestId, { key, controller })
 		try {
 			const execute = () => this.routes[route](key, requestId, message, controller.signal)
-			const result = CONTROL_ROUTES.has(route)
+			const result = CONTROL_ROUTES.has(route) && !TASK_INTERRUPT_KEYS.has(key)
 				? await this.executeControl(execute, controller.signal, requestId)
 				: await execute()
 			if (controller.signal.aborted) throw new WebviewRpcRequestCancelledError(requestId)
@@ -141,7 +142,7 @@ export class WebviewUnaryRpcRouter {
 			}
 			throw error
 		} finally {
-			if (this.activeRequests.get(requestId) === controller) this.activeRequests.delete(requestId)
+			if (this.activeRequests.get(requestId)?.controller === controller) this.activeRequests.delete(requestId)
 		}
 	}
 
@@ -157,10 +158,16 @@ export class WebviewUnaryRpcRouter {
 	}
 
 	cancel(requestId: string) {
-		const controller = this.activeRequests.get(requestId)
-		if (!controller) return false
-		controller.abort()
+		const active = this.activeRequests.get(requestId)
+		if (!active) return false
+		active.controller.abort()
 		return true
+	}
+
+	private abortActiveTaskOperations(exceptRequestId: string) {
+		for (const [requestId, active] of this.activeRequests) {
+			if (requestId !== exceptRequestId && isInterruptibleTaskOperation(active.key)) active.controller.abort()
+		}
 	}
 
 	private async handleMcp(key: string, requestId: string, message: unknown, signal: AbortSignal) {
@@ -192,6 +199,15 @@ const CONTROL_ROUTES = new Set<UnaryRoute>([
 	"mcp",
 	"instructionSettings",
 ])
+
+// Cancellation and leaving a task are control interrupts. Serializing them behind
+// a long-running compact/send operation would make the operation impossible to stop.
+const TASK_INTERRUPT_KEYS = new Set(["TaskService.cancelTask", "TaskService.clearTask"])
+
+function isInterruptibleTaskOperation(key: string) {
+	return key === "SlashService.condense"
+		|| (key.startsWith("TaskService.") && !TASK_INTERRUPT_KEYS.has(key))
+}
 
 function waitForControlExecution<T>(operation: Promise<T>, signal: AbortSignal, requestId: string, hasStarted: () => boolean) {
 	if (signal.aborted) return Promise.reject(new WebviewRpcRequestCancelledError(requestId))

@@ -32,7 +32,7 @@ namespace VsClineAgent.Host
         private int _receiveLoopRunning;
         private int _disposed;
 
-        public event Func<string, JToken?, Task<JToken?>>? RequestReceived;
+        public event Func<string, JToken?, CancellationToken, Task<JToken?>>? RequestReceived;
         public event Action<Exception>? ConnectionClosed;
 
         public NamedPipeJsonRpcClient(
@@ -156,12 +156,25 @@ namespace VsClineAgent.Host
                     }
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (OperationCanceledException ex)
+            {
+                terminalError = new IOException(
+                    "The LIG VS sidecar connection ended while receiving a host request.",
+                    ex);
+            }
+            catch (Exception ex)
             {
                 terminalError = ex;
             }
             finally
             {
+                // Every inbound handler belongs to this connection. Once the receive loop
+                // ends, no handler can deliver a valid response, regardless of whether the
+                // loop ended through EOF, transport failure, or local shutdown.
+                _receiveLoopCancellation?.Cancel();
                 Volatile.Write(ref _receiveLoopRunning, 0);
                 if (terminalError != null)
                     FailAllPendingRequests(terminalError);
@@ -255,13 +268,16 @@ namespace VsClineAgent.Host
                 var handler = RequestReceived;
                 var result = handler == null
                     ? null
-                    : await handler(method, parameters).ConfigureAwait(false);
+                    : await handler(method, parameters, cancellationToken).ConfigureAwait(false);
 
                 await WriteMessageAsync(new JObject
                 {
                     ["id"] = id,
                     ["result"] = result
                 }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
             }
             catch (Exception ex)
             {

@@ -3,19 +3,20 @@ import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state
 import { SquareArrowOutUpRightIcon } from "lucide-react"
 import { marked } from "marked"
 import type { ComponentProps } from "react"
-import React, { memo, useEffect, useMemo, useRef, useState } from "react"
+import React, { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight, { Options } from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 import type { Node } from "unist"
 import { visit } from "unist-util-visit"
-import MermaidBlock from "@/components/common/MermaidBlock"
 import { Button } from "@/components/ui/button"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, StateServiceClient } from "@/services/grpcClient"
 import { WithCopyButton } from "./CopyButton"
 import UnsafeImage from "./UnsafeImage"
+
+const MermaidBlock = lazy(() => import("@/components/common/MermaidBlock"))
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
 	try {
@@ -44,7 +45,11 @@ const MemoizedMarkdownBlock = memo(
 						const className = props.className || ""
 						if (className.includes("language-mermaid")) {
 							const codeText = String(props.children || "")
-							return <MermaidBlock code={codeText} />
+							return (
+								<Suspense fallback={<code className={className}>{codeText}</code>}>
+									<MermaidBlock code={codeText} />
+								</Suspense>
+							)
 						}
 
 						// Use the async file check component for potential file paths
@@ -129,11 +134,11 @@ const ActModeHighlight: React.FC = () => {
 			onClick={() => {
 				// Only toggle to Act mode if we're currently in Plan mode
 				if (mode === "plan") {
-					StateServiceClient.togglePlanActModeProto(
+					void StateServiceClient.togglePlanActModeProto(
 						TogglePlanActModeRequest.create({
 							mode: PlanActMode.ACT,
 						}),
-					)
+					).catch((error) => console.error("Failed to switch to Act mode", error))
 				}
 			}}
 			title={mode === "plan" ? "Click to toggle to Act Mode" : "Already in Act Mode"}>

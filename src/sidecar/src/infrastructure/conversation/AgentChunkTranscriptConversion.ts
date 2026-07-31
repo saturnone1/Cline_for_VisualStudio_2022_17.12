@@ -280,8 +280,15 @@ export function agentChunkRecordToTranscriptText(record: Record<string, unknown>
 		return contentToText([record])
 	}
 
-	if (type === "notice" || type === "status" || type === "error") {
-		return firstString(record, ["message", "text", "error", "status"])
+	// Canonical AgentError events own error projection. Rendering the parallel
+	// chunk would duplicate the error and object-valued payloads become
+	// "[object Object]" in weak-provider streams.
+	if (type === "error") {
+		return ""
+	}
+
+	if (type === "notice" || type === "status") {
+		return ""
 	}
 
 	return ""

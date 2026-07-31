@@ -16,13 +16,17 @@ export class CheckpointHandler {
 		return { checkpointRunCount, restoredSessionId: readString(result.sessionId) || readString(asRecord(result.startResult).sessionId) }
 	}
 
-	describe(request: CheckpointTargetRequest, context: CompareContext) {
+	async compare(request: CheckpointTargetRequest, context: CompareContext) {
 		if (!context.taskItem) return { success: false as const, supported: false as const, message: "No SDK-backed task is selected for checkpoint compare." }
 		const messageTs = request.messageTs
 		const checkpointRunCount = targetRunCount(request, context.messages, messageTs)
 		if (checkpointRunCount === undefined) return { success: false as const, supported: false as const, message: "No SDK checkpoint run count is available for this compare target." }
 		const checkpointMessage = findCheckpointMessage(context.messages, checkpointRunCount, messageTs)
-		return createCheckpointDiffDescription({ checkpointRunCount, sessionId: readString(context.taskItem.id), workspaceRoot: readString(checkpointMessage?.checkpointWorkspaceRoot) || readString(context.taskItem.cwdOnTaskInitialization), createdAt: readNumber(checkpointMessage?.ts), trackedChanges: context.trackedChanges })
+		const sessionId = readString(context.taskItem.id)
+		const workspaceRoot = readString(checkpointMessage?.checkpointWorkspaceRoot) || readString(context.taskItem.cwdOnTaskInitialization)
+		const result = asRecord(await this.agentEngine.compareCheckpoint({ sessionId, checkpointRunCount, cwd: workspaceRoot || undefined }))
+		const diffs = Array.isArray(result.diffs) ? result.diffs.map(asRecord) : []
+		return createCheckpointDiffDescription({ checkpointRunCount, sessionId, workspaceRoot: readString(result.cwd) || workspaceRoot, createdAt: readNumber(checkpointMessage?.ts), diffs, trackedChanges: context.trackedChanges })
 	}
 }
 

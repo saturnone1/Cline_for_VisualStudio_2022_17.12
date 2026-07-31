@@ -35,7 +35,7 @@ namespace VsClineAgent.Services
         private CancellationTokenSource _commandBatchCancellation = new CancellationTokenSource();
         private long _commandSequence;
         private long _outputSequence;
-        private bool _disposed;
+        private int _disposed;
         private readonly WindowsProcessJob _processJob = new WindowsProcessJob();
 
         public VsCommandExecutionService(ICommandOutputWriter? outputWriter = null, int maxShellSessionsPerCwd = MaxShellSessionsPerCwd)
@@ -44,28 +44,38 @@ namespace VsClineAgent.Services
             _maxShellSessionsPerCwd = Math.Max(1, maxShellSessionsPerCwd);
         }
 
+        public Task<bool> ShowOutputAsync()
+        {
+            return _outputWriter is ICommandOutputSurface surface
+                ? surface.ShowAsync()
+                : Task.FromResult(false);
+        }
+
         public async Task<CommandExecutionResult> ExecuteCommandAsync(
             string command,
             string cwd,
             int timeoutSeconds,
-            CancellationToken ct)
+            CancellationToken ct,
+            string profileId = "visual-studio-command-host",
+            bool reuseTerminal = true)
         {
             var commandId = "cmd-" + Interlocked.Increment(ref _commandSequence).ToString("D6");
+            CancellationTokenSource linkedCts;
             CancellationToken batchCancellation;
             lock (_cancellationLock)
             {
-                if (_disposed)
+                if (Volatile.Read(ref _disposed) != 0)
                     throw new ObjectDisposedException(nameof(VsCommandExecutionService));
                 batchCancellation = _commandBatchCancellation.Token;
+                linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    ct,
+                    batchCancellation,
+                    _shutdownCancellation.Token);
             }
 
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                ct,
-                batchCancellation,
-                _shutdownCancellation.Token);
-            linkedCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)));
+            using var linkedCtsScope = linkedCts;
 
-            var session = await AcquireSessionAsync(cwd, linkedCts.Token).ConfigureAwait(false);
+            var session = await AcquireSessionAsync(cwd, profileId, reuseTerminal, linkedCts.Token).ConfigureAwait(false);
             var terminalId = session.TerminalId;
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
@@ -80,15 +90,16 @@ namespace VsClineAgent.Services
                 CurrentDirectory = session.CurrentDirectory,
                 StartedAt = startedAt,
                 Status = "running",
-                IsReusableShell = true,
-                IsHot = TerminalCommandPolicy.IsLikelyLongRunning(command),
-                Shell = "cmd.exe",
+                IsReusableShell = session.IsReusable,
+                IsHot = false,
+                Shell = session.Shell,
             };
             var stdOut = new StringBuilder();
             var stdErr = new StringBuilder();
             runningInfo.StdOutBuffer = stdOut;
             runningInfo.StdErrBuffer = stdErr;
             var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            runningInfo.Completion = tcs;
 
             try
             {
@@ -96,32 +107,66 @@ namespace VsClineAgent.Services
                 await _outputWriter.WriteLineAsync($"  Terminal: {terminalId}");
                 await _outputWriter.WriteLineAsync($"  Working directory: {cwd}");
 
-                session.ActiveCommand = runningInfo;
-                session.ActiveCompletion = tcs;
+				lock (session.StateLock)
+				{
+					session.ActiveCommand = runningInfo;
+					session.ActiveCompletion = tcs;
+				}
                 _activeCommands[commandId] = runningInfo;
 
                 await SendCommandAsync(session, commandId, command, linkedCts.Token).ConfigureAwait(false);
-                await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, linkedCts.Token));
+                var observationWindow = Task.Delay(
+                    TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)),
+                    linkedCts.Token);
+                await Task.WhenAny(tcs.Task, observationWindow);
 
                 if (!tcs.Task.IsCompleted)
                 {
-                    var cancelled = ct.IsCancellationRequested || string.Equals(runningInfo.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
-                    if (cancelled)
-                    {
-                        TryKill(session.Process);
-                        runningInfo.Status = "cancelled";
-                    }
-                    else if (runningInfo.IsHot)
-                    {
-                        runningInfo.Status = "running";
-                        runningInfo.Background = true;
-                    }
-                    else
-                    {
-                        TryKill(session.Process);
-                        runningInfo.Status = "timedOut";
-                    }
+					var transitioned = false;
+					var cancelled = false;
+					var terminateSession = false;
+					lock (session.StateLock)
+					{
+						// The completion marker can arrive between WhenAny and this branch.
+						// Only move to background while holding the same lock used by the
+						// output callback, otherwise a completed command can remain active forever.
+						if (!tcs.Task.IsCompleted)
+						{
+							transitioned = true;
+							cancelled = linkedCts.IsCancellationRequested ||
+								string.Equals(runningInfo.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+							if (cancelled)
+							{
+								runningInfo.Status = "cancelled";
+								session.IsDisposed = true;
+								terminateSession = true;
+							}
+							else if (!session.Process.HasExited)
+							{
+								runningInfo.Status = "running";
+								runningInfo.Background = true;
+							}
+							else
+							{
+								runningInfo.Status = "timedOut";
+								session.IsDisposed = true;
+								terminateSession = true;
+							}
+						}
+					}
+
+					if (!transitioned)
+					{
+						// Completion won the race; continue through the normal result path.
+					}
+					else
+					{
+						var cancellationOwnedByService = batchCancellation.IsCancellationRequested ||
+							_shutdownCancellation.IsCancellationRequested;
+						if (terminateSession && !cancellationOwnedByService)
+							TryKill(session.Process);
                     stopwatch.Stop();
+					var output = CaptureCommandOutput(runningInfo);
                     await _outputWriter.WriteLineAsync(cancelled
                         ? "  Command cancelled."
                         : runningInfo.Background
@@ -138,8 +183,8 @@ namespace VsClineAgent.Services
                         IsHot = runningInfo.IsHot,
                         DurationMs = stopwatch.ElapsedMilliseconds,
                         CurrentDirectory = runningInfo.CurrentDirectory,
-                        StdOut = stdOut.ToString(),
-                        StdErr = stdErr.ToString(),
+						StdOut = output.StdOut,
+						StdErr = output.StdErr,
                         StdOutTruncated = runningInfo.StdOutTruncated,
                         StdErrTruncated = runningInfo.StdErrTruncated,
                     };
@@ -148,6 +193,7 @@ namespace VsClineAgent.Services
                         RecordCompletedCommand(runningInfo, result);
                     }
                     return result;
+					}
                 }
 
                 var exitCode = await tcs.Task;
@@ -155,6 +201,7 @@ namespace VsClineAgent.Services
                     ? "cancelled"
                     : exitCode == 0 ? "completed" : "failed";
                 stopwatch.Stop();
+				var completedOutput = CaptureCommandOutput(runningInfo);
                 await _outputWriter.WriteLineAsync($"  Exit code: {exitCode}");
                 var completedResult = new CommandExecutionResult
                 {
@@ -167,8 +214,8 @@ namespace VsClineAgent.Services
                     IsHot = runningInfo.IsHot,
                     DurationMs = stopwatch.ElapsedMilliseconds,
                     CurrentDirectory = runningInfo.CurrentDirectory,
-                    StdOut = stdOut.ToString(),
-                    StdErr = stdErr.ToString(),
+                    StdOut = completedOutput.StdOut,
+                    StdErr = completedOutput.StdErr,
                     StdOutTruncated = runningInfo.StdOutTruncated,
                     StdErrTruncated = runningInfo.StdErrTruncated,
                 };
@@ -178,8 +225,19 @@ namespace VsClineAgent.Services
             catch (Exception) when (linkedCts.IsCancellationRequested)
             {
                 var cancelled = ct.IsCancellationRequested || batchCancellation.IsCancellationRequested || _shutdownCancellation.IsCancellationRequested;
-                runningInfo.Status = cancelled ? "cancelled" : "timedOut";
+				lock (session.StateLock)
+				{
+					runningInfo.Status = cancelled ? "cancelled" : "timedOut";
+					session.IsDisposed = true;
+				}
+				// A cancellation while a command is being written leaves the shell
+				// protocol state unknown. Never return that shell to the reusable pool.
+				// CancelAll/Dispose own process-tree termination; avoid waiting on the
+				// same Process object concurrently from the command continuation.
+				if (!batchCancellation.IsCancellationRequested && !_shutdownCancellation.IsCancellationRequested)
+					TryKill(session.Process);
                 stopwatch.Stop();
+                var interruptedOutput = CaptureCommandOutput(runningInfo);
                 var interruptedResult = new CommandExecutionResult
                 {
                     CommandId = commandId,
@@ -190,8 +248,8 @@ namespace VsClineAgent.Services
                     IsHot = runningInfo.IsHot,
                     DurationMs = stopwatch.ElapsedMilliseconds,
                     CurrentDirectory = runningInfo.CurrentDirectory,
-                    StdOut = stdOut.ToString(),
-                    StdErr = stdErr.ToString(),
+					StdOut = interruptedOutput.StdOut,
+					StdErr = interruptedOutput.StdErr,
                     StdOutTruncated = runningInfo.StdOutTruncated,
                     StdErrTruncated = runningInfo.StdErrTruncated,
                 };
@@ -203,10 +261,13 @@ namespace VsClineAgent.Services
                 if (!runningInfo.Background)
                 {
                     _activeCommands.TryRemove(commandId, out _);
-                    if (ReferenceEquals(session.ActiveCommand, runningInfo))
+					lock (session.StateLock)
                     {
-                        session.ActiveCommand = null;
-                        session.ActiveCompletion = null;
+						if (ReferenceEquals(session.ActiveCommand, runningInfo))
+						{
+							session.ActiveCommand = null;
+							session.ActiveCompletion = null;
+						}
                     }
                     ReleaseSession(session);
                 }
@@ -220,8 +281,11 @@ namespace VsClineAgent.Services
                 new TerminalProfileInfo
                 {
                     Id = "visual-studio-command-host",
-                    Name = "Visual Studio Command Host",
+                    Name = "Visual Studio Developer Command Prompt",
                 },
+                new TerminalProfileInfo { Id = "visual-studio-developer-powershell", Name = "Visual Studio Developer PowerShell" },
+                new TerminalProfileInfo { Id = "windows-command-prompt", Name = "Windows Command Prompt" },
+                new TerminalProfileInfo { Id = "windows-powershell", Name = "Windows PowerShell" },
             };
 
             return Task.FromResult(profiles);
@@ -262,7 +326,9 @@ namespace VsClineAgent.Services
                     .ToList(),
                 RecentOutput = recentOutput,
                 OutputSequence = Interlocked.Read(ref _outputSequence),
-                Shell = "cmd.exe",
+                Shell = activeCommands.Select(command => command.Shell).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+                    ?? sessions.Select(session => session.Shell).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+                    ?? "cmd.exe",
                 ShellState = TerminalCommandPolicy.BuildShellState(sessions.Count, sessions.Count(session => session.Busy)),
                 ReuseMode = "reusable-cmd-session",
                 CurrentDirectory = currentDirectory,
@@ -290,18 +356,35 @@ namespace VsClineAgent.Services
                 pendingCommands = _commandBatchCancellation;
                 _commandBatchCancellation = new CancellationTokenSource();
             }
-            pendingCommands.Cancel();
+            try
+            {
+                pendingCommands.Cancel();
+            }
+            finally
+            {
+                pendingCommands.Dispose();
+            }
 
             var commands = _activeCommands.Values.ToArray();
-            var processes = commands
-                .Select(command => command.Process)
-                .Where(process => process != null)
-                .GroupBy(process => process!.Id)
-                .Select(group => group.First()!)
-                .ToArray();
-            var terminationTasks = processes.ToDictionary(
-                process => process.Id,
-                process => Task.Run(() => TryKill(process)));
+            var commandProcessIds = new Dictionary<string, int>(StringComparer.Ordinal);
+            var processesById = new Dictionary<int, Process>();
+            foreach (var command in commands)
+            {
+                var process = command.Process;
+                if (process == null || !TryGetProcessId(process, out var processId))
+                    continue;
+                commandProcessIds[command.CommandId] = processId;
+                processesById[processId] = process;
+            }
+
+            foreach (var command in commands)
+            {
+                command.Status = "cancelled";
+                command.Completion?.TrySetCanceled();
+            }
+            var terminationTasks = processesById.ToDictionary(
+                pair => pair.Key,
+                pair => Task.Run(() => TryKill(pair.Value)));
 
             await Task.WhenAll(terminationTasks.Values).ConfigureAwait(false);
 
@@ -315,11 +398,10 @@ namespace VsClineAgent.Services
             var cancelled = 0;
             foreach (var command in commands)
             {
-                var process = command.Process;
-                if (process == null || !terminationTasks.ContainsKey(process.Id))
+                if (!commandProcessIds.TryGetValue(command.CommandId, out var processId) ||
+                    !terminationTasks.ContainsKey(processId))
                     continue;
 
-                command.Status = "cancelled";
                 cancelled++;
                 AppendCommandOutput(command, "stderr", "Command cancelled by user.", new StringBuilder());
                 await _outputWriter.WriteLineAsync($"  Command cancelled: {command.Command}");
@@ -328,50 +410,89 @@ namespace VsClineAgent.Services
             return cancelled;
         }
 
-        private async Task<TerminalShellSession> AcquireSessionAsync(string cwd, CancellationToken cancellationToken)
+        private static bool TryGetProcessId(Process process, out int processId)
+        {
+            try
+            {
+                processId = process.Id;
+                return true;
+            }
+            catch
+            {
+                processId = 0;
+                return false;
+            }
+        }
+
+        private async Task<TerminalShellSession> AcquireSessionAsync(string cwd, string profileId, bool reuseTerminal, CancellationToken cancellationToken)
         {
             var normalizedCwd = string.IsNullOrWhiteSpace(cwd) ? Environment.CurrentDirectory : Path.GetFullPath(cwd);
-            var sessions = _sessionsByCwd.GetOrAdd(normalizedCwd, _ => new List<TerminalShellSession>());
+            var normalizedProfileId = NormalizeProfileId(profileId);
+            if (!reuseTerminal)
+            {
+                var isolated = CreateShellSession(normalizedCwd, normalizedProfileId, 1, false);
+                isolated.Busy = true;
+                return isolated;
+            }
+
+            var sessionKey = normalizedProfileId + "|" + normalizedCwd;
+            var sessions = _sessionsByCwd.GetOrAdd(sessionKey, _ => new List<TerminalShellSession>());
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (_disposed)
+                if (Volatile.Read(ref _disposed) != 0)
                     throw new ObjectDisposedException(nameof(VsCommandExecutionService));
 
                 TerminalShellSession? selected = null;
+                TerminalShellSession[] expired;
                 lock (sessions)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (_disposed)
+                    if (Volatile.Read(ref _disposed) != 0)
                         throw new ObjectDisposedException(nameof(VsCommandExecutionService));
 
-                    sessions.RemoveAll(session => session.IsDisposed || session.Process.HasExited);
+                    expired = sessions
+                        .Where(session => session.IsDisposed || HasExited(session.Process))
+                        .ToArray();
+                    if (expired.Length > 0)
+                    {
+                        var expiredSet = new HashSet<TerminalShellSession>(expired);
+                        sessions.RemoveAll(expiredSet.Contains);
+                    }
                     selected = sessions.FirstOrDefault(session => !session.Busy);
                     if (selected == null && sessions.Count < _maxShellSessionsPerCwd)
                     {
-                        selected = CreateShellSession(normalizedCwd, sessions.Count + 1);
+                        selected = CreateShellSession(normalizedCwd, normalizedProfileId, sessions.Count + 1, true);
                         sessions.Add(selected);
                     }
 
                     if (selected != null)
                     {
                         selected.Busy = true;
-                        return selected;
                     }
                 }
+
+                // Process shutdown can invoke Exited callbacks that re-enter the
+                // session registry, so never wait for a process while holding its list lock.
+                foreach (var expiredSession in expired)
+                    DisposeSession(expiredSession);
+
+                if (selected != null)
+                    return selected;
 
                 await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private TerminalShellSession CreateShellSession(string cwd, int ordinal)
+        private TerminalShellSession CreateShellSession(string cwd, string profileId, int ordinal, bool reusable)
         {
-            var terminalId = TerminalCommandPolicy.BuildTerminalId(cwd, ordinal);
+            var profile = ResolveShellProfile(profileId);
+            var terminalId = TerminalCommandPolicy.BuildTerminalId(cwd, ordinal, profile.Id);
             var psi = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = "/d /q /k chcp 65001 >nul",
+                FileName = profile.FileName,
+                Arguments = profile.Arguments,
                 WorkingDirectory = cwd,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
@@ -386,9 +507,12 @@ namespace VsClineAgent.Services
             var session = new TerminalShellSession
             {
                 TerminalId = terminalId,
+                ProfileId = profile.Id,
+                Shell = profile.Shell,
                 WorkingDirectory = cwd,
                 CurrentDirectory = cwd,
                 Process = process,
+                IsReusable = reusable,
             };
 
             process.OutputDataReceived += (_, e) => HandleSessionOutput(session, "stdout", e.Data);
@@ -397,6 +521,11 @@ namespace VsClineAgent.Services
 
             process.Start();
             _processJob.Assign(process);
+            if (!string.IsNullOrWhiteSpace(profile.InitializationCommand))
+            {
+                process.StandardInput.WriteLine(profile.InitializationCommand);
+                process.StandardInput.Flush();
+            }
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             return session;
@@ -408,16 +537,63 @@ namespace VsClineAgent.Services
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await session.Process.StandardInput.WriteLineAsync(command).ConfigureAwait(false);
-                await session.Process.StandardInput.WriteLineAsync("set \"__VSCLINE_EXIT=%ERRORLEVEL%\"").ConfigureAwait(false);
-                await session.Process.StandardInput.WriteLineAsync($"echo __VSCLINE_COMMAND_CWD__{commandId}__%CD%").ConfigureAwait(false);
-                await session.Process.StandardInput.WriteLineAsync($"echo __VSCLINE_COMMAND_DONE__{commandId}__%__VSCLINE_EXIT%").ConfigureAwait(false);
-                await session.Process.StandardInput.FlushAsync().ConfigureAwait(false);
+                var input = new StringBuilder().AppendLine(command);
+                if (IsPowerShellProfile(session.ProfileId))
+                {
+                    input.AppendLine("$__vsclineSucceeded = $?");
+                    input.AppendLine("$__vsclineExit = if ($__vsclineSucceeded) { 0 } elseif ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 1 }");
+                    input.AppendLine($"Write-Output \"__VSCLINE_COMMAND_CWD__{commandId}__$((Get-Location).Path)\"");
+                    input.AppendLine($"Write-Output \"__VSCLINE_COMMAND_DONE__{commandId}__$__vsclineExit\"");
+                }
+                else
+                {
+                    input.AppendLine("set \"__VSCLINE_EXIT=%ERRORLEVEL%\"");
+                    input.AppendLine($"echo __VSCLINE_COMMAND_CWD__{commandId}__%CD%");
+                    input.AppendLine($"echo __VSCLINE_COMMAND_DONE__{commandId}__%__VSCLINE_EXIT%");
+                }
+
+                // FlushFileBuffers can wait until a long-running child command reads
+                // the following marker lines. Queue the complete protocol payload in
+                // one pipe write instead so the foreground observation window can start.
+                var payload = Encoding.UTF8.GetBytes(input.ToString());
+                await AwaitIoOrCancellationAsync(
+                    () => session.Process.StandardInput.BaseStream.WriteAsync(payload, 0, payload.Length, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+                var flushTask = session.Process.StandardInput.BaseStream.FlushAsync(cancellationToken);
+                _ = flushTask.ContinueWith(
+                    completed => { _ = completed.Exception; },
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
             finally
             {
                 session.InputLock.Release();
             }
+        }
+
+        private static async Task AwaitIoOrCancellationAsync(Func<Task> ioOperation, CancellationToken cancellationToken)
+        {
+            var ioTask = ioOperation();
+            if (ioTask.IsCompleted)
+            {
+                await ioTask.ConfigureAwait(false);
+                return;
+            }
+
+            var cancellationTask = Task.Delay(Timeout.Infinite, cancellationToken);
+            if (await Task.WhenAny(ioTask, cancellationTask).ConfigureAwait(false) == ioTask)
+            {
+                await ioTask.ConfigureAwait(false);
+                return;
+            }
+
+            _ = ioTask.ContinueWith(
+                completed => { _ = completed.Exception; },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         private void HandleSessionOutput(TerminalShellSession session, string stream, string? text)
@@ -428,7 +604,8 @@ namespace VsClineAgent.Services
             var marker = CompletionMarkerRegex.Match(text.Trim());
             if (stream == "stdout" && marker.Success)
             {
-                var command = session.ActiveCommand;
+				RunningCommandInfo? command;
+				lock (session.StateLock) command = session.ActiveCommand;
                 if (command != null && string.Equals(command.CommandId, marker.Groups["id"].Value, StringComparison.Ordinal))
                 {
                     if (int.TryParse(marker.Groups["exit"].Value, out var exitCode))
@@ -442,7 +619,8 @@ namespace VsClineAgent.Services
             var cwdMarker = CurrentDirectoryMarkerRegex.Match(text.Trim());
             if (stream == "stdout" && cwdMarker.Success)
             {
-                var command = session.ActiveCommand;
+				RunningCommandInfo? command;
+				lock (session.StateLock) command = session.ActiveCommand;
                 if (command != null && string.Equals(command.CommandId, cwdMarker.Groups["id"].Value, StringComparison.Ordinal))
                 {
                     var currentDirectory = cwdMarker.Groups["cwd"].Value.Trim();
@@ -455,7 +633,8 @@ namespace VsClineAgent.Services
                 return;
             }
 
-            var active = session.ActiveCommand;
+			RunningCommandInfo? active;
+			lock (session.StateLock) active = session.ActiveCommand;
             if (active == null)
             {
                 _outputHistory.Enqueue(new CommandOutputLine
@@ -476,21 +655,28 @@ namespace VsClineAgent.Services
 
         private void CompleteBackgroundCommand(TerminalShellSession session, int exitCode, string status)
         {
-            var command = session.ActiveCommand;
-            if (command == null)
-                return;
+			RunningCommandInfo? command;
+			lock (session.StateLock)
+			{
+				command = session.ActiveCommand;
+				if (command == null)
+					return;
 
-            command.Status = string.Equals(command.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
-                ? "cancelled"
-                : status;
-            session.ActiveCompletion?.TrySetResult(exitCode);
+				command.Status = string.Equals(command.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+					? "cancelled"
+					: status;
+				session.ActiveCompletion?.TrySetResult(exitCode);
 
-            if (!command.Background)
-                return;
+				if (!command.Background)
+					return;
 
-            command.Background = false;
+				command.Background = false;
+				session.ActiveCommand = null;
+				session.ActiveCompletion = null;
+			}
 
             var duration = (long)Math.Max(0, (DateTimeOffset.UtcNow - command.StartedAt).TotalMilliseconds);
+            var output = CaptureCommandOutput(command);
             var result = new CommandExecutionResult
             {
                 CommandId = command.CommandId,
@@ -503,58 +689,219 @@ namespace VsClineAgent.Services
                 IsHot = command.IsHot,
                 DurationMs = duration,
                 CurrentDirectory = command.CurrentDirectory,
-                StdOut = command.StdOutBuffer?.ToString() ?? string.Empty,
-                StdErr = command.StdErrBuffer?.ToString() ?? string.Empty,
+                StdOut = output.StdOut,
+                StdErr = output.StdErr,
                 StdOutTruncated = command.StdOutTruncated,
                 StdErrTruncated = command.StdErrTruncated,
             };
             RecordCompletedCommand(command, result);
             _activeCommands.TryRemove(command.CommandId, out _);
 
-            session.ActiveCommand = null;
-            session.ActiveCompletion = null;
             ReleaseSession(session);
         }
 
-        private static void ReleaseSession(TerminalShellSession session)
+        private static string NormalizeProfileId(string profileId)
         {
-            if (!session.Process.HasExited)
+            switch (profileId)
             {
-                session.Busy = false;
+                case "visual-studio-developer-powershell":
+                case "windows-command-prompt":
+                case "windows-powershell":
+                case "visual-studio-command-host":
+                    return profileId;
+                default:
+                    return "visual-studio-command-host";
             }
-            else
+        }
+
+        private static bool IsPowerShellProfile(string profileId)
+        {
+            return string.Equals(profileId, "visual-studio-developer-powershell", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(profileId, "windows-powershell", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static ShellProfileDefinition ResolveShellProfile(string profileId)
+        {
+            var normalized = NormalizeProfileId(profileId);
+            if (IsPowerShellProfile(normalized))
             {
-                session.IsDisposed = true;
+                var initialization = string.Empty;
+                if (string.Equals(normalized, "visual-studio-developer-powershell", StringComparison.OrdinalIgnoreCase))
+                {
+                    var launchScript = FindVisualStudioTool("Launch-VsDevShell.ps1");
+                    if (!string.IsNullOrWhiteSpace(launchScript))
+                        initialization = "& '" + launchScript!.Replace("'", "''") + "' -SkipAutomaticLocation | Out-Null";
+                }
+
+                return new ShellProfileDefinition
+                {
+                    Id = normalized,
+                    Shell = "powershell.exe",
+                    FileName = "powershell.exe",
+                    Arguments = "-NoLogo -NoProfile -NoExit -Command \"[Console]::InputEncoding=[Text.UTF8Encoding]::new(); [Console]::OutputEncoding=[Text.UTF8Encoding]::new()\"",
+                    InitializationCommand = initialization,
+                };
             }
+
+            var commandInitialization = string.Empty;
+            if (string.Equals(normalized, "visual-studio-command-host", StringComparison.OrdinalIgnoreCase))
+            {
+                var developerCommand = FindVisualStudioTool("VsDevCmd.bat");
+                if (!string.IsNullOrWhiteSpace(developerCommand))
+                    commandInitialization = "call \"" + developerCommand + "\" -no_logo >nul";
+            }
+
+            return new ShellProfileDefinition
+            {
+                Id = normalized,
+                Shell = "cmd.exe",
+                FileName = "cmd.exe",
+                Arguments = "/d /q /k chcp 65001 >nul",
+                InitializationCommand = commandInitialization,
+            };
+        }
+
+        private static string? FindVisualStudioTool(string fileName)
+        {
+            var candidates = new List<string>();
+            var installDirectory = Environment.GetEnvironmentVariable("VSINSTALLDIR");
+            if (!string.IsNullOrWhiteSpace(installDirectory))
+                candidates.Add(Path.Combine(installDirectory, "Common7", "Tools", fileName));
+
+            try
+            {
+                var processPath = Process.GetCurrentProcess().MainModule?.FileName;
+                var ideDirectory = string.IsNullOrWhiteSpace(processPath) ? null : Path.GetDirectoryName(processPath);
+                if (!string.IsNullOrWhiteSpace(ideDirectory))
+                    candidates.Add(Path.GetFullPath(Path.Combine(ideDirectory!, "..", "Tools", fileName)));
+            }
+            catch
+            {
+            }
+
+            return candidates.FirstOrDefault(File.Exists);
+        }
+
+        private void ReleaseSession(TerminalShellSession session)
+        {
+            var shouldDispose = !session.IsReusable || session.IsDisposed || HasExited(session.Process);
+            if (!shouldDispose)
+            {
+                var sessionKey = session.ProfileId + "|" + session.WorkingDirectory;
+                if (_sessionsByCwd.TryGetValue(sessionKey, out var sessions))
+                {
+                    lock (sessions)
+                    {
+                        if (sessions.Contains(session) && !session.IsDisposed && !HasExited(session.Process))
+                            session.Busy = false;
+                        else
+                            shouldDispose = true;
+                    }
+                }
+                else
+                {
+                    shouldDispose = true;
+                }
+            }
+
+            if (shouldDispose)
+                DisposeSession(session);
+        }
+
+		private static void DisposeInputLock(TerminalShellSession session)
+		{
+			if (Interlocked.Exchange(ref session.InputLockDisposed, 1) == 0)
+				session.InputLock.Dispose();
+		}
+
+		private static void DisposeSession(TerminalShellSession session)
+		{
+			if (Interlocked.Exchange(ref session.ResourcesDisposed, 1) != 0)
+				return;
+			session.IsDisposed = true;
+			TryKill(session.Process);
+			try { session.Process.Dispose(); } catch { }
+			DisposeInputLock(session);
+		}
+
+		private static bool HasExited(Process process)
+		{
+			try { return process.HasExited; }
+			catch { return true; }
+		}
+
+        private sealed class ShellProfileDefinition
+        {
+            public string Id { get; set; } = string.Empty;
+            public string Shell { get; set; } = string.Empty;
+            public string FileName { get; set; } = string.Empty;
+            public string Arguments { get; set; } = string.Empty;
+            public string InitializationCommand { get; set; } = string.Empty;
         }
 
         private static bool TryKill(Process process)
         {
+            int processId;
+            try { processId = process.Id; }
+            catch { return true; }
+
             try
             {
-                if (!process.HasExited)
+                if (!IsProcessRunning(processId))
+                    return true;
+
+                if (Environment.OSVersion.Platform == PlatformID.Win32NT)
                 {
-                    if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                    using var killer = Process.Start(new ProcessStartInfo
                     {
-                        using var killer = Process.Start(new ProcessStartInfo
-                        {
-                            FileName = "taskkill.exe",
-                            Arguments = "/PID " + process.Id + " /T /F",
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                        });
-                        killer?.WaitForExit(3000);
-                    }
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                        process.WaitForExit(2000);
-                    }
+                        FileName = "taskkill.exe",
+                        Arguments = "/PID " + processId + " /T /F",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    });
+                    killer?.WaitForExit(3000);
                 }
 
-                return process.HasExited;
+                if (WaitForProcessExit(processId, 2000))
+                    return true;
+
+                using var remaining = Process.GetProcessById(processId);
+                remaining.Kill();
+                remaining.WaitForExit(2000);
+                return !IsProcessRunning(processId);
             }
             catch
+            {
+                // The Exited callback may dispose the original Process while this
+                // method is waiting. The OS process table is the source of truth.
+                return !IsProcessRunning(processId);
+            }
+        }
+
+        private static bool WaitForProcessExit(int processId, int timeoutMilliseconds)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds)
+            {
+                if (!IsProcessRunning(processId))
+                    return true;
+                Thread.Sleep(25);
+            }
+            return !IsProcessRunning(processId);
+        }
+
+        private static bool IsProcessRunning(int processId)
+        {
+            try
+            {
+                using var candidate = Process.GetProcessById(processId);
+                return !candidate.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
             {
                 return false;
             }
@@ -562,10 +909,8 @@ namespace VsClineAgent.Services
 
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
-
-            _disposed = true;
             _shutdownCancellation.Cancel();
             lock (_cancellationLock)
             {
@@ -579,20 +924,19 @@ namespace VsClineAgent.Services
                     TryKill(command.Process);
             }
 
+            var sessionsToDispose = new HashSet<TerminalShellSession>();
             foreach (var sessions in _sessionsByCwd.Values)
             {
                 lock (sessions)
                 {
                     foreach (var session in sessions)
-                    {
-                        session.IsDisposed = true;
-                        TryKill(session.Process);
-                        session.InputLock.Dispose();
-                    }
-
+                        sessionsToDispose.Add(session);
                     sessions.Clear();
                 }
             }
+
+            foreach (var session in sessionsToDispose)
+                DisposeSession(session);
 
             _activeCommands.Clear();
             _sessionsByCwd.Clear();
@@ -634,6 +978,29 @@ namespace VsClineAgent.Services
             while (_outputHistory.Count > MaxOutputHistoryLines && _outputHistory.TryDequeue(out _))
             {
             }
+        }
+
+        private static CommandOutputSnapshot CaptureCommandOutput(RunningCommandInfo command)
+        {
+            lock (command.OutputLock)
+            {
+                return new CommandOutputSnapshot(
+                    command.StdOutBuffer?.ToString() ?? string.Empty,
+                    command.StdErrBuffer?.ToString() ?? string.Empty);
+            }
+        }
+
+        private sealed class CommandOutputSnapshot
+        {
+            public CommandOutputSnapshot(string stdOut, string stdErr)
+            {
+                StdOut = stdOut;
+                StdErr = stdErr;
+            }
+
+            public string StdOut { get; }
+
+            public string StdErr { get; }
         }
 
         private void RecordCompletedCommand(RunningCommandInfo command, CommandExecutionResult result)

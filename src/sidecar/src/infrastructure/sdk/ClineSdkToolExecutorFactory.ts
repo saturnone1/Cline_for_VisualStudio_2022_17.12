@@ -1,32 +1,38 @@
 import type { AgentToolContext } from "@cline/shared"
 import type { AskQuestionResult } from "../../application/ports/AgentInteraction"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
-import { normalizeCommandArgumentForPlatform, normalizeCommandForPlatform } from "../../application/services/CommandPolicy"
+import { normalizeCommandForPlatform, serializeCommandInvocationForPlatform } from "../../application/services/CommandPolicy"
 import { countLineChanges, parseApplyPatchChanges } from "../../application/services/PatchPolicy"
+import { replaceTextExactlyOnce } from "../../application/services/TextEditPolicy"
 import type { AgentRuntimeEvent } from "../../domain/agent/AgentRuntimeEvent"
 import { normalizeAgentRuntimeEvent } from "./ClineSdkEventTranslator"
 import { resolveWorkspacePath } from "./SdkEnvironment"
 import { fetchWebContentForSdk, normalizeCommandResultForSdk, readPositiveIntEnv } from "./SdkToolSupport"
+import { RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
 import { writeChangeSnapshot as persistChangeSnapshot } from "./ChangeSnapshotStore"
+import { wrapAgentToolExecutorMap } from "./AgentToolFailureBoundary"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 
 type ToolExecutorDependencies = {
 	host: HostProviderPort
 	getActiveSessionId: () => string | null
+	getAutoApprovalSettings?: () => unknown
+	getCommandExecutionSettings?: () => unknown
 	onAskQuestion?: (question: string, options: string[]) => Promise<AskQuestionResult>
 	onEvent?: (event: AgentRuntimeEvent) => void
 	log?: (event: string, details: Record<string, unknown>) => void
 }
 
 export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: ToolExecutorDependencies) {
-	const defaultExecutors = sdk.createDefaultExecutors({ applyPatch: { restrictToCwd: true } })
+	const restrictedExecutors = sdk.createDefaultExecutors({ applyPatch: { restrictToCwd: true } })
+	const unrestrictedExecutors = sdk.createDefaultExecutors({ applyPatch: { restrictToCwd: false } })
 	const { host } = dependencies
 
-	return {
+	return wrapAgentToolExecutorMap({
 		readFile: async (request: { path: string; start_line?: number | null; end_line?: number | null }) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
-			const filePath = resolveWorkspacePath(request.path, workspaceRoots)
+			const filePath = resolveWorkspacePath(request.path, workspaceRoots, undefined, allowsExternalAccess(dependencies, "read"))
 			const result = asRecord(await host.workspaceClient.readTextFile({ path: filePath }))
 			if (result.exists !== true) throw new Error(`File not found: ${filePath}`)
 			const content = stringValue(result.content) || ""
@@ -41,16 +47,17 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 		},
 		search: async (query: string, cwd: string) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
-			const searchRoot = resolveWorkspacePath(cwd, workspaceRoots)
+			const searchRoot = resolveWorkspacePath(cwd, workspaceRoots, undefined, allowsExternalAccess(dependencies, "read"))
 			const result = asRecord(await host.workspaceClient.searchFiles({ path: searchRoot, query, limit: 500 }))
 			return boundToolOutput((Array.isArray(result.matches) ? result.matches : []).map(String).join("\n"), readPositiveIntEnv("VSCLINE_SEARCH_OUTPUT_CHARS", 48 * 1024), "Search output", "Narrow the query or search path to retrieve omitted matches.")
 		},
 		bash: async (command: string | { command: string; args?: string[] }, cwd: string, context: AgentToolContext) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
-			const commandCwd = resolveWorkspacePath(cwd, workspaceRoots)
+			const commandCwd = resolveWorkspacePath(cwd, workspaceRoots, undefined, allowsExternalCommandCwd(dependencies))
+			const terminalSettings = asRecord(dependencies.getCommandExecutionSettings?.())
 			const commandText = typeof command === "string"
 				? normalizeCommandForPlatform(command, process.platform)
-				: normalizeCommandForPlatform([command.command, ...(command.args || []).map((argument) => normalizeCommandArgumentForPlatform(argument, process.platform))].filter(Boolean).join(" "), process.platform)
+				: serializeCommandInvocationForPlatform(command.command, command.args || [], process.platform)
 			const abortSignal = context.signal ?? (context as AgentToolContext & { abortSignal?: AbortSignal }).abortSignal
 			if (abortSignal?.aborted) throw new Error("Command was cancelled before it started.")
 
@@ -60,10 +67,12 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 				const result = await host.workspaceClient.executeCommandInTerminal({
 					command: commandText,
 					cwd: commandCwd,
-					timeoutSeconds: readPositiveIntEnv("VSCLINE_COMMAND_TIMEOUT_SECONDS", 120),
+					timeoutSeconds: readPositiveIntEnv("VSCLINE_COMMAND_TIMEOUT_SECONDS", commandForegroundWaitSeconds(terminalSettings)),
+					profileId: stringValue(terminalSettings.profileId) || "visual-studio-command-host",
+					reuseTerminal: terminalSettings.reuseEnabled !== false,
 				})
 				if (abortSignal?.aborted) throw new Error("Command was cancelled.")
-				return normalizeCommandResultForSdk(result)
+				return normalizeCommandResultForSdk(result, Number(terminalSettings.outputLineLimit))
 			} finally {
 				abortSignal?.removeEventListener("abort", abortHandler)
 			}
@@ -87,13 +96,12 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 		},
 		editor: async (input: { path: string; old_text?: string | null; new_text: string; insert_line?: number | null }, cwd: string, context?: AgentToolContext) => {
 			const workspaceRoots = await host.workspaceClient.getWorkspacePaths({})
-			const filePath = resolveWorkspacePath(input.path, workspaceRoots, cwd)
+			const filePath = resolveWorkspacePath(input.path, workspaceRoots, cwd, allowsExternalAccess(dependencies, "edit"))
 			const current = asRecord(await host.workspaceClient.readTextFile({ path: filePath }))
 			const before = current.exists === true ? stringValue(current.content) || "" : ""
 			let next = before
 			if (input.old_text) {
-				if (!next.includes(input.old_text)) throw new Error(`old_text not found in ${filePath}`)
-				next = next.replace(input.old_text, input.new_text)
+				next = replaceTextExactlyOnce(next, input.old_text, input.new_text, filePath)
 			} else if (input.insert_line) {
 				const lines = next.split(/\r?\n/)
 				lines.splice(Math.max(input.insert_line - 1, 0), 0, input.new_text)
@@ -119,15 +127,17 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 			const patchText = typeof input === "string" ? input : input.input
 			const snapshots = []
 			for (const change of parseApplyPatchChanges(patchText)) {
-				const beforeFilePath = resolveWorkspacePath(change.path, workspaceRoots, cwd)
-				const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd)
+				const allowExternal = allowsExternalAccess(dependencies, "edit")
+				const beforeFilePath = resolveWorkspacePath(change.path, workspaceRoots, cwd, allowExternal)
+				const afterFilePath = resolveWorkspacePath(change.moveTo || change.path, workspaceRoots, cwd, allowExternal)
 				const current = asRecord(await host.workspaceClient.readTextFile({ path: beforeFilePath }))
 				const before = current.exists === true ? stringValue(current.content) || "" : ""
 				const beforePath = await persistChangeSnapshot(beforeFilePath, before, sessionIdFrom(context, dependencies) || "session")
 				snapshots.push({ ...change, beforeFilePath, afterFilePath, before, beforePath })
 			}
 
-			const result = await defaultExecutors.applyPatch?.(input, cwd, context)
+			const executors = allowsExternalAccess(dependencies, "edit") ? unrestrictedExecutors : restrictedExecutors
+			const result = await executors.applyPatch?.(input, cwd, context)
 			for (const snapshot of snapshots) {
 				const after = asRecord(await host.workspaceClient.readTextFile({ path: snapshot.afterFilePath }))
 				const afterContent = after.exists === true ? stringValue(after.content) || "" : ""
@@ -150,7 +160,7 @@ export function createClineSdkToolExecutors(sdk: ClineSdkModule, dependencies: T
 			throw new Error("Visual Studio follow-up question UI is not attached.")
 		},
 		submit: async (summary: string, verified: boolean) => `${verified ? "Verified" : "Submitted"}: ${summary}`,
-	}
+	}, (toolName, message) => dependencies.log?.("agentTool.failed", { toolName, error: message }))
 }
 
 function emitFileChanged(dependencies: ToolExecutorDependencies, payload: Record<string, unknown>) {
@@ -172,6 +182,25 @@ function stringValue(value: unknown) {
 function safeUrlHost(value: string) {
 	try { return new URL(value).host }
 	catch { return "invalid" }
+}
+
+function allowsExternalAccess(dependencies: ToolExecutorDependencies, kind: "read" | "edit") {
+	const settings = asRecord(dependencies.getAutoApprovalSettings?.())
+	const actions = asRecord(settings.actions)
+	return kind === "read" ? actions.readFilesExternally === true : actions.editFilesExternally === true
+}
+
+function allowsExternalCommandCwd(dependencies: ToolExecutorDependencies) {
+	const settings = asRecord(dependencies.getAutoApprovalSettings?.())
+	const actions = asRecord(settings.actions)
+	return actions.executeAllCommands === true
+}
+
+function commandForegroundWaitSeconds(settings: Record<string, unknown>) {
+	const milliseconds = Number(settings.foregroundWaitMs)
+	return Number.isFinite(milliseconds) && milliseconds > 0
+		? Math.max(1, Math.round(milliseconds / 1000))
+		: RUNTIME_DEFAULTS.commandForegroundWaitSeconds
 }
 
 export function boundToolOutput(value: string, maxChars: number, label: string, guidance = "") {

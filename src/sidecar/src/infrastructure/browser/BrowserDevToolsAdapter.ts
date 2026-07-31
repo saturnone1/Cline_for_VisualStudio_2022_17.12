@@ -5,6 +5,7 @@ import type { BrowserAutomationPort } from "../../application/ports/BrowserAutom
 import { normalizeBrowserActionName, normalizeBrowserDebugHost, shouldCaptureBrowserPreview, type BrowserAction, type BrowserViewport } from "../../features/browser/BrowserPolicy"
 import { terminateChildProcessTree } from "../process/ChildProcessTree"
 import { readBoundedPositiveIntEnv, readPositiveIntEnv, RUNTIME_DEFAULTS } from "../configuration/RuntimeEnvironment"
+import { fetchBoundedText } from "../network/BoundedFetch"
 
 export class BrowserDevToolsAdapter implements BrowserAutomationPort {
 	private readonly resources = new BrowserResourceRegistry()
@@ -17,18 +18,15 @@ export class BrowserDevToolsAdapter implements BrowserAutomationPort {
 }
 
 class BrowserResourceRegistry {
-	private readonly controllers = new Set<AbortController>()
 	private readonly sockets = new Set<{ close: () => void }>()
 	private readonly ownedProcesses = new Set<ReturnType<typeof spawn>>()
-	trackController(controller: AbortController) { this.controllers.add(controller); return () => this.controllers.delete(controller) }
 	trackSocket(socket: { close: () => void }) { this.sockets.add(socket); return () => this.sockets.delete(socket) }
 	trackProcess(process: ReturnType<typeof spawn>) { this.ownedProcesses.add(process); process.once("close", () => this.ownedProcesses.delete(process)) }
 	async cancelAll() {
-		const count = this.controllers.size + this.sockets.size + this.ownedProcesses.size
-		for (const controller of this.controllers) controller.abort()
+		const count = this.sockets.size + this.ownedProcesses.size
 		for (const socket of this.sockets) { try { socket.close() } catch { /* already closed */ } }
 		await Promise.all([...this.ownedProcesses].map((process) => terminateChildProcessTree(process)))
-		this.controllers.clear(); this.sockets.clear(); this.ownedProcesses.clear()
+		this.sockets.clear(); this.ownedProcesses.clear()
 		return count
 	}
 }
@@ -59,7 +57,7 @@ export async function ensureBrowserDebugHost(host: string, executablePath: strin
 		return { success: false, host, error: `Browser could not be launched: ${stringify(error)}` }
 	}
 
-	const timeoutAt = Date.now() + readPositiveIntEnv("VSCLINE_BROWSER_LAUNCH_TIMEOUT_MS", 10_000)
+	const timeoutAt = Date.now() + readPositiveIntEnv("VSCLINE_BROWSER_LAUNCH_TIMEOUT_MS", 60_000)
 	while (Date.now() < timeoutAt) {
 		await new Promise((resolve) => setTimeout(resolve, 250))
 		if (launchError) return { success: false, host, error: `Browser could not be launched: ${launchError}` }
@@ -95,7 +93,7 @@ export async function fetchBrowserDebugInfo(host: string) {
 		return { success: false, error: "Browser debug host is not configured." }
 	}
 
-	const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000)
+	const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 5_000)
 	const controller = new AbortController()
 	const timer = setTimeout(() => controller.abort(), timeoutMs)
 	try {
@@ -142,7 +140,7 @@ export async function listDevToolsTabs(host: string) {
 		return { success: false, tabs: [], error: "Browser debug host is not configured." }
 	}
 	const controller = new AbortController()
-	const timer = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000))
+	const timer = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 5_000))
 	try {
 		const response = await fetch(`${normalized}/json/list`, { signal: controller.signal })
 		if (!response.ok) {
@@ -316,11 +314,17 @@ async function resolveDevToolsTab(host: string, request: BrowserAction): Promise
 
 async function createDevToolsTab(host: string): Promise<DevToolsTab | undefined> {
 	const target = `${host}/json/new?${encodeURIComponent("about:blank")}`
-	const response = await fetch(target, { method: "PUT" }).catch(() => fetch(target))
+	const timeoutMs = readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 5_000)
+	const maximumBytes = readPositiveIntEnv("VSCLINE_BROWSER_DEVTOOLS_RESPONSE_BYTES", 256 * 1024)
+	let result = await fetchBoundedText(target, { method: "PUT" }, { timeoutMs, maximumBytes })
+	if (result.response.status === 404 || result.response.status === 405) {
+		result = await fetchBoundedText(target, {}, { timeoutMs, maximumBytes })
+	}
+	const response = result.response
 	if (!response.ok) {
 		return undefined
 	}
-	const tab = asRecord(await response.json().catch(() => ({})))
+	const tab = asRecord(tryParseJson(result.text) || {})
 	const webSocketDebuggerUrl = getString(tab, "webSocketDebuggerUrl")
 	if (!webSocketDebuggerUrl) {
 		return undefined
@@ -360,7 +364,7 @@ function connectDevTools(webSocketDebuggerUrl: string, resources: BrowserResourc
 	const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
 	const eventWaiters = new Map<string, Array<{ resolve: (value: unknown) => void; timer: NodeJS.Timeout }>>()
 	const opened = new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(() => reject(new Error("Timed out opening Chrome DevTools WebSocket.")), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 2000))
+		const timeout = setTimeout(() => reject(new Error("Timed out opening Chrome DevTools WebSocket.")), readPositiveIntEnv("VSCLINE_BROWSER_CONNECT_TIMEOUT_MS", 5_000))
 		socket.addEventListener("open", () => {
 			clearTimeout(timeout)
 			resolve()
@@ -432,7 +436,13 @@ function connectDevTools(webSocketDebuggerUrl: string, resources: BrowserResourc
 						reject(error)
 					},
 				})
-				socket.send(JSON.stringify({ id, method, params: params || {} }))
+				try {
+					socket.send(JSON.stringify({ id, method, params: params ?? {} }))
+				} catch (error) {
+					pending.delete(id)
+					clearTimeout(timer)
+					reject(error instanceof Error ? error : new Error(String(error)))
+				}
 			})
 		},
 		async waitForEvent(method: string, timeoutMs: number) {
@@ -546,17 +556,16 @@ export async function fetchOpenGraphData(url: string) {
 	if (!normalized) {
 		return { success: false, error: "Invalid URL." }
 	}
-	const controller = new AbortController()
-	const timeout = setTimeout(() => controller.abort(), readPositiveIntEnv("VSCLINE_OPEN_GRAPH_TIMEOUT_MS", RUNTIME_DEFAULTS.openGraphTimeoutMs))
 	try {
-		const response = await fetch(normalized, {
-			signal: controller.signal,
+		const { response, text: html } = await fetchBoundedText(normalized, {
 			headers: { Accept: "text/html,*/*;q=0.5", "User-Agent": "LIG-VS/1.0 VisualStudio2022" },
+		}, {
+			timeoutMs: readPositiveIntEnv("VSCLINE_OPEN_GRAPH_TIMEOUT_MS", RUNTIME_DEFAULTS.openGraphTimeoutMs),
+			maximumBytes: readPositiveIntEnv("VSCLINE_OPEN_GRAPH_MAXIMUM_BYTES", 1024 * 1024),
 		})
 		if (!response.ok) {
 			return { success: false, url: normalized, error: `HTTP ${response.status}` }
 		}
-		const html = await response.text()
 		const title = extractHtmlMeta(html, "og:title") || extractHtmlTitle(html)
 		const description = extractHtmlMeta(html, "og:description") || extractHtmlMeta(html, "description")
 		const image = extractHtmlMeta(html, "og:image")
@@ -570,8 +579,6 @@ export async function fetchOpenGraphData(url: string) {
 		}
 	} catch (error) {
 		return { success: false, url: normalized, error: stringify(error) }
-	} finally {
-		clearTimeout(timeout)
 	}
 }
 

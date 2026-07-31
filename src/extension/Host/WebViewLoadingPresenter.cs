@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Windows.Controls;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
@@ -78,8 +79,17 @@ namespace VsClineAgent.Host
                 _progress.Foreground = Brush(isLight ? "#0969B7" : "#0E70C0");
                 _progress.Background = Brush(isLight ? "#D9DEE7" : "#333333");
                 _error.Foreground = Brush(isLight ? "#B42318" : "#F44747");
-				_error.Background = Brush(isLight ? "#F5F6F8" : "#1E1E1E");
+                _error.Background = Brush(isLight ? "#F5F6F8" : "#1E1E1E");
                 _error.BorderBrush = Brush(isLight ? "#C7CCD4" : "#3C3C3C");
+                if (_owner.FindName("runtimeDiagnosticPanel") is Border diagnosticPanel)
+                {
+                    diagnosticPanel.Background = Brush(isLight ? "#FDEBEC" : "#3A1F22");
+                    diagnosticPanel.BorderBrush = Brush(isLight ? "#C43D4B" : "#B14A52");
+                }
+                if (_owner.FindName("runtimeDiagnosticText") is TextBlock diagnosticText)
+                    diagnosticText.Foreground = Brush(isLight ? "#7A1720" : "#FFD7D9");
+                foreach (var name in new[] { "loadingRetryButton", "runtimeDiagnosticDetailsButton", "runtimeDiagnosticDismissButton", "errorRetryButton", "errorDismissButton" })
+                    if (_owner.FindName(name) is Button button) ApplyButtonTheme(button, isLight);
                 ApplyGlowTheme(isLight);
             }
 
@@ -98,6 +108,13 @@ namespace VsClineAgent.Host
             var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
             brush.Freeze();
             return brush;
+        }
+
+        private static void ApplyButtonTheme(Button button, bool isLight)
+        {
+            button.Foreground = Brush(isLight ? "#172033" : "#F2F2F2");
+            button.Background = Brush(isLight ? "#E1E5EB" : "#33363A");
+            button.BorderBrush = Brush(isLight ? "#AEB6C2" : "#5A5E63");
         }
 
         private void ApplyGlowTheme(bool isLight)

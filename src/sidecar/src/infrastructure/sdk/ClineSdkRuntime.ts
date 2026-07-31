@@ -1,16 +1,15 @@
-import fs from "node:fs"
-import path from "node:path"
 import type { AskQuestionResult, ToolApprovalResult } from "../../application/ports/AgentInteraction"
-import type { AgentCompactSessionRequest, AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
+import type { AgentConnectionUpdateRequest, AgentEnginePort, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import type { HostProviderPort } from "../../application/ports/HostProviderPort"
 import type { AgentRuntimeEvent, ApprovalRequestedEvent } from "../../domain/agent/AgentRuntimeEvent"
+import { formatLogMetadata } from "../diagnostics/SafeLogMetadata"
 import { createClineSdkCore } from "./ClineSdkCoreFactory"
 import { ClineSdkMcpAdapter } from "./ClineSdkMcpAdapter"
 import { ClineSdkProviderAdapter } from "./ClineSdkProviderAdapter"
 import { ClineSdkSessionAdapter, type ClineSdkCore } from "./ClineSdkSessionAdapter"
-import { summarizeCompactionContext } from "./ClineSdkCompactionSummarizer"
 import { createSessionExtraTools } from "./SessionExtraToolComposition"
 import { createAskQuestionAgentTool } from "./AskQuestionAgentTool"
+import { readInstalledSdkVersion } from "./SdkPackageMetadata"
 export type ClineSdkStatus = {
 	mode: "sdk"
 	packageName: string
@@ -31,6 +30,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	private readonly sessions: ClineSdkSessionAdapter
 	private activeSessionId: string | null = null
 	private lastError: string | undefined
+	private readonly sdkVersion: string | null
 
 	constructor(
 		private readonly host: HostProviderPort,
@@ -40,9 +40,12 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		private readonly onAskQuestion?: (question: string, options: string[], signal?: AbortSignal) => Promise<AskQuestionResult>,
 		private readonly isAutomationEnabled?: () => boolean,
 		private readonly createHostExtraTools?: () => readonly unknown[],
+		private readonly getAutoApprovalSettings?: () => unknown,
 		private readonly coreFactory: typeof createClineSdkCore = createClineSdkCore,
+		private readonly getCommandExecutionSettings?: () => unknown,
 	) {
-		this.mcp = new ClineSdkMcpAdapter(host, () => this.readSdkVersion(), (level, message, metadata) => this.logSdkMessage(level, message, metadata))
+		this.sdkVersion = readInstalledSdkVersion(sidecarRoot)
+		this.mcp = new ClineSdkMcpAdapter(host, () => this.sdkVersion, (level, message, metadata) => this.logSdkMessage(level, message, metadata))
 		this.sessions = new ClineSdkSessionAdapter({
 			getCore: () => this.getCore(),
 			getCurrentCore: () => this.core,
@@ -56,7 +59,6 @@ export class ClineSdkRuntime implements AgentEnginePort {
 				log: (level, message, metadata) => this.logSdkMessage(level, message, metadata),
 			}),
 			getStatus: () => this.status,
-			summarizeCompaction: summarizeCompactionContext,
 		})
 	}
 
@@ -64,7 +66,7 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		return {
 			mode: "sdk",
 			packageName: "@cline/sdk",
-			packageVersion: this.readSdkVersion(),
+			packageVersion: this.sdkVersion,
 			started: this.core !== null,
 			activeSessionId: this.activeSessionId,
 			runtimeAddress: this.core?.runtimeAddress,
@@ -95,10 +97,6 @@ export class ClineSdkRuntime implements AgentEnginePort {
 
 	async startSession(request: AgentStartRequest) {
 		return this.sessions.start(request)
-	}
-
-	async compactSession(request: AgentCompactSessionRequest) {
-		return this.sessions.compact(request)
 	}
 
 	async send(request: AgentMessageRequest) {
@@ -133,12 +131,20 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		return this.sessions.updateSession(params)
 	}
 
+	async updateConnection(request: AgentConnectionUpdateRequest) {
+		return this.sessions.updateConnection(request)
+	}
+
 	async getUsage(params: unknown) {
 		return this.sessions.getUsage(params)
 	}
 
 	async restore(params: unknown) {
 		return this.sessions.restore(params)
+	}
+
+	async compareCheckpoint(params: unknown) {
+		return this.sessions.compareCheckpoint(params)
 	}
 
 	async listSettings(params: unknown) {
@@ -211,6 +217,8 @@ export class ClineSdkRuntime implements AgentEnginePort {
 		return this.coreFactory({
 			host: this.host,
 			getActiveSessionId: () => this.activeSessionId,
+			getAutoApprovalSettings: this.getAutoApprovalSettings,
+			getCommandExecutionSettings: this.getCommandExecutionSettings,
 			onEvent: this.onCoreEvent,
 			onToolApproval: this.onToolApproval,
 			onAskQuestion: this.onAskQuestion,
@@ -220,18 +228,9 @@ export class ClineSdkRuntime implements AgentEnginePort {
 	}
 
 	private logSdkMessage(level: string, message: string, metadata?: unknown) {
+		const metadataText = formatLogMetadata(metadata)
 		this.host.envClient.debugLog({
-			message: `[Cline SDK:${level}] ${message}${metadata ? ` ${JSON.stringify(metadata)}` : ""}`,
+			message: `[Cline SDK:${level}] ${message}${metadataText ? ` ${metadataText}` : ""}`,
 		}).catch(() => undefined)
-	}
-
-	private readSdkVersion() {
-		const packagePath = path.join(this.sidecarRoot, "node_modules", "@cline", "sdk", "package.json")
-		try {
-			const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8")) as { version?: string }
-			return packageJson.version || null
-		} catch {
-			return null
-		}
 	}
 }

@@ -11,8 +11,9 @@ namespace VsClineAgent.Host.Adapters
             return method == "host.health";
         }
 
-        public Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!CanHandle(method))
                 throw new InvalidOperationException("Unsupported health host method: " + method);
 

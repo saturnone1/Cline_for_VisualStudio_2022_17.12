@@ -16,7 +16,7 @@ test("SDK runtime disposes a core that finishes starting after shutdown", async 
 		listHistory: async () => [],
 		dispose: async () => { disposeCalls++ },
 	}
-	const runtime = new ClineSdkRuntime({}, __dirname, undefined, undefined, undefined, undefined, undefined, () => startup.promise)
+	const runtime = new ClineSdkRuntime({}, __dirname, undefined, undefined, undefined, undefined, undefined, undefined, () => startup.promise)
 	const starting = runtime.ensureStarted()
 	const disposing = runtime.dispose()
 	startup.resolve(core)

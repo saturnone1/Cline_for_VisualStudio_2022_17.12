@@ -15,6 +15,8 @@ test("SDK command results preserve terminal metadata and bound output", () => {
 		if (previous === undefined) delete process.env.VSCLINE_SDK_COMMAND_RESULT_CHARS
 		else process.env.VSCLINE_SDK_COMMAND_RESULT_CHARS = previous
 	}
+	const boundedLines = JSON.parse(normalizeCommandResultForSdk({ stdout: "1\n2\n3\n4\n5\n6" }, 4))
+	assert.equal(boundedLines.stdout, "1\n2\n[2 output lines omitted]\n5\n6")
 })
 
 test("SDK web support validates URLs and strips non-readable HTML", () => {

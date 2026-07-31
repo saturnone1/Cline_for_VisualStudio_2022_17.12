@@ -1,7 +1,7 @@
 import { NotepadTextIcon } from "lucide-react"
 import { memo } from "react"
 import { CopyButton } from "@/components/common/CopyButton"
-import MarkdownBlock from "@/components/common/MarkdownBlock"
+import MarkdownBlock from "@/components/common/LazyMarkdownBlock"
 import { cn } from "@/lib/utils"
 
 interface PlanCompletionOutputProps {

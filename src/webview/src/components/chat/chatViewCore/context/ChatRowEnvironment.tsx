@@ -8,7 +8,6 @@ export type ChatRowEnvironmentValue = Pick<
 	| "mcpServers"
 	| "mcpMarketplaceCatalog"
 	| "onRelinquishControl"
-	| "vscodeTerminalExecutionMode"
 	| "showFeatureTips"
 >;
 

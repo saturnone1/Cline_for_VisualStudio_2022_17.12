@@ -104,7 +104,7 @@ const router = fs.readFileSync(routerPath, "utf8")
 for (const collaborator of ["WebviewFeatureRegistry", "WebviewRpcIngress", "WebviewRuntimeEventIngress", "WebviewStreamPublisher", "StateStreamRefreshCoordinator"]) {
 	if (!router.includes(collaborator)) violations.push(`WebviewBackendComposition must delegate to ${collaborator}.`)
 }
-for (const focusedComposition of ["createWebviewRpcComposition", "createTaskHistoryComposition", "createContextCompactionFlow"]) {
+for (const focusedComposition of ["createWebviewRpcComposition", "createTaskHistoryComposition"]) {
 	if (!router.includes(focusedComposition)) violations.push(`WebviewBackendComposition must retain focused wiring through ${focusedComposition}.`)
 }
 for (const migratedField of ["settingsRpc", "accountRpc", "browserRpc", "terminalRpc", "taskRpc", "checkpointRpc", "hookRpc", "scheduledAgentRpc", "worktreeRpc", "modelCatalogRpc", "fileRpc", "instructionSettingsRpc", "uiWebRpc", "pluginRpc"]) {

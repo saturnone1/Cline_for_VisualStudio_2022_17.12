@@ -12,7 +12,7 @@ namespace VsClineAgent.Host
 		private readonly int _hardMaximumCount;
 		private readonly long _maximumBytes;
 		private readonly long _hardMaximumBytes;
-        private readonly Queue<string> _pending = new Queue<string>();
+        private readonly Queue<BufferedMessage> _pending = new Queue<BufferedMessage>();
 		private int _droppedCount;
 		private long _pendingBytes;
 
@@ -32,14 +32,27 @@ namespace VsClineAgent.Host
 		public long ByteCount => _pendingBytes;
 		public int TakeDroppedCount() { var count = _droppedCount; _droppedCount = 0; return count; }
         public void Enqueue(string json) { EnqueueCoalesced(json); Trim(); }
-        public string[] TakeAll() { var messages = _pending.ToArray(); _pending.Clear(); _pendingBytes = 0; return messages; }
-        public void ReturnFailed(IEnumerable<string> messages) { foreach (var message in messages) EnqueueCoalesced(message); Trim(); }
+        public string[] TakeAll() { var messages = _pending.Select(message => message.Json).ToArray(); _pending.Clear(); _pendingBytes = 0; return messages; }
+        public void ReturnFailed(IEnumerable<string> messages)
+        {
+			var returned = messages?.ToArray() ?? Array.Empty<string>();
+			if (returned.Length == 0) return;
+
+			// A failed delivery predates anything enqueued while the flush was in flight.
+			// Put it back at the front so unary replies and lifecycle events cannot be
+			// observed in a different order after a transient WebView failure.
+			var queued = _pending.Select(message => message.Json).ToArray();
+			_pending.Clear();
+			_pendingBytes = 0;
+			foreach (var message in returned) EnqueueCoalesced(message);
+			foreach (var message in queued) EnqueueCoalesced(message);
+			Trim();
+		}
         public void Clear() { _pending.Clear(); _pendingBytes = 0; }
 
 		private void Trim()
         {
 			if (_pending.Count <= _maximumCount && _pendingBytes <= _maximumBytes) return;
-			CoalesceReplaceableMessages();
 			while ((_pending.Count > _maximumCount || _pendingBytes > _maximumBytes) && DropOldestReplaceableMessage()) { }
 			while (_pending.Count > _hardMaximumCount || _pendingBytes > _hardMaximumBytes) DropOldestMessage();
         }
@@ -47,33 +60,33 @@ namespace VsClineAgent.Host
 		private void EnqueueCoalesced(string json)
 		{
 			var key = TryGetReplaceableMessageKey(json);
-			if (key != null && _pending.Any(message => string.Equals(TryGetReplaceableMessageKey(message), key, StringComparison.Ordinal)))
+			if (key != null && _pending.Any(message => string.Equals(message.ReplaceableKey, key, StringComparison.Ordinal)))
 			{
-				var retained = _pending.Where(message => !string.Equals(TryGetReplaceableMessageKey(message), key, StringComparison.Ordinal)).ToArray();
+				var retained = _pending.Where(message => !string.Equals(message.ReplaceableKey, key, StringComparison.Ordinal)).ToArray();
 				_pending.Clear();
 				_pendingBytes = 0;
 				foreach (var message in retained) Add(message);
 			}
-			Add(json);
+			Add(new BufferedMessage(json, key));
 		}
 
-		private void Add(string message)
+		private void Add(BufferedMessage message)
 		{
 			_pending.Enqueue(message);
-			_pendingBytes += MessageBytes(message);
+			_pendingBytes += message.ByteCount;
 		}
 
 		private void DropOldestMessage()
 		{
 			if (_pending.Count == 0) return;
-			_pendingBytes -= MessageBytes(_pending.Dequeue());
+			_pendingBytes -= _pending.Dequeue().ByteCount;
 			_droppedCount++;
 		}
 
 		private bool DropOldestReplaceableMessage()
 		{
 			var ordered = _pending.ToArray();
-			var dropIndex = Array.FindIndex(ordered, message => TryGetReplaceableMessageKey(message) != null);
+			var dropIndex = Array.FindIndex(ordered, message => message.ReplaceableKey != null);
 			if (dropIndex < 0) return false;
 
 			_pending.Clear();
@@ -83,32 +96,6 @@ namespace VsClineAgent.Host
 			_droppedCount++;
 			return true;
 		}
-
-		private void CoalesceReplaceableMessages()
-        {
-			var latestByKey = new Dictionary<string, string>(StringComparer.Ordinal);
-            var ordered = _pending.ToList();
-            foreach (var message in ordered)
-            {
-				var key = TryGetReplaceableMessageKey(message);
-				if (!string.IsNullOrWhiteSpace(key)) latestByKey[key!] = message;
-            }
-			if (latestByKey.Count == 0) return;
-
-            _pending.Clear();
-			_pendingBytes = 0;
-            var emitted = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var message in ordered)
-            {
-				var key = TryGetReplaceableMessageKey(message);
-				if (string.IsNullOrWhiteSpace(key)) { Add(message); continue; }
-				if (emitted.Contains(key!)) continue;
-				var latest = latestByKey[key!];
-				if (!string.Equals(message, latest, StringComparison.Ordinal)) continue;
-				Add(latest);
-				emitted.Add(key!);
-            }
-        }
 
 		private static string? TryGetReplaceableMessageKey(string json)
         {
@@ -129,6 +116,18 @@ namespace VsClineAgent.Host
             catch { return null; }
         }
 
-		private static int MessageBytes(string message) => Encoding.UTF8.GetByteCount(message ?? string.Empty);
+		private sealed class BufferedMessage
+		{
+			public BufferedMessage(string json, string? replaceableKey)
+			{
+				Json = json ?? string.Empty;
+				ReplaceableKey = replaceableKey;
+				ByteCount = Encoding.UTF8.GetByteCount(Json);
+			}
+
+			public string Json { get; }
+			public string? ReplaceableKey { get; }
+			public int ByteCount { get; }
+		}
     }
 }

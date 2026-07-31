@@ -541,11 +541,11 @@ const ApiOptions = ({
 			{showModelOptions && apiConfiguration && (
 				<div className="mt-2">
 					<DebouncedTextField
-						initialValue={apiConfiguration.requestTimeoutMs ? apiConfiguration.requestTimeoutMs.toString() : "600000"}
+						initialValue={apiConfiguration.requestTimeoutMs ? apiConfiguration.requestTimeoutMs.toString() : "1800000"}
 						inputMode="numeric"
 						min={1}
 						onChange={handleRequestTimeoutChange}
-						placeholder="Default: 600000 (10 minutes)"
+						placeholder="Default: 1800000 (30 minutes)"
 						style={{ width: "100%" }}>
 						<span className="font-semibold">{t("settings.api.requestTimeout")}</span>
 					</DebouncedTextField>

@@ -4,13 +4,14 @@ import { BoundedFetchError, fetchBoundedText } from "../network/BoundedFetch"
 
 export { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
-export function normalizeCommandResultForSdk(result: unknown) {
+export function normalizeCommandResultForSdk(result: unknown, outputLineLimit?: number) {
 	const limit = readPositiveIntEnv("VSCLINE_SDK_COMMAND_RESULT_CHARS", 20000)
 	if (typeof result === "string") return truncateText(result, limit)
 	const record = asRecord(result)
 	if (Object.keys(record).length === 0) return truncateText(String(result), limit)
-	const stdout = typeof record.stdout === "string" ? record.stdout : undefined
-	const stderr = typeof record.stderr === "string" ? record.stderr : undefined
+	const lineLimit = Number.isFinite(outputLineLimit) && Number(outputLineLimit) > 0 ? Math.round(Number(outputLineLimit)) : undefined
+	const stdout = typeof record.stdout === "string" ? boundOutputLines(record.stdout, lineLimit) : undefined
+	const stderr = typeof record.stderr === "string" ? boundOutputLines(record.stderr, lineLimit) : undefined
 	const backgroundNote = record.background === true
 		? `Command is still running in the Visual Studio terminal session (${stringValue(record.terminalId) || "terminal"}). Use terminal state/output if more output is needed.`
 		: undefined
@@ -41,6 +42,19 @@ export async function fetchWebContentForSdk(url: string, prompt: string, context
 		if (error instanceof BoundedFetchError) throw new Error(`Web fetch failed: ${error.message}`)
 		throw error
 	}
+}
+
+function boundOutputLines(value: string, maximumLines?: number) {
+	if (!maximumLines) return value
+	const lines = value.split(/\r?\n/)
+	if (lines.length <= maximumLines) return value
+	const headCount = Math.ceil(maximumLines / 2)
+	const tailCount = Math.floor(maximumLines / 2)
+	return [
+		...lines.slice(0, headCount),
+		`[${lines.length - maximumLines} output lines omitted]`,
+		...lines.slice(lines.length - tailCount),
+	].join("\n")
 }
 
 export function normalizeHttpUrl(value: string) {

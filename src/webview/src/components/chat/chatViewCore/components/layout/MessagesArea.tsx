@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { StickyUserMessage } from "@/components/chat/taskHeader/StickyUserMessage";
 import { useExtensionState } from "@/context/ExtensionStateContext";
+import { useLiveTaskMessages } from "@/context/TaskStreamState";
 import { cn } from "@/lib/utils";
 import type { ChatState, MessageHandlers, ScrollBehavior } from "../../types/chatTypes";
 import { createMessageRenderer } from "../messages/MessageRenderer";
@@ -31,15 +32,14 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 	messageHandlers,
 }) => {
 	const {
-		clineMessages,
 		currentTaskItem,
 		backgroundEditEnabled,
 		mcpServers,
 		mcpMarketplaceCatalog,
 		onRelinquishControl,
-		vscodeTerminalExecutionMode,
 		showFeatureTips,
 	} = useExtensionState();
+	const clineMessages = useLiveTaskMessages();
 	const taskRenderKey = String(currentTaskItem?.id || task.ts || "current-task");
 	const chatRowEnvironment = useMemo(
 		() => ({
@@ -47,7 +47,6 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 			mcpServers,
 			mcpMarketplaceCatalog,
 			onRelinquishControl,
-			vscodeTerminalExecutionMode,
 			showFeatureTips,
 		}),
 		[
@@ -55,7 +54,6 @@ export const MessagesArea: React.FC<MessagesAreaProps> = ({
 			mcpServers,
 			mcpMarketplaceCatalog,
 			onRelinquishControl,
-			vscodeTerminalExecutionMode,
 			showFeatureTips,
 		],
 	);

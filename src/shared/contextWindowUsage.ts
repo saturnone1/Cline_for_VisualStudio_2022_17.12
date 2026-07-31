@@ -4,6 +4,9 @@ export interface ContextWindowUsage {
 	used: number
 	source: "reported" | "estimated"
 	reliable: boolean
+	sdkMaxInputTokens?: number
+	sdkCompactionTriggerTokens?: number
+	sdkCompactionTargetTokens?: number
 }
 
 const MAX_ESTIMATED_TEXT_CHARS_PER_MESSAGE = 64_000
@@ -22,25 +25,48 @@ export function getLastApiReqTotalTokens(messages: ClineMessage[]): number {
 export function getContextWindowUsage(messages: ClineMessage[]): ContextWindowUsage | undefined {
 	const currentContextMessages = getCurrentContextMessages(messages)
 	const compactedBaseline = getLastCompactedTokenBaseline(messages)
+	const sdkBudget = getLatestSdkCompactionBudget(messages)
 	const snapshot = findLatestReportedUsage(currentContextMessages)
 	if (snapshot) {
-		const reported = getCalibratedConversationUsage(currentContextMessages, snapshot)
 		const afterSnapshot = currentContextMessages.slice(snapshot.index + 1)
 		const firstNewContextIndex = afterSnapshot.findIndex(advancesModelContext)
 		if (firstNewContextIndex < 0) {
-			return { used: reported, source: "estimated", reliable: false }
+			return { used: snapshot.used, source: "reported", reliable: true, ...sdkBudget }
 		}
 
 		const incremental = estimateConversationTokens(afterSnapshot.slice(firstNewContextIndex))
 		return {
-			used: reported + incremental,
+			used: snapshot.used + incremental,
 			source: "estimated",
 			reliable: false,
+			...sdkBudget,
 		}
 	}
 
 	const estimated = compactedBaseline + estimateConversationTokens(currentContextMessages)
-	return estimated > 0 ? { used: estimated, source: "estimated", reliable: false } : undefined
+	return estimated > 0 ? { used: estimated, source: "estimated", reliable: false, ...sdkBudget } : undefined
+}
+
+function getLatestSdkCompactionBudget(messages: ClineMessage[]) {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const compaction = messages[index].contextCompaction
+		if (!compaction) continue
+		const sdkMaxInputTokens = positiveCount(compaction.maxInputTokens)
+		const sdkCompactionTriggerTokens = positiveCount(compaction.triggerTokens)
+		const sdkCompactionTargetTokens = positiveCount(compaction.targetTokens)
+		if (sdkMaxInputTokens || sdkCompactionTriggerTokens || sdkCompactionTargetTokens) {
+			return {
+				...(sdkMaxInputTokens ? { sdkMaxInputTokens } : {}),
+				...(sdkCompactionTriggerTokens ? { sdkCompactionTriggerTokens } : {}),
+				...(sdkCompactionTargetTokens ? { sdkCompactionTargetTokens } : {}),
+			}
+		}
+	}
+	return {}
+}
+
+function positiveCount(value: unknown) {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined
 }
 
 function getLastCompactedTokenBaseline(messages: ClineMessage[]) {
@@ -67,48 +93,16 @@ function findLatestReportedUsage(messages: ClineMessage[]): ReportedUsageSnapsho
 			const output = firstTokenCount(usage, ["tokensOut", "outputTokens", "completionTokens"])
 			const cacheReads = firstTokenCount(usage, ["cacheReads", "cacheReadTokens", "cache_read_input_tokens"])
 			const cacheWrites = firstTokenCount(usage, ["cacheWrites", "cacheWriteTokens", "cache_creation_input_tokens"])
-			const promptTokens = input + cacheReads + cacheWrites
+			// SDK inputTokens is the complete prompt count. Cache counters are a
+			// breakdown of that total, not additional context. Older integrations
+			// sometimes reported only the breakdown, so retain it as a fallback.
+			const promptTokens = input > 0 ? input : cacheReads + cacheWrites
 			if (promptTokens > 0) {
 				return { index: i, promptTokens, outputTokens: output, used: promptTokens + output }
 			}
 			return undefined
 		} catch {
 			return undefined
-		}
-	}
-	return undefined
-}
-
-function getCalibratedConversationUsage(messages: ClineMessage[], latest: ReportedUsageSnapshot) {
-	const first = findFirstReportedUsage(messages)
-	if (!first) return latest.used
-
-	const initialUserContext = estimateConversationTokens(
-		messages.slice(0, first.index).filter(advancesModelContext),
-	)
-	const fixedPromptOverhead = Math.max(0, first.promptTokens - initialUserContext)
-	const calibratedReported = latest.promptTokens >= fixedPromptOverhead
-		? latest.promptTokens - fixedPromptOverhead + latest.outputTokens
-		: latest.used
-	const visibleConversation = estimateConversationTokens(messages)
-	return Math.max(1, calibratedReported, visibleConversation)
-}
-
-function findFirstReportedUsage(messages: ClineMessage[]): ReportedUsageSnapshot | undefined {
-	for (let i = 0; i < messages.length; i++) {
-		const message = messages[i]
-		if (message.type !== "say" || message.say !== "api_req_started" || !message.text) continue
-		try {
-			const usage = JSON.parse(message.text) as Record<string, unknown>
-			if (usage.usageReliable === false) continue
-			const input = firstTokenCount(usage, ["tokensIn", "inputTokens", "promptTokens"])
-			const output = firstTokenCount(usage, ["tokensOut", "outputTokens", "completionTokens"])
-			const cacheReads = firstTokenCount(usage, ["cacheReads", "cacheReadTokens", "cache_read_input_tokens"])
-			const cacheWrites = firstTokenCount(usage, ["cacheWrites", "cacheWriteTokens", "cache_creation_input_tokens"])
-			const promptTokens = input + cacheReads + cacheWrites
-			if (promptTokens > 0) return { index: i, promptTokens, outputTokens: output, used: promptTokens + output }
-		} catch {
-			// Continue to the next valid snapshot.
 		}
 	}
 	return undefined

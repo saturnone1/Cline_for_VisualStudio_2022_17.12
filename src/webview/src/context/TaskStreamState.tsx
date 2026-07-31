@@ -66,12 +66,19 @@ export function mergeLivePartialMessages(prevState: ExtensionState, incomingStat
 		}
 	}
 	if (!preserved.length) return incomingState
-	const mergedByTs = new Map(incomingMessages.map((message) => [message.ts, message]))
-	for (const message of preserved) mergedByTs.set(message.ts, message)
-	return { ...incomingState, clineMessages: [...mergedByTs.values()].sort(compareMessageTimestamp) }
+	const merged = [...incomingMessages]
+	const indexByTs = new Map(merged.map((message, index) => [message.ts, index]))
+	for (const message of preserved) {
+		const index = indexByTs.get(message.ts)
+		if (index === undefined) {
+			indexByTs.set(message.ts, merged.length)
+			merged.push(message)
+		} else {
+			merged[index] = message
+		}
+	}
+	return { ...incomingState, clineMessages: merged }
 }
-
-function compareMessageTimestamp(left: ClineMessage, right: ClineMessage) { return (left.ts ?? 0) - (right.ts ?? 0) }
 function createInitialExtensionState(): ExtensionState {
 	return {
 		version: "",
@@ -103,12 +110,10 @@ function createInitialExtensionState(): ExtensionState {
 		localAgentsRulesToggles: {},
 		localWorkflowToggles: {},
 		globalWorkflowToggles: {},
-		shellIntegrationTimeout: 4000,
+		shellIntegrationTimeout: 30_000,
 		terminalReuseEnabled: true,
-		vscodeTerminalExecutionMode: "vscodeTerminal",
 		terminalOutputLineLimit: 500,
-		maxConsecutiveMistakes: 3,
-		defaultTerminalProfile: "default",
+		defaultTerminalProfile: "visual-studio-command-host",
 		isNewUser: false,
 		welcomeViewCompleted: false,
 		onboardingModels: undefined,
@@ -116,7 +121,7 @@ function createInitialExtensionState(): ExtensionState {
 		strictPlanModeEnabled: false,
 		yoloModeToggled: false,
 		customPrompt: "",
-		useAutoCondense: false,
+		useAutoCondense: true,
 		subagentsEnabled: false,
 		scheduledAgentsEnabled: false,
 		clineWebToolsEnabled: { user: true, featureFlag: false },
@@ -130,7 +135,6 @@ function createInitialExtensionState(): ExtensionState {
 		backgroundCommandTaskId: undefined,
 		lastDismissedCliBannerVersion: 0,
 		backgroundEditEnabled: false,
-		doubleCheckCompletionEnabled: false,
 		lazyTeammateModeEnabled: false,
 		showFeatureTips: true,
 		globalSkillsToggles: {},
@@ -140,7 +144,6 @@ function createInitialExtensionState(): ExtensionState {
 		isMultiRootWorkspace: false,
 		multiRootSetting: { user: false, featureFlag: false },
 		hooksEnabled: false,
-		nativeToolCallSetting: false,
 		enableParallelToolCalling: false,
 	}
 }
@@ -164,18 +167,21 @@ export function TaskStreamStateProvider({ children }: { children: React.ReactNod
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const messageIndexRef = useRef(new Map<number, number>())
 	const stateRef = useRef(state)
+	const lastStateJsonRef = useRef("")
 	const pendingPartialsRef = useRef(new TaskPartialBuffer())
 	stateRef.current = state
 
 	const onStateJson = useCallback(
 		(stateJson: string) => {
+			if (stateJson === lastStateJsonRef.current) return
 			try {
 				let stateData = normalizeTaskStateMessages(JSON.parse(stateJson) as ExtensionState)
 				const incomingTaskId = String(stateData.currentTaskItem?.id || "")
 				const buffered = pendingPartialsRef.current.take(incomingTaskId)
 				if (buffered.length > 0) {
 					let messages = stateData.clineMessages ?? []
-					for (const proto of buffered) messages = mergeTaskPartial(messages, convertProtoToClineMessage(proto))
+					const messageIndex = buildTaskMessageIndex(messages)
+					for (const proto of buffered) messages = mergeTaskPartial(messages, convertProtoToClineMessage(proto), messageIndex)
 					stateData = { ...stateData, clineMessages: messages }
 				}
 				const previousState = { ...stateRef.current, clineMessages: liveMessagesRef.current }
@@ -198,6 +204,7 @@ export function TaskStreamStateProvider({ children }: { children: React.ReactNod
 				stateRef.current = nextState
 				setLiveMessages(nextState.clineMessages)
 				setState(nextState)
+				lastStateJsonRef.current = stateJson
 			} catch (error) {
 				console.error("Error parsing state JSON:", error)
 			}
@@ -223,7 +230,7 @@ export function TaskStreamStateProvider({ children }: { children: React.ReactNod
 				return
 			}
 			setLiveMessages((previousMessages) => {
-				const clineMessages = mergeTaskPartial(previousMessages, partialMessage)
+				const clineMessages = mergeTaskPartial(previousMessages, partialMessage, messageIndexRef.current)
 				if (clineMessages === previousMessages) return previousMessages
 				messageIndexRef.current = buildTaskMessageIndex(clineMessages)
 				liveMessagesRef.current = clineMessages

@@ -9,6 +9,8 @@ export class WebviewStreamPublisher {
 	private readonly partialRequests = new Set<string>()
 	private readonly stateDeliveryKeys = new Map<string, string>()
 	private readonly partialDeliveryKeys = new Map<string, string>()
+	private readonly partialInFlightKeys = new Map<string, string>()
+	private readonly pendingPartialDeliveries = new Map<string, PartialDelivery>()
 	private broadcastInFlight: Promise<void> | null = null
 	private broadcastQueued = false
 
@@ -31,10 +33,12 @@ export class WebviewStreamPublisher {
 		const removedPartial = this.partialRequests.delete(requestId)
 		this.stateDeliveryKeys.delete(requestId)
 		this.partialDeliveryKeys.delete(requestId)
+		this.partialInFlightKeys.delete(requestId)
+		this.pendingPartialDeliveries.delete(requestId)
 		return removedState || removedPartial
 	}
 
-	dispose() { this.stateRequests.clear(); this.partialRequests.clear(); this.stateDeliveryKeys.clear(); this.partialDeliveryKeys.clear() }
+	dispose() { this.stateRequests.clear(); this.partialRequests.clear(); this.stateDeliveryKeys.clear(); this.partialDeliveryKeys.clear(); this.partialInFlightKeys.clear(); this.pendingPartialDeliveries.clear() }
 
 	private buildStateDeliveries() {
 		if (this.stateRequests.size === 0) return []
@@ -66,11 +70,34 @@ export class WebviewStreamPublisher {
 		const correlationId = this.correlationId(), messageKey = `${taskId}:${partialMessageDeliveryKey(message)}:${correlationId}`
 		for (const requestId of this.partialRequests) {
 			const deliveryKey = `${requestId}:${messageKey}`
-			if (this.partialDeliveryKeys.get(requestId) === deliveryKey) continue
-			this.partialDeliveryKeys.set(requestId, deliveryKey)
-			this.logger.log("sidecar->webview", "partialMessage", { correlationId: correlationId || requestId, requestId, message: summarizeMessage(message) })
-			this.transport.send("webview.postMessage", { message: grpcResponse(requestId, { taskId, message: toProtoClineMessage(message) }, true, correlationId) }).catch((error) => { this.partialDeliveryKeys.delete(requestId); console.error(error) })
+			if (this.partialDeliveryKeys.get(requestId) === deliveryKey || this.partialInFlightKeys.get(requestId) === deliveryKey) continue
+			this.pendingPartialDeliveries.set(requestId, { deliveryKey, correlationId, message, taskId })
+			this.drainPartialDelivery(requestId)
 		}
+	}
+
+	private drainPartialDelivery(requestId: string) {
+		if (this.partialInFlightKeys.has(requestId) || !this.partialRequests.has(requestId)) return
+		const delivery = this.pendingPartialDeliveries.get(requestId)
+		if (!delivery) return
+		this.pendingPartialDeliveries.delete(requestId)
+		this.partialInFlightKeys.set(requestId, delivery.deliveryKey)
+		this.logger.log("sidecar->webview", "partialMessage", {
+			correlationId: delivery.correlationId || requestId,
+			requestId,
+			message: summarizeMessage(delivery.message),
+		})
+		this.transport.send("webview.postMessage", {
+			message: grpcResponse(requestId, { taskId: delivery.taskId, message: toProtoClineMessage(delivery.message) }, true, delivery.correlationId),
+		}).then(() => {
+			if (this.partialRequests.has(requestId)) this.partialDeliveryKeys.set(requestId, delivery.deliveryKey)
+		}).catch((error) => {
+			this.partialDeliveryKeys.delete(requestId)
+			console.error(error)
+		}).finally(() => {
+			if (this.partialInFlightKeys.get(requestId) === delivery.deliveryKey) this.partialInFlightKeys.delete(requestId)
+			this.drainPartialDelivery(requestId)
+		})
 	}
 
 	private async broadcastStateCore() {
@@ -83,6 +110,13 @@ export class WebviewStreamPublisher {
 		}))
 	}
 }
+
+type PartialDelivery = Readonly<{
+	deliveryKey: string
+	correlationId: string
+	message: Record<string, unknown>
+	taskId: string
+}>
 
 function grpcResponse(requestId: string, message: unknown, isStreaming: boolean, correlationId = "") {
 	return {

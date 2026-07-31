@@ -76,3 +76,31 @@ test("failed state delivery remains retryable and unsubscribe clears both stream
 	await Promise.resolve()
 	assert.equal(sent.length, 1)
 })
+
+test("partial stream keeps only the newest update while host delivery is in flight", async () => {
+	const sent = []
+	const releases = []
+	const publisher = new WebviewStreamPublisher(
+		{ send: (_method, params) => new Promise((resolve) => { sent.push(params.message); releases.push(resolve) }) },
+		{ log: () => {} },
+		() => "{}",
+		() => "correlation",
+		() => "task-1",
+	)
+	publisher.subscribePartial("partial-subscription")
+
+	publisher.sendPartial({ ts: 1, type: "say", say: "text", text: "h", partial: true })
+	publisher.sendPartial({ ts: 1, type: "say", say: "text", text: "he", partial: true })
+	publisher.sendPartial({ ts: 1, type: "say", say: "text", text: "hello", partial: true })
+	assert.equal(sent.length, 1)
+	assert.equal(sent[0].grpc_response.message.message.text, "h")
+
+	releases.shift()()
+	await new Promise((resolve) => setImmediate(resolve))
+	assert.equal(sent.length, 2)
+	assert.equal(sent[1].grpc_response.message.message.text, "hello")
+
+	releases.shift()()
+	await new Promise((resolve) => setImmediate(resolve))
+	assert.equal(sent.length, 2)
+})

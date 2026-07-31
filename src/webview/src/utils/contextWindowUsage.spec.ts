@@ -14,11 +14,23 @@ describe("context window usage", () => {
 			{ ts: 2, type: "say", say: "api_req_started", text: JSON.stringify({ tokensIn: 1_200, tokensOut: 100, cacheReads: 300 }) },
 		]
 
-		expect(getLastApiReqTotalTokens(messages)).toBe(1_600)
-		expect(getContextWindowUsage(messages)).toEqual({ used: 1_600, source: "estimated", reliable: false })
+		expect(getLastApiReqTotalTokens(messages)).toBe(1_300)
+		expect(getContextWindowUsage(messages)).toEqual({ used: 1_300, source: "reported", reliable: true })
 	})
 
-	it("removes repeated SDK system and tool overhead from the displayed conversation context", () => {
+	it("does not double-count SDK cache token breakdowns", () => {
+		const completeInput: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "api_req_started", text: JSON.stringify({ tokensIn: 4_000, tokensOut: 100, cacheReads: 3_500, cacheWrites: 200 }) },
+		]
+		const legacyBreakdownOnly: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "api_req_started", text: JSON.stringify({ tokensIn: 0, tokensOut: 100, cacheReads: 3_500, cacheWrites: 200 }) },
+		]
+
+		expect(getContextWindowUsage(completeInput)).toEqual({ used: 4_100, source: "reported", reliable: true })
+		expect(getContextWindowUsage(legacyBreakdownOnly)).toEqual({ used: 3_800, source: "reported", reliable: true })
+	})
+
+	it("uses the current model request rather than cumulative visible transcript estimates", () => {
 		const messages: ClineMessage[] = [
 			{ ts: 1, type: "say", say: "task", text: "안녕" },
 			{ ts: 2, type: "say", say: "text", text: "안녕하세요!" },
@@ -29,9 +41,7 @@ describe("context window usage", () => {
 		]
 
 		const usage = getContextWindowUsage(messages)
-		expect(usage?.source).toBe("estimated")
-		expect(usage?.used).toBeGreaterThan(100)
-		expect(usage?.used).toBeLessThan(500)
+		expect(usage).toEqual({ used: 9_516, source: "reported", reliable: true })
 	})
 
 	it("estimates the current transcript when the latest usage is unreliable", () => {
@@ -53,8 +63,7 @@ describe("context window usage", () => {
 
 		const usage = getContextWindowUsage(messages)
 		expect(usage?.source).toBe("estimated")
-		expect(usage?.used).toBeGreaterThan(estimateConversationTokens(messages.slice(1)))
-		expect(usage?.used).toBeLessThan(1_000)
+		expect(usage?.used).toBeGreaterThan(1_050)
 	})
 
 	it("keeps the reported baseline while a subsequent response is streaming", () => {
@@ -66,7 +75,7 @@ describe("context window usage", () => {
 
 		const usage = getContextWindowUsage(messages)
 		expect(usage?.source).toBe("estimated")
-		expect(usage?.used).toBeLessThan(1_000)
+		expect(usage?.used).toBeGreaterThan(9_200)
 	})
 
 	it("does not truncate long Korean messages at the former 8k-token ceiling", () => {
@@ -95,6 +104,46 @@ describe("context window usage", () => {
 		const usage = getContextWindowUsage(messages)
 		expect(usage?.used).toBeGreaterThanOrEqual(1_250)
 		expect(usage?.used).toBeLessThan(1_350)
+	})
+
+	it("carries the SDK-reported input and compaction budgets with current usage", () => {
+		const messages: ClineMessage[] = [
+			{
+				ts: 1,
+				type: "say",
+				say: "reasoning",
+				text: "Context compacted.",
+				contextCompaction: {
+					sourceSessionId: "session",
+					sessionId: "session",
+					estimatedTokensAfter: 2_800,
+					maxInputTokens: 4_500,
+					triggerTokens: 4_050,
+					targetTokens: 3_150,
+				},
+			},
+			{ ts: 2, type: "say", say: "api_req_started", text: JSON.stringify({ tokensIn: 2_800, tokensOut: 120 }) },
+		]
+
+		expect(getContextWindowUsage(messages)).toEqual({
+			used: 2_920,
+			source: "reported",
+			reliable: true,
+			sdkMaxInputTokens: 4_500,
+			sdkCompactionTriggerTokens: 4_050,
+			sdkCompactionTargetTokens: 3_150,
+		})
+	})
+
+	it("uses the first post-compaction model report without adding the old transcript again", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "say", say: "text", text: "이전 대화".repeat(2_000) },
+			{ ts: 2, type: "say", say: "reasoning", text: "응답 준비 기록", contextCompaction: { sourceSessionId: "session", sessionId: "session", estimatedTokensAfter: 2_800 } },
+			{ ts: 3, type: "say", say: "text", text: "압축 후 응답" },
+			{ ts: 4, type: "say", say: "api_req_started", text: JSON.stringify({ tokensIn: 2_800, tokensOut: 120 }) },
+		]
+
+		expect(getContextWindowUsage(messages)).toEqual({ used: 2_920, source: "reported", reliable: true })
 	})
 
 	it("does not treat compaction progress text as a successful boundary", () => {

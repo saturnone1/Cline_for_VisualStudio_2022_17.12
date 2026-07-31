@@ -56,12 +56,52 @@ test("webview state persistence restores user settings and omits transient state
 	const state = createInitialState()
 	state.uiLanguage = "en"
 	state.customPrompt = "Review carefully"
+	state.shellIntegrationTimeout = 4_500
+	state.terminalReuseEnabled = false
+	state.terminalOutputLineLimit = 900
+	state.defaultTerminalProfile = "windows-powershell"
 	state.backgroundCommandRunning = true
 	state.taskLifecycleStatus = "streaming"
 	const restored = loadInitialState(createPersistedStateSnapshot(state))
 
 	assert.equal(restored.uiLanguage, "en")
 	assert.equal(restored.customPrompt, "Review carefully")
+	assert.equal(restored.shellIntegrationTimeout, 4_500)
+	assert.equal(restored.terminalReuseEnabled, false)
+	assert.equal(restored.terminalOutputLineLimit, 900)
+	assert.equal(restored.defaultTerminalProfile, "windows-powershell")
 	assert.equal(restored.backgroundCommandRunning, false)
 	assert.equal(restored.taskLifecycleStatus, "idle")
+})
+
+test("legacy automatic-compaction defaults migrate once without overriding later user choice", () => {
+	const legacy = loadInitialState({ useAutoCondense: false })
+	assert.equal(legacy.useAutoCondense, true)
+	assert.equal(legacy.autoCondensePreferenceVersion, 1)
+
+	const configured = loadInitialState({ useAutoCondense: false, autoCondensePreferenceVersion: 1 })
+	assert.equal(configured.useAutoCondense, false)
+	assert.equal(createPersistedStateSnapshot(configured).autoCondensePreferenceVersion, 1)
+})
+
+test("persisted transcripts migrate legacy SDK status rows in current and historical tasks", () => {
+	const restored = loadInitialState({
+		currentTaskItem: { id: "current" },
+		clineMessages: [
+			{ type: "say", say: "text", text: "auto-compacting" },
+			{ type: "say", say: "text", text: "현재 응답" },
+		],
+		taskSnapshots: {
+			old: {
+				taskItem: { id: "old" },
+				messages: [
+					{ type: "say", say: "text", text: "auto-compacted" },
+					{ type: "say", say: "text", text: "과거 응답" },
+				],
+			},
+		},
+	})
+
+	assert.deepEqual(restored.clineMessages.map((message) => message.text), ["현재 응답"])
+	assert.deepEqual(restored.taskSnapshots.old.messages.map((message) => message.text), ["과거 응답"])
 })

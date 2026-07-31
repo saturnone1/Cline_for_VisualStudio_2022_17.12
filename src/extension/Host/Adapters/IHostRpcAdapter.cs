@@ -7,6 +7,9 @@ namespace VsClineAgent.Host.Adapters
     {
         bool CanHandle(string method);
 
-        Task<JToken?> HandleAsync(string method, JToken? parameters);
+        Task<JToken?> HandleAsync(
+            string method,
+            JToken? parameters,
+            System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
     }
 }

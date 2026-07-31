@@ -1,6 +1,5 @@
-import type { AgentCompactSessionRequest, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
+import type { AgentConnectionUpdateRequest, AgentMessageRequest, AgentSessionRequest, AgentStartRequest } from "../../application/ports/AgentEnginePort"
 import { buildSdkStartInput, normalizeAgentMode } from "./SdkSessionRequestBuilder"
-import { estimateCompactedTokens } from "./ClineSdkCompactionSummarizer"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 export type ClineSdkCore = Awaited<ReturnType<ClineSdkModule["ClineCore"]["create"]>>
@@ -13,7 +12,6 @@ type SessionAdapterDependencies = {
 	getWorkspacePaths: () => Promise<string[]>
 	createExtraTools: () => Promise<unknown>
 	getStatus: () => unknown
-	summarizeCompaction: (config: Readonly<Record<string, unknown>>, initialMessages: readonly unknown[], signal?: AbortSignal) => Promise<string>
 }
 
 export class ClineSdkSessionAdapter {
@@ -33,7 +31,7 @@ export class ClineSdkSessionAdapter {
 		}
 
 		const session = await core.get(sessionId)
-		if (session) this.dependencies.setActiveSessionId(sessionId)
+		this.dependencies.setActiveSessionId(session ? sessionId : null)
 		return session
 	}
 
@@ -52,48 +50,6 @@ export class ClineSdkSessionAdapter {
 				this.dependencies.setActiveSessionId(null)
 			}
 			throw error
-		}
-	}
-
-	async compact(request: AgentCompactSessionRequest) {
-		const core = await this.dependencies.getCore()
-		const workspaceRoots = await this.dependencies.getWorkspacePaths()
-		const summary = await this.dependencies.summarizeCompaction(request.config, request.initialMessages, request.signal)
-		throwIfAborted(request.signal)
-		const { startInput } = buildSdkStartInput({
-			cwd: request.cwd,
-			interactive: true,
-				sessionMetadata: {
-					...request.sessionMetadata,
-					ligVsCompactedFrom: request.sourceSessionId,
-					ligVsCompactedContext: summary,
-					ligVsCompactedInitialMessageCount: 0,
-			},
-			config: { ...request.config, sessionId: undefined },
-			toolPolicies: request.toolPolicies,
-			prompt: "",
-		}, workspaceRoots, await this.dependencies.createExtraTools())
-
-		const result = await core.start(startInput)
-		const replacementSessionId = stringValue(result.sessionId)
-		if (!replacementSessionId || replacementSessionId === request.sourceSessionId) {
-			if (replacementSessionId && replacementSessionId !== request.sourceSessionId) await core.stop(replacementSessionId).catch(() => undefined)
-			throw new Error("SDK did not create a valid replacement session for context compaction.")
-		}
-		if (request.signal?.aborted) {
-			await core.stop(replacementSessionId).catch(() => undefined)
-			await core.delete(replacementSessionId).catch(() => false)
-			throw new Error("Context compaction was cancelled.")
-		}
-		this.dependencies.setActiveSessionId(replacementSessionId)
-		return {
-			...result,
-			sessionId: replacementSessionId,
-			compactedFrom: request.sourceSessionId,
-			sourceSessionDeleted: false,
-			compactedMessageCount: 0,
-			estimatedTokensAfter: estimateCompactedTokens([{ role: "context", content: summary }]),
-			compactionSummary: summary,
 		}
 	}
 
@@ -156,19 +112,20 @@ export class ClineSdkSessionAdapter {
 	async deleteSession(params: unknown) {
 		const sessionId = stringValue(asRecord(params).sessionId)
 		if (!sessionId) return false
-		if (this.dependencies.getActiveSessionId() === sessionId) this.dependencies.setActiveSessionId(null)
-		return (await this.dependencies.getCore()).delete(sessionId)
+		const deleted = await (await this.dependencies.getCore()).delete(sessionId)
+		if (deleted && this.dependencies.getActiveSessionId() === sessionId) this.dependencies.setActiveSessionId(null)
+		return deleted
 	}
 
 	async updateSession(params: unknown) {
 		const request = asRecord(params)
 		const sessionId = stringValue(request.sessionId) || this.dependencies.getActiveSessionId()
 		if (!sessionId) throw new Error("No Cline SDK session selected.")
-		return (await this.dependencies.getCore()).update(sessionId, {
-			title: stringValue(request.title) || null,
-			prompt: stringValue(request.prompt) || null,
-			metadata: asRecord(request.metadata),
-		})
+		const updates: { title?: string | null; prompt?: string | null; metadata?: Record<string, unknown> | null } = {}
+		if ("title" in request) updates.title = nullableString(request.title, "title")
+		if ("prompt" in request) updates.prompt = nullableString(request.prompt, "prompt")
+		if ("metadata" in request) updates.metadata = nullableRecord(request.metadata, "metadata")
+		return (await this.dependencies.getCore()).update(sessionId, updates)
 	}
 
 	async getUsage(params: unknown) {
@@ -195,6 +152,27 @@ export class ClineSdkSessionAdapter {
 		return result
 	}
 
+	async updateConnection(request: AgentConnectionUpdateRequest) {
+		const sessionId = stringValue(request.sessionId) || this.dependencies.getActiveSessionId()
+		if (!sessionId) throw new Error("No Cline SDK session selected.")
+		const { sessionId: _sessionId, ...updates } = request
+		await (await this.dependencies.getCore()).updateSessionConnection(sessionId, updates as Parameters<ClineSdkCore["updateSessionConnection"]>[1])
+	}
+
+	async compareCheckpoint(params: unknown) {
+		const request = asRecord(params)
+		const sessionId = stringValue(request.sessionId) || this.dependencies.getActiveSessionId()
+		const checkpointRunCount = numberValue(request.checkpointRunCount)
+		if (!sessionId || checkpointRunCount === undefined) {
+			throw new Error("SDK checkpoint compare requires sessionId and checkpointRunCount.")
+		}
+		return (await this.dependencies.getCore()).compareCheckpoint({
+			sessionId,
+			checkpointRunCount,
+			cwd: stringValue(request.cwd),
+		})
+	}
+
 	async listSettings(params: unknown) {
 		return (await this.dependencies.getCore()).settings.list(asRecord(params))
 	}
@@ -216,4 +194,14 @@ function numberValue(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
-function throwIfAborted(signal?: AbortSignal) { if (signal?.aborted) throw new Error("Context compaction was cancelled.") }
+function nullableString(value: unknown, field: string) {
+	if (value === null) return null
+	if (typeof value === "string") return value
+	throw new TypeError(`SDK session ${field} must be a string or null.`)
+}
+
+function nullableRecord(value: unknown, field: string) {
+	if (value === null) return null
+	if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
+	throw new TypeError(`SDK session ${field} must be an object or null.`)
+}

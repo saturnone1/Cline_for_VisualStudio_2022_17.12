@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useState } from "react"
 import styled from "styled-components"
 import ChatErrorBoundary from "@/components/chat/ChatErrorBoundary"
 import { CODE_BLOCK_BG_COLOR } from "@/components/common/CodeBlock"
-import MarkdownBlock from "@/components/common/MarkdownBlock"
+import MarkdownBlock from "@/components/common/LazyMarkdownBlock"
 import { DropdownContainer } from "@/components/settings/common/ModelSelector"
 import { updateSetting } from "@/components/settings/utils/settingsHandlers"
 import { useExtensionState } from "../../../context/ExtensionStateContext"
@@ -108,7 +108,6 @@ const McpResponseDisplay: React.FC<McpResponseDisplayProps> = ({ responseText })
 			return
 		}
 
-		console.log("Processing MCP response for URL extraction")
 		setIsLoading(true)
 		setError(null)
 
@@ -246,7 +245,6 @@ const McpResponseDisplay: React.FC<McpResponseDisplayProps> = ({ responseText })
 			</ResponseContainer>
 		)
 	} catch (_error) {
-		console.log("Error rendering MCP response - falling back to plain text") // Restored comment
 		// Fallback for critical rendering errors
 		return (
 			<ResponseContainer>

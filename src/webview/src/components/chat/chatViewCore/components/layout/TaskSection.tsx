@@ -15,9 +15,7 @@ interface TaskSectionProps {
 		totalCost: number
 	}
 	contextWindowUsage?: ContextWindowUsage
-	compactResetKey?: number
 	contextCompactionInProgress?: boolean
-	contextCompactionThreshold?: number
 	lastApiReqTotalTokens?: number
 	selectedModelInfo: {
 		supportsPromptCache: boolean
@@ -37,9 +35,7 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 	messages,
 	apiMetrics,
 	contextWindowUsage,
-	compactResetKey,
 	contextCompactionInProgress,
-	contextCompactionThreshold,
 	lastApiReqTotalTokens,
 	selectedModelInfo,
 	messageHandlers,
@@ -51,14 +47,11 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 			cacheReads={apiMetrics.totalCacheReads}
 			cacheWrites={apiMetrics.totalCacheWrites}
 			doesModelSupportPromptCache={selectedModelInfo.supportsPromptCache}
-			compactResetKey={compactResetKey}
 			contextCompactionInProgress={contextCompactionInProgress}
-			contextCompactionThreshold={contextCompactionThreshold}
 			contextWindowUsage={contextWindowUsage}
 			lastApiReqTotalTokens={lastApiReqTotalTokens}
 			lastProgressMessageText={lastProgressMessageText}
 			messages={messages}
-			onCompact={messageHandlers.handleCompactTask}
 			onClose={messageHandlers.handleTaskCloseButtonClick}
 			showFocusChainPlaceholder={showFocusChainPlaceholder}
 			task={task}

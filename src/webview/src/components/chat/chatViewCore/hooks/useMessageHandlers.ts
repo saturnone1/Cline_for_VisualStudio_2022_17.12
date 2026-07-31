@@ -29,17 +29,6 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 	const sendInFlightRef = useRef(false);
 	const clearInFlightRef = useRef(false);
 
-	const handleCompactTask = useCallback(async () => {
-		setSendingDisabled(true);
-		setEnableButtons(false);
-		await SlashServiceClient.condense(EmptyRequest.create({})).catch((err) => {
-			console.error(err);
-			setSendingDisabled(false);
-			setEnableButtons(true);
-			throw err;
-		});
-	}, [setEnableButtons, setSendingDisabled]);
-
 	// Handle sending a message
 	const handleSendMessage = useCallback(
 		async (text: string, images: string[], files: string[]) => {
@@ -341,9 +330,6 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 
 				case "utility":
 					switch (clineAsk) {
-						case "condense":
-							await handleCompactTask();
-							break;
 						case "report_bug":
 							await SlashServiceClient.reportBug(StringRequest.create({ value: lastMessage?.text })).catch(
 								async (err) => {
@@ -362,7 +348,6 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		},
 		[
 			clineAsk,
-			handleCompactTask,
 			lastMessage,
 			messages,
 			clearInputState,
@@ -387,7 +372,6 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 
 	return {
 		executeButtonAction,
-		handleCompactTask,
 		handleSendMessage,
 		handleTaskCloseButtonClick,
 		startNewTask,

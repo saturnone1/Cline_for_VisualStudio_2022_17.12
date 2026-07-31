@@ -167,7 +167,7 @@ namespace VsClineAgent.Host.Tests
         public void BackgroundCommandLoggingDoesNotOpenOrActivateTheOutputPane()
         {
             var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "extension", "Host", "VisualStudioOutputPaneWriter.cs"));
-            Assert.Contains("CreatePane(ref outputPaneGuid, \"VsCline Agent\", 0, 1)", source);
+            Assert.Contains("CreatePane(ref outputPaneGuid, \"LIG VS Command\", 0, 1)", source);
             Assert.DoesNotContain("pane?.Activate()", source);
         }
 

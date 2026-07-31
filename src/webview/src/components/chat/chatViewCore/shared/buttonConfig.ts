@@ -164,10 +164,10 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 	// Utility states
 	condense: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "대화 압축",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "utility",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 	report_bug: {

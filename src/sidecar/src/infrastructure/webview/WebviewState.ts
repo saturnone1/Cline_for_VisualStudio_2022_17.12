@@ -1,6 +1,11 @@
 import type { TaskLifecycleStatus } from "../../domain/task/TaskLifecycle"
 import { capabilityRegistry } from "../../application/services/CapabilityRegistry"
-import { normalizeClineMessagePayload, normalizeMcpDisplayMode } from "../conversation/ConversationMessageProjection"
+import { isLegacyTransientRuntimeMessage } from "../../application/services/TransientRuntimeMessagePolicy"
+import { readInstalledSdkVersion } from "../sdk/SdkPackageMetadata"
+import {
+	normalizeClineMessagePayload,
+	normalizeMcpDisplayMode,
+} from "../conversation/ConversationMessageProjection"
 import { projectTranscriptMessages, TRANSCRIPT_SNAPSHOT_LIMITS } from "../conversation/TranscriptSnapshotPolicy"
 import {
 	isWebFetchEnabled,
@@ -23,6 +28,14 @@ function getString(record: Record<string, unknown>, key: string): string {
 	return typeof record[key] === "string" ? String(record[key]) : ""
 }
 
+function normalizeStoredMessages(value: unknown) {
+	return arrayOfRecords(value)
+		.map(normalizeClineMessagePayload)
+		.filter((message) => !isLegacyTransientRuntimeMessage(message))
+}
+
+const AUTO_CONDENSE_PREFERENCE_VERSION = 1
+
 export function cloneTaskSnapshot(snapshot: unknown): { taskItem: Record<string, unknown>; messages: Array<Record<string, unknown>> } | null {
 	const record = asRecord(snapshot)
 	const taskItem = asRecord(record.taskItem)
@@ -31,7 +44,7 @@ export function cloneTaskSnapshot(snapshot: unknown): { taskItem: Record<string,
 	}
 	return {
 		taskItem: { ...taskItem },
-		messages: arrayOfRecords(record.messages).map(normalizeClineMessagePayload),
+		messages: normalizeStoredMessages(record.messages),
 	}
 }
 
@@ -107,11 +120,9 @@ export function loadInitialState(persisted: Record<string, unknown> | null) {
 		"mcpResponsesCollapsed",
 		"strictPlanModeEnabled",
 		"yoloModeToggled",
-		"useAutoCondense",
 		"subagentsEnabled",
 		"scheduledAgentsEnabled",
 		"backgroundEditEnabled",
-		"doubleCheckCompletionEnabled",
 		"lazyTeammateModeEnabled",
 		"showFeatureTips",
 		"hooksEnabled",
@@ -121,9 +132,13 @@ export function loadInitialState(persisted: Record<string, unknown> | null) {
 			state[key] = persisted[key] as never
 		}
 	}
-	if (typeof persisted.nativeToolCallSetting === "boolean") {
-		state.nativeToolCallSetting = persisted.nativeToolCallSetting
+	const autoCondensePreferenceVersion = typeof persisted.autoCondensePreferenceVersion === "number"
+		? persisted.autoCondensePreferenceVersion
+		: 0
+	if (autoCondensePreferenceVersion >= AUTO_CONDENSE_PREFERENCE_VERSION && typeof persisted.useAutoCondense === "boolean") {
+		state.useAutoCondense = persisted.useAutoCondense
 	}
+	state.autoCondensePreferenceVersion = AUTO_CONDENSE_PREFERENCE_VERSION
 	if (typeof persisted.contextCompactionThreshold === "number" && Number.isFinite(persisted.contextCompactionThreshold)) {
 		state.contextCompactionThreshold = Math.min(100, Math.max(1, persisted.contextCompactionThreshold))
 	}
@@ -137,6 +152,18 @@ export function loadInitialState(persisted: Record<string, unknown> | null) {
 	}
 	if (typeof persisted.preferredLanguage === "string") {
 		state.preferredLanguage = normalizePreferredLanguage(persisted.preferredLanguage)
+	}
+	if (typeof persisted.shellIntegrationTimeout === "number" && Number.isFinite(persisted.shellIntegrationTimeout) && persisted.shellIntegrationTimeout >= 1_000) {
+		state.shellIntegrationTimeout = Math.round(persisted.shellIntegrationTimeout)
+	}
+	if (typeof persisted.terminalReuseEnabled === "boolean") {
+		state.terminalReuseEnabled = persisted.terminalReuseEnabled
+	}
+	if (typeof persisted.terminalOutputLineLimit === "number" && Number.isFinite(persisted.terminalOutputLineLimit)) {
+		state.terminalOutputLineLimit = Math.min(5_000, Math.max(100, Math.round(persisted.terminalOutputLineLimit)))
+	}
+	if (typeof persisted.defaultTerminalProfile === "string" && persisted.defaultTerminalProfile.trim()) {
+		state.defaultTerminalProfile = persisted.defaultTerminalProfile.trim()
 	}
 	const customPrompt = getString(persisted, "customPrompt")
 	state.customPrompt = customPrompt === "compact" ? "" : customPrompt
@@ -172,7 +199,7 @@ export function loadInitialState(persisted: Record<string, unknown> | null) {
 	const currentTaskItem = asRecord(persisted.currentTaskItem)
 	if (Object.keys(currentTaskItem).length > 0) {
 		state.currentTaskItem = currentTaskItem
-		state.clineMessages = arrayOfRecords(persisted.clineMessages).map(normalizeClineMessagePayload)
+		state.clineMessages = normalizeStoredMessages(persisted.clineMessages)
 	}
 
 	return state
@@ -196,16 +223,19 @@ export function createPersistedStateSnapshot(state: ReturnType<typeof createInit
 		strictPlanModeEnabled: state.strictPlanModeEnabled,
 		yoloModeToggled: state.yoloModeToggled,
 		useAutoCondense: state.useAutoCondense,
+		autoCondensePreferenceVersion: state.autoCondensePreferenceVersion,
 		contextCompactionThreshold: state.contextCompactionThreshold,
 		subagentsEnabled: state.subagentsEnabled,
 		scheduledAgentsEnabled: state.scheduledAgentsEnabled,
 		backgroundEditEnabled: state.backgroundEditEnabled,
-		doubleCheckCompletionEnabled: state.doubleCheckCompletionEnabled,
 		lazyTeammateModeEnabled: state.lazyTeammateModeEnabled,
 		showFeatureTips: state.showFeatureTips,
 		hooksEnabled: state.hooksEnabled,
-		nativeToolCallSetting: state.nativeToolCallSetting,
 		enableParallelToolCalling: state.enableParallelToolCalling,
+		shellIntegrationTimeout: state.shellIntegrationTimeout,
+		terminalReuseEnabled: state.terminalReuseEnabled,
+		terminalOutputLineLimit: state.terminalOutputLineLimit,
+		defaultTerminalProfile: state.defaultTerminalProfile,
 		taskHistory: state.taskHistory,
 		taskSnapshots: state.taskSnapshots,
 		currentTaskItem: state.currentTaskItem,
@@ -214,7 +244,7 @@ export function createPersistedStateSnapshot(state: ReturnType<typeof createInit
 }
 
 export function createWebviewStateSnapshot(state: ReturnType<typeof createInitialState>) {
-	const { taskSnapshots: _taskSnapshots, ...webviewState } = state
+	const { taskSnapshots: _taskSnapshots, autoCondensePreferenceVersion: _autoCondensePreferenceVersion, ...webviewState } = state
 	return {
 		...webviewState,
 		clineMessages: projectTranscriptMessages(state.clineMessages, TRANSCRIPT_SNAPSHOT_LIMITS.currentMessages),
@@ -292,11 +322,9 @@ export function createInitialState() {
 		localAgentsRulesToggles: {},
 		localWorkflowToggles: {},
 		globalWorkflowToggles: {},
-		shellIntegrationTimeout: 4000,
+		shellIntegrationTimeout: 30_000,
 		terminalReuseEnabled: true,
-		vscodeTerminalExecutionMode: "vscodeTerminal",
 		terminalOutputLineLimit: 500,
-		maxConsecutiveMistakes: 3,
 		defaultTerminalProfile: "visual-studio-command-host",
 		isNewUser: false,
 		welcomeViewCompleted: true,
@@ -305,7 +333,8 @@ export function createInitialState() {
 		strictPlanModeEnabled: false,
 		yoloModeToggled: false,
 		customPrompt: "",
-		useAutoCondense: false,
+		useAutoCondense: true,
+		autoCondensePreferenceVersion: AUTO_CONDENSE_PREFERENCE_VERSION,
 		subagentsEnabled: false,
 		scheduledAgentsEnabled: false,
 		clineWebToolsEnabled: { user: webFetchEnabled, featureFlag: webFetchEnabled, reason: webFetchDisabledReason(browserSettings) || undefined },
@@ -318,7 +347,6 @@ export function createInitialState() {
 		remoteConfigSettings: {},
 		backgroundCommandRunning: false,
 		backgroundEditEnabled: false,
-		doubleCheckCompletionEnabled: false,
 		lazyTeammateModeEnabled: false,
 		showFeatureTips: false,
 		globalSkillsToggles: {},
@@ -329,7 +357,6 @@ export function createInitialState() {
 		isMultiRootWorkspace: false,
 		multiRootSetting: { user: false, featureFlag: false },
 		hooksEnabled: false,
-		nativeToolCallSetting: false,
 		enableParallelToolCalling: false,
 		currentTaskItem: null as Record<string, unknown> | null,
 	}
@@ -347,5 +374,5 @@ export function createSdkCoverageState(lastError: string | null) {
 }
 
 export function readBundledSdkVersion() {
-	return "0.0.42"
+	return readInstalledSdkVersion() || "unknown"
 }

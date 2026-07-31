@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using VsClineAgent.Host;
@@ -27,9 +28,22 @@ namespace VsClineAgent.Services
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 var solutionPath = GetDte()?.Solution?.FullName;
-                return string.IsNullOrEmpty(solutionPath)
+                if (!string.IsNullOrWhiteSpace(solutionPath))
+                    return System.IO.Path.GetDirectoryName(solutionPath);
+
+                var solution = Package.GetGlobalService(typeof(SVsSolution)) as IVsSolution;
+                if (solution != null && ErrorHandler.Succeeded(solution.GetSolutionInfo(out var solutionDirectory, out var solutionFile, out _)))
+                {
+                    if (!string.IsNullOrWhiteSpace(solutionDirectory))
+                        return System.IO.Path.GetFullPath(solutionDirectory);
+                    if (!string.IsNullOrWhiteSpace(solutionFile))
+                        return System.IO.Path.GetDirectoryName(solutionFile);
+                }
+
+                var activeFile = GetDte()?.ActiveDocument?.FullName;
+                return string.IsNullOrWhiteSpace(activeFile)
                     ? null
-                    : System.IO.Path.GetDirectoryName(solutionPath);
+                    : System.IO.Path.GetDirectoryName(activeFile);
             }
             catch (Exception ex) { LogFailure("editor.solutionRoot.failed", ex); return null; }
         }

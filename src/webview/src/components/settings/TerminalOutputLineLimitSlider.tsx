@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useEffect, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
 import { updateSetting } from "./utils/settingsHandlers"
@@ -6,10 +6,17 @@ import { updateSetting } from "./utils/settingsHandlers"
 const TerminalOutputLineLimitSlider: React.FC = () => {
 	const { terminalOutputLineLimit } = useExtensionState()
 	const { t } = useI18n()
+	const persistedValue = terminalOutputLineLimit ?? 500
+	const [value, setValue] = useState(persistedValue)
+
+	useEffect(() => setValue(persistedValue), [persistedValue])
 
 	const handleSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-		const value = parseInt(event.target.value, 10)
-		updateSetting("terminalOutputLineLimit", value)
+		setValue(parseInt(event.target.value, 10))
+	}
+
+	const commitValue = () => {
+		if (value !== persistedValue) updateSetting("terminalOutputLineLimit", value)
 	}
 
 	return (
@@ -23,12 +30,15 @@ const TerminalOutputLineLimitSlider: React.FC = () => {
 					max="5000"
 					min="100"
 					onChange={handleSliderChange}
+					onBlur={commitValue}
+					onKeyUp={commitValue}
+					onPointerUp={commitValue}
 					step="100"
 					style={{ flexGrow: 1, marginRight: "1rem" }}
 					type="range"
-					value={terminalOutputLineLimit ?? 500}
+					value={value}
 				/>
-				<span>{terminalOutputLineLimit ?? 500}</span>
+				<span>{value}</span>
 			</div>
 			<p style={{ fontSize: "12px", color: "var(--vscode-descriptionForeground)", margin: "5px 0 0 0" }}>
 				{t("settings.terminal.outputLimitHelp")}

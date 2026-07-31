@@ -5,7 +5,6 @@ import {
 	type ClineSayTool,
 	COMPLETION_RESULT_CHANGES_FLAG,
 } from "@shared/ExtensionMessage"
-import { BooleanRequest } from "@shared/proto/cline/common"
 import type { Mode } from "@shared/storage/types"
 import {
 	ArrowRightIcon,
@@ -13,10 +12,8 @@ import {
 	CheckIcon,
 	CircleSlashIcon,
 	CircleXIcon,
-	LightbulbIcon,
 	LoaderCircleIcon,
 	RefreshCwIcon,
-	SettingsIcon,
 	TriangleAlertIcon,
 } from "lucide-react"
 import type { MouseEvent, ReactNode, RefObject } from "react"
@@ -25,7 +22,6 @@ import { WithCopyButton } from "@/components/common/CopyButton"
 import McpResponseDisplay from "@/components/mcp/chatDisplay/McpResponseDisplay"
 import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
-import { UiServiceClient } from "@/services/grpcClient"
 import CodeAccordian, { cleanPathPrefix } from "../common/CodeAccordian"
 import { CommandOutputContent } from "./CommandOutputRow"
 import { CompletionOutputRow } from "./CompletionOutputRow"
@@ -96,7 +92,6 @@ interface SayMessageRendererProps {
 	setSeeNewChangesDisabled: (value: boolean) => void
 	explainChangesDisabled: boolean
 	setExplainChangesDisabled: (value: boolean) => void
-	vscodeTerminalExecutionMode?: string
 	title: ReactNode
 	icon: ReactNode
 }
@@ -121,7 +116,6 @@ export function SayMessageRenderer({
 	setSeeNewChangesDisabled,
 	explainChangesDisabled,
 	setExplainChangesDisabled,
-	vscodeTerminalExecutionMode,
 	title,
 	icon,
 }: SayMessageRendererProps) {
@@ -353,19 +347,9 @@ export function SayMessageRenderer({
 				<div className="flex flex-col bg-warning/20 p-2 rounded-xs border border-error">
 					<div className="flex items-center mb-1">
 						<TriangleAlertIcon className="mr-2 size-2 stroke-3 text-error" />
-						<span className="font-medium text-foreground">Shell Integration Unavailable</span>
+						<span className="font-medium text-foreground">{t("chat.commandHostUnavailable.title")}</span>
 					</div>
-					<div className="text-foreground opacity-80">
-						Cline may have trouble viewing the command's output. Please update VSCode (
-						<code>CMD/CTRL + Shift + P</code> → "Update") and make sure you're using a supported shell:
-						zsh, bash, fish, or PowerShell (<code>CMD/CTRL + Shift + P</code> → "Terminal: Select Default
-						Profile").
-						<a
-							className="px-1"
-							href="https://github.com/cline/cline/wiki/Troubleshooting-%E2%80%90-Shell-Integration-Unavailable">
-							Still having trouble?
-						</a>
-					</div>
+					<div className="text-foreground opacity-80">{t("chat.commandHostUnavailable.description")}</div>
 				</div>
 			)
 		case "error_retry":
@@ -422,38 +406,15 @@ export function SayMessageRenderer({
 		case "subagent":
 			return <SubagentStatusRow isLast={isLast} lastModifiedMessage={lastModifiedMessage} message={message} />
 		case "shell_integration_warning_with_suggestion":
-			const isBackgroundModeEnabled = vscodeTerminalExecutionMode === "backgroundExec"
 			return (
-				<div className="p-2 bg-link/10 border border-link/30 rounded-xs">
+				<div className="p-2 bg-warning/10 border border-warning/30 rounded-xs">
 					<div className="flex items-center mb-1">
-						<LightbulbIcon className="mr-1.5 size-2 text-link" />
-						<span className="font-medium text-foreground">Shell integration issues</span>
+						<TriangleAlertIcon className="mr-1.5 size-2 text-warning" />
+						<span className="font-medium text-foreground">Visual Studio 명령 호스트 연결 문제</span>
 					</div>
-					<div className="text-foreground opacity-90 mb-2">
-						Since you're experiencing repeated shell integration issues, we recommend switching to
-						Background Terminal mode for better reliability.
+					<div className="text-foreground opacity-90">
+						터미널 설정에서 다른 Visual Studio/Windows 셸 프로필을 선택하거나 세션 재사용을 끈 뒤 다시 시도하세요.
 					</div>
-					<button
-						className={cn(
-							"bg-button-background text-button-foreground border-0 rounded-xs py-1.5 px-3 text-[12px] flex items-center gap-1.5 cursor-pointer hover:bg-button-hover",
-							{
-								"cursor-default opacity-80 bg-success": isBackgroundModeEnabled,
-							},
-						)}
-						disabled={isBackgroundModeEnabled}
-						onClick={async () => {
-							try {
-								// Enable background terminal execution mode
-								await UiServiceClient.setTerminalExecutionMode(BooleanRequest.create({ value: true }))
-							} catch (error) {
-								console.error("Failed to enable background terminal:", error)
-							}
-						}}>
-						<SettingsIcon className="size-2" />
-						{isBackgroundModeEnabled
-							? "Background Terminal Enabled"
-							: "Enable Background Terminal (Recommended)"}
-					</button>
 				</div>
 			)
 		case "task_progress":

@@ -7,6 +7,7 @@ import type { ExtensionSubscriptionCallbacks } from "./ExtensionSubscriptions"
 import { NavigationStateProvider } from "./NavigationState"
 import { RuntimeViewStateProvider } from "./RuntimeViewState"
 import { mergeLivePartialMessages, TaskStreamStateProvider, useLiveTaskMessages, useTaskBaseStateContext, useTaskStreamStateContext } from "./TaskStreamState"
+import { mergeTaskPartial } from "./taskPartialBuffer"
 
 let subscriptionCallbacks: ExtensionSubscriptionCallbacks | undefined
 
@@ -28,6 +29,37 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("TaskStreamStateProvider", () => {
+	it("preserves authoritative sidecar order when a progress row moved to the end", () => {
+		const previous = {
+			currentTaskItem: { id: "task-1" },
+			clineMessages: [
+				{ ts: 10, type: "say", say: "task", text: "question" },
+				{ ts: 11, type: "say", say: "reasoning", text: "long progress", partial: true },
+			],
+		} as ExtensionState
+		const incoming = {
+			...previous,
+			clineMessages: [
+				{ ts: 10, type: "say", say: "task", text: "question" },
+				{ ts: 12, type: "say", say: "tool", text: "tool result" },
+				{ ts: 11, type: "say", say: "reasoning", text: "short", partial: true },
+			],
+		} as ExtensionState
+
+		const merged = mergeLivePartialMessages(previous, incoming).clineMessages
+		expect(merged.map((message) => message.ts)).toEqual([10, 12, 11])
+		expect(merged.at(-1)?.text).toBe("long progress")
+	})
+
+	it("appends a newly delivered partial instead of reordering the transcript by timestamp", () => {
+		const messages = [
+			{ ts: 20, type: "say", say: "tool", text: "tool result" },
+			{ ts: 10, type: "say", say: "reasoning", text: "progress", partial: true },
+		] as ClineMessage[]
+		const merged = mergeTaskPartial(messages, { ts: 15, type: "say", say: "text", text: "assistant", partial: true })
+		expect(merged.map((message) => message.ts)).toEqual([20, 10, 15])
+	})
+
 	it("drops null message entries from incoming state snapshots", async () => {
 		const { result } = renderHook(() => useTaskStreamStateContext(), { wrapper })
 

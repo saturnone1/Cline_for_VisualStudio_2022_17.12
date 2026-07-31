@@ -469,12 +469,10 @@
     "ModeRequest": {
       "fields": {
         "mode": {
-          "type": "string",
-          "values": ["plan", "act"]
+          "type": "string"
         },
         "value": {
-          "type": "string",
-          "values": ["plan", "act"]
+          "type": "string"
         }
       },
       "allowAdditionalFields": true
@@ -2837,7 +2835,7 @@
       "sidecar": true,
       "requestShape": "Empty",
       "responseShape": "Empty",
-      "timeoutMs": 195000,
+      "timeoutMs": 0,
       "route": "task"
     },
     {

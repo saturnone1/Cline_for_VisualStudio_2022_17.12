@@ -35,6 +35,7 @@ namespace VsClineAgent.Services
         public string Shell { get; set; } = string.Empty;
         internal StringBuilder? StdOutBuffer { get; set; }
         internal StringBuilder? StdErrBuffer { get; set; }
+        internal TaskCompletionSource<int>? Completion { get; set; }
         internal object OutputLock { get; } = new object();
     }
 
@@ -107,13 +108,19 @@ namespace VsClineAgent.Services
     internal sealed class TerminalShellSession
     {
         public string TerminalId { get; set; } = string.Empty;
+        public string ProfileId { get; set; } = string.Empty;
+        public string Shell { get; set; } = string.Empty;
         public string WorkingDirectory { get; set; } = string.Empty;
         public string CurrentDirectory { get; set; } = string.Empty;
         public Process Process { get; set; } = null!;
+        public bool IsReusable { get; set; }
         public bool Busy { get; set; }
         public bool IsDisposed { get; set; }
         public RunningCommandInfo? ActiveCommand { get; set; }
         public TaskCompletionSource<int>? ActiveCompletion { get; set; }
         public SemaphoreSlim InputLock { get; } = new SemaphoreSlim(1, 1);
+		internal object StateLock { get; } = new object();
+		internal int InputLockDisposed;
+		internal int ResourcesDisposed;
     }
 }

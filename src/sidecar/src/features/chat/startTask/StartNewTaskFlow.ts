@@ -15,6 +15,7 @@ type Callbacks = Readonly<{
 	persist: () => void
 	broadcast: () => void
 	prepare: (input: StartNewTaskInput, task: Record<string, unknown>) => Promise<void>
+	fail: (error: unknown) => Promise<void>
 }>
 
 export class StartNewTaskFlow {
@@ -22,7 +23,7 @@ export class StartNewTaskFlow {
 
 	async execute(input: StartNewTaskInput) {
 		if (!this.callbacks.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
-		await this.callbacks.stopPrevious()
+		const previousStop = this.callbacks.stopPrevious()
 		this.callbacks.transitionStarting()
 		const task = this.callbacks.createTask(input)
 		this.callbacks.startLatency(input.requestId, String(task.id || ""), input.text.length)
@@ -35,6 +36,12 @@ export class StartNewTaskFlow {
 		this.callbacks.updateTask()
 		this.callbacks.persist()
 		if (input.broadcast) this.callbacks.broadcast()
+		try {
+			await previousStop
+		} catch (error) {
+			await this.callbacks.fail(error)
+			return
+		}
 		await this.callbacks.prepare(input, task)
 	}
 }

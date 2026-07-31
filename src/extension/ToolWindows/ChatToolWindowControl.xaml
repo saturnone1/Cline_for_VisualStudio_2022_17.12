@@ -140,25 +140,90 @@
                          Foreground="#0E70C0"
                          Background="#333333"
                          BorderThickness="0" />
+            <Button x:Name="loadingRetryButton"
+                    Visibility="Collapsed"
+                    Content="다시 시도"
+                    HorizontalAlignment="Center"
+                    Margin="0,14,0,0"
+                    Padding="14,5"
+                    Click="OnRetryErrorClick" />
         </StackPanel>
 
-        <TextBox x:Name="errorText"
-                 Visibility="Collapsed"
-                 VerticalAlignment="Stretch"
-                 HorizontalAlignment="Stretch"
-                 Foreground="#F44747"
-                 Background="#1E1E1E"
-                 BorderBrush="#3C3C3C"
-                 FontFamily="Consolas"
-                 FontSize="12"
-                 Margin="16"
-                 Padding="12"
-                 IsReadOnly="True"
-                 AcceptsReturn="True"
-                 AcceptsTab="True"
-                 TextWrapping="NoWrap"
-                 HorizontalScrollBarVisibility="Auto"
-                 VerticalScrollBarVisibility="Auto"
-                 Text="" />
+        <Border x:Name="runtimeDiagnosticPanel"
+                Visibility="Collapsed"
+                Panel.ZIndex="20"
+                VerticalAlignment="Top"
+                Margin="8"
+                Padding="10"
+                Background="#3A1F22"
+                BorderBrush="#B14A52"
+                BorderThickness="1"
+                CornerRadius="3">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="runtimeDiagnosticText"
+                           VerticalAlignment="Center"
+                           Foreground="#FFD7D9"
+                           TextWrapping="Wrap"
+                           MaxHeight="56" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="12,0,0,0">
+                    <Button x:Name="runtimeDiagnosticDetailsButton"
+                            Content="자세히"
+                            Padding="9,3"
+                            Margin="0,0,6,0"
+                            Click="OnShowRuntimeDiagnosticDetailsClick" />
+                    <Button x:Name="runtimeDiagnosticDismissButton"
+                            Content="닫기"
+                            Padding="9,3"
+                            Click="OnDismissRuntimeDiagnosticClick" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid x:Name="errorPanel"
+              Visibility="Collapsed"
+              Panel.ZIndex="30"
+              Margin="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBox x:Name="errorText"
+                     VerticalAlignment="Stretch"
+                     HorizontalAlignment="Stretch"
+                     Foreground="#F44747"
+                     Background="#1E1E1E"
+                     BorderBrush="#3C3C3C"
+                     FontFamily="Consolas"
+                     FontSize="12"
+                     Padding="12"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     HorizontalScrollBarVisibility="Auto"
+                     VerticalScrollBarVisibility="Auto"
+                     Text="" />
+            <StackPanel Grid.Row="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Margin="0,10,0,0">
+                <Button x:Name="errorRetryButton"
+                        Content="다시 시도"
+                        Padding="14,5"
+                        Margin="0,0,8,0"
+                        Click="OnRetryErrorClick" />
+                <Button x:Name="errorDismissButton"
+                        Content="오류 닫기"
+                        Padding="14,5"
+                        Click="OnDismissErrorClick" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

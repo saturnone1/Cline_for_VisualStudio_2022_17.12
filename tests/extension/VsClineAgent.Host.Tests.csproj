@@ -36,8 +36,11 @@
     <Compile Include="..\..\src\extension\Host\SidecarStartupConnector.cs" Link="Host\SidecarStartupConnector.cs" />
     <Compile Include="..\..\src\extension\Host\UiThemePreferenceStore.cs" Link="Host\UiThemePreferenceStore.cs" />
     <Compile Include="..\..\src\extension\Host\WebViewNavigationPolicy.cs" Link="Host\WebViewNavigationPolicy.cs" />
+    <Compile Include="..\..\src\extension\Host\WebViewShortcutPolicy.cs" Link="Host\WebViewShortcutPolicy.cs" />
+    <Compile Include="..\..\src\extension\Host\WebviewBootstrapScript.cs" Link="Host\WebviewBootstrapScript.cs" />
     <Compile Include="..\..\src\extension\Host\WebView2RuntimeResolver.cs" Link="Host\WebView2RuntimeResolver.cs" />
     <Compile Include="..\..\src\extension\Host\WebViewLifecycleMessage.cs" Link="Host\WebViewLifecycleMessage.cs" />
+    <Compile Include="..\..\src\extension\Host\WebViewDiagnosticPolicy.cs" Link="Host\WebViewDiagnosticPolicy.cs" />
     <Compile Include="..\..\src\extension\Host\ToolWindowLifetime.cs" Link="Host\ToolWindowLifetime.cs" />
     <Compile Include="..\..\src\extension\Services\TerminalCommandPolicy.cs" Link="Services\TerminalCommandPolicy.cs" />
     <Compile Include="..\..\src\extension\Services\CommandExecutionModels.cs" Link="Services\CommandExecutionModels.cs" />

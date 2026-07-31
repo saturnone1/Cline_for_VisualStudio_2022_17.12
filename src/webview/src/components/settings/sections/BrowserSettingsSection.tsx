@@ -1,10 +1,11 @@
 import { EmptyRequest, StringRequest } from "@shared/proto/cline/common"
 import { VSCodeButton, VSCodeCheckbox, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import styled from "styled-components"
 import { BROWSER_VIEWPORT_PRESETS } from "@shared/BrowserSettings"
 import { useExtensionState } from "../../../context/ExtensionStateContext"
 import { useI18n } from "@/i18n"
+import { useAsyncPolling } from "@/hooks/useAsyncPolling"
 import { BrowserServiceClient } from "../../../services/grpcClient"
 import CollapsibleContent from "../CollapsibleContent"
 import { DebouncedTextField } from "../common/DebouncedTextField"
@@ -14,6 +15,8 @@ import { updateSetting } from "../utils/settingsHandlers"
 interface BrowserSettingsSectionProps {
 	renderSectionHeader: (tabId: string) => JSX.Element | null
 }
+
+const BROWSER_CONNECTION_REFRESH_INTERVAL_MS = 5000
 
 const ConnectionStatusIndicator = ({
 	isChecking,
@@ -65,6 +68,7 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 		activeTabTitle?: string
 		error?: string
 	} | null>(null)
+	const isFirstConnectionCheckRef = useRef(true)
 
 	// Auto-clear relaunch result message after 15 seconds
 	useEffect(() => {
@@ -89,63 +93,42 @@ export const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({ 
 	}, [])
 
 	// Function to check connection once without changing UI state immediately
-	const checkConnectionOnce = useCallback(() => {
-		setIsCheckingConnection(true)
-		if (browserSettings.remoteBrowserHost) {
-			BrowserServiceClient.testBrowserConnection(StringRequest.create({ value: browserSettings.remoteBrowserHost }))
-				.then((result) => {
-					setConnectionStatus(result.success)
-					setBrowserDiagnostics({
-						message: result.message,
-						host: result.host,
-						browser: result.browser,
-						tabCount: result.tabCount,
-						activeTabTitle: result.activeTabTitle,
-						error: result.success ? undefined : result.message,
-					})
-				})
-				.catch((error) => {
-					console.error("Error testing browser connection:", error)
-					setConnectionStatus(false)
-					setBrowserDiagnostics({ error: error.message })
-				})
-				.finally(() => setIsCheckingConnection(false))
-		} else {
-			BrowserServiceClient.discoverBrowser(EmptyRequest.create({}))
-				.then((result) => {
-					setConnectionStatus(result.success)
-					setBrowserDiagnostics({
-						message: result.message,
-						host: result.host,
-						browser: result.browser,
-						tabCount: result.tabCount,
-						activeTabTitle: result.activeTabTitle,
-						error: result.success ? undefined : result.message,
-					})
-				})
-				.catch((error) => {
-					console.error("Error discovering browser:", error)
-					setConnectionStatus(false)
-					setBrowserDiagnostics({ error: error.message })
-				})
-				.finally(() => setIsCheckingConnection(false))
+	const checkConnectionOnce = useCallback(async () => {
+		const showProgress = isFirstConnectionCheckRef.current
+		if (showProgress) setIsCheckingConnection(true)
+		try {
+			const result = browserSettings.remoteBrowserHost
+				? await BrowserServiceClient.testBrowserConnection(StringRequest.create({ value: browserSettings.remoteBrowserHost }))
+				: await BrowserServiceClient.discoverBrowser(EmptyRequest.create({}))
+			setConnectionStatus(result.success)
+			setBrowserDiagnostics({
+				message: result.message,
+				host: result.host,
+				browser: result.browser,
+				tabCount: result.tabCount,
+				activeTabTitle: result.activeTabTitle,
+				error: result.success ? undefined : result.message,
+			})
+		} catch (error) {
+			console.error("Error checking browser connection:", error)
+			setConnectionStatus(false)
+			setBrowserDiagnostics({ error: error instanceof Error ? error.message : String(error) })
+		} finally {
+			isFirstConnectionCheckRef.current = false
+			if (showProgress) setIsCheckingConnection(false)
 		}
 	}, [browserSettings.remoteBrowserHost])
 
-	// Setup continuous polling for connection status when remote browser is enabled
 	useEffect(() => {
-		if (!browserSettings.remoteBrowserEnabled) {
-			setIsCheckingConnection(false)
-			return
-		}
-
-		checkConnectionOnce()
-		const pollInterval = setInterval(() => {
-			checkConnectionOnce()
-		}, 5000)
-
-		return () => clearInterval(pollInterval)
-	}, [browserSettings.remoteBrowserEnabled, checkConnectionOnce])
+		isFirstConnectionCheckRef.current = true
+		setConnectionStatus(null)
+		setIsCheckingConnection(false)
+	}, [browserSettings.remoteBrowserEnabled, browserSettings.remoteBrowserHost])
+	useAsyncPolling({
+		enabled: browserSettings.remoteBrowserEnabled === true,
+		intervalMs: BROWSER_CONNECTION_REFRESH_INTERVAL_MS,
+		poll: checkConnectionOnce,
+	})
 
 	const handleViewportChange = (event: Event) => {
 		const target = event.target as HTMLSelectElement

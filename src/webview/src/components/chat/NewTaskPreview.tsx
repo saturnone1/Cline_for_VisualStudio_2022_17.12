@@ -1,5 +1,5 @@
 import React from "react"
-import MarkdownBlock from "../common/MarkdownBlock"
+import MarkdownBlock from "../common/LazyMarkdownBlock"
 
 interface NewTaskPreviewProps {
 	context: string

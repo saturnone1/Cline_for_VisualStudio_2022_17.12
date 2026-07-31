@@ -53,7 +53,9 @@ export class SettingsRpcHandler {
 				setBannerVersion(state, command.banner, command.version)
 				return this.broadcastEmpty()
 			case "setTerminalTimeout":
-				state.shellIntegrationTimeout = command.timeout || state.shellIntegrationTimeout
+				state.shellIntegrationTimeout = command.timeout && command.timeout >= 1_000
+					? command.timeout
+					: state.shellIntegrationTimeout
 				return this.broadcastEmpty()
 			case "completeWelcome":
 				state.welcomeViewCompleted = true

@@ -95,7 +95,7 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 			sessionId,
 			message: readString(raw.message),
 			reason,
-			noticeType: readString(raw.noticeType) || (isTransientSdkStatus(reason, raw) ? "status" : ""),
+			noticeType: readString(raw.noticeType) || "status",
 			raw,
 		}
 	}
@@ -124,8 +124,8 @@ export function translateClineAgentEvent(value: unknown, sessionId: string): Age
 			raw,
 		}
 	}
-	if (type === "done") return { type: "AgentDone", sessionId, result: asRecord(raw.result), completion: completionFields(raw), raw }
-	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, raw }
+	if (type === "done") return { type: "AgentDone", sessionId, reason: readString(raw.reason) || "completed", result: asRecord(raw.result), completion: completionFields(raw), raw }
+	if (type === "error") return { type: "AgentError", sessionId, error: raw.error, recoverable: raw.recoverable === true, iteration: readNumber(raw.iteration), raw }
 	return { type: "AgentEventUnknown", sessionId, originalType: type, raw }
 }
 
@@ -176,11 +176,6 @@ function readString(value: unknown) {
 
 function readNumber(value: unknown) {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function isTransientSdkStatus(reason: string, raw: AgentEventPayload) {
-	const kind = readString(raw.kind)
-	return reason === "auto_compaction" || reason === "manual_compaction" || kind === "auto_compaction" || kind === "manual_compaction"
 }
 
 function records(value: unknown): AgentEventPayload[] { return Array.isArray(value) ? value.map(asRecord) : [] }

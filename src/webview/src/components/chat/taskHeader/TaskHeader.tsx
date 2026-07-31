@@ -27,12 +27,9 @@ interface TaskHeaderProps {
 	totalCost: number
 	lastApiReqTotalTokens?: number
 	contextWindowUsage?: ContextWindowUsage
-	compactResetKey?: number
 	contextCompactionInProgress?: boolean
-	contextCompactionThreshold?: number
 	lastProgressMessageText?: string
 	showFocusChainPlaceholder?: boolean
-	onCompact?: () => Promise<void> | void
 	onClose: () => void
 }
 
@@ -48,12 +45,9 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	cacheReads,
 	lastApiReqTotalTokens,
 	contextWindowUsage,
-	compactResetKey,
 	contextCompactionInProgress,
-	contextCompactionThreshold,
 	lastProgressMessageText,
 	showFocusChainPlaceholder,
-	onCompact,
 	onClose,
 }) => {
 	const {
@@ -208,15 +202,11 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 						<ContextWindow
 							cacheReads={cacheReads}
 							cacheWrites={cacheWrites}
-							compactResetKey={compactResetKey}
 							compactionInProgress={contextCompactionInProgress}
-							compactThreshold={contextCompactionThreshold}
 							contextUsage={contextWindowUsage}
 							contextWindow={selectedModelInfo?.contextWindow}
 							language={uiLanguage}
 							lastApiReqTotalTokens={lastApiReqTotalTokens}
-							onCompact={onCompact}
-							taskId={String(currentTaskItem?.id ?? "")}
 							tokensIn={tokensIn}
 							tokensOut={tokensOut}
 							useAutoCondense={useAutoCondense === true}

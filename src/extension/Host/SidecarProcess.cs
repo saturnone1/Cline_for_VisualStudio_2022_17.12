@@ -30,6 +30,10 @@ namespace VsClineAgent.Host
         private Func<object, Task>? _postToWebviewAsync;
         private readonly object _recentOutputLock = new object();
         private readonly Queue<string> _recentOutput = new Queue<string>();
+        private readonly object _logWriterLock = new object();
+        private StreamWriter? _logWriter;
+        private int _unflushedLogLines;
+        private int _logWriterClosed;
         private string? _logFilePath;
         private int _unavailableNotificationSent;
 
@@ -128,6 +132,7 @@ namespace VsClineAgent.Host
             var scriptPath = Path.Combine(runtimeDirectory, "cline-sidecar.js");
             var nodePath = SidecarRuntimeInstaller.ResolveBundledNodePath(sidecarDirectory);
             _logFilePath = GetSidecarLogPath();
+            Volatile.Write(ref _logWriterClosed, 0);
 
             if (!File.Exists(scriptPath))
                 throw new FileNotFoundException(SidecarRuntimeInstaller.BuildMissingEntrypointDiagnostic(sidecarDirectory, runtimeDirectory), scriptPath);
@@ -280,9 +285,12 @@ namespace VsClineAgent.Host
             InteractionLog.Write("host", eventName, payload);
         }
 
-        private async Task<JToken?> HandleSidecarRequestAsync(string method, JToken? parameters)
+        private async Task<JToken?> HandleSidecarRequestAsync(
+            string method,
+            JToken? parameters,
+            CancellationToken cancellationToken)
         {
-            return await _hostRpcRouter.HandleAsync(method, parameters).ConfigureAwait(false);
+            return await _hostRpcRouter.HandleAsync(method, parameters, cancellationToken).ConfigureAwait(false);
         }
 
         private void OnConnectionClosed(Exception error)
@@ -353,6 +361,7 @@ namespace VsClineAgent.Host
             process?.Dispose();
             _process = null;
             _processJob.Dispose();
+            CloseSidecarLog();
         }
 
 		private static int ReadShutdownGraceMilliseconds()
@@ -364,7 +373,7 @@ namespace VsClineAgent.Host
         private static int ReadSdkWarmupTimeoutMilliseconds()
         {
             var configured = Environment.GetEnvironmentVariable("VSCLINE_SDK_WARMUP_TIMEOUT_MS");
-            return int.TryParse(configured, out var value) && value >= 5000 && value <= 120000 ? value : 60000;
+            return int.TryParse(configured, out var value) && value >= 5000 && value <= 600000 ? value : 300000;
         }
 
         public static void DisposeAllRunning()
@@ -431,8 +440,12 @@ namespace VsClineAgent.Host
 
                 try
                 {
-                    if (!string.IsNullOrWhiteSpace(_logFilePath))
-                        File.AppendAllText(_logFilePath!, entry + Environment.NewLine, Encoding.UTF8);
+                    WriteSidecarLogEntry(
+                        entry,
+                        prefix.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        prefix.IndexOf("exit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        prefix.IndexOf("shutdown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        prefix.IndexOf("unavailable", StringComparison.OrdinalIgnoreCase) >= 0);
                 }
                 catch
                 {
@@ -440,8 +453,67 @@ namespace VsClineAgent.Host
             }
         }
 
+        private void WriteSidecarLogEntry(string entry, bool flushImmediately)
+        {
+            if (Volatile.Read(ref _logWriterClosed) != 0 || string.IsNullOrWhiteSpace(_logFilePath))
+                return;
+
+            lock (_logWriterLock)
+            {
+                if (Volatile.Read(ref _logWriterClosed) != 0)
+                    return;
+
+                if (_logWriter == null)
+                {
+                    var stream = new FileStream(
+                        _logFilePath!,
+                        FileMode.Append,
+                        FileAccess.Write,
+                        FileShare.ReadWrite,
+                        16 * 1024,
+                        FileOptions.SequentialScan);
+                    _logWriter = new StreamWriter(stream, new UTF8Encoding(false), 16 * 1024)
+                    {
+                        AutoFlush = false,
+                    };
+                }
+
+                _logWriter.WriteLine(entry);
+                _unflushedLogLines++;
+                if (flushImmediately || _unflushedLogLines >= 16)
+                {
+                    _logWriter.Flush();
+                    _unflushedLogLines = 0;
+                }
+            }
+        }
+
+        private void FlushSidecarLog()
+        {
+            lock (_logWriterLock)
+            {
+                try { _logWriter?.Flush(); } catch { }
+                _unflushedLogLines = 0;
+            }
+        }
+
+        private void CloseSidecarLog()
+        {
+            if (Interlocked.Exchange(ref _logWriterClosed, 1) != 0)
+                return;
+
+            lock (_logWriterLock)
+            {
+                try { _logWriter?.Flush(); } catch { }
+                try { _logWriter?.Dispose(); } catch { }
+                _logWriter = null;
+                _unflushedLogLines = 0;
+            }
+        }
+
         private string BuildStartupDiagnostic(string summary, Exception ex)
         {
+            FlushSidecarLog();
             var builder = new StringBuilder();
             builder.Append(summary);
             builder.Append(" ");

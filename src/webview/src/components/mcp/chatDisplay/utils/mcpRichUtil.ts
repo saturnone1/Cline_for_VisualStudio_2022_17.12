@@ -56,11 +56,9 @@ export const safeCreateUrl = (url: string): URL | null => {
 			try {
 				return new URL(`https://${url}`)
 			} catch (_e) {
-				console.log(`Invalid URL: ${url}`)
 				return null
 			}
 		}
-		console.log(`Invalid URL: ${url}`)
 		return null
 	}
 }
@@ -129,8 +127,7 @@ export const normalizeRelativeUrl = (relativeUrl: string, baseUrl: string): stri
 			}
 			return `${baseUrlObj.protocol}//${baseUrlObj.host}${basePath}${relativeUrl}`
 		}
-	} catch (error) {
-		console.log(`Error normalizing relative URL: ${error}`)
+	} catch {
 		return relativeUrl // Return original on error
 	}
 }
@@ -148,7 +145,6 @@ export const formatUrlForOpening = (url: string): string => {
 		return urlObj.href
 	}
 
-	console.log(`Invalid URL format: ${url}`)
 	// Return a safe fallback that won't crash
 	return "about:blank"
 }
@@ -160,53 +156,17 @@ export const checkIfImageUrl = async (url: string): Promise<boolean> => {
 		return true
 	}
 
-	// Create a secure URL for the check but don't modify the original URL
-	let secureUrl = url
-	// Convert HTTP to HTTPS for security in the network request only
-	if (secureUrl.startsWith("http://")) {
-		secureUrl = secureUrl.replace("http://", "https://")
-		console.log(`Using HTTPS version for image check: ${secureUrl}`)
-	}
-
-	// Validate URL before proceeding
-	if (!isUrl(url)) {
-		console.log("Invalid URL format:", url)
+	const parsedUrl = safeCreateUrl(url)
+	if (!parsedUrl || (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:")) {
 		return false
 	}
 
-	// For https URLs, we need to use the gRPC FileService
-	if (url.startsWith("https")) {
-		try {
-			// Use the gRPC client with timeout
-			const timeoutPromise = new Promise<boolean>((resolve) => {
-				setTimeout(() => {
-					console.log("Hit timeout waiting for checkIsImageUrl")
-					resolve(false)
-				}, 3000)
-			})
-
-			// Create the actual service call
-			const servicePromise = WebServiceClient.checkIsImageUrl(StringRequest.create({ value: url }))
-				.then((result) => result.isImage)
-				.catch((error) => {
-					console.error("Error checking if URL is an image via gRPC:", error)
-					return false
-				})
-
-			// Race between the service call and the timeout
-			return Promise.race([servicePromise, timeoutPromise])
-		} catch (_error) {
-			console.log("Error checking if URL is an image:", url)
-			// Return false to indicate it's not an image
-			return false
-		}
+	try {
+		const result = await WebServiceClient.checkIsImageUrl(StringRequest.create({ value: parsedUrl.href }))
+		return result.isImage
+	} catch {
+		return false
 	}
-
-	// Don't fall back to extension check for other URLs
-	// Only data URLs (handled above) are guaranteed to be images
-	// For all other URLs, we need proper content type verification
-	console.log(`URL protocol not supported for image check: ${url}`)
-	return false
 }
 
 /**
@@ -226,13 +186,11 @@ export const extractUrlsFromText = (text: string, maxUrls: number = 50): UrlMatc
 
 		// Skip invalid URLs
 		if (!isUrl(url)) {
-			console.log("Skipping invalid URL:", url)
 			continue
 		}
 
 		// Skip localhost URLs to prevent security issues
 		if (isLocalhostUrl(url)) {
-			console.log("Skipping localhost URL:", url)
 			continue
 		}
 
@@ -247,13 +205,12 @@ export const extractUrlsFromText = (text: string, maxUrls: number = 50): UrlMatc
 		urlCount++
 	}
 
-	console.log(`Found ${matches.length} URLs in text`)
 	return matches.sort((a, b) => a.index - b.index)
 }
 
 /**
  * Processes URLs to determine their types (e.g., image vs link)
- * Processes URLs sequentially to avoid network flooding
+ * Processes URLs in small batches to avoid both network flooding and serial latency.
  * @param matches - Array of URL matches to process
  * @param onProgress - Callback for progress updates with updated matches
  * @param cancellationToken - Object to check if processing should be cancelled
@@ -264,55 +221,19 @@ export const processUrlTypes = async (
 	onProgress: (updatedMatches: UrlMatch[]) => void,
 	cancellationToken: { cancelled: boolean },
 ): Promise<void> => {
-	console.log(`Starting sequential URL processing for ${matches.length} URLs`)
-
-	for (let i = 0; i < matches.length; i++) {
-		// Skip already processed URLs
-		if (matches[i].isProcessed) {
-			continue
-		}
-
-		// Check if processing has been canceled
-		if (cancellationToken.cancelled) {
-			console.log("URL processing canceled")
-			return
-		}
-
-		const match = matches[i]
-		console.log(`Processing URL ${i + 1} of ${matches.length}: ${match.url}`)
-
-		try {
-			// Check if URL is an image
-			const isImage = await checkIfImageUrl(match.url)
-
-			// Skip if processing has been canceled
-			if (cancellationToken.cancelled) {
-				return
+	const pending = matches.filter((match) => !match.isProcessed)
+	const batchSize = Math.min(4, pending.length)
+	for (let offset = 0; offset < pending.length && !cancellationToken.cancelled; offset += batchSize) {
+		const batch = pending.slice(offset, offset + batchSize)
+		await Promise.all(batch.map(async (match) => {
+			try {
+				match.isImage = await checkIfImageUrl(match.url)
+			} finally {
+				match.isProcessed = true
 			}
-
-			// Update the match
-			match.isImage = isImage
-			match.isProcessed = true
-
-			// Notify progress with a new array to ensure React detects changes
-			onProgress([...matches])
-		} catch (err) {
-			console.log(`URL check error: ${match.url}`, err)
-			match.isProcessed = true
-
-			// Update state even on error
-			if (!cancellationToken.cancelled) {
-				onProgress([...matches])
-			}
-		}
-
-		// Delay between URL processing to avoid overwhelming the network
-		if (!cancellationToken.cancelled && i < matches.length - 1) {
-			await new Promise((resolve) => setTimeout(resolve, 100))
-		}
+		}))
+		if (!cancellationToken.cancelled) onProgress([...matches])
 	}
-
-	console.log(`URL processing complete. Found ${matches.filter((m) => m.isImage).length} image URLs`)
 }
 
 /**
@@ -354,7 +275,6 @@ export const processResponseUrls = (
 	// Return cleanup function
 	return () => {
 		cancellationToken.cancelled = true
-		console.log("Cleaning up URL processing")
 	}
 }
 

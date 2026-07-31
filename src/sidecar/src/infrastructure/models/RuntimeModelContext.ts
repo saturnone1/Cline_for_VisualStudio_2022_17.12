@@ -1,13 +1,13 @@
 import { normalizeProviderId } from "../../application/services/ProviderIdentity"
 import { resolveModelId, selectProvider } from "../../features/providers/ProviderSelection"
 import { resolveConfiguredContextWindow } from "../configuration/ProviderConfiguration"
+import { readBoundedPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 
 type RuntimeModelContextDependencies = {
 	configuration: () => Record<string, unknown>
 	mode: () => "plan" | "act"
 	defaultModelId: () => string
 	defaultOllamaModelId: () => string
-	maxResumedConversationChars: number
 }
 
 export class RuntimeModelContext {
@@ -20,14 +20,14 @@ export class RuntimeModelContext {
 		return resolveModelId(configuration, providerId, modePrefix) || this.dependencies.defaultModelId() || "claude-sonnet-4-6"
 	}
 
-	resumedConversationCharBudget() {
+	resumedConversationTokenBudget() {
 		const configuration = this.dependencies.configuration()
 		const modePrefix = this.dependencies.mode() === "plan" ? "planMode" : "actMode"
 		const providerId = normalizeProviderId(stringValue(configuration[`${modePrefix}ApiProvider`]) || "anthropic")
 		const contextWindowTokens = resolveConfiguredContextWindow(configuration, providerId, modePrefix, this.modelId())
-		return contextWindowTokens
-			? Math.min(this.dependencies.maxResumedConversationChars, Math.max(4_000, Math.floor(contextWindowTokens * 1.25)))
-			: this.dependencies.maxResumedConversationChars
+		if (!contextWindowTokens) return undefined
+		const percentage = readBoundedPositiveIntEnv("VSCLINE_RESUMED_CONTEXT_PERCENT", 60, 10, 90)
+		return Math.max(1, Math.floor(contextWindowTokens * percentage / 100))
 	}
 }
 

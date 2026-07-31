@@ -1,5 +1,6 @@
 import { tryParseJson } from "./ToolCommandFormatting"
 import { CLINE_ASK_KIND_MAP, CLINE_SAY_KIND_MAP } from "../../application/dto/generated/ClineMessageKinds"
+import { isNonDisplayableObjectCoercion } from "../../application/services/DisplayTextPolicy"
 
 export function normalizeClineMessagePayload(message: Record<string, unknown>) {
 	const normalized = { ...message }
@@ -89,7 +90,8 @@ export function isMeaninglessTextMessage(message: Record<string, unknown>) {
 	if (ask || say !== "text") {
 		return false
 	}
-	return isEmptyJsonObjectString(getString(message, "text"))
+	const text = getString(message, "text")
+	return isEmptyJsonObjectString(text) || isNonDisplayableObjectCoercion(text)
 }
 
 export function isJsonObjectString(value: string) {

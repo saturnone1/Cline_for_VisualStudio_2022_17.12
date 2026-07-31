@@ -20,8 +20,9 @@ namespace VsClineAgent.Host.Adapters
             return method.StartsWith("env.", StringComparison.Ordinal);
         }
 
-        public Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             JToken result;
             switch (method)
             {

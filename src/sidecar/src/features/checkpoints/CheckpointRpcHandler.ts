@@ -31,7 +31,7 @@ export class CheckpointRpcHandler {
 			await this.restore(command.target, signal)
 			return { payload: { value: true } }
 		}
-		const description = this.callbacks.checkpoints().describe(command.target, { taskItem: this.callbacks.currentTask() || undefined, messages: this.callbacks.messages(), trackedChanges: this.callbacks.trackedChanges() })
+		const description = await this.callbacks.checkpoints().compare(command.target, { taskItem: this.callbacks.currentTask() || undefined, messages: this.callbacks.messages(), trackedChanges: this.callbacks.trackedChanges() })
 		if (description.success) {
 			this.callbacks.addInfo(description.text, description.checkpointRunCount)
 			this.callbacks.updateTask()

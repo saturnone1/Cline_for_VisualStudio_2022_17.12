@@ -20,11 +20,11 @@ interface TaskContextWindowButtonsProps extends TokenUsageInfoProps {
 	percentage: number
 	tokenUsed: number
 	contextWindow: number
+	configuredContextWindow?: number
+	compactionTriggerTokens?: number
+	compactionTargetTokens?: number
 	usageSource: "reported" | "estimated"
 	autoCompactEnabled?: boolean
-	autoCompactThreshold?: number
-	isThresholdChanged?: boolean
-	isThresholdFadingOut?: boolean
 	language?: "en" | "ko"
 }
 
@@ -103,9 +103,11 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 	cacheWrites,
 	cacheReads,
 	percentage,
+	configuredContextWindow,
+	compactionTriggerTokens,
+	compactionTargetTokens,
 	usageSource,
 	autoCompactEnabled = false,
-	autoCompactThreshold = 0,
 	language = "en",
 }) => {
 	// Accordion state
@@ -129,31 +131,15 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 
 	const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
 	const isKorean = language === "ko"
+	const hasDistinctConfiguredWindow = Boolean(configuredContextWindow && configuredContextWindow !== contextWindow)
 
 	return (
 		<div className="context-window-tooltip-content flex flex-col gap-2 bg-menu rounded shadow-sm z-100 w-60 p-1">
-			{autoCompactThreshold > 0 && (
-				<AccordionItem
-					isExpanded={expandedSections.has("threshold")}
-					onToggle={(event) => toggleSection("threshold", event)}
-					title={isKorean ? "자동 압축 임계치" : "Auto compaction threshold"}
-					value={<span className="text-muted-foreground">{`${(autoCompactThreshold * 100).toFixed(0)}%`}</span>}>
-					<div className="space-y-1">
-						<p className="text-xs leading-relaxed text-white">
-							{isKorean ? "컨텍스트 창 막대를 눌러 새 임계치를 설정합니다." : "Click the context window bar to set a new threshold."}
-						</p>
-						<p className="text-xs leading-relaxed mt-0 mb-0">
-							{isKorean ? "컨텍스트 사용량이 이 값을 넘으면 대화 압축을 제안합니다." : "When context usage exceeds this threshold, conversation compaction is suggested."}
-						</p>
-					</div>
-				</AccordionItem>
-			)}
-
-			{autoCompactEnabled && autoCompactThreshold <= 0 && (
+			{autoCompactEnabled && (
 				<div className="rounded border border-[var(--vscode-widget-border)] p-1 text-xs text-muted-foreground">
 					{isKorean
-						? "자동 압축이 켜져 있습니다. 사용량이 임계치에 도달하면 압축을 제안합니다."
-						: "Auto Compact is enabled. LIG VS will suggest compaction when usage reaches the threshold."}
+						? "SDK 자동 압축이 켜져 있습니다. 모델 요청 전에 전체 요청 크기를 검사해 필요할 때 압축합니다."
+						: "SDK auto compaction is enabled. The full request is checked and compacted before model calls when needed."}
 				</div>
 			)}
 
@@ -168,12 +154,30 @@ export const ContextWindowSummary: React.FC<TaskContextWindowButtonsProps> = ({
 						<span className="font-mono">{formatTokenNumber(tokenUsed)}</span>
 					</div>
 					<div className="flex justify-between">
-						<span>{isKorean ? "최대:" : "Total:"}</span>
+						<span>{hasDistinctConfiguredWindow ? (isKorean ? "SDK 입력 한도:" : "SDK input limit:") : (isKorean ? "최대:" : "Total:")}</span>
 						<span className="font-mono">{formatTokenNumber(contextWindow)}</span>
 					</div>
+					{hasDistinctConfiguredWindow && (
+						<div className="flex justify-between">
+							<span>{isKorean ? "설정된 모델 컨텍스트:" : "Configured model context:"}</span>
+							<span className="font-mono">{formatTokenNumber(configuredContextWindow || 0)}</span>
+						</div>
+					)}
+					{compactionTriggerTokens !== undefined && (
+						<div className="flex justify-between">
+							<span>{isKorean ? "자동 압축 기준:" : "Auto-compaction trigger:"}</span>
+							<span className="font-mono">{formatTokenNumber(compactionTriggerTokens)}</span>
+						</div>
+					)}
+					{compactionTargetTokens !== undefined && (
+						<div className="flex justify-between">
+							<span>{isKorean ? "압축 목표:" : "Compaction target:"}</span>
+							<span className="font-mono">{formatTokenNumber(compactionTargetTokens)}</span>
+						</div>
+					)}
 					<div className="flex justify-between">
 						<span>{isKorean ? "남음:" : "Remaining:"}</span>
-						<span className="font-mono">{formatTokenNumber(contextWindow - tokenUsed)}</span>
+						<span className="font-mono">{formatTokenNumber(Math.max(0, contextWindow - tokenUsed))}</span>
 					</div>
 					<div className="flex justify-between">
 						<span>{isKorean ? "출처:" : "Source:"}</span>

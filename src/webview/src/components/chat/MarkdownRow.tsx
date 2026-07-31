@@ -1,5 +1,5 @@
 import { memo } from "react"
-import MarkdownBlock from "../common/MarkdownBlock"
+import MarkdownBlock from "../common/LazyMarkdownBlock"
 
 export const MarkdownRow = memo(({ markdown, showCursor }: { markdown?: string; showCursor?: boolean }) => {
 	return (

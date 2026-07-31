@@ -51,7 +51,7 @@ export function sendHostRequest(connection: JsonRpcConnection, method: HostRpcMe
 			connection.pending.delete(id)
 			pending.reject(error instanceof Error ? error : new Error(String(error)))
 		}
-		if (!tryWriteJsonLine(connection.socket, { protocolVersion: HOST_RPC_PROTOCOL_VERSION, id, method, params: params || null }, failWrite)) {
+		if (!tryWriteJsonLine(connection.socket, { protocolVersion: HOST_RPC_PROTOCOL_VERSION, id, method, params: params ?? null }, failWrite)) {
 			failWrite(new Error("Host pipe is closed."))
 		}
 	})

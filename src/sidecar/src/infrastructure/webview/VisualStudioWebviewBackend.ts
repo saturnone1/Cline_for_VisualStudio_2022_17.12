@@ -25,6 +25,8 @@ export class VisualStudioWebviewBackend implements WebviewApplicationPort {
 
 	configureFeatures(features: RuntimeWebviewFeatures) { this.composition.configureFeatures(features) }
 	getBrowserSettings() { return this.composition.getBrowserSettings() }
+	getAutoApprovalSettings() { return this.composition.getAutoApprovalSettings() }
+	getCommandExecutionSettings() { return this.composition.getCommandExecutionSettings() }
 
 	serializeState() { return this.composition.serializeState() }
 	publishChangeTranscript(text: string) { return this.composition.publishChangeTranscript(text) }

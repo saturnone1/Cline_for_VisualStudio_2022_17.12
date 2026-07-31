@@ -4,6 +4,9 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+	"postinstall": "node scripts/patchClineToolCallRepair.js",
+	"pretest": "node scripts/patchClineToolCallRepair.js",
+	"prebuild": "node scripts/patchClineToolCallRepair.js",
     "check": "tsc --noEmit",
 		"test": "tsc && node --test tests/*.test.js && node scripts/architectureChecks.js && node scripts/parityChecks.js && node ../../scripts/generate-cline-message-kinds.mjs --check && node ../../scripts/generate-webview-rpc-contracts.mjs --check && node ../../scripts/generate-host-rpc-contracts.mjs --check",
     "contracts:check": "node ../../scripts/generate-webview-rpc-contracts.mjs --check && node ../../scripts/generate-host-rpc-contracts.mjs --check",
@@ -13,7 +16,10 @@
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   },
-  "dependencies": {
-    "@cline/sdk": "^0.0.43"
-  }
+	"dependencies": {
+		"@cline/sdk": "0.0.66"
+	},
+	"overrides": {
+		"undici": "6.28.0"
+	}
 }

@@ -33,6 +33,7 @@ export function createCheckpointDiffDescription(input: {
 	sessionId: string
 	workspaceRoot: string
 	createdAt?: number
+	diffs?: readonly Record<string, unknown>[]
 	trackedChanges: readonly Record<string, unknown>[]
 }) {
 	const createdAtText = input.createdAt ? new Date(input.createdAt).toLocaleString() : ""
@@ -41,8 +42,9 @@ export function createCheckpointDiffDescription(input: {
 		input.sessionId ? `Session: ${input.sessionId}` : "",
 		input.workspaceRoot ? `Workspace: ${input.workspaceRoot}` : "",
 		createdAtText ? `Created: ${createdAtText}` : "",
+		`Changed files: ${input.diffs?.length || 0}`,
+		...(input.diffs || []).map((diff) => `- ${readString(diff.filePath) || "(unknown file)"}`),
 		input.trackedChanges.length ? `Tracked edit snapshots: ${input.trackedChanges.length}` : "",
-		"The current SDK runtime exposes checkpoint restore metadata, but not a first-class checkpoint diff stream. Use the transcript change cards or Review controls for file-level snapshots.",
 	].filter(Boolean).join("\n")
 	return {
 		success: true,
@@ -50,8 +52,11 @@ export function createCheckpointDiffDescription(input: {
 		checkpointRunCount: input.checkpointRunCount,
 		sessionId: input.sessionId,
 		workspaceRoot: input.workspaceRoot,
-		comments: [{ type: "sdk_checkpoint_limitation", message: "Checkpoint diff stream is unavailable from the current SDK runtime; Visual Studio links the compare request to stored edit snapshots.", trackedChanges: input.trackedChanges }],
+		diffs: input.diffs || [],
+		comments: [],
 		trackedChanges: input.trackedChanges,
 		text,
 	}
 }
+
+function readString(value: unknown) { return typeof value === "string" ? value : "" }

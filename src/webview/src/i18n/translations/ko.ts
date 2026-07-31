@@ -27,7 +27,7 @@ export const ko: Record<keyof typeof en, string> = {
 	"settings.api.modelExample": "예: llama3.1",
 	"settings.api.modelContextWindow": "모델 컨텍스트 창",
 	"settings.api.requestTimeout": "요청 제한 시간(ms)",
-	"settings.api.requestTimeoutHelp": "API 응답을 기다릴 최대 시간입니다. 기본값은 600000ms(10분)입니다.",
+	"settings.api.requestTimeoutHelp": "API 응답을 기다릴 최대 시간입니다. 기본값은 1800000ms(30분)입니다.",
 	"settings.api.ollamaApiKeyHelp":
 		"인증이 필요한 Ollama 인스턴스 또는 클라우드 서비스용 선택 API 키입니다. 로컬 설치라면 비워두세요.",
 	"settings.api.enterOptionalApiKey": "API 키 입력(선택)...",
@@ -40,6 +40,9 @@ export const ko: Record<keyof typeof en, string> = {
 	"settings.api.quickstartGuide": "빠른 시작 가이드",
 	"settings.api.modelCapabilityNote":
 		"참고: LIG VS는 복잡한 프롬프트를 사용하며 Claude 계열 모델에서 가장 안정적으로 동작합니다. 성능이 낮은 모델은 기대대로 동작하지 않을 수 있습니다.",
+	"chat.commandHostUnavailable.title": "Visual Studio 명령 호스트를 사용할 수 없음",
+	"chat.commandHostUnavailable.description":
+		"Visual Studio 호스트에서 명령 출력을 읽지 못했습니다. 'LIG VS Command' 출력 창을 확인한 뒤 다시 시도하거나, 터미널 설정에서 다른 Visual Studio/Windows 셸 프로필을 선택하세요.",
 	"settings.apiProfiles.title": "API 프로필",
 	"settings.apiProfiles.new": "새로 만들기",
 	"settings.apiProfiles.duplicate": "복제",
@@ -102,25 +105,23 @@ export const ko: Record<keyof typeof en, string> = {
 	"settings.browser.customArgsHelp": "브라우저 실행 파일에 전달할 공백 구분 인자입니다.",
 	"settings.terminal.defaultProfile": "기본 터미널 프로필",
 	"settings.terminal.defaultProfileHelp":
-		"LIG VS가 사용할 기본 터미널을 선택합니다. 'Default'는 VS Code 전역 설정을 사용합니다.",
-	"settings.terminal.timeout": "셸 통합 제한 시간(초)",
-	"settings.terminal.timeoutPlaceholder": "제한 시간을 초 단위로 입력",
-	"settings.terminal.timeoutError": "양수를 입력하세요",
+		"LIG VS 명령을 실행할 Visual Studio/Windows 셸을 선택합니다. 실행 결과는 Visual Studio의 LIG VS 명령 출력에서 확인할 수 있습니다.",
+	"settings.terminal.timeout": "백그라운드 전환 대기 시간(초)",
+	"settings.terminal.timeoutPlaceholder": "1초 이상의 대기 시간 입력",
+	"settings.terminal.timeoutError": "1초 이상의 값을 입력하세요",
+	"settings.terminal.timeoutUpdateError": "백그라운드 전환 시간을 저장하지 못했습니다.",
 	"settings.terminal.timeoutHelp":
-		"명령 실행 전 셸 통합이 활성화될 때까지 LIG VS가 기다릴 시간을 설정합니다. 터미널 연결 제한 시간이 자주 발생하면 값을 늘리세요.",
-	"settings.terminal.reuse": "공격적 터미널 재사용 사용",
+		"이 시간이 지나도 실행 중인 명령은 강제 종료하지 않고 Visual Studio 명령 호스트의 백그라운드 작업으로 계속 추적합니다.",
+	"settings.terminal.reuse": "동일 작업 폴더의 터미널 세션 재사용",
 	"settings.terminal.reuseHelp":
-		"켜면 LIG VS가 현재 작업 폴더가 아닌 기존 터미널도 재사용합니다. 터미널 명령 후 작업 잠김 문제가 있으면 끄세요.",
-	"settings.terminal.executionMode": "터미널 실행 방식",
-	"settings.terminal.backgroundExec": "백그라운드 실행",
-	"settings.terminal.executionModeHelp":
-		"LIG VS가 VS Code 터미널에서 명령을 실행할지 백그라운드 프로세스로 실행할지 선택합니다.",
-	"settings.terminal.issues": "터미널 문제가 있나요?",
-	"settings.terminal.quickFixes": "터미널 빠른 해결",
-	"settings.terminal.troubleshooting": "전체 문제 해결 가이드",
+		"켜면 같은 프로필과 작업 폴더의 셸 세션을 재사용합니다. 끄면 명령마다 독립된 셸을 사용하고 완료 후 종료합니다.",
+	"settings.terminal.profile.developerCommandPrompt": "Visual Studio 개발자 명령 프롬프트",
+	"settings.terminal.profile.developerPowerShell": "Visual Studio 개발자 PowerShell",
+	"settings.terminal.profile.commandPrompt": "Windows 명령 프롬프트",
+	"settings.terminal.profile.windowsPowerShell": "Windows PowerShell",
 	"settings.terminal.outputLimit": "터미널 출력 제한",
 	"settings.terminal.outputLimitHelp":
-		"명령 실행 시 터미널 출력에 포함할 최대 줄 수입니다. 초과하면 토큰 절약을 위해 중간 줄이 제거됩니다.",
+		"명령 결과를 모델에 전달할 때 포함하는 최대 줄 수입니다. Visual Studio의 LIG VS 명령 출력에는 전체 진행 로그가 유지됩니다.",
 	"settings.general.telemetry": "오류 및 사용량 보고 허용",
 	"settings.general.telemetryHelp":
 		"사용량 데이터와 오류 보고를 보내 LIG VS 개선에 도움을 줍니다. 코드, 프롬프트, 개인정보는 전송되지 않습니다.",

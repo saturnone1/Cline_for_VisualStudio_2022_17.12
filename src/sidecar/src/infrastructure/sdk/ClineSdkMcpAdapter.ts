@@ -3,7 +3,7 @@ import { readPositiveIntEnv } from "./SdkToolSupport"
 import { callMcpListMethod, getArrayProperty, isToolAutoApproved, normalizeMcpPrompts, normalizeMcpResources, normalizeMcpResourceTemplates, toDisplayMcpConfig, toProtoMcpStatus } from "./McpProjection"
 import { ClineSdkMcpSettingsStore } from "./ClineSdkMcpSettingsStore"
 import { MCP_AUTO_APPROVE_MARKER } from "./SdkSessionRequestBuilder"
-
+import { wrapMcpToolFailureContext } from "./McpToolFailureBoundary"
 type ClineSdkModule = typeof import("@cline/sdk")
 type McpManagerInstance = InstanceType<ClineSdkModule["InMemoryMcpManager"]>
 type McpOperation = "connecting" | "restarting" | "deleting" | "authenticating" | "toggling"
@@ -303,7 +303,6 @@ export class ClineSdkMcpAdapter {
 		})
 		return this.getMcpServersResponse()
 	}
-
 	private async withMcpOperation<T>(
 		serverName: string,
 		operation: "connecting" | "restarting" | "deleting" | "authenticating" | "toggling",
@@ -386,10 +385,12 @@ export class ClineSdkMcpAdapter {
 						const generatedName = typeof record.name === "string" ? record.name : ""
 						const prefix = `${registration.name}__`
 						const configuredName = generatedName.startsWith(prefix) ? generatedName.slice(prefix.length) : generatedName
-						return {
+						return wrapMcpToolFailureContext({
 							...record,
 							[MCP_AUTO_APPROVE_MARKER]: isToolAutoApproved(serverConfig, configuredName),
-						}
+						}, registration.name, configuredName, (message) => { this.sessionToolErrors.set(registration.name, message)
+							this.logSdkMessage("warn", `MCP tool failed for ${registration.name}`, { toolName: configuredName, error: message })
+						}, () => { this.sessionToolErrors.delete(registration.name) })
 					}),
 				)
 				this.sessionToolErrors.delete(registration.name)

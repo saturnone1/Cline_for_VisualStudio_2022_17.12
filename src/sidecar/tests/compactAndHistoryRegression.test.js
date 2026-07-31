@@ -1,8 +1,6 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
 const { TaskRpcHandler } = require("../dist/features/chat/TaskRpcHandler")
-const { CompactSessionFlow } = require("../dist/features/chat/runtime/CompactSessionFlow")
-const { isContextOverflowError } = require("../dist/features/chat/runtime/ContextOverflowError")
 const { TaskHistorySync } = require("../dist/features/taskHistory/TaskHistorySync")
 const { TaskTranscriptHydrator, reconcileTranscriptMessages } = require("../dist/features/taskHistory/TaskTranscriptHydrator")
 const { AgentLifecycleEventProjector } = require("../dist/infrastructure/conversation/AgentLifecycleEventProjector")
@@ -10,13 +8,14 @@ const { AgentSnapshotEventProjector } = require("../dist/infrastructure/conversa
 const { RuntimeStatusEventProjector } = require("../dist/infrastructure/conversation/RuntimeStatusEventProjector")
 const { TaskCompletionProjector } = require("../dist/infrastructure/conversation/TaskCompletionProjector")
 const { AgentRunRecoveryFlow } = require("../dist/features/chat/runtime/AgentRunRecoveryFlow")
+const { sdkMessagesToClineMessages } = require("../dist/infrastructure/conversation/SdkMessageTranscriptProjection")
+const { agentChunkToTranscriptText } = require("../dist/infrastructure/conversation/AgentChunkTranscriptConversion")
+const { isLegacyTransientRuntimeMessage } = require("../dist/application/services/TransientRuntimeMessagePolicy")
 const { validateWebviewRpcPayload } = require("../dist/application/dto/generated/WebviewRpcContract")
 const { decodeTaskRpcCommand } = require("../dist/infrastructure/webview/TaskRpcDecoder")
-const { createContextCompactionFlow } = require("../dist/infrastructure/webview/ContextCompactionComposition")
 const { taskTranscriptStorageBytes } = require("../dist/features/taskHistory/TaskHistoryStorageSize")
 const { buildCompactedConversationMessages } = require("../dist/infrastructure/conversation/ResumedConversationProjection")
 const { RuntimeModelContext } = require("../dist/infrastructure/models/RuntimeModelContext")
-const { assertCompactionConvergence, resolveCompactionBudget } = require("../dist/infrastructure/sdk/ClineSdkCompactionSummarizer")
 
 test("compact and history requests satisfy their WebView RPC contracts", () => {
 	assert.deepEqual(validateWebviewRpcPayload("SlashService", "condense", "request", {}), { ok: true })
@@ -128,71 +127,6 @@ test("SDK history refresh preserves local tasks that are absent from the SDK res
 	assert.deepEqual(history.map((item) => item.id), ["remote-1", "local-1"])
 })
 
-test("compact flow delegates validated summarization and creates a replacement SDK session", async () => {
-	let compactCommand
-	let applied
-	let cleanedSource
-	const flow = new CompactSessionFlow({
-		isRuntimeAvailable: () => true,
-		activeSessionId: () => "stale-session",
-		selectedSessionId: () => "session-1",
-		language: () => "ko",
-		transitionStarting: () => {},
-		showProgress: () => {},
-		persist: () => {},
-		broadcast: async () => {},
-		buildRequest: async (sourceSessionId) => ({ sourceSessionId, cwd: "C:\\repo", initialMessages: [{ role: "user", content: "summary" }], config: {}, toolPolicies: {} }),
-		compact: async (command) => { compactCommand = command; return { sessionId: "session-2" } },
-		result: (result) => ({ sessionId: result.sessionId, messagesAfter: result.compactedMessageCount || 3, estimatedTokensAfter: result.estimatedTokensAfter || 500, summary: result.compactionSummary || "stored summary" }),
-		applySuccess: async (...args) => { applied = args },
-		cleanupSource: async (sessionId) => { cleanedSource = sessionId },
-		applyFailure: async (error) => { throw error },
-		messageCount: () => 25,
-		log: () => {},
-	})
-
-	assert.equal(await flow.execute("compact-request"), "session-2")
-	assert.equal(compactCommand.sourceSessionId, "session-1")
-	assert.equal("prompt" in compactCommand, false)
-	assert.deepEqual(applied, ["session-1", { sessionId: "session-2", messagesAfter: 3, estimatedTokensAfter: 500, summary: "stored summary" }, 25, 3])
-	assert.equal(cleanedSource, "session-1")
-})
-
-test("compaction merge rejects a non-decreasing summary set", () => {
-	assert.doesNotThrow(() => assertCompactionConvergence(4, 2))
-	assert.throws(() => assertCompactionConvergence(2, 2), /did not converge/)
-})
-
-test("compaction preserves the source and restores visible state when commit persistence fails", async () => {
-	let task = { id: "source", task: "inspect", cwdOnTaskInitialization: "C:\\repo" }
-	let messages = [{ type: "say", say: "task", text: "inspect" }, { type: "say", say: "text", text: "result" }]
-	const runtimeCalls = []
-	const bound = []
-	let persistCalls = 0
-	const runtime = {
-		compactSession: async () => ({ sessionId: "replacement", compactedMessageCount: 0, estimatedTokensAfter: 20, compactionSummary: "A sufficiently detailed durable summary for the replacement session." }),
-		stop: async ({ sessionId }) => runtimeCalls.push(["stop", sessionId]),
-		deleteSession: async ({ sessionId }) => { runtimeCalls.push(["delete", sessionId]); return true },
-		activateSession: async (sessionId) => { runtimeCalls.push(["activate", sessionId]); return { sessionId } },
-	}
-	const flow = createContextCompactionFlow({
-		runtime: () => runtime, activeSessionId: () => "source", selectedSessionId: () => "source", language: () => "en",
-		currentTask: () => task, messages: () => messages, workspaceRoot: async () => "C:\\repo", buildConfig: async () => ({ providerId: "test", modelId: "model" }), toolPolicies: () => ({}),
-		setInProgress: () => {}, transition: () => {}, startProgress: () => {}, finishProgress: () => {},
-		addMessage: (message) => { messages = [...messages, message] }, markClosing: () => {},
-		bindSession: (sessionId) => { bound.push(sessionId); task = { ...task, id: sessionId } },
-		restoreState: (previousTask, previousMessages) => { task = previousTask; messages = previousMessages },
-		advanceGeneration: () => {}, markSettingsActive: () => {}, updateTask: () => {},
-		persist: () => { if (++persistCalls > 1) throw new Error("disk full") }, broadcast: async () => {}, log: () => {},
-	})
-
-	assert.equal(await flow.execute("request"), undefined)
-	assert.deepEqual(runtimeCalls, [["stop", "replacement"], ["delete", "replacement"], ["activate", "source"]])
-	assert.equal(task.id, "source")
-	assert.deepEqual(bound, ["replacement", "source"])
-	assert.match(messages.at(-1).text, /preserved/)
-})
-
 test("compaction preserves the latest user request and completed result under a small context budget", () => {
 	const messages = [
 		{ type: "say", say: "task", text: "안녕" },
@@ -220,24 +154,15 @@ test("first compaction preserves chronological middle decisions instead of seman
 	assert.match(JSON.stringify(buildCompactedConversationMessages(messages)), /middle decision: use protocol alpha/)
 })
 
-test("configured context tokens provide a usable character budget for Korean compaction", () => {
+test("configured context tokens provide a model-relative token budget for resumed conversation", () => {
 	const context = new RuntimeModelContext({
 		configuration: () => ({ actModeApiProvider: "ollama", actModeOllamaModelId: "model", ollamaApiOptionsCtxNum: "4096" }),
 		mode: () => "act",
 		defaultModelId: () => "",
 		defaultOllamaModelId: () => "model",
-		maxResumedConversationChars: 20_000,
 	})
 
-	assert.equal(context.resumedConversationCharBudget(), 5_120)
-})
-
-test("compaction budget respects a small configured context window", () => {
-	const budget = resolveCompactionBudget({ contextWindowTokens: 4096 })
-	assert.equal(budget.contextTokens, 4096)
-	assert.ok(budget.outputTokens < 2048)
-	assert.ok(budget.inputTokens < 4096)
-	assert.ok(budget.inputTokens + budget.outputTokens < budget.contextTokens)
+	assert.equal(context.resumedConversationTokenBudget(), 2_457)
 })
 
 test("a repeated compaction chains the stored summary with only post-boundary conversation", () => {
@@ -258,12 +183,6 @@ test("a repeated compaction chains the stored summary with only post-boundary co
 	assert.doesNotMatch(serialized, /old raw answer/)
 	assert.equal(compacted[0].role, "context")
 	assert.equal(compacted.some((message) => message.role === "assistant" && /loaded|restored/i.test(message.content)), false)
-})
-
-test("context overflow detection excludes unrelated worker exhaustion", () => {
-	assert.equal(isContextOverflowError(new Error("max_tokens must be at least 1, got -65855")), true)
-	assert.equal(isContextOverflowError(new Error("maximum context length exceeded")), true)
-	assert.equal(isContextOverflowError(new Error("Worker local total request limit reached (33/32)")), false)
 })
 
 test("active transcript reconciliation appends a missed final response and replaces its partial", () => {
@@ -400,6 +319,26 @@ test("resumed SDK bootstrap history stays out of the visible transcript", async 
 	])
 })
 
+test("SDK user input envelopes project as the original user text", () => {
+	const messages = sdkMessagesToClineMessages([
+		{ role: "user", content: [{ type: "text", text: '<user_input mode="act">?</user_input>' }] },
+	], { id: "session-envelope", task: "?" })
+
+	assert.equal(messages.length, 1)
+	assert.equal(messages[0].say, "task")
+	assert.equal(messages[0].text, "?")
+})
+
+test("transcript reconciliation repairs previously persisted SDK user input envelopes", () => {
+	const result = reconcileTranscriptMessages(
+		[{ type: "say", say: "user_feedback", text: '<user_input mode="act">?</user_input>' }],
+		[{ type: "say", say: "user_feedback", text: "?" }],
+	)
+
+	assert.equal(result.changed, true)
+	assert.deepEqual(result.messages, [{ type: "say", say: "user_feedback", text: "?" }])
+})
+
 test("legacy resume bootstrap detection does not mistake a later tool result for the current prompt", async () => {
 	let projectedInput
 	const hydrator = new TaskTranscriptHydrator({
@@ -433,10 +372,135 @@ test("AgentError projects an error and terminates the task as failed", () => {
 		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false,
 		activePartialText: () => "", hasAssistantAfterUser: () => false, log: () => {},
 		formatError: (error) => String(error.message || error), markErrorLatency: () => {},
+		quarantineSession: (sessionId) => calls.push(["quarantine", sessionId]),
 	})
 
-	projector.handle({ type: "AgentError", sessionId: "session-1", error: new Error("provider failed") })
-	assert.deepEqual(calls, [["error", "provider failed"], ["finish", "session-1", "failed"]])
+	projector.handle({ type: "AgentError", sessionId: "session-1", error: new Error("provider failed"), recoverable: false })
+	assert.deepEqual(calls, [["error", "provider failed"], ["quarantine", "session-1"], ["finish", "session-1", "failed"]])
+})
+
+test("recoverable AgentError remains in the active run", () => {
+	const calls = []
+	const projector = new AgentLifecycleEventProjector({
+		noteActivity: (reason) => calls.push(["activity", reason]), clearReasoning: () => {}, finishToolActivity: () => {}, finishProgress: () => calls.push(["finishProgress"]),
+		finalizePartial: () => {}, addText: () => {}, addError: (text) => calls.push(["error", text]),
+		finishTask: (sessionId, status) => calls.push(["finish", sessionId, status]),
+		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false,
+		activePartialText: () => "", hasAssistantAfterUser: () => false, log: (event) => calls.push(["log", event]),
+		formatError: (error) => String(error.message || error), markErrorLatency: () => {},
+		quarantineSession: (sessionId) => calls.push(["quarantine", sessionId]),
+	})
+
+	projector.handle({ type: "AgentError", sessionId: "session-1", error: new Error("retrying"), recoverable: true, iteration: 2 })
+	assert.deepEqual(calls, [["activity", "recoverable-error"], ["log", "recoverableAgentError"]])
+})
+
+test("native SDK compaction notices use top-level SDK metadata without adding chat text", () => {
+	const phases = []
+	const texts = []
+	const projector = new AgentLifecycleEventProjector({
+		noteActivity: () => {}, clearReasoning: () => {}, finishToolActivity: () => {}, finishProgress: () => {},
+		finalizePartial: () => {}, addText: (text) => texts.push(text), addError: () => {}, finishTask: () => {},
+		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false,
+		activePartialText: () => "", hasAssistantAfterUser: () => false, log: () => {},
+		formatError: String, markErrorLatency: () => {}, quarantineSession: () => {},
+		setCompactionStatus: (notice) => phases.push(notice),
+	})
+
+	projector.handle({ type: "NoticeReceived", sessionId: "session-1", message: "auto-compacting", reason: "auto_compaction", noticeType: "status", raw: { phase: "started", maxInputTokens: 8192, triggerTokens: 7373, targetTokens: 5734, messageTargetTokens: 4096 } })
+	projector.handle({ type: "NoticeReceived", sessionId: "session-1", message: "auto-compacted", reason: "auto_compaction", noticeType: "status", raw: { phase: "completed", tokensBefore: 7600, tokensAfter: 3200, messagesBefore: 12, messagesAfter: 4, maxInputTokens: 8192 } })
+
+	assert.deepEqual(phases, [
+		{ phase: "started", sessionId: "session-1", reason: "auto_compaction", maxInputTokens: 8192, triggerTokens: 7373, targetTokens: 5734, messageTargetTokens: 4096 },
+		{ phase: "completed", sessionId: "session-1", reason: "auto_compaction", tokensBefore: 7600, tokensAfter: 3200, messagesBefore: 12, messagesAfter: 4, maxInputTokens: 8192 },
+	])
+	assert.deepEqual(texts, [])
+	assert.equal(agentChunkToTranscriptText({ type: "notice", message: "auto-compacting", reason: "auto_compaction", phase: "started" }), "")
+	assert.equal(agentChunkToTranscriptText({ type: "notice", message: "auto-compacted", kind: "auto_compaction", phase: "completed" }), "")
+	assert.equal(agentChunkToTranscriptText({ type: "notice", message: "compaction-budget-adjusted", reason: "compaction_budget_emergency" }), "")
+})
+
+test("terminal SDK events always clear an unfinished compaction state", () => {
+	const phases = []
+	const finishes = []
+	const projector = new AgentLifecycleEventProjector({
+		noteActivity: () => {}, clearReasoning: () => {}, finishToolActivity: () => {}, finishProgress: () => {},
+		finalizePartial: () => {}, addText: () => {}, addError: () => {}, finishTask: (sessionId, status) => finishes.push([sessionId, status]),
+		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false,
+		activePartialText: () => "", hasAssistantAfterUser: () => false, log: () => {},
+		formatError: String, markErrorLatency: () => {}, quarantineSession: () => {},
+		setCompactionStatus: (notice) => phases.push(notice.phase),
+	})
+
+	projector.handle({ type: "NoticeReceived", sessionId: "done", message: "auto-compacting", reason: "auto_compaction", noticeType: "status", raw: { phase: "started" } })
+	projector.handle({ type: "AgentDone", sessionId: "done", reason: "completed", result: {}, completion: {} })
+	projector.handle({ type: "NoticeReceived", sessionId: "failed", message: "auto-compacting", reason: "auto_compaction", noticeType: "status", raw: { phase: "started" } })
+	projector.handle({ type: "AgentError", sessionId: "failed", error: new Error("provider failed"), recoverable: false })
+
+	assert.deepEqual(phases, ["started", "idle", "started", "idle"])
+	assert.deepEqual(finishes, [["done", "completed"], ["failed", "failed"]])
+})
+
+test("legacy SDK compaction status rows are removed without hiding ordinary conversation", () => {
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: "auto-compacting" }), true)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: "compaction-budget-adjusted" }), true)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: " auto-compacted " }), true)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: "auto-compaction-skipped" }), true)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: "왜 auto-compaction-skipped 됐지?" }), false)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "task", text: "auto-compacting" }), false)
+	assert.equal(isLegacyTransientRuntimeMessage({ type: "say", say: "text", text: "auto-compacting", files: ["note.txt"] }), false)
+
+	const reconciled = reconcileTranscriptMessages([
+		{ type: "say", say: "text", text: "auto-compacting" },
+		{ type: "say", say: "text", text: "정상 응답" },
+	], [])
+	assert.equal(reconciled.changed, true)
+	assert.deepEqual(reconciled.messages, [{ type: "say", say: "text", text: "정상 응답" }])
+})
+
+test("parallel SDK error chunks do not duplicate canonical errors or render object Object", () => {
+	assert.equal(agentChunkToTranscriptText({ type: "error", error: { message: "invalid tool arguments" } }), "")
+})
+
+test("transcript reconciliation removes persisted object-coercion placeholders", () => {
+	const result = reconcileTranscriptMessages(
+		[{ type: "say", say: "text", text: "[object Object]" }],
+		[],
+	)
+
+	assert.equal(result.changed, true)
+	assert.deepEqual(result.messages, [])
+})
+
+test("AgentDone maps SDK terminal reasons instead of treating every stop as success", () => {
+	const finishes = []
+	const projector = new AgentLifecycleEventProjector({
+		noteActivity: () => {}, clearReasoning: () => {}, finishToolActivity: () => {}, finishProgress: () => {},
+		finalizePartial: () => {}, addText: () => {}, addError: () => {}, finishTask: (sessionId, status) => finishes.push([sessionId, status]),
+		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false, activePartialText: () => "", hasAssistantAfterUser: () => false,
+		log: () => {}, formatError: String, markErrorLatency: () => {}, quarantineSession: () => {},
+	})
+
+	projector.handle({ type: "AgentDone", sessionId: "mistake", reason: "mistake_limit", result: {}, completion: {} })
+	projector.handle({ type: "AgentDone", sessionId: "aborted", reason: "aborted", result: {}, completion: {} })
+	projector.handle({ type: "AgentDone", sessionId: "complete", reason: "completed", result: {}, completion: {} })
+	assert.deepEqual(finishes, [["mistake", "failed"], ["aborted", "cancelled"], ["complete", "completed"]])
+})
+
+test("RunFailed preserves the SDK failure reason instead of leaving only tool JSON", () => {
+	const calls = []
+	const projector = new AgentLifecycleEventProjector({
+		noteActivity: () => {}, clearReasoning: () => {}, finishToolActivity: () => {}, finishProgress: () => {},
+		finalizePartial: () => {}, addText: () => {}, addError: (text) => calls.push(["error", text]),
+		finishTask: (sessionId, status) => calls.push(["finish", sessionId, status]),
+		updateUsage: () => {}, recordContextUsage: () => {}, hasCompletion: () => false,
+		activePartialText: () => "", hasAssistantAfterUser: () => false, log: () => {},
+		formatError: (error) => String(error.message || error), markErrorLatency: () => {},
+		quarantineSession: (sessionId) => calls.push(["quarantine", sessionId]),
+	})
+
+	projector.handle({ type: "RunFailed", sessionId: "session-1", reason: "MCP server unavailable" })
+	assert.deepEqual(calls, [["error", "MCP server unavailable"], ["quarantine", "session-1"], ["finish", "session-1", "failed"]])
 })
 
 test("run recovery ignores a late rejection after terminal state", async () => {
@@ -444,7 +508,7 @@ test("run recovery ignores a late rejection after terminal state", async () => {
 	let failureCalls = 0
 	const flow = new AgentRunRecoveryFlow({
 		currentGeneration: () => 1, isTerminal: () => true, activeText: () => "", hasAssistantText: () => false,
-		hydrate: async () => { hydrateCalls++; return true }, finishTask: () => {}, updateTask: () => {},
+		hydrate: async () => { hydrateCalls++; return true }, sessionStatus: async () => "completed", finishTask: () => {}, updateTask: () => {},
 		broadcast: async () => {}, projectFailure: () => { failureCalls++ }, log: () => {},
 	})
 
@@ -453,22 +517,23 @@ test("run recovery ignores a late rejection after terminal state", async () => {
 	assert.equal(failureCalls, 0)
 })
 
-test("run recovery follows a deadline policy and can recover a later transcript", async () => {
-	let clock = 0
+test("run recovery defers failure while the SDK session remains active", async () => {
 	let hydrateCalls = 0
-	let finished = 0
+	let failed = 0
+	let broadcasts = 0
 	const flow = new AgentRunRecoveryFlow({
-		currentGeneration: () => 1, isTerminal: () => hydrateCalls >= 4,
-		activeText: () => hydrateCalls >= 4 ? "late final response" : "",
+		currentGeneration: () => 1, isTerminal: () => false,
+		activeText: () => "partial response",
 		hasAssistantText: () => false,
-		hydrate: async () => { hydrateCalls++; return hydrateCalls >= 4 },
-		finishTask: () => { finished++ }, updateTask: () => {}, broadcast: async () => {},
-		projectFailure: () => assert.fail("terminal hydration should recover"), log: () => {},
-	}, { deadlineMs: 5_000, initialDelayMs: 100, maxDelayMs: 1_000, now: () => clock, wait: async (ms) => { clock += ms } })
+		hydrate: async () => { hydrateCalls++; return false }, sessionStatus: async () => "running",
+		finishTask: () => {}, updateTask: () => {}, broadcast: async () => { broadcasts++ },
+		projectFailure: () => { failed++ }, log: () => {},
+	})
 
 	await flow.recover("session-1", "run", 1, new Error("transport closed"))
-	assert.equal(finished, 0)
-	assert.equal(hydrateCalls, 4)
+	assert.equal(hydrateCalls, 1)
+	assert.equal(failed, 0)
+	assert.equal(broadcasts, 1)
 })
 
 test("run recovery preserves partial output but reports failure without a terminal event", async () => {
@@ -477,9 +542,9 @@ test("run recovery preserves partial output but reports failure without a termin
 	const flow = new AgentRunRecoveryFlow({
 		currentGeneration: () => 1, isTerminal: () => false,
 		activeText: () => "unfinished partial response", hasAssistantText: () => true,
-		hydrate: async () => false, finishTask: () => { finished++ }, updateTask: () => {}, broadcast: async () => {},
+		hydrate: async () => false, sessionStatus: async () => "failed", finishTask: () => { finished++ }, updateTask: () => {}, broadcast: async () => {},
 		projectFailure: () => { failed++ }, log: () => {},
-	}, { deadlineMs: 0, initialDelayMs: 1, maxDelayMs: 1 })
+	})
 
 	await flow.recover("session-1", "run", 1, new Error("transport closed"))
 	assert.equal(finished, 0)

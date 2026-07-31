@@ -14,7 +14,12 @@ export class TerminalRpcHandler {
 	async handle(command: TerminalCommand): Promise<TerminalRpcResult> {
 		const request = "terminalId" in command ? { terminalId: command.terminalId, commandId: command.commandId } : {}
 		switch (command.type) {
-			case "profiles": return { payload: { profiles: [{ id: "visual-studio-command-host", name: "Visual Studio Command Host" }] } }
+			case "profiles": return { payload: { profiles: [
+				{ id: "visual-studio-command-host", name: "Visual Studio Developer Command Prompt" },
+				{ id: "visual-studio-developer-powershell", name: "Visual Studio Developer PowerShell" },
+				{ id: "windows-command-prompt", name: "Windows Command Prompt" },
+				{ id: "windows-powershell", name: "Windows PowerShell" },
+			] } }
 			case "open": return { payload: await this.workspace.openTerminalPanel(request) }
 			case "attach": return { payload: await this.workspace.attachTerminalCommand(request), includeStateMessages: true }
 			case "continue": return { payload: await this.workspace.continueTerminalCommand(request), includeStateMessages: true }

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict")
 const test = require("node:test")
-const { canTransitionTask, isTerminalTaskStatus, TaskLifecycleMachine } = require("../dist/domain/task/TaskLifecycle")
+const { canTransitionTask, isTerminalTaskStatus, terminalTaskOutcome, TaskLifecycleMachine } = require("../dist/domain/task/TaskLifecycle")
 
 test("task lifecycle accepts expected streaming and cancellation transitions", () => {
 	assert.equal(canTransitionTask("idle", "starting"), true)
@@ -23,5 +23,7 @@ test("task lifecycle machine rejects duplicate cancellation and invalid completi
 
 test("terminal SDK statuses remain normalized", () => {
 	assert.equal(isTerminalTaskStatus(" Completed "), true)
+	assert.equal(isTerminalTaskStatus("mistake_limit"), true)
+	assert.equal(terminalTaskOutcome("mistake_limit"), "failed")
 	assert.equal(isTerminalTaskStatus("streaming"), false)
 })

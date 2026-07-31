@@ -205,7 +205,7 @@ export class VisualStudioHostBridgeClient {
 		return sendHostRequest(this.connection, "webview.postMessage", { message })
 	}
 
-	async executeCommandInTerminal(command: string, cwd?: string, timeoutSeconds?: number): Promise<{
+	async executeCommandInTerminal(command: string, cwd?: string, timeoutSeconds?: number, profileId?: string, reuseTerminal?: boolean): Promise<{
 		commandId: string
 		terminalId: string
 		status?: string
@@ -227,6 +227,8 @@ export class VisualStudioHostBridgeClient {
 			command,
 			cwd,
 			timeoutSeconds,
+			profileId,
+			reuseTerminal,
 		}) as Promise<{
 			commandId: string
 			terminalId: string

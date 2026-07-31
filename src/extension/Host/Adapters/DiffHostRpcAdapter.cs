@@ -19,8 +19,9 @@ namespace VsClineAgent.Host.Adapters
             return method == "diff.openDiff" || method == "diff.closeAllDiffs";
         }
 
-        public async Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public async Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             switch (method)
             {
                 case "diff.closeAllDiffs":

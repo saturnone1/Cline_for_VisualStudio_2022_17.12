@@ -106,6 +106,38 @@ test("SDK compaction progress notices remain transient status instead of chat te
 	)
 })
 
+test("unrecognized SDK notices remain machine status instead of assistant dialogue", () => {
+	const translated = translateClineAgentEvent({
+		type: "notice",
+		message: "compaction-budget-adjusted",
+		reason: "compaction_budget_emergency",
+	}, "session-notice")
+
+	assert.equal(translated.type, "NoticeReceived")
+	assert.equal(translated.noticeType, "status")
+})
+
+test("SDK agent errors preserve recoverability and iteration metadata", () => {
+	const error = new Error("temporary provider failure")
+	assert.deepEqual(
+		translateClineAgentEvent({ type: "error", error, recoverable: true, iteration: 4 }, "session-retry"),
+		{
+			type: "AgentError",
+			sessionId: "session-retry",
+			error,
+			recoverable: true,
+			iteration: 4,
+			raw: { type: "error", error, recoverable: true, iteration: 4 },
+		},
+	)
+})
+
+test("SDK done events preserve their terminal reason", () => {
+	const event = translateClineAgentEvent({ type: "done", reason: "mistake_limit", text: "Unable to continue" }, "session-done")
+	assert.equal(event.type, "AgentDone")
+	assert.equal(event.reason, "mistake_limit")
+})
+
 test("agent runtime events preserve unknown SDK events without leaking an untyped envelope", () => {
 	assert.deepEqual(
 		normalizeAgentRuntimeEvent({ type: "future_event", payload: { value: 1 } }),

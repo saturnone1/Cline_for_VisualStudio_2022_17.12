@@ -1,6 +1,7 @@
 import type { InteractionLoggerPort } from "../../application/ports/InteractionLoggerPort"
 import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import type { WorkspaceChange } from "../../domain/agent/AgentRuntimeEvent"
+import { terminalTaskOutcome } from "../../domain/task/TaskLifecycle"
 import { AgentEventDispatcher } from "../../features/runtime/AgentEventDispatcher"
 import { AgentRuntimeEventDispatcher } from "../../features/runtime/AgentRuntimeEventDispatcher"
 import type { RuntimeMonitoringCoordinator } from "../../features/runtime/RuntimeMonitoringCoordinator"
@@ -10,7 +11,7 @@ import type { HookLifecycleCoordinator } from "../../features/hooks/HookLifecycl
 import type { TaskStateCoordinator } from "../../features/taskHistory/TaskStateCoordinator"
 import { AgentAuxiliaryEventProjector } from "../conversation/AgentAuxiliaryEventProjector"
 import { AgentChunkEventProjector } from "../conversation/AgentChunkEventProjector"
-import { AgentLifecycleEventProjector } from "../conversation/AgentLifecycleEventProjector"
+import { AgentLifecycleEventProjector, type CompactionNotice } from "../conversation/AgentLifecycleEventProjector"
 import { AgentSnapshotEventProjector } from "../conversation/AgentSnapshotEventProjector"
 import { AgentTextEventProjector } from "../conversation/AgentTextEventProjector"
 import { AgentToolEventProjector } from "../conversation/AgentToolEventProjector"
@@ -51,11 +52,16 @@ type Dependencies = Readonly<{
 	language: () => "en" | "ko"
 	recentTexts: () => string[]
 	broadcast: () => Promise<void>
+	setCompactionStatus: (notice: CompactionNotice) => void
 }>
 
 export function createAgentEventProjectionComposition(deps: Dependencies) {
 	const broadcast = () => {
 		void deps.broadcast().catch((error) => console.error(error))
+	}
+	const finishTask = (sessionId: string, status: string, text = "") => {
+		if (terminalTaskOutcome(status) === "failed") deps.session.markClosing(sessionId)
+		deps.completion.finish(sessionId, status, text)
 	}
 	const textEvents = new AgentTextEventProjector({
 		noteActivity: (reason) => deps.monitoring.noteActivity(reason),
@@ -108,7 +114,7 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 		finalizePartial: () => deps.partial.finalize(),
 		addText: (text) => deps.messages.add(projectAssistantTranscript(text)),
 		addError: (text) => deps.messages.add({ type: "say", say: "error", text }),
-		finishTask: (sessionId, status, text) => deps.completion.finish(sessionId, status, text),
+		finishTask,
 		updateUsage: (usage) => deps.taskState.update(usage),
 		recordContextUsage: (usage) => deps.messages.add({
 			type: "say",
@@ -132,6 +138,8 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 		log: (event, details) => deps.logger.log("sidecar", event, details),
 		formatError: (error) => formatProviderErrorForTranscript(error, deps.language()),
 		markErrorLatency: (sessionId, error) => deps.monitoring.markError(sessionId, error),
+		quarantineSession: (sessionId) => deps.session.markClosing(sessionId),
+		setCompactionStatus: deps.setCompactionStatus,
 	})
 	const semanticEvents = new AgentEventDispatcher({
 		bindSession: (sessionId) => deps.session.bindSession(sessionId),
@@ -150,7 +158,7 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 	})
 	const snapshotEvents = new AgentSnapshotEventProjector({
 		bindSession: (sessionId) => deps.session.bindSession(sessionId),
-		finishTask: (sessionId, status, text) => deps.completion.finish(sessionId, status, text),
+		finishTask,
 		noteActivity: (reason) => deps.monitoring.noteActivity(reason),
 		activeText: () => deps.partial.activeText(),
 		updateTask: (updates) => deps.taskState.update(updates),
@@ -159,7 +167,7 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 	const chunkEvents = new AgentChunkEventProjector({
 		noteActivity: (reason) => deps.monitoring.noteActivity(reason),
 		noteQuietActivity: (reason) => deps.monitoring.noteQuietActivity(reason),
-		finishTask: (status, text) => deps.completion.finish(deps.activeSessionId() || deps.currentTaskId(), status, text),
+		finishTask: (status, text) => finishTask(deps.activeSessionId() || deps.currentTaskId(), status, text),
 		addMessage: (message) => deps.messages.add(message),
 		recordTool: (text) => deps.runtime.recordToolActivity("tool", text),
 		foldReasoning: (text) => deps.folded.upsertReasoning(text),
@@ -175,7 +183,7 @@ export function createAgentEventProjectionComposition(deps: Dependencies) {
 		shouldIgnore: (sessionId) => deps.session.shouldIgnoreEvent(sessionId),
 		markFirstEvent: (sessionId, eventType) => deps.monitoring.markFirstSdkEvent(sessionId, eventType),
 		activeText: () => deps.partial.activeText(),
-		finishTask: (sessionId, status, text) => deps.completion.finish(sessionId, status, text),
+		finishTask,
 		updateTask: () => deps.taskState.update(),
 		broadcast,
 		transitionStreaming: (source) => deps.session.transition("streaming", source),

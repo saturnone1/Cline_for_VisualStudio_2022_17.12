@@ -94,4 +94,17 @@ describe("ProtoBusClient failure boundaries", () => {
 		response(firstId, { value: "first" });
 		await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
 	});
+
+	it("allows explicitly long-running unary operations to opt out of the client deadline", async () => {
+		vi.useFakeTimers();
+		try {
+			const request = TestClient.makeUnaryRequest("compact", {}, (value) => value, (value) => value.value, 0);
+			const requestId = postMessage.mock.calls[0][0].grpc_request.request_id;
+			await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+			response(requestId, { value: "completed" });
+			await expect(request).resolves.toBe("completed");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });

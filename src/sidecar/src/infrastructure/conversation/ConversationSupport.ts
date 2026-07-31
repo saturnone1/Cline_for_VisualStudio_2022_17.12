@@ -7,6 +7,6 @@ export { isToolTranscript, looksLikeReasoningNarration, looksLikeTokenizedReason
 export { shouldDropTokenizedReasoning, shouldFoldTextContentAsReasoning, shouldDelayAssistantTextUntilClassified, stripRawToolCallMarkup, normalizeReasoningTranscriptText, normalizeProgressTranscriptText, sanitizeProgressTranscriptForDisplay, normalizeAssistantTranscriptText } from "./TranscriptNormalization"
 export { toolActivityEntriesFromMessage, toolTranscriptToActivityEntries, buildGroupedToolActivityText, formatToolActivitySection, buildTerminalActivityText, formatCompletedCommandActivity, normalizeTerminalOutputText, toolActivityEntryKey, uniqueToolActivityEntries, splitToolPaths, looksLikeCommandText, uniqueStrings } from "./ToolActivityFormatting"
 export type { ToolActivityEntry } from "./ToolActivityFormatting"
-export { RESUMED_CONVERSATION_MAX_CHARS, buildCompactedConversationMessages, buildResumedConversationMessages, clineMessageToResumedTranscriptEntry, resumedTranscriptTextForMessage } from "./ResumedConversationProjection"
+export { buildCompactedConversationMessages, buildResumedConversationMessages, clineMessageToResumedTranscriptEntry, resumedTranscriptTextForMessage } from "./ResumedConversationProjection"
 export { buildSettingsToggleMap, isGlobalSettingsItem, normalizeChangePath, settingsItemKey, settingsItemToSkillInfo } from "./SettingsItemProjection"
 export * from "./TranscriptConversion"

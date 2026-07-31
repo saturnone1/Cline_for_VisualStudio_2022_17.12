@@ -1,1 +1,1 @@
-import{a5 as o,j as n}from"./index.js";const t=(r,a)=>o.lang.round(n.parse(r)[a]);export{t as c};
+import{U as a,C as n}from"./MermaidBlock.js";const t=(r,o)=>a.lang.round(n.parse(r)[o]);export{t as c};

@@ -10,7 +10,6 @@ namespace VsClineAgent.Host.Adapters
 {
     internal sealed class TerminalHostRpcAdapter : IHostRpcAdapter
     {
-        private const int MaxCommandOutputChars = 12000;
         private readonly string _fallbackWorkingDirectory;
         private readonly VsEditorService _editorService;
         private readonly VsCommandExecutionService _commandExecutionService;
@@ -42,12 +41,13 @@ namespace VsClineAgent.Host.Adapters
             }
         }
 
-        public async Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public async Task<JToken?> HandleAsync(string method, JToken? parameters, CancellationToken cancellationToken = default(CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             switch (method)
             {
                 case "workspace.executeCommandInTerminal":
-                    return await ExecuteCommandAsync(parameters).ConfigureAwait(false);
+                    return await ExecuteCommandAsync(parameters, cancellationToken).ConfigureAwait(false);
                 case "workspace.cancelCommands":
                     return new JObject
                     {
@@ -68,7 +68,7 @@ namespace VsClineAgent.Host.Adapters
             }
         }
 
-        private async Task<JObject> ExecuteCommandAsync(JToken? parameters)
+        private async Task<JObject> ExecuteCommandAsync(JToken? parameters, CancellationToken cancellationToken)
         {
             var command = GetString(parameters, "command");
             if (string.IsNullOrWhiteSpace(command))
@@ -81,8 +81,10 @@ namespace VsClineAgent.Host.Adapters
             var result = await _commandExecutionService.ExecuteCommandAsync(
                 command,
                 cwd,
-                GetInt(parameters, "timeoutSeconds") ?? 60,
-                CancellationToken.None).ConfigureAwait(false);
+                GetInt(parameters, "timeoutSeconds") ?? 600,
+                cancellationToken,
+                GetString(parameters, "profileId"),
+                GetBool(parameters, "reuseTerminal") ?? true).ConfigureAwait(false);
 
             return new JObject
             {
@@ -99,10 +101,10 @@ namespace VsClineAgent.Host.Adapters
                 ["proceedWhileRunningAvailable"] = result.Background || result.IsHot,
                 ["durationMs"] = result.DurationMs,
                 ["currentDirectory"] = result.CurrentDirectory,
-                ["stdout"] = TruncateOutput(result.StdOut),
-                ["stderr"] = TruncateOutput(result.StdErr),
-                ["stdoutTruncated"] = result.StdOutTruncated || result.StdOut.Length > MaxCommandOutputChars,
-                ["stderrTruncated"] = result.StdErrTruncated || result.StdErr.Length > MaxCommandOutputChars
+                ["stdout"] = result.StdOut,
+                ["stderr"] = result.StdErr,
+                ["stdoutTruncated"] = result.StdOutTruncated,
+                ["stderrTruncated"] = result.StdErrTruncated
             };
         }
 
@@ -115,24 +117,32 @@ namespace VsClineAgent.Host.Adapters
 
         private async Task<JObject> OpenTerminalPanelAsync(JToken? parameters)
         {
-            await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
+            var outputVisible = await _commandExecutionService.ShowOutputAsync().ConfigureAwait(false);
             var commandId = GetString(parameters, "commandId");
             var terminalId = GetString(parameters, "terminalId");
             return string.IsNullOrWhiteSpace(commandId) && string.IsNullOrWhiteSpace(terminalId)
-                ? new JObject { ["success"] = true }
+                ? new JObject
+                {
+                    ["success"] = outputVisible,
+                    ["message"] = outputVisible
+                        ? "Visual Studio command output is visible."
+                        : "The Visual Studio command output surface is unavailable."
+                }
                 : await BuildCommandActionResultAsync(
                     commandId,
                     terminalId,
-                    "Visual Studio command output pane was opened.").ConfigureAwait(false);
+                    outputVisible
+                        ? "Visual Studio command output is visible."
+                        : "The command is still tracked, but its Visual Studio output surface is unavailable.").ConfigureAwait(false);
         }
 
         private async Task<JObject> OpenCommandAsync(JToken? parameters, string message)
         {
-            await _editorService.ExecuteCommandAsync("View.Terminal").ConfigureAwait(false);
+            var outputVisible = await _commandExecutionService.ShowOutputAsync().ConfigureAwait(false);
             return await BuildCommandActionResultAsync(
                 GetString(parameters, "commandId"),
                 GetString(parameters, "terminalId"),
-                message).ConfigureAwait(false);
+                outputVisible ? message : "The command is tracked, but its Visual Studio output surface is unavailable.").ConfigureAwait(false);
         }
 
         private async Task<JObject> BuildCommandActionResultAsync(string commandId, string terminalId, string message)
@@ -160,14 +170,6 @@ namespace VsClineAgent.Host.Adapters
         {
             return (string.IsNullOrWhiteSpace(commandId) || string.Equals(candidateCommandId, commandId, StringComparison.OrdinalIgnoreCase)) &&
                    (string.IsNullOrWhiteSpace(terminalId) || string.Equals(candidateTerminalId, terminalId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static string TruncateOutput(string value)
-        {
-            return string.IsNullOrEmpty(value) || value.Length <= MaxCommandOutputChars
-                ? value
-                : value.Substring(0, MaxCommandOutputChars) + Environment.NewLine + Environment.NewLine +
-                  $"[truncated {value.Length - MaxCommandOutputChars} chars]";
         }
 
         private static JObject ToTerminalStateJson(TerminalStateInfo state)
@@ -233,6 +235,11 @@ namespace VsClineAgent.Host.Adapters
         private static int? GetInt(JToken? parameters, string name)
         {
             return parameters is JObject values ? values.Value<int?>(name) : null;
+        }
+
+        private static bool? GetBool(JToken? parameters, string name)
+        {
+            return parameters is JObject values ? values.Value<bool?>(name) : null;
         }
     }
 }

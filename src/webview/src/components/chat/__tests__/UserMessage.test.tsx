@@ -15,4 +15,18 @@ describe("UserMessage", () => {
 		expect(screen.queryByText("Restore Chat")).toBeNull()
 		expect(screen.queryByText("Restore All")).toBeNull()
 	})
+
+	it("renders attached images and files as message content", () => {
+		render(
+			<UserMessage
+				files={["C:\\workspace\\README.md"]}
+				images={["data:image/png;base64,AAAA"]}
+				text="첨부 검토"
+			/>,
+		)
+
+		expect(screen.getByAltText("Thumbnail image-1")).toBeTruthy()
+		expect(screen.getByTitle("README.md")).toBeTruthy()
+		expect(screen.queryByText(/Attachments:/)).toBeNull()
+	})
 })

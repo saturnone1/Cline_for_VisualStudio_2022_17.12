@@ -6,10 +6,9 @@ type Callbacks = Readonly<{
 	currentStatus: () => TaskLifecycleStatus
 	advanceRunGeneration: () => void
 	currentSessionId: () => string
+	isClosing: (sessionId: string) => boolean
 	markClosing: (sessionId: string, closing?: boolean) => void
 	cancelWork: (sessionId: string) => Promise<{ succeeded: boolean; completed: readonly string[]; failures: ReadonlyArray<{ name: string; reason: string; timedOut: boolean }> }>
-	failCancellation: () => void
-	addError: (text: string) => void
 	rememberSnapshot: (sessionId: string) => void
 	clearProjection: () => void
 	clearInteractions: () => void
@@ -25,44 +24,40 @@ export class ClearTaskHandler {
 
 	async execute() {
 		const previousStatus = this.callbacks.currentStatus()
-		const requiresCancellation = previousStatus === "starting" || previousStatus === "streaming" || previousStatus === "awaiting_user" || previousStatus === "cancelling"
-		if (requiresCancellation) this.callbacks.transition("cancelling", "clear-task")
 		const engine = this.engine()
 		const sessionId = this.callbacks.currentSessionId()
-		if (sessionId && requiresCancellation) {
-			this.callbacks.markClosing(sessionId)
-			const cancellation = await this.callbacks.cancelWork(sessionId)
-			if (!cancellation.succeeded) {
-				this.callbacks.advanceRunGeneration()
-				this.callbacks.failCancellation()
-				const details = cancellation.failures.map((failure) => `${failure.name}: ${failure.reason}`).join("\n")
-				this.callbacks.log("clearTaskCancellationFailed", { sessionId, completed: cancellation.completed, failures: cancellation.failures })
-				this.callbacks.addError(`세션을 종료하지 못해 대화 화면을 유지합니다.\n\n${details}`)
-				await this.callbacks.broadcast()
-				throw new Error("The active task could not be cancelled before leaving the session.")
-			}
-			if (engine) {
-				try {
-					await engine.stop({ sessionId })
-				} catch (error) {
-					this.callbacks.advanceRunGeneration()
-					this.callbacks.failCancellation()
-					this.callbacks.log("clearTaskRuntimeStopFailed", { sessionId, error: stringify(error) })
-					this.callbacks.addError(`세션 런타임을 종료하지 못해 대화 화면을 유지합니다.\n\n${stringify(error)}`)
-					await this.callbacks.broadcast()
-					throw error
-				}
-			}
-		}
+		const requiresCancellation = previousStatus === "starting" || previousStatus === "streaming" || previousStatus === "awaiting_user" || previousStatus === "cancelling" || this.callbacks.isClosing(sessionId)
+		if (requiresCancellation) this.callbacks.transition("cancelling", "clear-task")
 		this.callbacks.advanceRunGeneration()
+		if (sessionId && requiresCancellation) this.callbacks.markClosing(sessionId)
 		this.callbacks.rememberSnapshot(sessionId)
+		if (sessionId) engine?.markSessionInactive(sessionId)
+		if (sessionId && requiresCancellation) {
+			this.callbacks.persist()
+			try {
+				await this.callbacks.broadcast()
+			} catch (error) {
+				this.callbacks.log("clearTaskCancellingBroadcastFailed", { sessionId, error: stringify(error) })
+			}
+			await this.stopActiveSession(sessionId)
+		}
 		this.callbacks.clearProjection()
 		this.callbacks.clearInteractions()
 		this.callbacks.clearTaskState()
 		this.callbacks.resetLifecycle("clear-task-complete")
 		this.callbacks.persist()
 		await this.callbacks.broadcast()
-		if (sessionId) engine?.markSessionInactive(sessionId)
+	}
+
+	private async stopActiveSession(sessionId: string) {
+		try {
+			const cancellation = await this.callbacks.cancelWork(sessionId)
+			if (!cancellation.succeeded) {
+				this.callbacks.log("clearTaskCancellationIncomplete", { sessionId, completed: cancellation.completed, failures: cancellation.failures })
+			}
+		} catch (error) {
+			this.callbacks.log("clearTaskCancellationFailed", { sessionId, error: stringify(error) })
+		}
 	}
 }
 

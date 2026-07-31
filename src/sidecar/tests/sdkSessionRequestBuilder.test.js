@@ -1,8 +1,13 @@
 const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const os = require("node:os")
+const path = require("node:path")
 const test = require("node:test")
 const { buildSdkStartInput, normalizeAgentMode } = require("../dist/infrastructure/sdk/SdkSessionRequestBuilder")
 
-test("SDK start request builder translates product configuration at one boundary", () => {
+test("SDK start request builder translates product configuration at one boundary", (t) => {
+	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "vscline-sdk-request-"))
+	t.after(() => fs.rmSync(workspace, { recursive: true, force: true }))
 	const extraTools = [{ name: "mcp_tool", __ligVsAutoApprove: true }]
 	const { requestedSessionId, startInput } = buildSdkStartInput({
 		prompt: "inspect",
@@ -17,13 +22,13 @@ test("SDK start request builder translates product configuration at one boundary
 		userFiles: ["file.ts"],
 		initialMessages: [{ role: "user", content: "previous" }, { role: "system", content: "ignored" }, { role: "assistant", content: "" }],
 		config: { sessionId: "config-session", providerId: "config-provider", modelId: "config-model", apiKey: "config-key", enableSpawnAgent: true },
-	}, ["C:\\workspace"], extraTools)
+	}, [workspace], extraTools)
 
 	assert.equal(requestedSessionId, "config-session")
 	assert.equal(startInput.config.providerId, "config-provider")
 	assert.equal(startInput.config.modelId, "config-model")
 	assert.equal(startInput.config.apiKey, "config-key")
-	assert.equal(startInput.config.cwd, "C:\\workspace")
+	assert.equal(startInput.config.cwd, workspace)
 	assert.equal(startInput.config.mode, "plan")
 	assert.equal(startInput.config.enableSpawnAgent, true)
 	assert.deepEqual(startInput.config.extraTools, [{ name: "mcp_tool" }])
@@ -49,6 +54,19 @@ test("SDK fallback prompt requires tool evidence before reporting success", () =
 	assert.match(startInput.config.systemPrompt, /until an actual tool result confirms it/)
 	assert.match(startInput.config.systemPrompt, /instead of inventing a result/)
 	assert.match(startInput.config.systemPrompt, /never generalize results from tested operations to untested capabilities/)
+	assert.match(startInput.config.systemPrompt, /shell selected in LIG VS settings/)
+	assert.doesNotMatch(startInput.config.systemPrompt, /Windows cmd\.exe/)
+})
+
+test("legacy product compaction metadata is not injected into the native SDK prompt", () => {
+	const { startInput } = buildSdkStartInput({
+		prompt: "continue",
+		cwd: "C:\\workspace",
+		sessionMetadata: { ligVsCompactedContext: "obsolete product summary" },
+	}, [], [])
+
+	assert.doesNotMatch(startInput.config.systemPrompt, /lig-vs-compacted-context/)
+	assert.doesNotMatch(startInput.config.systemPrompt, /obsolete product summary/)
 })
 
 test("SDK resumed context is explicitly historical instead of replayed messages", () => {

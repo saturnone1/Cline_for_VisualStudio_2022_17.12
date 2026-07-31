@@ -30,3 +30,15 @@ test("session extra tools combine available MCP and host tools", async () => {
 
 	assert.deepEqual(tools, [mcpTool, hostTool, productTool])
 })
+
+test("session extra tools share one failure boundary", async () => {
+	const logs = []
+	const tools = await createSessionExtraTools({
+		loadMcpTools: async () => [],
+		loadHostTools: () => [{ name: "host_tool", execute: async () => { throw { message: "host RPC unavailable" } } }],
+		log: (level, message, metadata) => logs.push({ level, message, metadata }),
+	})
+
+	await assert.rejects(() => tools[0].execute({}), /Tool "host_tool" failed: host RPC unavailable/)
+	assert.equal(logs.at(-1).message, "Agent tool execution failed")
+})

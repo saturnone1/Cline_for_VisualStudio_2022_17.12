@@ -31,7 +31,7 @@ export class ResumeSessionFlow {
 	async execute(sessionId: string, command: SendMessageCommand, textLength: number) {
 		if (!this.callbacks.isRuntimeAvailable()) throw new Error("LIG VS SDK runtime is not attached.")
 		const roots = await this.callbacks.workspaceRoots()
-		const cwd = this.callbacks.currentCwd() || roots[0] || process.cwd()
+		const cwd = roots[0] || this.callbacks.currentCwd() || process.env.USERPROFILE || process.env.HOME || process.cwd()
 		const prompt = command.prompt || "", userImages = command.userImages || [], userFiles = command.userFiles || []
 		const task = this.callbacks.prepareTask(sessionId, prompt, cwd)
 		this.callbacks.noteActivity("resume-session")

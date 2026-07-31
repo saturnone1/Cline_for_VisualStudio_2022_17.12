@@ -6,6 +6,7 @@ import { toolActivityEntriesFromMessage, toolTranscriptToActivityEntries, buildG
 import type { ToolActivityEntry } from "./ToolActivityFormatting"
 import { readPositiveIntEnv } from "../configuration/RuntimeEnvironment"
 import { contentToText, sdkContentToReasoningText, sdkContentToToolActivityEntries, sdkContentToVisibleAssistantText } from "./SdkContentConversion"
+import { unwrapSdkUserInputEnvelope } from "../../application/services/SdkUserInputEnvelope"
 
 export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<string, unknown>) {
 	if (!Array.isArray(messages)) {
@@ -69,7 +70,7 @@ export function sdkMessagesToClineMessages(messages: unknown, taskItem: Record<s
 		const ts = sdkMessageTimestamp(record, taskItem, messageIndex++)
 		let partOffset = 0
 		if (role === "user") {
-			const text = stripLegacyMcpContext(contentToText(record.content))
+			const text = stripLegacyMcpContext(unwrapSdkUserInputEnvelope(contentToText(record.content)))
 			const entries = sdkContentToToolActivityEntries(record.content)
 			if (result.length === 0) {
 				result.push({ ts: ts + partOffset++, type: "say", say: "task", text })

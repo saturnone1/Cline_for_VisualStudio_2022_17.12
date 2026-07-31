@@ -1,7 +1,8 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useAsyncPolling } from "@/hooks/useAsyncPolling"
 import { BrowserServiceClient } from "../../services/grpcClient"
 
 interface ConnectionInfo {
@@ -17,6 +18,8 @@ interface ConnectionInfo {
 	error?: string
 }
 
+const BROWSER_INFO_REFRESH_INTERVAL_MS = 5000
+
 export const BrowserSettingsMenu = () => {
 	const { browserSettings, navigateToSettings } = useExtensionState()
 	const containerRef = useRef<HTMLDivElement>(null)
@@ -28,7 +31,7 @@ export const BrowserSettingsMenu = () => {
 	})
 	const popoverRef = useRef<HTMLDivElement>(null)
 
-	const fetchConnectionInfo = async () => {
+	const fetchConnectionInfo = useCallback(async () => {
 		try {
 			const info = await BrowserServiceClient.getBrowserConnectionInfo(EmptyRequest.create({}))
 			setConnectionInfo({
@@ -46,12 +49,12 @@ export const BrowserSettingsMenu = () => {
 		} catch (error) {
 			console.error("Error fetching browser connection info:", error)
 		}
-	}
+	}, [])
 
 	// Get actual connection info from the browser session using gRPC
 	useEffect(() => {
 		fetchConnectionInfo()
-	}, [browserSettings.remoteBrowserHost, browserSettings.remoteBrowserEnabled])
+	}, [browserSettings.remoteBrowserHost, browserSettings.remoteBrowserEnabled, fetchConnectionInfo])
 
 	// Close popover when clicking outside
 	useEffect(() => {
@@ -78,12 +81,7 @@ export const BrowserSettingsMenu = () => {
 	}
 
 	const toggleInfoPopover = () => {
-		setShowInfoPopover(!showInfoPopover)
-
-		// Request updated connection info when opening the popover using gRPC
-		if (!showInfoPopover) {
-			fetchConnectionInfo()
-		}
+		setShowInfoPopover((visible) => !visible)
 	}
 
 	// Determine icon based on connection state
@@ -106,16 +104,11 @@ export const BrowserSettingsMenu = () => {
 		}
 	}
 
-	// Keep connection details fresh only while the popover is visible.
-	useEffect(() => {
-		if (!showInfoPopover) {
-			return
-		}
-		fetchConnectionInfo()
-		const intervalId = setInterval(fetchConnectionInfo, 5000)
-
-		return () => clearInterval(intervalId)
-	}, [showInfoPopover])
+	useAsyncPolling({
+		enabled: showInfoPopover,
+		intervalMs: BROWSER_INFO_REFRESH_INTERVAL_MS,
+		poll: fetchConnectionInfo,
+	})
 
 	return (
 		<div ref={containerRef} style={{ position: "relative", marginTop: "-1px", display: "flex" }}>

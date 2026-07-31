@@ -49,11 +49,41 @@ test("cancel flow never projects success when owned work remains", async () => {
 		broadcast: async () => undefined,
 		log: () => undefined,
 	})
-	await assert.rejects(() => flow.execute(), /cancellation operations failed/)
+	await flow.execute()
 	assert.equal(status, "failed")
 	assert.equal(generations, 1)
 	assert.equal(messages.some((message) => message.kind === "info"), false)
 	assert.equal(messages.some((message) => message.kind === "error" && message.text.includes("terminal: alive")), true)
+})
+
+test("task cancellation proceeds when the cancelling-state broadcast fails", async () => {
+	let status = "streaming"
+	let cancelCalls = 0
+	let broadcasts = 0
+	const logged = []
+	const flow = new CancelTaskFlow({
+		beginCancel: () => { status = "cancelling"; return true },
+		currentStatus: () => status,
+		advanceRunGeneration: () => undefined,
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: ["agent"], failures: [] } },
+		clearProjection: () => undefined,
+		addInfo: () => undefined,
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => undefined,
+		completeCancel: () => { status = "idle" },
+		failCancellation: () => { status = "failed" },
+		quarantineSession: () => undefined,
+		broadcast: async () => { if (broadcasts++ === 0) throw new Error("webview disconnected") },
+		log: (event) => { logged.push(event) },
+	})
+
+	await flow.execute()
+	assert.equal(cancelCalls, 1)
+	assert.equal(status, "idle")
+	assert.equal(logged.includes("cancelStateBroadcastFailed"), true)
 })
 
 test("task cancellation releases pending user interaction alongside owned work", async () => {
@@ -98,7 +128,7 @@ test("a failed cancellation hook cannot leave a successfully cancelled task stuc
 
 	await flow.execute()
 	assert.equal(status, "idle")
-	assert.equal(broadcasts, 1)
+	assert.equal(broadcasts, 2)
 	assert.equal(events.some(({ event }) => event === "cancelHookFailed"), true)
 })
 
@@ -125,7 +155,7 @@ test("a timed-out cancellation quarantines the old run instead of restoring stre
 		log: () => undefined,
 	})
 
-	await assert.rejects(() => flow.execute(), /cancellation operations failed/)
+	await flow.execute()
 	assert.equal(status, "failed")
 	assert.equal(generations, 1)
 	assert.equal(quarantined, "session-1")
@@ -148,33 +178,43 @@ test("cancel handler marks a session inactive only after SDK abort succeeds", as
 	assert.equal(inactive, 1)
 })
 
-test("leaving a task preserves the visible session when cancellation is incomplete", async () => {
+test("leaving a task waits for bounded cancellation before clearing the visible session", async () => {
 	let cleared = false
 	let closing = false
 	let status = "streaming"
 	let generations = 0
+	let releaseCancellation
+	const cancellationStarted = new Promise((resolve) => { releaseCancellation = resolve })
 	const handler = new ClearTaskHandler(() => null, {
 		transition: (next) => { status = next },
 		currentStatus: () => status,
 		advanceRunGeneration: () => { generations++ },
 		currentSessionId: () => "session-1",
+		isClosing: () => false,
 		markClosing: (_sessionId, value = true) => { closing = value },
-		cancelWork: async () => ({ succeeded: false, completed: ["agent-and-mcp"], failures: [{ name: "hook", reason: "alive", timedOut: false }] }),
-		failCancellation: () => { status = "failed" },
-		addError: () => undefined,
+		cancelWork: async () => {
+			assert.equal(cleared, false)
+			await cancellationStarted
+			return { succeeded: false, completed: ["agent-and-mcp"], failures: [{ name: "hook", reason: "alive", timedOut: false }] }
+		},
 		rememberSnapshot: () => undefined,
 		clearProjection: () => { cleared = true },
 		clearInteractions: () => undefined,
 		clearTaskState: () => { cleared = true },
-		resetLifecycle: () => undefined,
+		resetLifecycle: () => { status = "idle" },
 		persist: () => undefined,
 		broadcast: async () => undefined,
 		log: () => undefined,
 	})
-	await assert.rejects(() => handler.execute(), /could not be cancelled/)
+	const execution = handler.execute()
+	await new Promise((resolve) => setImmediate(resolve))
 	assert.equal(cleared, false)
+	assert.equal(status, "cancelling")
+	releaseCancellation()
+	await execution
+	assert.equal(cleared, true)
 	assert.equal(closing, true)
-	assert.equal(status, "failed")
+	assert.equal(status, "idle")
 	assert.equal(generations, 1)
 })
 
@@ -187,10 +227,9 @@ test("leaving a completed task skips active-work cancellation", async () => {
 		currentStatus: () => status,
 		advanceRunGeneration: () => undefined,
 		currentSessionId: () => "session-1",
+		isClosing: () => false,
 		markClosing: () => undefined,
 		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: [], failures: [] } },
-		failCancellation: () => { status = "failed" },
-		addError: () => undefined,
 		rememberSnapshot: () => undefined,
 		clearProjection: () => { cleared = true },
 		clearInteractions: () => undefined,
@@ -206,7 +245,7 @@ test("leaving a completed task skips active-work cancellation", async () => {
 	assert.equal(status, "idle")
 })
 
-test("leaving a failed task skips active-work cancellation", async () => {
+test("leaving a quarantined failed task retries active-work cancellation", async () => {
 	let cancelCalls = 0
 	let status = "failed"
 	const handler = new ClearTaskHandler(() => null, {
@@ -214,10 +253,9 @@ test("leaving a failed task skips active-work cancellation", async () => {
 		currentStatus: () => status,
 		advanceRunGeneration: () => undefined,
 		currentSessionId: () => "session-1",
+		isClosing: () => true,
 		markClosing: () => undefined,
 		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: [], failures: [] } },
-		failCancellation: () => { status = "failed" },
-		addError: () => undefined,
 		rememberSnapshot: () => undefined,
 		clearProjection: () => undefined,
 		clearInteractions: () => undefined,
@@ -229,11 +267,11 @@ test("leaving a failed task skips active-work cancellation", async () => {
 	})
 
 	await handler.execute()
-	assert.equal(cancelCalls, 0)
+	assert.equal(cancelCalls, 1)
 	assert.equal(status, "idle")
 })
 
-test("leaving a task after cancellation timeout keeps the session quarantined and failed", async () => {
+test("leaving a task after cancellation timeout keeps the old session quarantined while returning home", async () => {
 	let closing = false
 	let status = "streaming"
 	let generations = 0
@@ -242,22 +280,47 @@ test("leaving a task after cancellation timeout keeps the session quarantined an
 		currentStatus: () => status,
 		advanceRunGeneration: () => { generations++ },
 		currentSessionId: () => "session-1",
+		isClosing: () => false,
 		markClosing: (_sessionId, value = true) => { closing = value },
 		cancelWork: async () => ({ succeeded: false, completed: [], failures: [{ name: "agent", reason: "timeout", timedOut: true }] }),
-		failCancellation: () => { status = "failed" },
-		addError: () => undefined,
 		rememberSnapshot: () => undefined,
 		clearProjection: () => undefined,
 		clearInteractions: () => undefined,
 		clearTaskState: () => undefined,
-		resetLifecycle: () => undefined,
+		resetLifecycle: () => { status = "idle" },
 		persist: () => undefined,
 		broadcast: async () => undefined,
 		log: () => undefined,
 	})
 
-	await assert.rejects(() => handler.execute(), /could not be cancelled/)
-	assert.equal(status, "failed")
+	await handler.execute()
+	assert.equal(status, "idle")
 	assert.equal(closing, true)
 	assert.equal(generations, 1)
+})
+
+test("leaving a task contains an unexpected cancellation rejection before returning home", async () => {
+	let status = "streaming"
+	const logged = []
+	const handler = new ClearTaskHandler(() => null, {
+		transition: (next) => { status = next },
+		currentStatus: () => status,
+		advanceRunGeneration: () => undefined,
+		currentSessionId: () => "session-1",
+		isClosing: () => false,
+		markClosing: () => undefined,
+		cancelWork: async () => { throw new Error("transport closed") },
+		rememberSnapshot: () => undefined,
+		clearProjection: () => undefined,
+		clearInteractions: () => undefined,
+		clearTaskState: () => undefined,
+		resetLifecycle: () => { status = "idle" },
+		persist: () => undefined,
+		broadcast: async () => undefined,
+		log: (event) => { logged.push(event) },
+	})
+
+	await handler.execute()
+	assert.equal(status, "idle")
+	assert.deepEqual(logged, ["clearTaskCancellationFailed"])
 })

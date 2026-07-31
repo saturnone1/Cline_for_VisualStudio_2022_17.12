@@ -443,7 +443,7 @@ function parseJsonRecord(value?: string): Record<string, unknown> {
  * Get the task message from the messages array
  */
 export function getTaskMessage(messages: ClineMessage[]): ClineMessage | undefined {
-	return messages.at(0)
+	return messages.find((message) => message.type === "say" && message.say === "task")
 }
 
 /**

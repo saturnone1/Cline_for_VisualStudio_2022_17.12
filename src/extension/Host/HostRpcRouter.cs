@@ -15,13 +15,17 @@ namespace VsClineAgent.Host
             _adapters = adapters;
         }
 
-        public async Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public async Task<JToken?> HandleAsync(
+            string method,
+            JToken? parameters,
+            System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             InteractionLog.Write("sidecar->host", method, parameters);
             foreach (var adapter in _adapters)
             {
                 if (adapter.CanHandle(method))
-                    return await adapter.HandleAsync(method, parameters).ConfigureAwait(false);
+                    return await adapter.HandleAsync(method, parameters, cancellationToken).ConfigureAwait(false);
             }
 
             throw new InvalidOperationException("Unsupported host method: " + method);

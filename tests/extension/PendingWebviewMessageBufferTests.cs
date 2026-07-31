@@ -20,6 +20,20 @@ namespace VsClineAgent.Host.Tests
             Assert.Equal(new[] { "second" }, buffer.TakeAll());
         }
 
+		[Fact]
+		public void FailedDeliveriesReturnBeforeMessagesQueuedDuringTheFlush()
+		{
+			var buffer = new PendingWebviewMessageBuffer();
+			buffer.Enqueue("old-1");
+			buffer.Enqueue("old-2");
+
+			var delivery = buffer.TakeAll();
+			buffer.Enqueue("new-1");
+			buffer.ReturnFailed(delivery);
+
+			Assert.Equal(new[] { "old-1", "old-2", "new-1" }, buffer.TakeAll());
+		}
+
         [Fact]
         public void OverflowKeepsLatestStatePerRequest()
         {

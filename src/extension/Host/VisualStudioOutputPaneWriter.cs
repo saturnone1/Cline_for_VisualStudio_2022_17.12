@@ -6,7 +6,7 @@ using VsClineAgent.Services;
 
 namespace VsClineAgent.Host
 {
-    internal sealed class VisualStudioOutputPaneWriter : ICommandOutputWriter
+    internal sealed class VisualStudioOutputPaneWriter : ICommandOutputWriter, ICommandOutputSurface
     {
         private static readonly Guid OutputPaneGuid = new Guid("A95D2F78-1D66-4E7D-B3B0-7E7193E129F1");
         private readonly object _paneLock = new object();
@@ -22,6 +22,24 @@ namespace VsClineAgent.Host
             }
             catch
             {
+            }
+        }
+
+        public async Task<bool> ShowAsync()
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var pane = GetOrCreatePane();
+                if (pane == null)
+                    return false;
+
+                pane.Activate();
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -41,7 +59,7 @@ namespace VsClineAgent.Host
 
             // Command output is diagnostic background activity. Creating or activating a
             // visible pane here steals focus from the LIG VS WebView during a task.
-            outputWindow.CreatePane(ref outputPaneGuid, "VsCline Agent", 0, 1);
+            outputWindow.CreatePane(ref outputPaneGuid, "LIG VS Command", 0, 1);
             outputWindow.GetPane(ref outputPaneGuid, out var pane);
             lock (_paneLock)
             {

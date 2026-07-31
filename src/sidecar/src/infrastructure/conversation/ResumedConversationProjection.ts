@@ -1,15 +1,12 @@
 import { normalizeAssistantTranscriptText } from "./TranscriptNormalization"
 import { normalizeTranscriptText } from "./TranscriptTextPolicy"
 import { tryParseJson } from "./ToolCommandFormatting"
-
-const RESUMED_CONVERSATION_MAX_MESSAGES = 40
-export const RESUMED_CONVERSATION_MAX_CHARS = 20_000
-const RESUMED_CONVERSATION_MAX_ENTRY_CHARS = 2_500
+import { estimateTextTokens, truncateTextByTokenBudget } from "../../domain/context/TokenEstimator"
 
 export function buildResumedConversationMessages(
 	messages: Array<Record<string, unknown>>,
 	prompt: string,
-	maxChars = RESUMED_CONVERSATION_MAX_CHARS,
+	maxTokens = Number.MAX_SAFE_INTEGER,
 ) {
 	const currentPrompt = prompt.trim()
 	const entries = messages
@@ -26,25 +23,23 @@ export function buildResumedConversationMessages(
 	}
 
 	const selected: Array<{ role: string; text: string }> = []
-	let totalChars = currentPrompt.length
+	let remainingTokens = Math.max(0, maxTokens - estimateTextTokens(currentPrompt))
 	let hasUserBoundary = false
-	const boundaryReserve = Math.min(1_200, Math.max(300, Math.floor(maxChars * 0.25)))
+	const latestUser = [...entries].reverse().find((entry) => entry.role === "User")
+	const boundaryReserve = latestUser ? Math.min(remainingTokens, estimateTextTokens(latestUser.text)) : 0
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index]
-		if (selected.length >= RESUMED_CONVERSATION_MAX_MESSAGES && hasUserBoundary) break
-		if (selected.length >= RESUMED_CONVERSATION_MAX_MESSAGES) continue
-
-		const remaining = Math.max(0, maxChars - totalChars)
 		const available = hasUserBoundary || entry.role === "User"
-			? remaining
-			: Math.max(0, remaining - boundaryReserve)
+			? remainingTokens
+			: Math.max(0, remainingTokens - boundaryReserve)
 		if (available <= 0) continue
 
-		const text = truncateText(entry.text, Math.min(RESUMED_CONVERSATION_MAX_ENTRY_CHARS, available))
+		const text = truncateTextByTokenBudget(entry.text, available)
+		if (!text) continue
 		selected.unshift({ ...entry, text })
-		totalChars += text.length
+		remainingTokens = Math.max(0, remainingTokens - estimateTextTokens(text))
 		if (entry.role === "User") hasUserBoundary = true
-		if (totalChars >= maxChars && hasUserBoundary) break
+		if (remainingTokens <= 0 && hasUserBoundary) break
 	}
 
 	while (selected.length > 0 && selected[0].role !== "User" && selected[0].role !== "Tool") {
@@ -73,9 +68,9 @@ export function buildResumedConversationMessages(
 export function buildResumedConversationContext(
 	messages: Array<Record<string, unknown>>,
 	prompt: string,
-	maxChars = RESUMED_CONVERSATION_MAX_CHARS,
+	maxTokens = Number.MAX_SAFE_INTEGER,
 ) {
-	return buildResumedConversationMessages(messages, prompt, maxChars)
+	return buildResumedConversationMessages(messages, prompt, maxTokens)
 		.map((message) => `[Previous ${message.role}]\n${message.content}`)
 		.join("\n\n")
 }
@@ -193,4 +188,3 @@ function asRecord(value: unknown): Record<string, unknown> { return value && typ
 function getString(value: unknown, key: string) { const item = asRecord(value)[key]; return typeof item === "string" ? item : item == null ? "" : String(item) }
 function getStringArray(value: unknown, key: string) { const item = asRecord(value)[key]; return Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [] }
 function stringify(value: unknown) { if (typeof value === "string") return value; try { return JSON.stringify(value) } catch { return String(value) } }
-function truncateText(value: string, maxChars: number) { return value.length <= maxChars ? value : value.slice(0, maxChars) + "\n\n[truncated " + (value.length - maxChars) + " chars]" }

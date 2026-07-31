@@ -122,3 +122,48 @@ test("an active control-plane RPC observes cancellation and remains serialized u
 	await task
 	assert.equal(taskCalls, 1)
 })
+
+test("task cancellation interrupts an active compaction without waiting in the control queue", async () => {
+	let compactSignal
+	let cancelCalls = 0
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		task: {
+			handle: async (command, _requestId, signal) => {
+				if (command.type === "compact") {
+					compactSignal = signal
+					await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }))
+				}
+				if (command.type === "cancel") cancelCalls++
+				return { payload: {} }
+			},
+		},
+	}))
+
+	const compact = router.handle("SlashService.condense", "compact-running", {})
+	await Promise.resolve()
+	const cancel = router.handle("TaskService.cancelTask", "cancel-now", {})
+
+	await cancel
+	assert.equal(cancelCalls, 1)
+	assert.equal(compactSignal.aborted, true)
+	await assert.rejects(compact, WebviewRpcRequestCancelledError)
+})
+
+test("leaving a task interrupts active compaction immediately", async () => {
+	let clearCalls = 0
+	const router = new WebviewUnaryRpcRouter(dependencies({
+		task: {
+			handle: async (command, _requestId, signal) => {
+				if (command.type === "compact") await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }))
+				if (command.type === "clear") clearCalls++
+				return { payload: {} }
+			},
+		},
+	}))
+
+	const compact = router.handle("SlashService.condense", "compact-before-leave", {})
+	await Promise.resolve()
+	await router.handle("TaskService.clearTask", "leave-now", {})
+	assert.equal(clearCalls, 1)
+	await assert.rejects(compact, WebviewRpcRequestCancelledError)
+})

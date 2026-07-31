@@ -5,29 +5,18 @@ namespace VsClineAgent.Services
 {
     internal static class TerminalCommandPolicy
     {
-        public static bool IsLikelyLongRunning(string command)
-        {
-            var text = (command ?? string.Empty).ToLowerInvariant();
-            return text.Contains(" dotnet watch") ||
-                   text.StartsWith("dotnet watch", StringComparison.Ordinal) ||
-                   text.Contains(" npm run dev") ||
-                   text.StartsWith("npm run dev", StringComparison.Ordinal) ||
-                   text.Contains(" npm start") ||
-                   text.StartsWith("npm start", StringComparison.Ordinal) ||
-                   text.Contains(" vite") ||
-                   text.Contains(" webpack serve") ||
-                   text.Contains("ng serve") ||
-                   text.Contains("yarn dev") ||
-                   text.Contains("pnpm dev");
-        }
-
-        public static string BuildTerminalId(string workingDirectory, int ordinal)
+        public static string BuildTerminalId(string workingDirectory, int ordinal, string? profileId = null)
         {
             var trimmed = string.IsNullOrWhiteSpace(workingDirectory)
                 ? ""
                 : workingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var name = string.IsNullOrWhiteSpace(trimmed) ? "workspace" : Path.GetFileName(trimmed);
-            return "vs-command-host:" + (string.IsNullOrWhiteSpace(name) ? "workspace" : name) + ":" + ordinal;
+            var workspaceName = string.IsNullOrWhiteSpace(name) ? "workspace" : name;
+            if (string.IsNullOrWhiteSpace(profileId))
+                return "vs-command-host:" + workspaceName + ":" + ordinal;
+
+            var profile = profileId!.Replace("visual-studio-", "vs-").Replace("windows-", "win-");
+            return "vs-command-host:" + profile + ":" + workspaceName + ":" + ordinal;
         }
 
         public static string BuildShellState(int sessionCount, int busyCount)

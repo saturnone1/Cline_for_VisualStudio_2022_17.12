@@ -5,6 +5,10 @@ import { RESUMED_SESSION_FORMAT_VERSION } from "./ResumeSessionFlow"
 type Callbacks = Readonly<{
 	activeSettingsRevision: () => number
 	settingsRevision: () => number
+	activeConnectionRevision: () => number
+	connectionRevision: () => number
+	syncConnection: (sessionId: string) => Promise<void>
+	markConnectionRevisionActive: () => void
 	requiresReplacement: (sessionId: string) => boolean
 	bindSession: (sessionId: string) => void
 	markClosing: (sessionId: string, closing: boolean) => void
@@ -64,6 +68,13 @@ export class SendOrResumeSessionFlow {
 				await engine.stop({ sessionId }).catch((error) => this.callbacks.log("sendAskResponse.stopForSettingsChangeFailed", { sessionId, error: stringify(error) }))
 				this.callbacks.markClosing(sessionId, false)
 				return await this.callbacks.resume(sessionId, command, textLength)
+			}
+			const activeConnectionRevision = this.callbacks.activeConnectionRevision()
+			const connectionRevision = this.callbacks.connectionRevision()
+			if (activeConnectionRevision !== connectionRevision) {
+				this.callbacks.log("sendAskResponse.updateConnectionForSettingsChange", { sessionId, activeConnectionRevision, connectionRevision })
+				await this.callbacks.syncConnection(sessionId)
+				this.callbacks.markConnectionRevisionActive()
 			}
 			this.callbacks.markSend(sessionId)
 			this.callbacks.log("sendAskResponse.sdkSend", { sessionId, textLength })

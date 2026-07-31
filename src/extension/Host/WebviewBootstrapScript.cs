@@ -279,6 +279,22 @@ html, body, #root {
     window.__vsClineAcquireVsCodeApi = api;
     window.acquireVsCodeApi = function () { return api; };
 
+    window.addEventListener('keydown', function (event) {
+        if (event.key !== 'F5' || event.altKey || (event.ctrlKey && event.shiftKey)) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        window.chrome.webview.postMessage({
+            protocolVersion: 1,
+            type: 'vscline_shortcut',
+            virtualKey: 0x74,
+            control: event.ctrlKey,
+            shift: event.shiftKey,
+            alt: event.altKey
+        });
+    }, true);
+
     if (!installThemeShim()) {
         document.addEventListener('DOMContentLoaded', installThemeShim, { once: true });
     }

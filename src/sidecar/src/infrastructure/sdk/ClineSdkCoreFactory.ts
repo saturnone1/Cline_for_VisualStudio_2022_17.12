@@ -6,13 +6,15 @@ import { translateToolApprovalRequest } from "./ClineSdkEventTranslator"
 import { subscribeToClineSdkEvents } from "./ClineSdkEventSubscription"
 import type { ClineSdkCore } from "./ClineSdkSessionAdapter"
 import { createClineSdkToolExecutors } from "./ClineSdkToolExecutorFactory"
-import { ensureUsableHomeEnvironment } from "./SdkEnvironment"
+import { ensureUsableHomeEnvironment, resolveUsableWorkingDirectory } from "./SdkEnvironment"
 
 type ClineSdkModule = typeof import("@cline/sdk")
 
 type CoreFactoryDependencies = {
 	host: HostProviderPort
 	getActiveSessionId: () => string | null
+	getAutoApprovalSettings?: () => unknown
+	getCommandExecutionSettings?: () => unknown
 	onEvent?: (event: AgentRuntimeEvent) => void
 	onToolApproval?: (request: ApprovalRequestedEvent) => Promise<ToolApprovalResult>
 	onAskQuestion?: (question: string, options: string[], signal?: AbortSignal) => Promise<AskQuestionResult>
@@ -24,7 +26,7 @@ export async function createClineSdkCore(dependencies: CoreFactoryDependencies):
 	ensureUsableHomeEnvironment()
 	const sdk = await importClineSdk()
 	const workspaceRoots = await dependencies.host.workspaceClient.getWorkspacePaths({}).catch(() => [] as string[])
-	const workspaceRoot = workspaceRoots[0] || process.cwd()
+	const workspaceRoot = resolveUsableWorkingDirectory(workspaceRoots)
 	const automationEnabled = dependencies.isAutomationEnabled?.() === true || process.env.VSCLINE_ENABLE_AUTOMATION === "1"
 	const automation = automationEnabled ? {
 		cronScope: "workspace" as const,
@@ -35,6 +37,8 @@ export async function createClineSdkCore(dependencies: CoreFactoryDependencies):
 	const toolExecutors = createClineSdkToolExecutors(sdk, {
 		host: dependencies.host,
 		getActiveSessionId: dependencies.getActiveSessionId,
+		getAutoApprovalSettings: dependencies.getAutoApprovalSettings,
+		getCommandExecutionSettings: dependencies.getCommandExecutionSettings,
 		onAskQuestion: dependencies.onAskQuestion,
 		onEvent: dependencies.onEvent,
 		log: (event, details) => dependencies.log("debug", event, details),

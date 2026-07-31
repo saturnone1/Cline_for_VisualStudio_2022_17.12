@@ -1,9 +1,6 @@
-import { UpdateTerminalConnectionTimeoutResponse } from "@shared/proto/index.cline"
 import { VSCodeCheckbox, VSCodeDropdown, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
-import React, { useState } from "react"
-import { PlatformType } from "@/config/platform.config"
+import React, { useEffect, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { usePlatform } from "@/context/PlatformContext"
 import { useI18n } from "@/i18n"
 import { StateServiceClient } from "../../../services/grpcClient"
 import Section from "../Section"
@@ -21,47 +18,41 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 		terminalReuseEnabled,
 		defaultTerminalProfile,
 		availableTerminalProfiles,
-		vscodeTerminalExecutionMode,
 	} = useExtensionState()
-	const platformConfig = usePlatform()
-	const isVsCodePlatform = platformConfig.type === PlatformType.VSCODE
 
-	const [inputValue, setInputValue] = useState((shellIntegrationTimeout / 1000).toString())
+	const normalizedWaitMs = shellIntegrationTimeout >= 1_000 ? shellIntegrationTimeout : 30_000
+	const [inputValue, setInputValue] = useState((normalizedWaitMs / 1000).toString())
 	const [inputError, setInputError] = useState<string | null>(null)
+
+	useEffect(() => {
+		setInputValue((normalizedWaitMs / 1000).toString())
+	}, [normalizedWaitMs])
+
+	const validateTimeout = (value: string) => {
+		const seconds = Number(value)
+		return Number.isFinite(seconds) && seconds >= 1 ? Math.round(seconds * 1000) : null
+	}
 
 	const handleTimeoutChange = (event: Event) => {
 		const target = event.target as HTMLInputElement
 		const value = target.value
-
 		setInputValue(value)
-
-		const seconds = parseFloat(value)
-		if (Number.isNaN(seconds) || seconds <= 0) {
-			setInputError(t("settings.terminal.timeoutError"))
-			return
-		}
-
-		setInputError(null)
-		const timeoutMs = Math.round(seconds * 1000)
-
-		StateServiceClient.updateTerminalConnectionTimeout({ timeoutMs })
-			.then((response: UpdateTerminalConnectionTimeoutResponse) => {
-				const timeoutMs = response.timeoutMs
-				// Backend calls postStateToWebview(), so state will update via subscription
-				// Just sync the input value with the confirmed backend value
-				if (timeoutMs !== undefined) {
-					setInputValue((timeoutMs / 1000).toString())
-				}
-			})
-			.catch((error) => {
-				console.error("Failed to update terminal connection timeout:", error)
-			})
+		setInputError(validateTimeout(value) === null ? t("settings.terminal.timeoutError") : null)
 	}
 
-	const handleInputBlur = () => {
-		if (inputError) {
-			setInputValue((shellIntegrationTimeout / 1000).toString())
+	const commitTimeout = async () => {
+		const timeoutMs = validateTimeout(inputValue)
+		if (timeoutMs === null) {
+			setInputValue((normalizedWaitMs / 1000).toString())
 			setInputError(null)
+			return
+		}
+		if (timeoutMs === normalizedWaitMs) return
+		try {
+			await StateServiceClient.updateTerminalConnectionTimeout({ timeoutMs })
+		} catch {
+			setInputValue((normalizedWaitMs / 1000).toString())
+			setInputError(t("settings.terminal.timeoutUpdateError"))
 		}
 	}
 
@@ -71,22 +62,21 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 		updateSetting("terminalReuseEnabled", checked)
 	}
 
-	const handleExecutionModeChange = (event: Event) => {
-		const target = event.target as HTMLSelectElement
-		const value = target.value === "backgroundExec" ? "backgroundExec" : "vscodeTerminal"
-		updateSetting("vscodeTerminalExecutionMode", value)
-	}
-
 	// Use any to avoid type conflicts between Event and FormEvent
 	const handleDefaultTerminalProfileChange = (event: any) => {
 		const target = event.target as HTMLSelectElement
 		const profileId = target.value
 
 		// Save immediately using the consolidated updateSettings approach
-		updateSetting("defaultTerminalProfile", profileId || "default")
+		updateSetting("defaultTerminalProfile", profileId || "visual-studio-command-host")
 	}
 
-	const profilesToShow = availableTerminalProfiles
+	const profilesToShow = availableTerminalProfiles.length > 0
+		? availableTerminalProfiles
+		: [{ id: "visual-studio-command-host", name: t("settings.terminal.profile.developerCommandPrompt") }]
+	const selectedProfile = defaultTerminalProfile && defaultTerminalProfile !== "default"
+		? defaultTerminalProfile
+		: "visual-studio-command-host"
 
 	return (
 		<div>
@@ -101,10 +91,10 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 							className="w-full"
 							id="default-terminal-profile"
 							onChange={handleDefaultTerminalProfileChange}
-							value={defaultTerminalProfile || "default"}>
+							value={selectedProfile}>
 							{profilesToShow.map((profile) => (
 								<VSCodeOption key={profile.id} title={profile.description} value={profile.id}>
-									{profile.name}
+									{terminalProfileLabel(profile.id, profile.name, t)}
 								</VSCodeOption>
 							))}
 						</VSCodeDropdown>
@@ -119,8 +109,11 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 							<div className="flex items-center">
 								<VSCodeTextField
 									className="w-full"
-									onBlur={handleInputBlur}
+									onBlur={() => void commitTimeout()}
 									onChange={(event) => handleTimeoutChange(event as Event)}
+									onKeyDown={(event) => {
+										if (event.key === "Enter") (event.currentTarget as HTMLInputElement).blur()
+									}}
 									placeholder={t("settings.terminal.timeoutPlaceholder")}
 									value={inputValue}
 								/>
@@ -144,46 +137,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 							{t("settings.terminal.reuseHelp")}
 						</p>
 					</div>
-					{isVsCodePlatform && (
-						<div className="mb-4">
-							<label className="font-medium block mb-1" htmlFor="terminal-execution-mode">
-								{t("settings.terminal.executionMode")}
-							</label>
-							<VSCodeDropdown
-								className="w-full"
-								id="terminal-execution-mode"
-								onChange={(event) => handleExecutionModeChange(event as Event)}
-								value={vscodeTerminalExecutionMode ?? "vscodeTerminal"}>
-								<VSCodeOption value="vscodeTerminal">VS Code Terminal</VSCodeOption>
-								<VSCodeOption value="backgroundExec">{t("settings.terminal.backgroundExec")}</VSCodeOption>
-							</VSCodeDropdown>
-							<p className="text-xs text-[var(--vscode-descriptionForeground)] mt-1">
-								{t("settings.terminal.executionModeHelp")}
-							</p>
-						</div>
-					)}
 					<TerminalOutputLineLimitSlider />
-					<div className="mt-5 p-3 bg-(--vscode-textBlockQuote-background) rounded border border-(--vscode-textBlockQuote-border)">
-						<p className="text-[13px] m-0">
-							<strong>{t("settings.terminal.issues")}</strong>{" "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://docs.cline.bot/troubleshooting/terminal-quick-fixes"
-								rel="noopener noreferrer"
-								target="_blank">
-								{t("settings.terminal.quickFixes")}
-							</a>{" "}
-							{" / "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://docs.cline.bot/troubleshooting/terminal-integration-guide"
-								rel="noopener noreferrer"
-								target="_blank">
-								{t("settings.terminal.troubleshooting")}
-							</a>
-							.
-						</p>
-					</div>
 				</div>
 			</Section>
 		</div>
@@ -191,3 +145,13 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 }
 
 export default TerminalSettingsSection
+
+function terminalProfileLabel(id: string, fallback: string, t: (key: any) => string) {
+	switch (id) {
+		case "visual-studio-command-host": return t("settings.terminal.profile.developerCommandPrompt")
+		case "visual-studio-developer-powershell": return t("settings.terminal.profile.developerPowerShell")
+		case "windows-command-prompt": return t("settings.terminal.profile.commandPrompt")
+		case "windows-powershell": return t("settings.terminal.profile.windowsPowerShell")
+		default: return fallback
+	}
+}

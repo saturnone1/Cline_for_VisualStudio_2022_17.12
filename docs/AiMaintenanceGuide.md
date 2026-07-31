@@ -24,9 +24,12 @@ Do not keep `.stashed`, `.bak`, `.old`, or `.tmp` files under active source. Del
 
 `SidecarConnectionFactory` builds one complete `RuntimeWebviewFeatures` object and configures it atomically. Never restore per-feature setter injection. `WebviewBackendComposition` is the runtime assembly point, not a feature implementation. Keep feature-specific wiring in focused modules such as:
 
-- `ContextCompactionComposition`
 - `TaskHistoryComposition`
 - `WebviewRpcComposition`
+
+Context compaction is owned by the Cline SDK request pipeline. Do not add a
+second LIG VS compaction flow or replacement-session protocol to the WebView
+composition root.
 
 New feature behavior belongs in a feature handler or flow. The composition root should only connect callbacks, ports, and handlers.
 

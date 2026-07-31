@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using VsClineAgent.Host.Adapters;
@@ -52,6 +53,80 @@ namespace VsClineAgent.Host.Tests
                 var matches = (JArray)result["matches"]!;
                 Assert.Single(matches);
                 Assert.Contains(Path.Combine("src", "match.txt"), matches[0]!.Value<string>());
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        [Fact]
+        public async Task RecursiveSearchHonorsConnectionCancellation()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+                var adapter = new FileSystemHostRpcAdapter(1024, 100, 1000);
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    adapter.HandleAsync(
+                        "workspace.searchFiles",
+                        new JObject { ["path"] = directory, ["query"] = "needle" },
+                        cancellation.Token));
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        [Fact]
+        public async Task RecursiveSearchTreatsTheQueryAsARegularExpression()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var sourcePath = Path.Combine(directory, "MathHelper.cs");
+                File.WriteAllText(sourcePath, "public static int Add(int left, int right) => left + right;");
+                var adapter = new FileSystemHostRpcAdapter(1024, 100, 1000);
+
+                var result = (JObject)(await adapter.HandleAsync("workspace.searchFiles", new JObject
+                {
+                    ["path"] = directory,
+                    ["query"] = @"static\s+int\s+",
+                    ["limit"] = 10
+                }))!;
+
+                var matches = (JArray)result["matches"]!;
+                Assert.Single(matches);
+                Assert.Equal(sourcePath, matches[0]!.Value<string>());
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        [Fact]
+        public async Task RecursiveSearchRejectsAnInvalidRegularExpression()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "Program.cs"), "class Program { }");
+                var adapter = new FileSystemHostRpcAdapter(1024, 100, 1000);
+
+                var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    adapter.HandleAsync("workspace.searchFiles", new JObject
+                    {
+                        ["path"] = directory,
+                        ["query"] = "[",
+                        ["limit"] = 10
+                    }));
+
+                Assert.Contains("Invalid search regular expression", error.Message);
             }
             finally
             {

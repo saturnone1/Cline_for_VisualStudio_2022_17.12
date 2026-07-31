@@ -1,4 +1,7 @@
 import type { TaskHistoryItem } from "./TaskHistoryCollection"
+import { extractSdkUserInput } from "../../application/services/SdkUserInputEnvelope"
+import { isNonDisplayableObjectCoercion } from "../../application/services/DisplayTextPolicy"
+import { isLegacyTransientRuntimeMessage } from "../../application/services/TransientRuntimeMessagePolicy"
 
 type Message = Record<string, unknown>
 type Transcript = { session: unknown; messages: unknown }
@@ -106,7 +109,9 @@ export class TaskTranscriptHydrator {
 		const task = this.callbacks.projectSession(session)
 		const bootstrapCount = internalBootstrapMessageCount(session, sdkMessages)
 		const visibleMessages = bootstrapCount > 0 ? sdkMessages.slice(bootstrapCount) : sdkMessages
-		return { task, messages: this.callbacks.projectMessages(visibleMessages, task), sdkCount: sdkMessages.length, sessionStatus: stringValue(session.status) }
+		const messages = this.callbacks.projectMessages(visibleMessages, task)
+			.filter((message) => !isLegacyTransientRuntimeMessage(message))
+		return { task, messages, sdkCount: sdkMessages.length, sessionStatus: stringValue(session.status) }
 	}
 
 	private logSkip(reason: string, taskId: string, activeSessionId: string) {
@@ -115,11 +120,29 @@ export class TaskTranscriptHydrator {
 }
 
 export function reconcileTranscriptMessages(current: readonly Message[], projected: readonly Message[]) {
-	const next = current.map((message) => ({ ...message }))
+	let changed = false
+	const next: Message[] = current.filter((message) => {
+		if (isLegacyTransientRuntimeMessage(message)) {
+			changed = true
+			return false
+		}
+		if (!isNonDisplayableObjectCoercion(stringValue(message.text))) return true
+		changed = true
+		return false
+	}).map((message): Message => {
+		const text = stringValue(message.text)
+		const unwrapped = isUserConversationMessage(message) ? extractSdkUserInput(text) : ""
+		if (!unwrapped) return { ...message }
+		changed = true
+		return { ...message, text: unwrapped }
+	})
 	const currentSignatureCounts = countSignatures(next)
 	const projectedSignatureCounts = new Map<string, number>()
-	let changed = false
 	for (const candidate of projected) {
+		if (isLegacyTransientRuntimeMessage(candidate)) {
+			changed = true
+			continue
+		}
 		const signature = messageSignature(candidate)
 		if (!signature) continue
 		const occurrence = (projectedSignatureCounts.get(signature) || 0) + 1
@@ -133,6 +156,10 @@ export function reconcileTranscriptMessages(current: readonly Message[], project
 		changed = true
 	}
 	return { changed, messages: next }
+}
+
+function isUserConversationMessage(message: Message) {
+	return message.type === "say" && (message.say === "task" || message.say === "user_feedback")
 }
 
 function messageSignature(message: Message) {
@@ -176,14 +203,12 @@ function internalBootstrapMessageCount(session: Record<string, unknown>, message
 		const message = asRecord(messages[index])
 		if (stringValue(message.role) !== "user") continue
 		const rawText = sdkMessageText(message.content)
-		const wrappedPrompt = extractUserInput(rawText)
+		const wrappedPrompt = extractSdkUserInput(rawText)
 		const text = normalizeText(rawText)
 		if ((wrappedPrompt && normalizeText(wrappedPrompt) === prompt) || text === prompt) return index
 	}
 	return 0
 }
-
-function extractUserInput(value: string) { return /<user_input\b[^>]*>([\s\S]*?)<\/user_input>/i.exec(value)?.[1] || "" }
 
 function sdkMessageText(value: unknown): string {
 	if (typeof value === "string") return value

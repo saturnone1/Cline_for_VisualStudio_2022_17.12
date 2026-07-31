@@ -29,6 +29,12 @@ export class CancelTaskFlow {
 		}
 		const hookSessionId = this.callbacks.hookSessionId()
 		const activeSessionId = this.callbacks.activeSessionId()
+		this.callbacks.updateTask()
+		try {
+			await this.callbacks.broadcast()
+		} catch (error) {
+			this.callbacks.log("cancelStateBroadcastFailed", { sessionId: activeSessionId, error: stringify(error) })
+		}
 		const result = await this.callbacks.cancelWork(activeSessionId)
 		if (!result.succeeded) {
 			const details = result.failures.map((failure) => `${failure.name}: ${failure.reason}`).join("\n")
@@ -41,7 +47,7 @@ export class CancelTaskFlow {
 			this.callbacks.quarantineSession(activeSessionId)
 			this.callbacks.failCancellation()
 			await this.callbacks.broadcast()
-			throw new Error("One or more task cancellation operations failed.")
+			return
 		}
 		this.callbacks.advanceRunGeneration()
 		this.callbacks.clearProjection()

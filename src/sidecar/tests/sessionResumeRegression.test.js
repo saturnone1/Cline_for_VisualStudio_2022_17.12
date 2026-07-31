@@ -19,6 +19,7 @@ test("a selected history session that is absent from the SDK resumes without a f
 	const flow = new SendOrResumeSessionFlow(() => engine, {
 		activeSettingsRevision: () => 0,
 		settingsRevision: () => 0,
+		activeConnectionRevision: () => 0, connectionRevision: () => 0, syncConnection: async () => {}, markConnectionRevisionActive: () => {},
 		requiresReplacement: () => false,
 		bindSession: () => {},
 		markClosing: () => {},
@@ -43,7 +44,7 @@ test("activating an existing selected session rebinds sidecar ownership before s
 		activateSession: async (sessionId) => { calls.push(["activate", sessionId]); engine.status.activeSessionId = sessionId; return { sessionId } },
 	}
 	const flow = new SendOrResumeSessionFlow(() => engine, {
-		activeSettingsRevision: () => 0, settingsRevision: () => 0, requiresReplacement: () => false,
+		activeSettingsRevision: () => 0, settingsRevision: () => 0, activeConnectionRevision: () => 0, connectionRevision: () => 0, syncConnection: async () => {}, markConnectionRevisionActive: () => {}, requiresReplacement: () => false,
 		bindSession: (sessionId) => calls.push(["bind", sessionId]),
 		markClosing: () => {}, send: async (command) => { calls.push(["send", command.sessionId]); return { sessionId: command.sessionId } },
 		resume: async () => { throw new Error("must not resume an existing session") },
@@ -52,6 +53,26 @@ test("activating an existing selected session rebinds sidecar ownership before s
 
 	await flow.execute("selected-history", { sessionId: "selected-history", prompt: "continue" }, 8)
 	assert.deepEqual(calls, [["activate", "selected-history"], ["bind", "selected-history"], ["send", "selected-history"]])
+})
+
+test("connection settings are synchronized on the same idle session before its next message", async () => {
+	const calls = []
+	let activeConnectionRevision = 1
+	const engine = { status: { activeSessionId: "active" }, getSession: async () => ({ sessionId: "active" }) }
+	const flow = new SendOrResumeSessionFlow(() => engine, {
+		activeSettingsRevision: () => 3, settingsRevision: () => 3,
+		activeConnectionRevision: () => activeConnectionRevision, connectionRevision: () => 2,
+		syncConnection: async (sessionId) => calls.push(["connection", sessionId]),
+		markConnectionRevisionActive: () => { activeConnectionRevision = 2 },
+		requiresReplacement: () => false, bindSession: () => {}, markClosing: () => {},
+		send: async (command) => { calls.push(["send", command.sessionId]); return { sessionId: command.sessionId } },
+		resume: async () => { throw new Error("connection-only settings must not replace the session") },
+		markSend: () => {}, markError: () => {}, isSessionNotFound: () => false, log: () => {},
+	})
+
+	await flow.execute("active", { sessionId: "active", prompt: "continue" }, 8)
+	assert.deepEqual(calls, [["connection", "active"], ["send", "active"]])
+	assert.equal(activeConnectionRevision, 2)
 })
 
 test("a legacy resumed session is replaced before it can receive another message", async () => {
@@ -63,7 +84,7 @@ test("a legacy resumed session is replaced before it can receive another message
 		stop: async ({ sessionId }) => calls.push(["stop", sessionId]),
 	}
 	const flow = new SendOrResumeSessionFlow(() => engine, {
-		activeSettingsRevision: () => 0, settingsRevision: () => 0, requiresReplacement: () => false,
+		activeSettingsRevision: () => 0, settingsRevision: () => 0, activeConnectionRevision: () => 0, connectionRevision: () => 0, syncConnection: async () => {}, markConnectionRevisionActive: () => {}, requiresReplacement: () => false,
 		bindSession: () => {}, markClosing: () => {}, send: async () => { throw new Error("legacy session must not receive a send") },
 		resume: async (sessionId) => { calls.push(["resume", sessionId]); return { sessionId: "replacement" } },
 		markSend: () => {}, markError: () => {}, isSessionNotFound: () => false, log: () => {},
@@ -80,7 +101,7 @@ test("a transient session format inspection failure does not block a normal send
 		getSession: async () => { throw new Error("temporary metadata failure") },
 	}
 	const flow = new SendOrResumeSessionFlow(() => engine, {
-		activeSettingsRevision: () => 0, settingsRevision: () => 0, requiresReplacement: () => false,
+		activeSettingsRevision: () => 0, settingsRevision: () => 0, activeConnectionRevision: () => 0, connectionRevision: () => 0, syncConnection: async () => {}, markConnectionRevisionActive: () => {}, requiresReplacement: () => false,
 		bindSession: () => {}, markClosing: () => {}, send: async () => { sends++; return { sessionId: "active" } },
 		resume: async () => { throw new Error("must not resume") }, markSend: () => {}, markError: () => {}, isSessionNotFound: () => false, log: () => {},
 	})
@@ -99,6 +120,7 @@ test("a quarantined active session is replaced instead of receiving another dire
 	const flow = new SendOrResumeSessionFlow(() => engine, {
 		activeSettingsRevision: () => 0,
 		settingsRevision: () => 0,
+		activeConnectionRevision: () => 0, connectionRevision: () => 0, syncConnection: async () => {}, markConnectionRevisionActive: () => {},
 		requiresReplacement: (sessionId) => sessionId === "quarantined-session",
 		bindSession: () => {},
 		markClosing: () => {},
@@ -119,17 +141,18 @@ test("a quarantined active session is replaced instead of receiving another dire
 
 test("a user message targets the selected history task instead of a stale active session", async () => {
 	const sends = []
+	const projectedMessages = []
 	const flow = new SendUserMessageFlow({
 		interactions: { hasPending: () => false, clear: () => {} },
 		newTask: { start: async () => { throw new Error("must not start a new task") } },
 		lifecycle: { startLatency: () => {}, transitionStarting: () => {}, nextGeneration: () => 1, currentGeneration: () => 1 },
-		projection: { addUserMessage: () => ({}), showPreparing: () => {}, persist: () => {}, publishPartial: () => {}, broadcast: () => {} },
+		projection: { addUserMessage: (...args) => { projectedMessages.push(args); return {} }, showPreparing: () => {}, persist: () => {}, publishPartial: () => {}, broadcast: () => {} },
 		attachments: { normalizeImages: async () => [] },
 		hooks: { onPrompt: () => {} },
 		agent: {
 			send: async (sessionId) => { sends.push(sessionId); return { sessionId } },
 			resultSessionId: (result, fallback) => result.sessionId || fallback,
-			complete: async () => {}, recover: async () => {}, recoverContextOverflow: async () => false,
+			complete: async () => {}, recover: async () => {},
 		},
 		log: () => {},
 	})
@@ -137,6 +160,27 @@ test("a user message targets the selected history task instead of a stale active
 	await flow.execute({ requestId: "request-1", prompt: "continue", transcriptText: "continue", images: [], files: [], mode: "act", activeSessionId: "stale-active", selectedSessionId: "selected-history" })
 	await new Promise((resolve) => setImmediate(resolve))
 	assert.deepEqual(sends, ["selected-history"])
+	assert.deepEqual(projectedMessages, [["continue", [], []]])
+})
+
+test("a continued task projects attachment UI data without exposing the transport envelope", async () => {
+	const projectedMessages = []
+	const flow = new SendUserMessageFlow({
+		interactions: { hasPending: () => false, clear: () => {} },
+		newTask: { start: async () => { throw new Error("must not start a new task") } },
+		lifecycle: { startLatency: () => {}, transitionStarting: () => {}, nextGeneration: () => 1, currentGeneration: () => 1 },
+		projection: { addUserMessage: (...args) => { projectedMessages.push(args); return {} }, showPreparing: () => {}, persist: () => {}, publishPartial: () => {}, broadcast: () => {} },
+		attachments: { normalizeImages: async (images) => images.map(() => "data:image/png;base64,AAAA") },
+		hooks: { onPrompt: () => {} },
+		agent: {
+			send: async (sessionId) => ({ sessionId }), resultSessionId: (result, fallback) => result.sessionId || fallback,
+			complete: async () => {}, recover: async () => {},
+		},
+		log: () => {},
+	})
+
+	await flow.execute({ requestId: "request-2", prompt: "이 파일을 검토해", transcriptText: "이 파일을 검토해\n\nAttachments:\nImage: [attached image/png]\nFile: README.md", images: ["C:\\image.png"], files: ["README.md"], mode: "act", activeSessionId: "session", selectedSessionId: "session" })
+	assert.deepEqual(projectedMessages, [["이 파일을 검토해", ["C:\\image.png"], ["README.md"]]])
 })
 
 test("history resume starts a fresh SDK session and brackets replacement ownership", async () => {

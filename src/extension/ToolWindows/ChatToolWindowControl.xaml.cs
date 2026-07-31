@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -42,6 +43,7 @@ namespace VsClineAgent.ToolWindows
         }
 
         private readonly SidecarLifecycle _sidecar;
+        private readonly VsEditorService _editorService;
         private string? _assemblyDirectory;
         private string? _lastWebMessageJson;
         private readonly WebviewMessageQueue _webviewMessages;
@@ -54,6 +56,7 @@ namespace VsClineAgent.ToolWindows
         private int _webviewHydrated;
 		private int _sdkWarmupStarted;
         private bool _initialized;
+        private string? _lastRuntimeDiagnostic;
         internal bool IsDisposed => _lifetime.IsDisposed;
 
         public ChatToolWindowControl()
@@ -65,19 +68,22 @@ namespace VsClineAgent.ToolWindows
 			_loadingPresenter.ApplyTheme(_themePreferences.Read());
 			_loadingPresenter.InitializeLogo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory);
 			_loadingPresenter.StartAnimation();
+            _editorService = new VsEditorService();
             _sidecar = new SidecarLifecycle(
-                new VsEditorService(),
+                _editorService,
                 new VsCommandExecutionService(new VisualStudioOutputPaneWriter()),
                 SetStatus);
 			_sidecar.ReadyGenerationChanged += OnSidecarReadyGenerationChanged;
 			_sidecar.TransportUnavailable += OnSidecarTransportUnavailable;
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
+            PreviewKeyDown += OnPreviewKeyDown;
             _lifetime = new ToolWindowLifetime(
                 () =>
                 {
                     Loaded -= OnLoaded;
                     Unloaded -= OnUnloaded;
+                    PreviewKeyDown -= OnPreviewKeyDown;
 					_sidecar.ReadyGenerationChanged -= OnSidecarReadyGenerationChanged;
 					_sidecar.TransportUnavailable -= OnSidecarTransportUnavailable;
                     DetachWebViewEventHandlers();
@@ -115,6 +121,25 @@ namespace VsClineAgent.ToolWindows
 	            _ = OnLoadedAsync();
         }
 
+        private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            var modifiers = Keyboard.Modifiers;
+            e.Handled = TryExecuteVisualStudioShortcut(
+                KeyInterop.VirtualKeyFromKey(e.Key),
+                (modifiers & ModifierKeys.Control) != 0,
+                (modifiers & ModifierKeys.Shift) != 0,
+                (modifiers & ModifierKeys.Alt) != 0);
+        }
+
+        private bool TryExecuteVisualStudioShortcut(int virtualKey, bool control, bool shift, bool alt)
+        {
+            if (!WebViewShortcutPolicy.TryResolveVisualStudioCommand(virtualKey, control, shift, alt, out var command))
+                return false;
+
+            _ = _editorService.ExecuteCommandAsync(command);
+            return true;
+        }
+
 		private void OnSidecarReadyGenerationChanged(int generation)
 		{
 			Interlocked.Exchange(ref _sdkWarmupStarted, 0);
@@ -124,6 +149,30 @@ namespace VsClineAgent.ToolWindows
 				type = "vscline_transport_reset",
 				generation
 			});
+		}
+
+		private bool TryHandleVisualStudioShortcut(string webMessageAsJson)
+		{
+			try
+			{
+				var message = JObject.Parse(webMessageAsJson);
+				if (!string.Equals((string?)message["type"], "vscline_shortcut", StringComparison.Ordinal))
+					return false;
+
+				if ((int?)message["protocolVersion"] == 1)
+				{
+					TryExecuteVisualStudioShortcut(
+						(int?)message["virtualKey"] ?? 0,
+						(bool?)message["control"] == true,
+						(bool?)message["shift"] == true,
+						(bool?)message["alt"] == true);
+				}
+				return true;
+			}
+			catch
+			{
+				return false;
+			}
 		}
 
 		private void OnSidecarTransportUnavailable(int generation)
@@ -332,6 +381,9 @@ namespace VsClineAgent.ToolWindows
 
             _webviewMessages.SetReady(false);
             Volatile.Write(ref _webviewHydrated, 0);
+			errorPanel.Visibility = Visibility.Collapsed;
+			runtimeDiagnosticPanel.Visibility = Visibility.Collapsed;
+			loadingRetryButton.Visibility = Visibility.Collapsed;
 			_loadingPresenter.StartAnimation();
 			SetStatus("LIG VS를 준비하는 중입니다...");
 			loadingPanel.Visibility = Visibility.Visible;
@@ -392,6 +444,8 @@ namespace VsClineAgent.ToolWindows
                 _lastWebMessageJson = webMessageAsJson;
                 InteractionLog.Write("webview->host", "webview.message", webMessageAsJson);
 				if (TryHandleThemePreference(webMessageAsJson))
+					return;
+				if (TryHandleVisualStudioShortcut(webMessageAsJson))
 					return;
                 if (TryHandleWebViewLifecycle(webMessageAsJson))
                     return;
@@ -462,8 +516,19 @@ namespace VsClineAgent.ToolWindows
                 var kind = message.Value<string>("kind") ?? "script";
                 var text = message.Value<string>("message") ?? "(no message)";
                 var stack = message.Value<string>("stack") ?? "";
-                ShowError("WebApp script failed:\n" + kind + ": " + text +
-                    (string.IsNullOrWhiteSpace(stack) ? "" : "\n\n" + stack));
+                var diagnostic = "WebApp script failed:\n" + kind + ": " + text +
+                    (string.IsNullOrWhiteSpace(stack) ? "" : "\n\n" + stack);
+                if (WebViewDiagnosticPolicy.ShouldReplaceContent(
+                    _initialized,
+                    Volatile.Read(ref _webviewHydrated) != 0,
+                    kind))
+                {
+                    ShowError(diagnostic);
+                }
+                else
+                {
+                    ShowRuntimeDiagnostic(diagnostic, text);
+                }
                 return true;
             }
             catch
@@ -496,6 +561,7 @@ namespace VsClineAgent.ToolWindows
             {
 				_loadingPresenter.StopAnimation();
                 loadingPanel.Visibility = Visibility.Collapsed;
+                errorPanel.Visibility = Visibility.Collapsed;
                 webView.Visibility = Visibility.Visible;
             }
 
@@ -535,7 +601,8 @@ namespace VsClineAgent.ToolWindows
                 loadingPanel.Visibility = Visibility.Collapsed;
                 webView.Visibility = Visibility.Collapsed;
                 errorText.Text = detailedMessage;
-                errorText.Visibility = Visibility.Visible;
+                runtimeDiagnosticPanel.Visibility = Visibility.Collapsed;
+                errorPanel.Visibility = Visibility.Visible;
                 HostDiagnosticReport.WriteSnapshot(detailedMessage);
             }
 
@@ -543,6 +610,97 @@ namespace VsClineAgent.ToolWindows
                 ApplyError();
             else
                 _ = VisualStudioUiThread.PostAsync(ApplyError);
+        }
+
+        private void ShowRuntimeDiagnostic(string message, string summary)
+        {
+            void ApplyDiagnostic()
+            {
+                var detailedMessage = HostDiagnosticReport.Create(message, null, null, CreateDiagnosticContext());
+                _lastRuntimeDiagnostic = detailedMessage;
+                runtimeDiagnosticText.Text = "요청 처리 중 오류가 발생했습니다. 대화는 유지됩니다. " + summary;
+                runtimeDiagnosticText.ToolTip = detailedMessage;
+                runtimeDiagnosticPanel.Visibility = Visibility.Visible;
+                HostDiagnosticReport.WriteSnapshot(detailedMessage);
+            }
+
+            if (Dispatcher.CheckAccess())
+                ApplyDiagnostic();
+            else
+                _ = VisualStudioUiThread.PostAsync(ApplyDiagnostic);
+        }
+
+        private void OnDismissRuntimeDiagnosticClick(object sender, RoutedEventArgs e)
+        {
+            runtimeDiagnosticPanel.Visibility = Visibility.Collapsed;
+        }
+
+        private void OnShowRuntimeDiagnosticDetailsClick(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_lastRuntimeDiagnostic))
+                return;
+
+            runtimeDiagnosticPanel.Visibility = Visibility.Collapsed;
+            loadingPanel.Visibility = Visibility.Collapsed;
+            webView.Visibility = Visibility.Collapsed;
+            errorText.Text = _lastRuntimeDiagnostic;
+            errorPanel.Visibility = Visibility.Visible;
+        }
+
+        private void OnDismissErrorClick(object sender, RoutedEventArgs e)
+        {
+            errorPanel.Visibility = Visibility.Collapsed;
+            if (_initialized && webView.CoreWebView2 != null)
+            {
+                loadingPanel.Visibility = Visibility.Collapsed;
+                webView.Visibility = Visibility.Visible;
+                return;
+            }
+
+            SetStatus("초기화가 중단되었습니다. 준비가 되면 다시 시도해 주세요.");
+            _loadingPresenter.StopAnimation();
+            loadingProgress.IsIndeterminate = false;
+            loadingRetryButton.Visibility = Visibility.Visible;
+            loadingPanel.Visibility = Visibility.Visible;
+        }
+
+        private void OnRetryErrorClick(object sender, RoutedEventArgs e)
+        {
+            _ = RetryErrorAsync();
+        }
+
+        private async Task RetryErrorAsync()
+        {
+            try
+            {
+                if (_initializing)
+                    return;
+
+                errorPanel.Visibility = Visibility.Collapsed;
+                runtimeDiagnosticPanel.Visibility = Visibility.Collapsed;
+                loadingRetryButton.Visibility = Visibility.Collapsed;
+                loadingProgress.IsIndeterminate = true;
+                webView.Visibility = Visibility.Collapsed;
+                loadingPanel.Visibility = Visibility.Visible;
+                _loadingPresenter.StartAnimation();
+
+                if (webView.CoreWebView2 != null)
+                {
+                    _webviewMessages.SetReady(false);
+                    Volatile.Write(ref _webviewHydrated, 0);
+                    SetStatus("LIG VS 화면을 다시 불러오는 중입니다...");
+                    webView.CoreWebView2.Reload();
+                    return;
+                }
+
+                _initialized = false;
+                await OnLoadedAsync();
+            }
+            catch (Exception ex)
+            {
+                _sidecar.RecordError(ex);
+                ShowError("다시 시도하지 못했습니다:\n" + ex.Message);
+            }
         }
 
         private HostDiagnosticContext CreateDiagnosticContext()

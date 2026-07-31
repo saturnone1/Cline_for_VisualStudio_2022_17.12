@@ -32,6 +32,7 @@ export function useScrollBehavior(
 	const virtuosoRef = useRef<VirtuosoHandle>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const disableAutoScrollRef = useRef(false)
+	const pendingScrollFrameRef = useRef<number>()
 
 	// State
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false)
@@ -39,100 +40,16 @@ export function useScrollBehavior(
 	const [pendingScrollToMessage, setPendingScrollToMessage] = useState<number | null>(null)
 	const [scrolledPastUserMessage, setScrolledPastUserMessage] = useState<ClineMessage | null>(null)
 
-	// Find all user feedback messages
-	const userFeedbackMessages = useMemo(() => {
-		return visibleMessages.filter((msg) => msg.say === "user_feedback")
-	}, [visibleMessages])
-
-	// Track scroll position to detect which user message has been scrolled past
-	// Shows the most recent user message that's above the current viewport
-	const checkScrolledPastUserMessage = useCallback(() => {
-		const scrollContainer = scrollContainerRef.current
-		if (!scrollContainer || userFeedbackMessages.length === 0) {
-			setScrolledPastUserMessage(null)
-			return
+	const handleRangeChanged = useCallback((range: ListRange) => {
+		let nextMessage: ClineMessage | null = null
+		for (let index = Math.min(range.startIndex - 1, groupedMessages.length - 1); index >= 0; index--) {
+			const item = groupedMessages[index]
+			const group = Array.isArray(item) ? item : [item]
+			nextMessage = [...group].reverse().find((message) => message.say === "user_feedback") ?? null
+			if (nextMessage) break
 		}
-
-		const containerRect = scrollContainer.getBoundingClientRect()
-
-		// Find the most recent (last in order) user message that's been scrolled past
-		// We iterate from the end to find the latest one that's above the viewport
-		let mostRecentScrolledPast: ClineMessage | null = null
-
-		// Track if we've found any visible message element in the DOM
-		// This helps us determine if missing elements are above or below viewport
-		let foundAnyVisibleElement = false
-
-		for (let i = userFeedbackMessages.length - 1; i >= 0; i--) {
-			const msg = userFeedbackMessages[i]
-			const messageElement = scrollContainer.querySelector(`[data-message-ts="${msg.ts}"]`) as HTMLElement
-
-			if (messageElement) {
-				foundAnyVisibleElement = true
-				const messageRect = messageElement.getBoundingClientRect()
-				// Message is scrolled past if its bottom edge is above (or near) the container's top
-				// Add a small threshold so the pin appears slightly before message fully scrolls out
-				const threshold = 10
-				if (messageRect.bottom < containerRect.top + threshold) {
-					mostRecentScrolledPast = msg
-					break // Found the most recent one that's scrolled past
-				}
-			} else {
-				// Element not in DOM - it's virtualized out
-				// Only consider it scrolled past if we've already found a visible element after it
-				// (meaning this missing element is above the viewport, not below)
-				if (foundAnyVisibleElement) {
-					mostRecentScrolledPast = msg
-					break
-				}
-				// If we haven't found any visible elements yet, this message might be
-				// below the viewport, so continue looking for visible elements
-			}
-		}
-
-		setScrolledPastUserMessage(mostRecentScrolledPast)
-	}, [userFeedbackMessages])
-
-	// Use scroll event listener - attach to the scrollable element inside the container
-	useEffect(() => {
-		const scrollContainer = scrollContainerRef.current
-		if (!scrollContainer) {
-			return
-		}
-
-		// The scrollable element is the Virtuoso scroller or a child with overflow
-		const findScrollableElement = () => {
-			// Try finding the Virtuoso scroller
-			const virtuosoScroller = scrollContainer.querySelector('[data-virtuoso-scroller="true"]') as HTMLElement
-			if (virtuosoScroller) {
-				return virtuosoScroller
-			}
-			// Fallback to the first child with scrollable class
-			const scrollable = scrollContainer.querySelector(".scrollable") as HTMLElement
-			return scrollable || scrollContainer
-		}
-
-		const scrollableElement = findScrollableElement()
-
-		const handleScroll = () => {
-			checkScrolledPastUserMessage()
-		}
-
-		scrollableElement.addEventListener("scroll", handleScroll, { passive: true })
-
-		// Also check on mount and when dependencies change
-		checkScrolledPastUserMessage()
-
-		return () => {
-			scrollableElement.removeEventListener("scroll", handleScroll)
-		}
-	}, [checkScrolledPastUserMessage])
-
-	// Handler for when visible range changes in Virtuoso (kept for compatibility but not used for sticky)
-	const handleRangeChanged = useCallback((_range: ListRange) => {
-		// Range changed callback - we now use scroll position instead
-		// but keep this for potential future use
-	}, [])
+		setScrolledPastUserMessage((current) => current?.ts === nextMessage?.ts ? current : nextMessage)
+	}, [groupedMessages])
 	const scrollToBottomSmooth = useMemo(
 		() =>
 			debounce(
@@ -155,6 +72,17 @@ export function useScrollBehavior(
 			behavior: "auto", // instant causes crash
 		})
 	}, [])
+	const scheduleScrollToBottom = useCallback(() => {
+		if (pendingScrollFrameRef.current !== undefined) cancelAnimationFrame(pendingScrollFrameRef.current)
+		pendingScrollFrameRef.current = requestAnimationFrame(() => {
+			pendingScrollFrameRef.current = undefined
+			scrollToBottomAuto()
+		})
+	}, [scrollToBottomAuto])
+	useEffect(() => () => {
+		scrollToBottomSmooth.clear()
+		if (pendingScrollFrameRef.current !== undefined) cancelAnimationFrame(pendingScrollFrameRef.current)
+	}, [scrollToBottomSmooth])
 
 	const scrollToMessage = useCallback(
 		(messageIndex: number) => {
@@ -242,23 +170,19 @@ export function useScrollBehavior(
 			}
 			// Only scroll on collapse, never on expand - expanding should stay in place
 			if (isCollapsing && isAtBottom) {
-				const timer = setTimeout(() => {
-					scrollToBottomAuto()
-				}, 0)
-				return () => clearTimeout(timer)
+				scheduleScrollToBottom()
+				return
 			}
 			if (isCollapsing && (isLast || isSecondToLast)) {
 				if (isSecondToLast && !isLastCollapsedApiReq) {
 					return
 				}
-				const timer = setTimeout(() => {
-					scrollToBottomAuto()
-				}, 0)
-				return () => clearTimeout(timer)
+				scheduleScrollToBottom()
+				return
 			}
 			// When expanding, don't scroll - let the element expand in place
 		},
-		[groupedMessages, expandedRows, scrollToBottomAuto, isAtBottom],
+		[groupedMessages, expandedRows, scheduleScrollToBottom, isAtBottom],
 	)
 
 	const handleRowHeightChange = useCallback(
@@ -267,13 +191,11 @@ export function useScrollBehavior(
 				if (isTaller) {
 					scrollToBottomSmooth()
 				} else {
-					setTimeout(() => {
-						scrollToBottomAuto()
-					}, 0)
+					scheduleScrollToBottom()
 				}
 			}
 		},
-		[scrollToBottomSmooth, scrollToBottomAuto],
+		[scrollToBottomSmooth, scheduleScrollToBottom],
 	)
 
 	useEffect(() => {

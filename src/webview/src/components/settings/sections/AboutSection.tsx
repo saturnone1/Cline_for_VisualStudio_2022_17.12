@@ -18,7 +18,55 @@ type PatchNote = Readonly<{
 
 const patchNotes: readonly PatchNote[] = [
 	{
-		version: "2.2.3",
+		version: "3.0.4",
+		ko: [
+			"대화 중 변경한 모델, API 연결, 컨텍스트 창 및 추론 설정을 현재 응답 완료 후 활성 SDK 세션에 반영하도록 수정했습니다.",
+			"새 설치에서는 SDK 자동 컨텍스트 압축을 기본 활성화하고, 연결 설정 변경만으로 대화 세션을 불필요하게 교체하지 않도록 개선했습니다.",
+		],
+		en: [
+			"Applied model, API connection, context-window, and reasoning changes to the active SDK session after the current response finishes.",
+			"Enabled native SDK auto-compaction by default for new installs and avoided replacing a conversation for connection-only changes.",
+		],
+	},
+	{
+		version: "3.0.3",
+		ko: [
+			"Cline SDK 0.0.66의 네이티브 자동 컨텍스트 압축으로 통합하고 중복 수동 압축 세션·버튼·제한 시간을 제거했습니다.",
+			"사용자가 설정한 모델 컨텍스트 크기와 최신 provider 설정 계약을 SDK에 직접 전달하고 SDK 압축 진행 상태를 대화 UI에 연결했습니다.",
+		],
+		en: [
+			"Delegated context compaction to Cline SDK 0.0.66 and removed the duplicate manual session, button, and timeout flow.",
+			"Forwarded the configured model context size through the current provider contract and connected native SDK compaction status to the chat UI.",
+		],
+	},
+	{
+		version: "2.2.6",
+		ko: [
+			"긴 대화를 여러 단계로 압축할 때 각 모델 요청에 독립적인 제한 시간을 적용하고 진행 단계를 표시하도록 개선했습니다.",
+			"압축 도중 취소하거나 작업 목록으로 나갈 때 제어 큐를 기다리지 않고 실행 중인 압축을 즉시 중단하도록 수정했습니다.",
+			"취소된 압축은 실패로 기록하지 않고 기존 대화와 세션을 그대로 사용할 수 있도록 수명 주기 처리를 정리했습니다.",
+		],
+		en: [
+			"Applied independent timeouts to each model request in multi-stage long-conversation compaction and exposed stage progress.",
+			"Made cancellation and leaving a task interrupt active compaction immediately instead of waiting behind the control queue.",
+			"Treated cancelled compaction as a preserved-session outcome rather than a failure, keeping the existing conversation usable.",
+		],
+	},
+	{
+		version: "2.2.5",
+		ko: [
+			"모델의 이미지 입력 지원 여부가 불확실할 때 UI에서 미리 차단하지 않고 실제 공급자가 판단하도록 수정했습니다.",
+			"내장·브라우저·질문·MCP 도구 오류를 공통 경계에서 정규화해 모델이 원인을 보고 다른 방법으로 복구할 수 있도록 했습니다.",
+			"상태 조회 polling의 반복 호출 오탐을 제거하고, 복구 가능 SDK 오류와 실패 세션의 수명 주기 처리를 안정화했습니다.",
+		],
+		en: [
+			"Stopped preemptively blocking image input when model capability is unknown, allowing the configured provider to make the final decision.",
+			"Normalized built-in, browser, question, and MCP tool failures at one boundary so the model can inspect the cause and recover with another approach.",
+			"Removed false loop detection for status polling and stabilized recoverable SDK errors and failed-session lifecycle handling.",
+		],
+	},
+	{
+		version: "2.2.4",
 		ko: [
 			"WebView 초기 상태 복원을 고정 시간 제한으로 실패 처리하지 않도록 변경하고, 상태 복원 완료 뒤 SDK 워밍업을 시작해 시작 경합을 제거했습니다.",
 			"호스트 진단 보고서에 포함되는 상태와 WebView 메시지에서 API 키 등 민감정보를 마스킹합니다.",
@@ -163,7 +211,7 @@ const AboutSection = ({ version, renderSectionHeader }: AboutSectionProps) => {
 						{language === "ko" ? "앞으로 구현할 부분 및 미진한 부분" : "Planned and Partial Areas"}
 					</h3>
 					<ul className="m-0 pl-5 text-xs text-description">
-						<li>{language === "ko" ? "Visual Studio 터미널 창과의 완전한 통합" : "First-class integration with the Visual Studio terminal pane"}</li>
+						<li>{language === "ko" ? "Visual Studio 전용 터미널 탭과의 직접 통합" : "Direct integration with a dedicated Visual Studio terminal tab"}</li>
 						<li>{language === "ko" ? "파일 변경 검토·되돌리기와 체크포인트 diff 기능 고도화" : "Richer file review, undo, and checkpoint diff workflows"}</li>
 						<li>{language === "ko" ? "MCP Marketplace, 원격 OAuth, resource·prompt 기능 보강" : "MCP Marketplace, remote OAuth, resources, and prompts"}</li>
 						<li>{language === "ko" ? "Provider별 인증·모델 카탈로그 및 계정 기능의 완성도 향상" : "More complete provider authentication, model catalogs, and account flows"}</li>

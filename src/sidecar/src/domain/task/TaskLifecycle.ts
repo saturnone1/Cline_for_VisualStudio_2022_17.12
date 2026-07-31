@@ -1,5 +1,5 @@
-const TERMINAL_TASK_STATUSES = new Set(["completed", "complete", "ended", "stopped", "cancelled", "aborted", "failed", "error"])
-const FAILED_TASK_STATUSES = new Set(["failed", "error"])
+const TERMINAL_TASK_STATUSES = new Set(["completed", "complete", "ended", "stopped", "cancelled", "aborted", "failed", "error", "mistake_limit"])
+const FAILED_TASK_STATUSES = new Set(["failed", "error", "mistake_limit"])
 const CANCELLED_TASK_STATUSES = new Set(["stopped", "cancelled", "aborted"])
 const STALLED_TASK_STATUSES = new Set(["stalled", "idle-timeout"])
 

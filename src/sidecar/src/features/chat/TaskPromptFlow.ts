@@ -16,7 +16,7 @@ type TaskPromptDependencies = {
 	mode: () => "plan" | "act"
 	hasPendingApproval: () => boolean
 	hasPendingQuestion: () => boolean
-	resolveInitialCwd: (requestedWorkspacePath: string) => string
+	resolveInitialCwd: (requestedWorkspacePath: string) => Promise<string>
 	buildTranscript: (text: string, images: string[], files: string[]) => string
 	createRequestId: () => string
 	log: (event: string, details: Record<string, unknown>) => void
@@ -30,12 +30,13 @@ export class TaskPromptFlow {
 		const files = request.files ?? []
 		const prompt = resolveTaskPrompt(request.text, images, files)
 		const requestedWorkspacePath = request.workspacePath ?? ""
+		const initialCwd = await this.dependencies.resolveInitialCwd(requestedWorkspacePath)
 		await this.dependencies.startFlow.execute({
 			text: prompt,
 			images,
 			files,
 			requestedWorkspacePath,
-			initialCwd: this.dependencies.resolveInitialCwd(requestedWorkspacePath),
+			initialCwd,
 			requestId: options.requestId || this.dependencies.createRequestId(),
 			broadcast: options.broadcast !== false,
 		})

@@ -1,6 +1,8 @@
 export const RUNTIME_DEFAULTS = Object.freeze({
-	apiRequestTimeoutMs: 600_000,
-	webFetchTimeoutMs: 15_000,
+	apiRequestTimeoutMs: 1_800_000,
+	webFetchTimeoutMs: 120_000,
+	browserToolTimeoutMs: 600_000,
+	commandForegroundWaitSeconds: 30,
 	imageProbeTimeoutMs: 5_000,
 	openGraphTimeoutMs: 15_000,
 	hostFileRequestTimeoutMs: 15_000,

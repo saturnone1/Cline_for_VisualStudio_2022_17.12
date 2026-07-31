@@ -166,22 +166,24 @@ export default function ChatInputToolbar({
 
 	const onModeToggle = useCallback(() => {
 		void (async () => {
-			const response = await StateServiceClient.togglePlanActModeProto(
-				TogglePlanActModeRequest.create({
-					mode: mode === "plan" ? PlanActMode.ACT : PlanActMode.PLAN,
-					chatContent: {
-						message: inputValue.trim() ? inputValue : undefined,
-						images: selectedImages,
-						files: selectedFiles,
-					},
-				}),
-			)
-			setTimeout(() => {
+			try {
+				const response = await StateServiceClient.togglePlanActModeProto(
+					TogglePlanActModeRequest.create({
+						mode: mode === "plan" ? PlanActMode.ACT : PlanActMode.PLAN,
+						chatContent: {
+							message: inputValue.trim() ? inputValue : undefined,
+							images: selectedImages,
+							files: selectedFiles,
+						},
+					}),
+				)
 				if (response.value) {
 					setInputValue("")
 				}
-				textAreaRef.current?.focus()
-			}, 100)
+				requestAnimationFrame(() => textAreaRef.current?.focus())
+			} catch (error) {
+				console.error("Failed to switch Plan/Act mode", error)
+			}
 		})()
 	}, [inputValue, mode, selectedFiles, selectedImages, setInputValue, textAreaRef])
 

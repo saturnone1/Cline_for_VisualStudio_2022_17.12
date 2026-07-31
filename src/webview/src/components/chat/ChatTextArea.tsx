@@ -70,7 +70,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		} = useExtensionState()
 		const { t } = useI18n()
 		const { selectedModelInfo } = useMemo(() => normalizeApiConfiguration(apiConfiguration, mode), [apiConfiguration, mode])
-		const modelSupportsImages = selectedModelInfo.supportsImages || false
+		const modelSupportsImages = selectedModelInfo.supportsImages !== false
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
 		const slashCommandsMenuContainerRef = useRef<HTMLDivElement>(null)
 

@@ -126,8 +126,9 @@ namespace VsClineAgent.Host.Tests
                 var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var calls = 0;
-                client.RequestReceived += async (_, __) =>
+                client.RequestReceived += async (_, __, cancellationToken) =>
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     Interlocked.Increment(ref calls);
                     entered.TrySetResult(true);
                     await release.Task;
@@ -150,6 +151,56 @@ namespace VsClineAgent.Host.Tests
                     var completed = JObject.Parse(await reader.ReadLineAsync());
 					Assert.Equal("1", (string?)completed["id"]);
                 }
+            }
+        }
+
+        [Fact]
+        public async Task ConnectionClosureCancelsActiveInboundHostRequest()
+        {
+            var pipeName = "VsClineAgent-Test-" + Guid.NewGuid().ToString("N");
+            using (var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous))
+            using (var client = new NamedPipeJsonRpcClient(pipeName))
+            {
+                var accept = server.WaitForConnectionAsync();
+                await client.ConnectAsync(5000, CancellationToken.None);
+                await accept;
+
+                var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var handlerExited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var connectionClosed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var observedToken = CancellationToken.None;
+                client.ConnectionClosed += error => connectionClosed.TrySetResult(error);
+                client.RequestReceived += async (_, __, cancellationToken) =>
+                {
+                    observedToken = cancellationToken;
+                    entered.TrySetResult(true);
+                    try
+                    {
+                        await Task.Delay(Timeout.Infinite, cancellationToken);
+                    }
+                    finally
+                    {
+                        handlerExited.TrySetResult(true);
+                    }
+                    return null;
+                };
+
+                var writer = new StreamWriter(server, new UTF8Encoding(false), 1024, true) { AutoFlush = true };
+                await writer.WriteLineAsync(new JObject
+                {
+                    ["id"] = "cancel-on-close",
+                    ["method"] = "host.test",
+                    ["protocolVersion"] = HostRpcContract.ProtocolVersion,
+                }.ToString(Newtonsoft.Json.Formatting.None));
+                await entered.Task;
+                writer.Dispose();
+                server.Disconnect();
+
+                var connectionCompletion = await Task.WhenAny(connectionClosed.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(connectionClosed.Task, connectionCompletion);
+                Assert.True(observedToken.IsCancellationRequested);
+                var completed = await Task.WhenAny(handlerExited.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(handlerExited.Task, completed);
             }
         }
     }

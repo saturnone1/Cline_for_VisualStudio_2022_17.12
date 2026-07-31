@@ -5,13 +5,14 @@ import { combineHookSequences } from "@shared/combineHookSequences";
 import { getApiMetrics, getContextWindowUsage, getLastApiReqTotalTokens } from "@shared/getApiMetrics";
 import type { ClineMessage } from "@shared/ExtensionMessage";
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common";
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMount } from "react-use";
 import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils";
 import { useExtensionState } from "@/context/ExtensionStateContext";
 import { useLiveTaskMessages } from "@/context/TaskStreamState";
 import { useShowNavbar } from "@/context/PlatformContext";
 import { FileServiceClient, UiServiceClient } from "@/services/grpcClient";
+import { superviseStreamSubscription } from "@/services/streamSubscriptionSupervisor";
 import { Navbar } from "../menu/Navbar";
 import AutoApproveBar from "./autoApproveMenu/AutoApproveBar";
 import { deriveRequestPendingState, type RequestPendingState } from "./chatViewCore/utils/requestPendingState";
@@ -22,6 +23,7 @@ import {
 	ChatLayout,
 	convertHtmlToMarkdownWithFallback,
 	filterVisibleMessages,
+	getTaskMessage,
 	groupLowStakesTools,
 	groupMessages,
 	InputSection,
@@ -59,21 +61,20 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		currentTaskItem,
 		taskLifecycleStatus,
 		contextCompactionInProgress,
-		contextCompactionThreshold,
 	} = useExtensionState();
 	const messages = useLiveTaskMessages();
 	const isProdHostedApp = userInfo?.apiBaseUrl === "https://app.cline.bot";
 	const shouldShowQuickWins = isProdHostedApp && (!taskHistory || taskHistory.length < QUICK_WINS_HISTORY_THRESHOLD);
 	const deferredMessages = useDeferredValue(messages);
 
-	//const task = messages.length > 0 ? (messages[0].say === "task" ? messages[0] : undefined) : undefined) : undefined
-	const task = useMemo(() => messages.at(0), [messages]); // leaving this less safe version here since if the first message is not a task, then the extension is in a bad state and needs to be debugged (see Cline.abort)
+	const task = useMemo(() => getTaskMessage(messages), [messages]);
 	const modifiedMessages = useMemo(() => {
-		const slicedMessages = deferredMessages.slice(1);
+		const taskIndex = task ? deferredMessages.findIndex((message) => message.ts === task.ts) : -1;
+		const slicedMessages = taskIndex >= 0 ? deferredMessages.slice(taskIndex + 1) : deferredMessages;
 		// Only combine hook sequences if hooks are enabled
 		const withHooks = hooksEnabled ? combineHookSequences(slicedMessages) : slicedMessages;
 		return combineErrorRetryMessages(combineApiRequests(combineCommandSequences(withHooks)));
-	}, [deferredMessages, hooksEnabled]);
+	}, [deferredMessages, hooksEnabled, task]);
 	// has to be after api_req_finished are all reduced into api_req_started messages
 	const apiMetrics = useMemo(() => getApiMetrics(modifiedMessages), [modifiedMessages]);
 
@@ -81,12 +82,10 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		() => getLastApiReqTotalTokens(modifiedMessages) || undefined,
 		[modifiedMessages],
 	);
-	const contextWindowUsage = useMemo(() => getContextWindowUsage(deferredMessages), [deferredMessages]);
-	const compactResetKey = useMemo(() => {
-		const resetMessage = [...modifiedMessages].reverse().find((message) => message.contextCompaction);
-		return resetMessage?.ts;
-	}, [modifiedMessages]);
-
+	// Context boundaries must update immediately after SDK compaction. Heavy chat
+	// grouping can remain deferred, but deferring this value can leave the old
+	// pre-compaction total visible throughout a continuing response stream.
+	const contextWindowUsage = useMemo(() => getContextWindowUsage(messages), [messages]);
 	// Use custom hooks for state management
 	const chatState = useChatState(messages);
 	const {
@@ -202,22 +201,26 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	const { selectedModelInfo } = useMemo(() => {
 		return normalizeApiConfiguration(apiConfiguration, mode);
 	}, [apiConfiguration, mode]);
+	const modelAcceptsImageAttachments = selectedModelInfo.supportsImages !== false;
 	const [filePickerStatus, setFilePickerStatus] = useState("");
+	const isHiddenRef = useRef(isHidden);
+	const focusFrameRef = useRef<number>();
+	isHiddenRef.current = isHidden;
 
 	const selectFilesAndImages = useCallback(async () => {
 		try {
 			setFilePickerStatus("");
 			const response = await FileServiceClient.selectFiles(
 				BooleanRequest.create({
-					value: selectedModelInfo.supportsImages,
+					value: modelAcceptsImageAttachments,
 				}),
 			);
 			if (response && response.values1 && response.values2) {
-				const unsupportedImageCount = selectedModelInfo.supportsImages
+				const unsupportedImageCount = modelAcceptsImageAttachments
 					? 0
 					: response.values1.length + response.values2.filter(isImageFilePath).length;
-				const candidateImages = selectedModelInfo.supportsImages ? response.values1 : [];
-				const candidateFiles = selectedModelInfo.supportsImages
+				const candidateImages = modelAcceptsImageAttachments ? response.values1 : [];
+				const candidateFiles = modelAcceptsImageAttachments
 					? response.values2
 					: response.values2.filter((file) => !isImageFilePath(file));
 				if (unsupportedImageCount > 0) {
@@ -257,69 +260,59 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	}, [
 		selectedFiles.length,
 		selectedImages.length,
-		selectedModelInfo.supportsImages,
+		modelAcceptsImageAttachments,
 		setSelectedFiles,
 		setSelectedImages,
 	]);
 
 	const shouldDisableFilesAndImages = selectedImages.length + selectedFiles.length >= MAX_IMAGES_AND_FILES_PER_MESSAGE;
 
-	// Subscribe to show webview events from the backend
+	// Keep host UI streams alive across navigation and sidecar restarts.
 	useEffect(() => {
-		const cleanup = UiServiceClient.subscribeToShowWebview(
-			{},
-			{
-				onResponse: (event) => {
-					// Only focus if not hidden and preserveEditorFocus is false
-					if (!isHidden && !event.preserveEditorFocus) {
-						textAreaRef.current?.focus();
-					}
-				},
-				onError: (error) => {
-					console.error("Error in showWebview subscription:", error);
-				},
-				onComplete: () => {
-					console.log("showWebview subscription completed");
-				},
+		const cleanup = superviseStreamSubscription<{ preserveEditorFocus?: boolean }>({
+			label: "show webview",
+			subscribe: (observer) => UiServiceClient.subscribeToShowWebview({}, observer),
+			onResponse: (event) => {
+				if (!isHiddenRef.current && !event.preserveEditorFocus) {
+					textAreaRef.current?.focus();
+				}
 			},
-		);
+			reportError: (label, error) => console.error(`Error in ${label} subscription:`, error),
+		});
 
 		return cleanup;
-	}, [isHidden]);
+	}, [textAreaRef]);
 
-	// Set up addToInput subscription
 	useEffect(() => {
-		const cleanup = UiServiceClient.subscribeToAddToInput(
-			{},
-			{
-				onResponse: (event) => {
-					if (event.value) {
-						setInputValue((prevValue) => {
-							const newText = event.value;
-							const newTextWithNewline = newText + "\n";
-							return prevValue ? `${prevValue}\n${newTextWithNewline}` : newTextWithNewline;
-						});
-						// Add scroll to bottom after state update
-						// Auto focus the input and start the cursor on a new line for easy typing
-						setTimeout(() => {
-							if (textAreaRef.current) {
-								textAreaRef.current.scrollTop = textAreaRef.current.scrollHeight;
-								textAreaRef.current.focus();
-							}
-						}, 0);
+		const cleanup = superviseStreamSubscription<{ value?: string }>({
+			label: "add to input",
+			subscribe: (observer) => UiServiceClient.subscribeToAddToInput({}, observer),
+			onResponse: (event) => {
+				if (!event.value) return;
+				setInputValue((prevValue) => {
+					const newTextWithNewline = `${event.value}\n`;
+					return prevValue ? `${prevValue}\n${newTextWithNewline}` : newTextWithNewline;
+				});
+				if (focusFrameRef.current !== undefined) cancelAnimationFrame(focusFrameRef.current);
+				focusFrameRef.current = requestAnimationFrame(() => {
+					focusFrameRef.current = undefined;
+					if (textAreaRef.current) {
+						textAreaRef.current.scrollTop = textAreaRef.current.scrollHeight;
+						textAreaRef.current.focus();
 					}
-				},
-				onError: (error) => {
-					console.error("Error in addToInput subscription:", error);
-				},
-				onComplete: () => {
-					console.log("addToInput subscription completed");
-				},
+				});
 			},
-		);
+			reportError: (label, error) => console.error(`Error in ${label} subscription:`, error),
+		});
 
-		return cleanup;
-	}, []);
+		return () => {
+			cleanup();
+			if (focusFrameRef.current !== undefined) {
+				cancelAnimationFrame(focusFrameRef.current);
+				focusFrameRef.current = undefined;
+			}
+		};
+	}, [setInputValue, textAreaRef]);
 
 	useMount(() => {
 		// NOTE: the vscode window needs to be focused for this to work
@@ -380,9 +373,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				{task ? (
 					<TaskSection
 						apiMetrics={apiMetrics}
-						compactResetKey={compactResetKey}
 						contextCompactionInProgress={contextCompactionInProgress === true}
-						contextCompactionThreshold={contextCompactionThreshold}
 						contextWindowUsage={contextWindowUsage}
 						lastApiReqTotalTokens={lastApiReqTotalTokens}
 						lastProgressMessageText={lastProgressMessageText}
@@ -390,7 +381,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						messages={messages}
 						selectedModelInfo={{
 							supportsPromptCache: selectedModelInfo.supportsPromptCache,
-							supportsImages: selectedModelInfo.supportsImages || false,
+							supportsImages: modelAcceptsImageAttachments,
 						}}
 						showFocusChainPlaceholder={showFocusChainPlaceholder}
 						task={task}

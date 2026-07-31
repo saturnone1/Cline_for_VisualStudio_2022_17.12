@@ -26,14 +26,16 @@ export type AgentStartRequest = Readonly<{
 }>
 
 export type AgentSessionRequest = Readonly<{ sessionId: string }>
-export type AgentCompactSessionRequest = Readonly<{
-	sourceSessionId: string
-	cwd: string
-	initialMessages: readonly unknown[]
-	sessionMetadata?: Readonly<Record<string, unknown>>
-	config: Readonly<Record<string, unknown>>
-	toolPolicies?: Readonly<Record<string, unknown>>
-	signal?: AbortSignal
+export type AgentConnectionUpdateRequest = Readonly<{
+	sessionId: string
+	providerId?: string
+	modelId?: string
+	apiKey?: string
+	baseUrl?: string
+	providerConfig?: Readonly<Record<string, unknown>>
+	reasoningEffort?: "low" | "medium" | "high" | "xhigh" | null
+	thinking?: boolean | null
+	thinkingBudgetTokens?: number | null
 }>
 export type AgentRestoreRequest = Readonly<{
 	sessionId: string
@@ -41,6 +43,11 @@ export type AgentRestoreRequest = Readonly<{
 	cwd: string
 	restore: Readonly<{ messages: boolean; workspace: boolean }>
 	start: Readonly<{ config: Readonly<Record<string, unknown>>; interactive: boolean; toolPolicies: Readonly<Record<string, unknown>> }>
+}>
+export type AgentCheckpointCompareRequest = Readonly<{
+	sessionId: string
+	checkpointRunCount: number
+	cwd?: string
 }>
 
 export type AgentEngineStatus = {
@@ -56,7 +63,6 @@ export interface AgentEnginePort {
 	markSessionInactive(sessionId?: string): void
 	activateSession(sessionId: string): Promise<unknown>
 	startSession(command: AgentStartRequest): Promise<unknown>
-	compactSession(command: AgentCompactSessionRequest): Promise<unknown>
 	send(command: AgentMessageRequest): Promise<unknown>
 	stop(command: AgentSessionRequest): Promise<unknown>
 	abort(command: AgentSessionRequest): Promise<unknown>
@@ -65,7 +71,9 @@ export interface AgentEnginePort {
 	readMessages(params: unknown): Promise<unknown>
 	deleteSession(params: unknown): Promise<unknown>
 	updateSession(params: unknown): Promise<unknown>
+	updateConnection(request: AgentConnectionUpdateRequest): Promise<void>
 	restore(params: AgentRestoreRequest): Promise<unknown>
+	compareCheckpoint(params: AgentCheckpointCompareRequest): Promise<unknown>
 	listSettings(params: unknown): Promise<unknown>
 	toggleSetting(params: unknown): Promise<unknown>
 	getProviderConfigFields(providerId: string): Promise<unknown>

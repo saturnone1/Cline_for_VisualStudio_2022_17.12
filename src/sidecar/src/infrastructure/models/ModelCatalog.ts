@@ -9,6 +9,11 @@ export function normalizeOllamaOpenAiBaseUrl(baseUrl: string) {
 	return `${normalizeOllamaRootBaseUrl(baseUrl)}/v1`
 }
 
+export function isOllamaOpenAiCompatibleEndpoint(baseUrl: string) {
+	const normalized = (baseUrl || "").trim().replace(/\/+$/, "")
+	return /\/v1$/i.test(normalized)
+}
+
 export function normalizeOpenAiCompatibleBaseUrl(baseUrl: string) {
 	const normalized = (baseUrl || "").replace(/\/+$/, "")
 	return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`

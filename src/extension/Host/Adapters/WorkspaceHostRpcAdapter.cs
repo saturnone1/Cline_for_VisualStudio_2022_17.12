@@ -33,8 +33,9 @@ namespace VsClineAgent.Host.Adapters
             }
         }
 
-        public async Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public async Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             switch (method)
             {
                 case "host.workspace.getRoots":

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { readPositiveIntEnv } from "../infrastructure/configuration/RuntimeEnvironment"
+import { readPositiveIntEnv, RUNTIME_DEFAULTS } from "../infrastructure/configuration/RuntimeEnvironment"
 import type { JsonRpcConnection } from "../infrastructure/transport/JsonRpcConnection"
 import { JsonRpcWebviewTransport } from "../infrastructure/transport/JsonRpcConnection"
 import { interactionLogger } from "../infrastructure/diagnostics/InteractionLog"
@@ -58,9 +58,9 @@ export function createSidecarConnectionScope(connection: JsonRpcConnection, stat
 	const webview = new VisualStudioWebviewController(backend)
 	const browser = new BrowserHandler(new BrowserDevToolsAdapter(), randomUUID, readPositiveIntEnv("VSCLINE_BROWSER_SESSION_TTL_MS", 30 * 60 * 1000))
 	const runtime = new ClineSdkRuntime(host, __dirname, (event) => webview.handleSdkEvent(event), (request) => webview.requestToolApproval(request), (question, options, signal) => webview.requestQuestion(question, options, signal), () => webview.isScheduledAgentsEnabled(), () => {
-		const tool = createBrowserAgentTool(browser, () => backend.getBrowserSettings(), readPositiveIntEnv("VSCLINE_BROWSER_TOOL_TIMEOUT_MS", 30_000))
+		const tool = createBrowserAgentTool(browser, () => backend.getBrowserSettings(), readPositiveIntEnv("VSCLINE_BROWSER_TOOL_TIMEOUT_MS", RUNTIME_DEFAULTS.browserToolTimeoutMs))
 		return tool ? [tool] : []
-	})
+	}, () => backend.getAutoApprovalSettings(), undefined, () => backend.getCommandExecutionSettings())
 	const worktrees = new NodeWorktreeOperationsAdapter(host), worktreeQueries = new WorktreeQueryHandler(worktrees, interactionLogger)
 	const tokenExchange = new FetchOAuthTokenExchangeAdapter(), oauthTokens = new OAuthTokenHandler(tokenExchange, interactionLogger), credentials = new ProviderCredentialHandler(new ProviderCredentialEnvironmentAdapter(), tokenExchange, runtime)
 	const callbacks = new OAuthCallbackCoordinator(interactionLogger, readPositiveIntEnv("VSCLINE_OAUTH_CALLBACK_TTL_MS", 15 * 60 * 1000))

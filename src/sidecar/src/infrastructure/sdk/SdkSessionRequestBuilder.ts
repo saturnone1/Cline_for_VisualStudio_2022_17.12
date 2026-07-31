@@ -1,12 +1,13 @@
 import type { AgentStartRequest } from "../../application/ports/AgentEnginePort"
-import { AGENT_EXECUTION_EVIDENCE_INSTRUCTION } from "../../application/services/AgentExecutionContract"
+import { createVisualStudioAgentSystemPrompt } from "../../application/services/AgentExecutionContract"
 import { BUILTIN_TOOL_REPLACEMENT_MARKER } from "./AskQuestionAgentTool"
+import { resolveUsableWorkingDirectory } from "./SdkEnvironment"
 
-const DEFAULT_SYSTEM_PROMPT = `You are Cline running inside Visual Studio 2022 through the VsClineAgent wrapper. Commands execute under Windows cmd.exe; when using cmd built-ins such as dir, type, copy, or del, use backslashes for paths or quote absolute paths.\n\n${AGENT_EXECUTION_EVIDENCE_INSTRUCTION}`
+const DEFAULT_SYSTEM_PROMPT = createVisualStudioAgentSystemPrompt()
 export const MCP_AUTO_APPROVE_MARKER = "__ligVsAutoApprove"
 
 export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: string[], sessionExtraTools: unknown) {
-	const cwd = stringValue(request.cwd) || workspaceRoots[0] || process.cwd()
+	const cwd = resolveUsableWorkingDirectory([stringValue(request.cwd), ...workspaceRoots])
 	const config = asRecord(request.config)
 	const requestedSessionId = stringValue(config.sessionId) || stringValue(request.sessionId)
 	const userImages = stringArrayValue(request.userImages)
@@ -14,7 +15,7 @@ export function buildSdkStartInput(request: AgentStartRequest, workspaceRoots: s
 	const initialMessages = sdkInitialMessages(request.initialMessages)
 	const sessionMetadata = asRecord(request.sessionMetadata)
 	const baseSystemPrompt = stringValue(request.systemPrompt) || stringValue(config.systemPrompt) || DEFAULT_SYSTEM_PROMPT
-	const systemPrompt = appendSessionContext(baseSystemPrompt, stringValue(sessionMetadata.ligVsCompactedContext), stringValue(sessionMetadata.ligVsResumedContext))
+	const systemPrompt = appendSessionContext(baseSystemPrompt, stringValue(sessionMetadata.ligVsResumedContext))
 	const projectedExtraTools = projectExtraTools(sessionExtraTools)
 	const extraTools = projectedExtraTools.tools
 	const toolPolicies = projectToolPolicies(request.toolPolicies, projectedExtraTools)
@@ -98,9 +99,8 @@ function mergeToolRoutingRules(value: unknown, replacements: Array<{ builtin: st
 	]
 }
 
-function appendSessionContext(basePrompt: string, compactedContext?: string, resumedContext?: string) {
+function appendSessionContext(basePrompt: string, resumedContext?: string) {
 	const sections = [basePrompt]
-	if (compactedContext) sections.push(`<lig-vs-compacted-context>\n${compactedContext}\n</lig-vs-compacted-context>`)
 	if (resumedContext) sections.push(
 		"<lig-vs-resumed-context>\n" +
 		"The content below is historical context from a previous session. Use it for continuity only. " +

@@ -18,8 +18,9 @@ namespace VsClineAgent.Host.Adapters
             return method == "webview.postMessage";
         }
 
-        public async Task<JToken?> HandleAsync(string method, JToken? parameters)
+        public async Task<JToken?> HandleAsync(string method, JToken? parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!CanHandle(method))
                 throw new InvalidOperationException("Unsupported WebView host method: " + method);
 

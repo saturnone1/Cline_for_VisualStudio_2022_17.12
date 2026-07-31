@@ -8,9 +8,6 @@ interface FeatureTipItem {
 
 const FEATURE_TIPS: FeatureTipItem[] = [
 	{
-		text: 'Enable "Double-Check Completion" in settings to have LIG VS verify its work before finishing a task.',
-	},
-	{
 		text: "Add a .clinerules file to your project root to give LIG VS project-specific instructions.",
 	},
 	{
@@ -26,7 +23,7 @@ const FEATURE_TIPS: FeatureTipItem[] = [
 		text: "LIG VS creates checkpoints after changes — you can always restore to a previous state.",
 	},
 	{
-		text: "Use the context window compact button to condense long conversations and free up context window space.",
+		text: "SDK Auto Compact can reduce long conversations before a model request reaches its context limit.",
 	},
 	{
 		text: "Enable auto-approve for read-only tools like file reads to speed up exploration.",

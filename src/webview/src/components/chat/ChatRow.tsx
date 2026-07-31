@@ -16,6 +16,7 @@ import SubagentStatusRow from "./SubagentStatusRow";
 import { ToolMessageRenderer } from "./ToolMessageRenderer";
 import { useQuoteSelection } from "./useQuoteSelection";
 import { useChatRowEnvironment } from "./chatViewCore/context/ChatRowEnvironment";
+import { parseJsonObject } from "./chatViewCore/utils/safeJson";
 
 const HEADER_CLASSNAMES = "flex items-center gap-2.5 mb-3";
 
@@ -91,7 +92,6 @@ export const ChatRowContent = memo(
 			mcpServers,
 			mcpMarketplaceCatalog,
 			onRelinquishControl,
-			vscodeTerminalExecutionMode,
 			showFeatureTips,
 		} = useChatRowEnvironment();
 		const { t, language } = useI18n();
@@ -134,7 +134,7 @@ export const ChatRowContent = memo(
 
 		const [cost, apiReqStreamingFailedMessage] = useMemo(() => {
 			if (message.text != null && message.say === "api_req_started") {
-				const info: ClineApiReqInfo = JSON.parse(message.text);
+				const info = parseJsonObject<ClineApiReqInfo>(message.text);
 				return [info.cost, info.streamingFailedMessage];
 			}
 			return [undefined, undefined];
@@ -192,7 +192,7 @@ export const ChatRowContent = memo(
 						<span className="font-bold text-foreground">{t("command.title")}</span>,
 					];
 				case "use_mcp_server":
-					const mcpServerUse = JSON.parse(message.text || "{}") as ClineAskUseMcpServer;
+					const mcpServerUse = parseJsonObject<ClineAskUseMcpServer>(message.text);
 					return [
 						isMcpServerResponding ? (
 							<ProgressIndicator />
@@ -237,7 +237,7 @@ export const ChatRowContent = memo(
 
 		const tool = useMemo(() => {
 			if (message.ask === "tool" || message.say === "tool") {
-				return JSON.parse(message.text || "{}") as ClineSayTool;
+				return parseJsonObject<ClineSayTool>(message.text);
 			}
 			return null;
 		}, [message.ask, message.say, message.text]);
@@ -271,8 +271,7 @@ export const ChatRowContent = memo(
 
 		useEffect(() => {
 			if (isCommandMessage && isCommandExecuting && !isExpanded) {
-				const timer = setTimeout(() => onToggleExpand(message.ts), 500);
-				return () => clearTimeout(timer);
+				onToggleExpand(message.ts);
 			}
 		}, [isCommandMessage, isCommandExecuting, isExpanded, onToggleExpand, message.ts]);
 
@@ -302,7 +301,6 @@ export const ChatRowContent = memo(
 			return (
 				<CommandOutputRow
 					icon={icon}
-					isBackgroundExec={vscodeTerminalExecutionMode === "backgroundExec"}
 					isCommandCompleted={isCommandCompleted}
 					isCommandExecuting={isCommandExecuting}
 					isCommandPending={isCommandPending}
@@ -320,7 +318,7 @@ export const ChatRowContent = memo(
 		}
 
 		if (message.ask === "use_mcp_server" || message.say === "use_mcp_server") {
-			const useMcpServer = JSON.parse(message.text || "{}") as ClineAskUseMcpServer;
+			const useMcpServer = parseJsonObject<ClineAskUseMcpServer>(message.text);
 			const server = mcpServers.find((server) => server.name === useMcpServer.serverName);
 			return (
 				<div>
@@ -403,7 +401,6 @@ export const ChatRowContent = memo(
 					setSeeNewChangesDisabled,
 					showFeatureTips,
 					title,
-					vscodeTerminalExecutionMode,
 				}}
 				askProps={{
 					contentRef,

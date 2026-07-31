@@ -78,7 +78,7 @@ export default defineConfig({
 	build: {
 		outDir: "../../artifacts/WebApp",
 		emptyOutDir: true,
-		reportCompressedSize: false,
+		reportCompressedSize: true,
 		// Only minify in production build
 		minify: !isDevBuild,
 		// Enable inline source maps for dev build
@@ -100,7 +100,7 @@ export default defineConfig({
 				}),
 			},
 		},
-		chunkSizeWarningLimit: 100000,
+		chunkSizeWarningLimit: 2500,
 	},
 	server: {
 		port: 25463,

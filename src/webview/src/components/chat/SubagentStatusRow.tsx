@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useI18n } from "@/i18n"
-import MarkdownBlock from "../common/MarkdownBlock"
+import MarkdownBlock from "../common/LazyMarkdownBlock"
 
 interface SubagentStatusRowProps {
 	message: ClineMessage

@@ -69,9 +69,7 @@ export interface ExtensionState {
 	shellIntegrationTimeout: number
 	terminalReuseEnabled?: boolean
 	terminalOutputLineLimit: number
-	maxConsecutiveMistakes: number
 	defaultTerminalProfile?: string
-	vscodeTerminalExecutionMode: string
 	backgroundCommandRunning?: boolean
 	backgroundCommandTaskId?: string
 	lastCompletedCommandTs?: number
@@ -111,11 +109,9 @@ export interface ExtensionState {
 	remoteConfigSettings?: Partial<RemoteConfigFields>
 	globalSkillsToggles?: Record<string, boolean>
 	localSkillsToggles?: Record<string, boolean>
-	nativeToolCallSetting?: boolean
 	enableParallelToolCalling?: boolean
 	backgroundEditEnabled?: boolean
 	optOutOfRemoteConfig?: boolean
-	doubleCheckCompletionEnabled?: boolean
 	lazyTeammateModeEnabled?: boolean
 	showFeatureTips?: boolean
 	banners?: BannerCardData[]
@@ -179,6 +175,10 @@ export interface ClineMessage {
 		messagesBefore?: number
 		messagesAfter?: number
 		estimatedTokensAfter?: number
+		maxInputTokens?: number
+		triggerTokens?: number
+		targetTokens?: number
+		messageTargetTokens?: number
 		summary?: string
 	}
 }

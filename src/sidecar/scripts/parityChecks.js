@@ -45,7 +45,7 @@ const router = read("infrastructure/webview/VisualStudioWebviewBackend.ts")
 const unaryRouter = read("infrastructure/webview/WebviewUnaryRpcRouter.ts")
 const runtimeEnvironment = read("infrastructure/configuration/RuntimeEnvironment.ts")
 
-requireMatch("long API timeout policy", runtimeEnvironment, /apiRequestTimeoutMs:\s*600_000/)
+requireMatch("long API timeout policy", runtimeEnvironment, /apiRequestTimeoutMs:\s*1_800_000/)
 requireMatch("API timeout uses runtime policy", configBuilder, /readPositiveIntEnv\("VSCLINE_API_TIMEOUT_MS", RUNTIME_DEFAULTS\.apiRequestTimeoutMs\)/)
 requireMatch("long idle watchdog", connectionFactory, /readPositiveIntEnv\("VSCLINE_TASK_IDLE_COMPLETE_MS", 600_000\)/)
 requireMatch("SDK prompt remains unchanged", sdkSessionAdapter, /return await core\.send\(\{[\s\S]{0,180}prompt: request\.prompt/)

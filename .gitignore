@@ -30,3 +30,4 @@ src/webview/node_modules/
 src/webview/coverage/
 artifacts/.staging/
 artifacts/Sidecar/
+TestResults/

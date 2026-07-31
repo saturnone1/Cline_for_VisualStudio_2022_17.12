@@ -39,6 +39,9 @@ export const en = {
 	"settings.api.quickstartGuide": "quickstart guide.",
 	"settings.api.modelCapabilityNote":
 		"Note: LIG VS uses complex prompts and works best with Claude models. Less capable models may not work as expected.",
+	"chat.commandHostUnavailable.title": "Visual Studio command host unavailable",
+	"chat.commandHostUnavailable.description":
+		"LIG VS could not read the command through the Visual Studio host. Check the LIG VS Command output pane, then retry or select another Visual Studio/Windows shell profile in Terminal settings.",
 	"settings.apiProfiles.title": "API Profile",
 	"settings.apiProfiles.new": "New",
 	"settings.apiProfiles.duplicate": "Duplicate",
@@ -102,25 +105,23 @@ export const en = {
 	"settings.browser.customArgsHelp": "Space-separated arguments to pass to the browser executable.",
 	"settings.terminal.defaultProfile": "Default Terminal Profile",
 	"settings.terminal.defaultProfileHelp":
-		"Select the default terminal LIG VS will use. 'Default' uses your VS Code global setting.",
-	"settings.terminal.timeout": "Shell integration timeout (seconds)",
-	"settings.terminal.timeoutPlaceholder": "Enter timeout in seconds",
-	"settings.terminal.timeoutError": "Please enter a positive number",
+		"Select the Visual Studio or Windows shell used for LIG VS commands. Progress is available in the LIG VS Command output pane in Visual Studio.",
+	"settings.terminal.timeout": "Background transition wait (seconds)",
+	"settings.terminal.timeoutPlaceholder": "Enter at least 1 second",
+	"settings.terminal.timeoutError": "Please enter a value of at least 1 second",
+	"settings.terminal.timeoutUpdateError": "Could not save the background transition wait.",
 	"settings.terminal.timeoutHelp":
-		"Set how long LIG VS waits for shell integration to activate before executing commands. Increase this value if you experience terminal connection timeouts.",
-	"settings.terminal.reuse": "Enable aggressive terminal reuse",
+		"Commands still running after this period are not killed; they remain tracked as background work by the Visual Studio command host.",
+	"settings.terminal.reuse": "Reuse terminal sessions for the same working directory",
 	"settings.terminal.reuseHelp":
-		"When enabled, LIG VS will reuse existing terminal windows that aren't in the current working directory. Disable this if you experience issues with task lockout after a terminal command.",
-	"settings.terminal.executionMode": "Terminal Execution Mode",
-	"settings.terminal.backgroundExec": "Background Exec",
-	"settings.terminal.executionModeHelp":
-		"Choose whether LIG VS runs commands in the VS Code terminal or a background process.",
-	"settings.terminal.issues": "Having terminal issues?",
-	"settings.terminal.quickFixes": "Terminal Quick Fixes",
-	"settings.terminal.troubleshooting": "Complete Troubleshooting Guide",
+		"When enabled, LIG VS reuses a shell with the same profile and working directory. When disabled, each command gets an independent shell that closes after completion.",
+	"settings.terminal.profile.developerCommandPrompt": "Visual Studio Developer Command Prompt",
+	"settings.terminal.profile.developerPowerShell": "Visual Studio Developer PowerShell",
+	"settings.terminal.profile.commandPrompt": "Windows Command Prompt",
+	"settings.terminal.profile.windowsPowerShell": "Windows PowerShell",
 	"settings.terminal.outputLimit": "Terminal output limit",
 	"settings.terminal.outputLimitHelp":
-		"Maximum number of lines to include in terminal output when executing commands. When exceeded, lines will be removed from the middle, saving tokens.",
+		"Maximum lines returned to the model. The Visual Studio LIG VS Command output retains the full live progress log.",
 	"settings.general.telemetry": "Allow error and usage reporting",
 	"settings.general.telemetryHelp":
 		"Help improve LIG VS by sending usage data and error reports. No code, prompts, or personal information are ever sent. See our",

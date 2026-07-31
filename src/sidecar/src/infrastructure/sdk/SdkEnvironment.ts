@@ -2,14 +2,14 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export function resolveWorkspacePath(inputPath: string, workspaceRoots: string[], basePath?: string) {
+export function resolveWorkspacePath(inputPath: string, workspaceRoots: string[], basePath?: string, allowOutsideWorkspace = false) {
 	if (!inputPath || inputPath.trim().length === 0) throw new Error("Path is required.")
 	const roots = workspaceRoots.map(canonicalizeWorkspaceRoot)
 	const base = basePath && basePath.trim().length > 0 ? path.resolve(basePath) : roots[0]
 	const normalizedInputPath = expandTildePath(inputPath)
 	const resolved = path.resolve(path.isAbsolute(normalizedInputPath) ? normalizedInputPath : path.join(base || process.cwd(), normalizedInputPath))
 	const canonical = canonicalizePathForAccess(resolved)
-	if (!roots.some((root) => isPathInsideOrEqual(canonical, root))) {
+	if (!allowOutsideWorkspace && !roots.some((root) => isPathInsideOrEqual(canonical, root))) {
 		throw new Error(`Access denied: path outside Visual Studio workspace: ${inputPath}`)
 	}
 	return canonical
@@ -24,6 +24,19 @@ export function ensureUsableHomeEnvironment() {
 
 export function getLocalAppDataRoot() {
 	return process.env.LOCALAPPDATA || process.env.APPDATA || process.cwd()
+}
+
+export function resolveUsableWorkingDirectory(candidates: readonly (string | undefined | null)[] = []) {
+	for (const candidate of candidates) {
+		if (!candidate || !candidate.trim()) continue
+		try {
+			const resolved = path.resolve(candidate)
+			if (fs.statSync(resolved).isDirectory()) return resolved
+		} catch {
+			// Continue to the next host-provided candidate.
+		}
+	}
+	return getUsableHomeDirectory()
 }
 
 export function sanitizePathPart(value: string) {

@@ -36,6 +36,18 @@ export function chunkTextByTokenBudget(value: string, maxTokens: number) {
 	return chunks
 }
 
+export function truncateTextByTokenBudget(value: string, maxTokens: number) {
+	if (maxTokens <= 0) return ""
+	if (estimateTextTokens(value) <= maxTokens) return value
+	let low = 0, high = value.length, end = 0
+	while (low <= high) {
+		const middle = (low + high) >>> 1
+		if (estimateTextTokens(value.slice(0, middle)) <= maxTokens) { end = middle; low = middle + 1 }
+		else high = middle - 1
+	}
+	return value.slice(0, end)
+}
+
 function isCjk(codePoint: number) {
 	return (codePoint >= 0x3040 && codePoint <= 0x30ff) ||
 		(codePoint >= 0x3400 && codePoint <= 0x9fff) ||

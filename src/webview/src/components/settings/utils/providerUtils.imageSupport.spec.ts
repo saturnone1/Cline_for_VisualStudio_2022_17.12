@@ -1,9 +1,9 @@
 import { inferLocalModelImageSupport } from "./providerUtils"
 
 describe("inferLocalModelImageSupport", () => {
-	it("does not advertise text-only local models as multimodal", () => {
-		expect(inferLocalModelImageSupport("openai/gpt-oss-120b")).toBe(false)
-		expect(inferLocalModelImageSupport("deepseek-r1:70b")).toBe(false)
+	it("keeps unverified local model image support unknown instead of blocking attachments", () => {
+		expect(inferLocalModelImageSupport("openai/gpt-oss-120b")).toBeUndefined()
+		expect(inferLocalModelImageSupport("deepseek-r1:70b")).toBeUndefined()
 	})
 
 	it("recognizes common multimodal local model families", () => {

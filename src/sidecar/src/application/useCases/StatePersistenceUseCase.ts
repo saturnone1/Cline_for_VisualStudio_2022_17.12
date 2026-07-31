@@ -6,7 +6,6 @@ export class StatePersistenceUseCase {
 	private timer: ReturnType<typeof setTimeout> | null = null
 	private maxWaitTimer: ReturnType<typeof setTimeout> | null = null
 	private scheduledSnapshotFactory: StateSnapshotFactory | null = null
-	private pendingSave: Promise<void> = Promise.resolve()
 	private queuedSnapshot: Record<string, unknown> | null = null
 	private saveInProgress = false
 	private lastError: Error | null = null
@@ -97,7 +96,7 @@ export class StatePersistenceUseCase {
 		this.queuedSnapshot = snapshot
 		if (this.saveInProgress) return
 		this.saveInProgress = true
-		this.pendingSave = this.drainDeferred()
+		void this.drainDeferred()
 	}
 
 	private async drainDeferred() {

@@ -63,11 +63,13 @@ export abstract class ProtoBusClient {
 					},
 				});
 			};
-			const timeout = window.setTimeout(() => {
-				cancelHostRequest();
-				cleanup();
-				reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`));
-			}, timeoutMs);
+			const timeout = timeoutMs > 0
+				? window.setTimeout(() => {
+					cancelHostRequest();
+					cleanup();
+					reject(new Error(`Timed out waiting for ${this.serviceName}.${methodName}`));
+				}, timeoutMs)
+				: undefined;
 
 			// Set up one-time listener for this specific request
 			const handleResponse = (event: MessageEvent<unknown>) => {

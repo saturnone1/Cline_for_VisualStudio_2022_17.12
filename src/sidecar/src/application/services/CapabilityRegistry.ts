@@ -7,6 +7,7 @@ const capabilities: readonly Capability[] = [
 		["sessions", "Sessions", "cline-sdk"], ["history", "History", "cline-sdk"], ["messages", "Messages", "cline-sdk"],
 		["settings", "Rules, workflows, skills", "cline-sdk"], ["tool-approval", "Tool approvals", "cline-sdk"], ["streaming", "Streaming output", "cline-sdk"],
 		["terminal-command-host", "VS command host attach/continue/cancel", "visual-studio-host"], ["checkpoints", "Checkpoint restore and snapshot comments", "cline-sdk"],
+		["sdk-checkpoint-diff-streams", "SDK checkpoint workspace comparison", "cline-sdk"],
 		["usage", "Token and cost usage", "cline-sdk"], ["mcp", "MCP server settings and tools", "cline-sdk"],
 		["browser-devtools", "Browser DevTools sessions and phases", "visual-studio-host"], ["auth", "Provider-scoped OAuth and token state", "cline-sdk"],
 		["models", "Provider catalog refresh diagnostics", "cline-sdk"], ["worktrees", "Worktree routing and merge recovery", "visual-studio-host"],
@@ -16,7 +17,7 @@ const capabilities: readonly Capability[] = [
 	...withStatus("partial", [
 		["mcp-marketplace", "MCP marketplace install", "cline-sdk"], ["remote-mcp-oauth", "Remote MCP OAuth callbacks", "cline-sdk"],
 		["browser-auto-launch", "Automatic browser relaunch", "cline-sdk"], ["global-account-billing", "Global Cline account billing/org controls", "cline-sdk"],
-		["sdk-checkpoint-diff-streams", "SDK checkpoint diff streams", "cline-sdk"], ["scheduler-queue-controls", "Hosted scheduler queue controls", "cline-sdk"],
+		["scheduler-queue-controls", "Hosted scheduler queue controls", "cline-sdk"],
 		["provider-specific-catalogs", "Non-OpenAI provider-specific catalog APIs", "cline-sdk"],
 	]),
 	{ id: "vscode-terminal-api", label: "VS Code terminal shell integration", status: "unsupported", reason: "Visual Studio 2022 exposes a different terminal automation surface than VS Code." },

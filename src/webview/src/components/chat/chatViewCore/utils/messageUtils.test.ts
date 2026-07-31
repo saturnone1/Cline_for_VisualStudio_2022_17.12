@@ -1,6 +1,6 @@
 import type { ClineMessage } from "@shared/ExtensionMessage"
 import { describe, expect, it } from "vitest"
-import { filterVisibleMessages, groupLowStakesTools, groupMessages, isToolGroup } from "./messageUtils"
+import { filterVisibleMessages, getTaskMessage, groupLowStakesTools, groupMessages, isToolGroup } from "./messageUtils"
 
 const createTextMessage = (ts: number, text: string): ClineMessage => ({
 	type: "say",
@@ -113,6 +113,13 @@ describe("filterVisibleMessages", () => {
 		])
 
 		expect(visible).toHaveLength(0)
+	})
+})
+
+describe("getTaskMessage", () => {
+	it("finds the task by message semantics after a migrated leading row", () => {
+		const task = { ts: 2, type: "say", say: "task", text: "review" } as ClineMessage
+		expect(getTaskMessage([createTextMessage(1, "legacy row"), task])).toBe(task)
 	})
 })
 

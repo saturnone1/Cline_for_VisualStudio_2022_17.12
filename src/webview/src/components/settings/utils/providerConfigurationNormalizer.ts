@@ -418,5 +418,5 @@ export function normalizeApiConfiguration(
 
 export function inferLocalModelImageSupport(modelId: string) {
 	const id = modelId.toLowerCase()
-	return /(claude|gemini|gpt-4o|gpt-4\.1|vision|llava|bakllava|moondream|pixtral|qwen[^/]*[-_.:]?vl|gemma[-_.:]?3|ministral[-_.:]?3|phi[^/]*vision)/.test(id)
+	return /(claude|gemini|gpt-4o|gpt-4\.1|vision|llava|bakllava|moondream|pixtral|qwen[^/]*[-_.:]?vl|gemma[-_.:]?3|ministral[-_.:]?3|phi[^/]*vision)/.test(id) ? true : undefined
 }

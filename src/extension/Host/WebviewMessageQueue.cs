@@ -166,13 +166,18 @@ namespace VsClineAgent.Host
 
             var failed = new List<string>();
 			Exception? firstFailure = null;
-            foreach (var json in messages)
+            for (var index = 0; index < messages.Length; index++)
             {
-                try { webview!.PostWebMessageAsJson(json); }
+                try { webview!.PostWebMessageAsJson(messages[index]); }
                 catch (Exception ex)
                 {
-                    failed.Add(json);
+					// CoreWebView2 failures normally mean the document or process is being
+					// replaced. Do not send later messages out of order; retry the failed
+					// message and every message that has not been attempted yet.
+					for (var pendingIndex = index; pendingIndex < messages.Length; pendingIndex++)
+						failed.Add(messages[pendingIndex]);
 					firstFailure ??= ex;
+					break;
                 }
             }
 

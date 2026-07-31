@@ -52,11 +52,16 @@ export class VisualStudioHostProvider implements HostProviderPort {
 	}
 }
 
-class VisualStudioWorkspaceClient {
+export class VisualStudioWorkspaceClient {
 	private static cachedWorkspacePaths: { value: string[]; expiresAt: number } | null = null
 	private static workspacePathsRequest: Promise<string[]> | null = null
 
 	constructor(private readonly bridge: VisualStudioHostBridgeClient) {}
+
+	static clearWorkspacePathCache() {
+		VisualStudioWorkspaceClient.cachedWorkspacePaths = null
+		VisualStudioWorkspaceClient.workspacePathsRequest = null
+	}
 
 	getWorkspacePaths(_request: unknown) {
 		const now = Date.now()
@@ -70,11 +75,14 @@ class VisualStudioWorkspaceClient {
 		VisualStudioWorkspaceClient.workspacePathsRequest = this.bridge
 			.getWorkspacePaths()
 			.then((paths) => {
-				VisualStudioWorkspaceClient.cachedWorkspacePaths = {
-					value: paths,
-					expiresAt: Date.now() + readPositiveIntEnv("VSCLINE_WORKSPACE_PATHS_CACHE_MS", 5000),
-				}
-				return paths
+				const usablePaths = paths.filter((value) => typeof value === "string" && value.trim().length > 0)
+				VisualStudioWorkspaceClient.cachedWorkspacePaths = usablePaths.length > 0
+					? {
+						value: usablePaths,
+						expiresAt: Date.now() + readPositiveIntEnv("VSCLINE_WORKSPACE_PATHS_CACHE_MS", 5000),
+					}
+					: null
+				return usablePaths
 			})
 			.finally(() => {
 				VisualStudioWorkspaceClient.workspacePathsRequest = null
@@ -114,8 +122,8 @@ class VisualStudioWorkspaceClient {
 		return this.bridge.selectFiles(request.allowImages === true || request.value === true)
 	}
 
-	executeCommandInTerminal(request: { command?: string; cwd?: string; timeoutSeconds?: number }) {
-		return this.bridge.executeCommandInTerminal(request.command || "", request.cwd || "", request.timeoutSeconds)
+	executeCommandInTerminal(request: { command?: string; cwd?: string; timeoutSeconds?: number; profileId?: string; reuseTerminal?: boolean }) {
+		return this.bridge.executeCommandInTerminal(request.command || "", request.cwd || "", request.timeoutSeconds, request.profileId, request.reuseTerminal)
 	}
 
 	cancelCommands() {

@@ -355,8 +355,8 @@ export function createToolPolicies(autoApprovalSettings: unknown, browserSetting
 	const actions = asRecord(settings.actions)
 	const autoApproveAll = settings.enabled === true || yoloMode
 	const webFetchEnabled = isWebFetchEnabled(browserSettings)
-	const readAuto = yoloMode || autoApproveAll && actions.readFiles === true
-	const editAuto = yoloMode || autoApproveAll && actions.editFiles === true
+	const readAuto = yoloMode || autoApproveAll && (actions.readFiles === true || actions.readFilesExternally === true)
+	const editAuto = yoloMode || autoApproveAll && (actions.editFiles === true || actions.editFilesExternally === true)
 	const commandAuto = yoloMode || autoApproveAll && (actions.executeAllCommands === true || actions.executeSafeCommands === true)
 	const mcpAuto = yoloMode || autoApproveAll && (actions.useMcp === true || actions.useMcpServers === true)
 	const browserAuto = yoloMode || autoApproveAll && actions.useBrowser === true
@@ -420,23 +420,19 @@ export function webFetchDisabledReason(browserSettings: unknown) {
 	return ""
 }
 
+const SESSION_CONFIGURATION_KEYS = new Set([
+	"preferredLanguage",
+	"subagentsEnabled",
+	"enableCheckpointsSetting",
+	"yoloModeToggled",
+	"enableParallelToolCalling",
+	"strictPlanModeEnabled",
+	"useAutoCondense",
+	"customPrompt",
+])
+
 export function isRuntimeSettingsKey(key: string) {
-	return (
-		key === "mode" ||
-		key === "planActSeparateModelsSetting" ||
-		key === "preferredLanguage" ||
-		key === "subagentsEnabled" ||
-		key === "scheduledAgentsEnabled" ||
-		key === "hooksEnabled" ||
-		key === "enableCheckpointsSetting" ||
-		key === "yoloModeToggled" ||
-		key === "doubleCheckCompletionEnabled" ||
-		key === "enableParallelToolCalling" ||
-		key === "nativeToolCallEnabled" ||
-		key === "strictPlanModeEnabled" ||
-		key === "useAutoCondense" ||
-		key === "customPrompt"
-	)
+	return SESSION_CONFIGURATION_KEYS.has(key)
 }
 
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }

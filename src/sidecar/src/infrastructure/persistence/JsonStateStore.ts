@@ -116,16 +116,23 @@ function pairSnapshots(settings: Record<string, unknown> | null, transcripts: Re
 function boundSnapshots(value: unknown, historyValue: unknown, currentTaskId: string) {
 	const snapshots = asRecord(value)
 	const history = Array.isArray(historyValue) ? historyValue.map(asRecord) : []
-	const priorityIds = history
-		.sort((left, right) => Number(right.ts || 0) - Number(left.ts || 0))
-		.sort((left, right) => Number(right.isFavorited === true) - Number(left.isFavorited === true))
-		.map((item) => String(item.id || ""))
-		.filter(Boolean)
-	if (currentTaskId) priorityIds.unshift(currentTaskId)
-	for (const id of Object.keys(snapshots)) if (!priorityIds.includes(id)) priorityIds.push(id)
+	const priorityIds: string[] = []
+	const seenIds = new Set<string>()
+	const addId = (id: string) => {
+		if (!id || seenIds.has(id)) return
+		seenIds.add(id)
+		priorityIds.push(id)
+	}
+	addId(currentTaskId)
+	history.sort((left, right) => {
+		const favoriteOrder = Number(right.isFavorited === true) - Number(left.isFavorited === true)
+		return favoriteOrder || Number(right.ts || 0) - Number(left.ts || 0)
+	})
+	for (const item of history) addId(String(item.id || ""))
+	for (const id of Object.keys(snapshots)) addId(id)
 	const bounded: Record<string, unknown> = {}
 	let usedChars = 2
-	for (const id of [...new Set(priorityIds)].slice(0, MAX_SNAPSHOTS)) {
+	for (const id of priorityIds.slice(0, MAX_SNAPSHOTS)) {
 		const snapshot = asRecord(snapshots[id])
 		if (!Object.keys(snapshot).length) continue
 		const candidate = { ...snapshot, messages: projectTranscriptMessages(snapshot.messages, TRANSCRIPT_SNAPSHOT_LIMITS.snapshotMessages) }

@@ -2,12 +2,28 @@ import type { ClineMessage } from "@shared/ExtensionMessage"
 import type React from "react"
 import { useMemo } from "react"
 import BrowserSessionRow from "@/components/chat/BrowserSessionRow"
+import ChatErrorBoundary from "@/components/chat/ChatErrorBoundary"
 import ChatRow from "@/components/chat/ChatRow"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import type { MessageHandlers } from "../../types/chatTypes"
 import { isToolGroup } from "../../utils/messageUtils"
 import { ToolGroupRenderer } from "./ToolGroupRenderer"
+
+const messageRevisionIds = new WeakMap<ClineMessage, number>()
+let nextMessageRevisionId = 1
+
+function messageRevisionKey(messageOrGroup: ClineMessage | ClineMessage[]) {
+	const messages = Array.isArray(messageOrGroup) ? messageOrGroup : [messageOrGroup]
+	return messages.map((message) => {
+		let id = messageRevisionIds.get(message)
+		if (id === undefined) {
+			id = nextMessageRevisionId++
+			messageRevisionIds.set(message, id)
+		}
+		return id
+	}).join(":")
+}
 
 interface MessageRendererProps {
 	index: number
@@ -121,8 +137,10 @@ export const createMessageRenderer = (
 	messageHandlers: MessageHandlers,
 	footerActive: boolean,
 ) => {
-	return (index: number, messageOrGroup: ClineMessage | ClineMessage[]) => (
-		<MessageRenderer
+	return (index: number, messageOrGroup: ClineMessage | ClineMessage[]) => {
+		return (
+		<ChatErrorBoundary errorTitle="이 대화 항목을 표시하지 못했습니다." resetKey={messageRevisionKey(messageOrGroup)}>
+			<MessageRenderer
 			expandedRows={expandedRows}
 			footerActive={footerActive}
 			groupedMessages={groupedMessages}
@@ -134,6 +152,8 @@ export const createMessageRenderer = (
 			onHeightChange={onHeightChange}
 			onSetQuote={onSetQuote}
 			onToggleExpand={onToggleExpand}
-		/>
-	)
+			/>
+		</ChatErrorBoundary>
+		)
+	}
 }

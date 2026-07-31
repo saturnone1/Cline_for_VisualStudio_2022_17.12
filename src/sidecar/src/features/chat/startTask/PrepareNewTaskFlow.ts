@@ -25,7 +25,6 @@ export class PrepareNewTaskFlow {
 		try {
 			await this.callbacks.stopSession(previousSessionId)
 		} catch (error) {
-			this.callbacks.markClosing(previousSessionId, false)
 			this.callbacks.log("startNewTask.stopPreviousFailed", { sessionId: previousSessionId, error: stringify(error) })
 			throw error
 		}
@@ -45,11 +44,16 @@ export class PrepareNewTaskFlow {
 			this.callbacks.runHook("TaskStart", context)
 			this.callbacks.runHook("UserPromptSubmit", context)
 			const userImages = await this.callbacks.normalizeImages(input.images)
+			if (userImages.length !== input.images.length) {
+				throw new Error("One or more attached images could not be read. Reattach the image and try again.")
+			}
 			void this.callbacks.launch({ prompt: input.text, cwd, userImages, userFiles: input.files, interactive: true }, cwd, sessionId)
 		} catch (error) {
-			await this.callbacks.projectError(error)
+			await this.reportError(error)
 		}
 	}
+
+	reportError(error: unknown) { return this.callbacks.projectError(error) }
 }
 
 function stringify(value: unknown) { return value instanceof Error ? value.message : String(value) }

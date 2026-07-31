@@ -1,6 +1,7 @@
 import { ClineMessage } from "@shared/ExtensionMessage"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChatState } from "../types/chatTypes"
+import { getTaskMessage } from "../utils/messageUtils"
 
 /**
  * Custom hook for managing chat state
@@ -30,7 +31,7 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 	const clineAsk = useMemo(() => (lastMessage?.type === "ask" ? lastMessage.ask : undefined), [lastMessage])
 
 	// Clear expanded rows when task changes
-	const task = useMemo(() => messages.at(0), [messages])
+	const task = useMemo(() => getTaskMessage(messages), [messages])
 	const clearExpandedRows = useCallback(() => {
 		setExpandedRows({})
 	}, [])
