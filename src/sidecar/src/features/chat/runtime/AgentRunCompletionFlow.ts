@@ -8,6 +8,7 @@ type Callbacks = Readonly<{
 	bindSession: (sessionId: string) => void
 	isCurrentSession: (sessionId: string) => boolean
 	hydrate: (sessionId: string, source: string) => Promise<boolean>
+	noteRunSucceeded: (sessionId: string) => void
 	activeText: () => string
 	hasAssistantText: () => boolean
 	lastActivityReason: () => string
@@ -36,6 +37,9 @@ export class AgentRunCompletionFlow {
 			this.callbacks.log("ignoredStaleSdkResult", { source, sessionId, currentTaskId: this.callbacks.currentTaskId(), activeSessionId: this.callbacks.activeSessionId() })
 			return
 		}
+		// The run reached the sidecar intact, so the provider is reachable and any
+		// retry budget spent on earlier transport faults is released.
+		this.callbacks.noteRunSucceeded(sessionId)
 		await this.callbacks.hydrate(sessionId, `complete:${source}`)
 
 		if (decoded.empty) {

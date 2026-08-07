@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.Validation</id>
+    <version>15.5.31</version>
+    <authors>Microsoft</authors>
+    <owners>Microsoft</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/Microsoft/vs-validation</projectUrl>
+    <iconUrl>https://aka.ms/VsExtensibilityIcon</iconUrl>
+    <description>Common input validation and state verification utility methods.</description>
+    <releaseNotes>https://go.microsoft.com/fwlink/?LinkID=746387</releaseNotes>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>InputValidation IntegrityCheck</tags>
+    <repository type="git" url="https://github.com/microsoft/vs-validation" commit="8b1ca8d699a97f81ec86d8f7b5937943e6bec2cd" />
+    <dependencies>
+      <group targetFramework=".NETStandard2.0" />
+      <group targetFramework=".NETStandard2.1" />
+    </dependencies>
+  </metadata>
+</package>

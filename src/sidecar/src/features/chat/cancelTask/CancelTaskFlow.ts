@@ -24,7 +24,17 @@ export class CancelTaskFlow {
 
 	async execute() {
 		if (!this.callbacks.beginCancel()) {
-			this.callbacks.log("duplicateCancelIgnored", { status: this.callbacks.currentStatus() })
+			const status = this.callbacks.currentStatus()
+			if (status === "cancelling") {
+				this.callbacks.log("duplicateCancelIgnored", { status })
+				return
+			}
+			// The run already left an active phase (idle/completed/failed), so the
+			// lifecycle refuses the cancelling transition. Terminals, hooks, browsers
+			// and pending approvals can still be live, and a stop request must never
+			// be silently dropped -- otherwise the button appears dead and the user
+			// has to press it again.
+			await this.settleInactiveTask(status)
 			return
 		}
 		const hookSessionId = this.callbacks.hookSessionId()
@@ -59,6 +69,20 @@ export class CancelTaskFlow {
 			this.callbacks.log("cancelHookFailed", { sessionId: hookSessionId, error: stringify(error) })
 		}
 		this.callbacks.completeCancel()
+		await this.callbacks.broadcast()
+	}
+
+	private async settleInactiveTask(status: TaskLifecycleStatus) {
+		const activeSessionId = this.callbacks.activeSessionId()
+		this.callbacks.log("cancelSettledInactiveTask", { status, sessionId: activeSessionId })
+		// Only the leftover side work is stopped. No cancellation marker and no
+		// projection clearing: the task already reached its own terminal state, and
+		// clearProjection drops terminal asks, which would delete the completion
+		// result of a task that finished normally.
+		this.callbacks.advanceRunGeneration()
+		const result = await this.callbacks.cancelWork(activeSessionId)
+		if (!result.succeeded) this.callbacks.log("cancelFailed", { sessionId: activeSessionId, completed: result.completed, failures: result.failures })
+		this.callbacks.updateTask()
 		await this.callbacks.broadcast()
 	}
 }

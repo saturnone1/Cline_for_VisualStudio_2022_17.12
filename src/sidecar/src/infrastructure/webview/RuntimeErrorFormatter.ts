@@ -33,6 +33,12 @@ export function formatProviderErrorForTranscript(value: unknown, language: "en" 
 	return text
 }
 
+export function formatRunRetryNoticeForUi(attempt: number, maxAttempts: number, language: "en" | "ko") {
+	return language === "ko"
+		? `모델 요청이 응답 전에 실패했습니다. 오류 내용을 에이전트에 전달하고 이어서 진행합니다. (재시도 ${attempt}/${maxAttempts})`
+		: `The model request failed before a response arrived. Reporting the error to the agent and continuing. (retry ${attempt} of ${maxAttempts})`
+}
+
 export function formatSdkErrorForUi(error: unknown, language: "en" | "ko") {
 	const text = stringify(error).trim()
 	if (text && text !== "[object Object]" && text !== "{}") return text

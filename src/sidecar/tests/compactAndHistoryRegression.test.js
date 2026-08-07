@@ -525,9 +525,10 @@ test("run recovery ignores a late rejection after terminal state", async () => {
 	let hydrateCalls = 0
 	let failureCalls = 0
 	const flow = new AgentRunRecoveryFlow({
-		currentGeneration: () => 1, isTerminal: () => true, activeText: () => "", hasAssistantText: () => false,
+		currentGeneration: () => 1, isTerminal: () => true, isStopping: () => false, activeText: () => "", hasAssistantText: () => false,
 		hydrate: async () => { hydrateCalls++; return true }, sessionStatus: async () => "completed", finishTask: () => {}, updateTask: () => {},
-		broadcast: async () => {}, projectFailure: () => { failureCalls++ }, log: () => {},
+		broadcast: async () => {}, decideRecovery: () => ({ action: "surface", reason: "fatal" }), retry: async () => false,
+		projectFailure: () => { failureCalls++ }, log: () => {},
 	})
 
 	await flow.recover("session-1", "run", 1, new Error("late rejection"))
@@ -540,11 +541,12 @@ test("run recovery defers failure while the SDK session remains active", async (
 	let failed = 0
 	let broadcasts = 0
 	const flow = new AgentRunRecoveryFlow({
-		currentGeneration: () => 1, isTerminal: () => false,
+		currentGeneration: () => 1, isTerminal: () => false, isStopping: () => false,
 		activeText: () => "partial response",
 		hasAssistantText: () => false,
 		hydrate: async () => { hydrateCalls++; return false }, sessionStatus: async () => "running",
 		finishTask: () => {}, updateTask: () => {}, broadcast: async () => { broadcasts++ },
+		decideRecovery: () => ({ action: "surface", reason: "fatal" }), retry: async () => false,
 		projectFailure: () => { failed++ }, log: () => {},
 	})
 
@@ -558,9 +560,10 @@ test("run recovery preserves partial output but reports failure without a termin
 	let failed = 0
 	let finished = 0
 	const flow = new AgentRunRecoveryFlow({
-		currentGeneration: () => 1, isTerminal: () => false,
+		currentGeneration: () => 1, isTerminal: () => false, isStopping: () => false,
 		activeText: () => "unfinished partial response", hasAssistantText: () => true,
 		hydrate: async () => false, sessionStatus: async () => "failed", finishTask: () => { finished++ }, updateTask: () => {}, broadcast: async () => {},
+		decideRecovery: () => ({ action: "surface", reason: "fatal" }), retry: async () => false,
 		projectFailure: () => { failed++ }, log: () => {},
 	})
 

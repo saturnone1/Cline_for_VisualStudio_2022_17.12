@@ -1,0 +1,36 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.LanguageServer.Client</id>
+    <version>17.0.5165</version>
+    <title>Microsoft.VisualStudio.LanguageServer.Client</title>
+    <authors>Microsoft</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">license.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vslsp</projectUrl>
+    <description>Visual Studio client side APIs for interacting with a Language Server Protocol enabled server.</description>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <tags>Microsoft VisualStudio LanguageServer Language Server Client VSSDK</tags>
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.VisualStudio.CoreUtility" version="17.0.448" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Shell.15.0" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Validation" version="17.0.28" exclude="Build,Analyzers" />
+        <dependency id="StreamJsonRpc" version="2.8.28" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <frameworkAssemblies>
+      <frameworkAssembly assemblyName="System.IO" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Net.Http" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Net.WebSockets" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Runtime" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Algorithms" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Encoding" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Primitives" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.X509Certificates" targetFramework=".NETFramework4.7.2" />
+    </frameworkAssemblies>
+  </metadata>
+</package>

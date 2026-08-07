@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.Telemetry</id>
+    <version>16.3.176</version>
+    <authors>Microsoft</authors>
+    <owners>Microsoft</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://www.visualstudio.com/en-us/support/legal/mt736442</licenseUrl>
+    <projectUrl>http://aka.ms/VsExtensibility</projectUrl>
+    <iconUrl>http://aka.ms/VsExtensibilityIcon</iconUrl>
+    <description>Microsoft® Visual Studio® Telemetry Library</description>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <repository type="git" url="https://devdiv.visualstudio.com/DevDiv/_git/VSTelemetryAPI" commit="5451cd3af636d26475cd34e9c12a6bcafb1e9220" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.5">
+        <dependency id="Microsoft.Diagnostics.Tracing.EventSource.Redist" version="1.1.28" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RemoteControl" version="16.3.32" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities.Internal" version="16.3.23" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Newtonsoft.Json" version="9.0.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.VisualStudio.RemoteControl" version="16.3.32" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Utilities.Internal" version="16.3.23" include="Runtime,Build,Native,ContentFiles,Analyzers,BuildTransitive" />
+        <dependency id="Microsoft.Win32.Registry" version="4.5.0" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="9.0.1" exclude="Build,Analyzers" />
+        <dependency id="System.Diagnostics.PerformanceCounter" version="4.5.0" exclude="Build,Analyzers" />
+        <dependency id="System.Diagnostics.Tracing" version="4.3.0" exclude="Build,Analyzers" />
+        <dependency id="System.IO.FileSystem.AccessControl" version="4.5.0" exclude="Build,Analyzers" />
+        <dependency id="System.Management" version="4.5.0" exclude="Build,Analyzers" />
+        <dependency id="System.Security.Principal.Windows" version="4.5.1" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <frameworkAssemblies>
+      <frameworkAssembly assemblyName="Microsoft.CSharp" targetFramework=".NETFramework4.5" />
+      <frameworkAssembly assemblyName="System.Management" targetFramework=".NETFramework4.5" />
+      <frameworkAssembly assemblyName="System.Windows.Forms" targetFramework=".NETFramework4.5" />
+    </frameworkAssemblies>
+  </metadata>
+</package>

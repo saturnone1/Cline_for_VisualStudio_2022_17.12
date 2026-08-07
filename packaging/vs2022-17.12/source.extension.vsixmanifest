@@ -2,7 +2,7 @@
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011"
                  xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="VsClineAgent.3F8C2A1D-E7B4-4F9E-A8C5-6D2B1F7E3A04" Language="en-US" Version="3.0.5" Publisher="Developer" />
+    <Identity Id="VsClineAgent.3F8C2A1D-E7B4-4F9E-A8C5-6D2B1F7E3A04" Language="en-US" Version="3.0.6" Publisher="Developer" />
     <DisplayName>LIG VS</DisplayName>
     <Description xml:space="preserve">AI coding agent for Visual Studio, powered by local/offline runtimes</Description>
     <Icon>Assets\lig-ci-white.png</Icon>

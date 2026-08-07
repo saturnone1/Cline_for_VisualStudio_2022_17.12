@@ -361,3 +361,70 @@ test("leaving a task contains an unexpected cancellation rejection before return
 	assert.equal(status, "idle")
 	assert.deepEqual(logged, ["clearTaskCancellationFailed"])
 })
+
+test("a stop request after the run already failed still stops leftover work", async () => {
+	// The lifecycle refuses failed -> cancelling, so beginCancel returns false.
+	// The request must still reach the cancellation participants instead of being
+	// dropped, otherwise the stop button looks dead until it is pressed again.
+	const status = "failed"
+	let cancelledSessionId = ""
+	let generations = 0
+	let projectionsCleared = 0
+	let markers = 0
+	const logged = []
+	const flow = new CancelTaskFlow({
+		beginCancel: () => false,
+		currentStatus: () => status,
+		advanceRunGeneration: () => { generations++ },
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: async (sessionId) => { cancelledSessionId = sessionId; return { succeeded: true, completed: ["terminal"], failures: [] } },
+		clearProjection: () => { projectionsCleared++ },
+		addCancellationMarker: () => { markers++ },
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => undefined,
+		completeCancel: () => undefined,
+		failCancellation: () => undefined,
+		quarantineSession: () => undefined,
+		broadcast: async () => undefined,
+		log: (event) => { logged.push(event) },
+	})
+
+	await flow.execute()
+	assert.equal(cancelledSessionId, "session-1")
+	assert.equal(generations, 1)
+	// The task reached its own terminal state, so it must not be relabelled cancelled,
+	// and clearing the projection would drop the completion_result ask of a task that
+	// finished normally.
+	assert.equal(markers, 0)
+	assert.equal(projectionsCleared, 0)
+	assert.deepEqual(logged, ["cancelSettledInactiveTask"])
+})
+
+test("a second stop request while already cancelling stays a no-op", async () => {
+	let cancelCalls = 0
+	const logged = []
+	const flow = new CancelTaskFlow({
+		beginCancel: () => false,
+		currentStatus: () => "cancelling",
+		advanceRunGeneration: () => undefined,
+		hookSessionId: () => "session-1",
+		activeSessionId: () => "session-1",
+		cancelWork: async () => { cancelCalls++; return { succeeded: true, completed: [], failures: [] } },
+		clearProjection: () => undefined,
+		addCancellationMarker: () => undefined,
+		addError: () => undefined,
+		updateTask: () => undefined,
+		runHook: async () => undefined,
+		completeCancel: () => undefined,
+		failCancellation: () => undefined,
+		quarantineSession: () => undefined,
+		broadcast: async () => undefined,
+		log: (event) => { logged.push(event) },
+	})
+
+	await flow.execute()
+	assert.equal(cancelCalls, 0)
+	assert.deepEqual(logged, ["duplicateCancelIgnored"])
+})

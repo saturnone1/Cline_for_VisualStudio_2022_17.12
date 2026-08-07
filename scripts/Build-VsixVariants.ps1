@@ -16,6 +16,17 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
+# vendor/LocalPackages is an expanded global-packages cache, not a feed, so NuGet
+# only finds it when NUGET_PACKAGES points at it. Without this the restore fails
+# with NU1100 and the build then dies on MC3074 (missing WebView2 WPF tag).
+if (-not $env:NUGET_PACKAGES) {
+    $localPackages = Join-Path $repoRoot "vendor\LocalPackages"
+    if (Test-Path -LiteralPath $localPackages) {
+        $env:NUGET_PACKAGES = (Resolve-Path -LiteralPath $localPackages).Path
+        Write-Host "Using offline package cache: $env:NUGET_PACKAGES"
+    }
+}
+
 & (Join-Path $PSScriptRoot "Sync-ProductVersion.ps1")
 [xml]$productVersionProps = Get-Content -LiteralPath (Join-Path $repoRoot "packaging\ProductVersion.props")
 $expectedProductVersion = [string]$productVersionProps.Project.PropertyGroup.ProductVersion
@@ -115,6 +126,11 @@ foreach ($variant in $variants) {
         "/p:VsTarget=$($variant.Target)",
         "/p:Configuration=$Configuration",
         "/p:DeployExtension=false",
+		# NU1603 must stay fatal here. The 17.0 profile pins SDK 17.0.32112.339 so the
+		# assembly binds against Microsoft.VisualStudio.Threading 17.0.x, which is what
+		# VS 2022 17.0 actually ships. Letting NuGet resolve up to 17.6 still compiles,
+		# but the package then fails to load at runtime with a FileNotFoundException
+		# for Microsoft.VisualStudio.Threading 17.6.0.0.
 		"/warnaserror",
         "/v:minimal"
     )
