@@ -1,3 +1,0 @@
-[Microsoft.VisualStudio.Shell.ThreadHelper]::Invoke
-[Microsoft.VisualStudio.Shell.ThreadHelper]::InvokeAsync
-[Microsoft.VisualStudio.Shell.ThreadHelper]::BeginInvoke

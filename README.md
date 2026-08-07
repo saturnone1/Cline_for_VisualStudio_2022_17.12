@@ -1,67 +1,72 @@
-# LIG VS for Visual Studio 2022 17.0 and 17.12
+# LIG VS — Cline for Visual Studio 2022 (17.0 and 17.12)
 
-Visual Studio 2022에서 Cline을 사용할 수 있도록 포팅한 VSIX 프로젝트입니다.
+A VSIX project that ports Cline to Visual Studio 2022.
 
-이 저장소의 현재 방향은 Cline 에이전트 런타임을 C#으로 다시 구현하는 것이 아니라, `@cline/sdk`를 Node sidecar에서 실행하고 Visual Studio 확장은 WebView2 UI, 프로세스 수명주기, named-pipe JSON-RPC, Visual Studio 호스트 어댑터를 제공하는 것입니다.
+The approach here is deliberately **not** to reimplement the Cline agent runtime in C#.
+`@cline/sdk` runs in a Node sidecar; the Visual Studio extension supplies the WebView2 UI,
+process lifecycle, named-pipe JSON-RPC, and the Visual Studio host adapters.
 
-## 프로젝트 개요
+## Overview
 
-- 확장 이름: `VS AI Agent (Cline Port)`
-- 대상 IDE: Visual Studio 2022 17.0 계열 및 17.12 이상 amd64
-- VSIX 프로젝트: `src/extension/VsClineAgent.csproj`
-- 대상 프레임워크: 17.0 profile은 .NET Framework 4.8, 17.12 profile은 .NET Framework 4.7.2
-- 런타임 구조: Visual Studio VSIX + WebView2 + Node sidecar + `@cline/sdk`
-- 주요 용도: Visual Studio 안에서 Cline 스타일의 채팅, 파일 읽기/수정, 검색, 명령 실행, 작업 기록, 일부 MCP/체크포인트 기능 사용
-- 오프라인/폐쇄망 방향: WebView2 Fixed Version Runtime, Node 런타임, SDK 의존성, NuGet 패키지를 VSIX 또는 로컬 패키지로 번들링
+| | |
+|---|---|
+| Extension name | `VS AI Agent (Cline Port)` |
+| Target IDE | Visual Studio 2022, 17.0 line and 17.12+, amd64 |
+| VSIX project | `src/extension/VsClineAgent.csproj` |
+| Target framework | .NET Framework 4.8 (17.0 profile), 4.7.2 (17.12 profile) |
+| Runtime shape | VSIX + WebView2 + Node sidecar + `@cline/sdk` |
 
-## 저장소 구조
+What it gives you inside Visual Studio: Cline-style chat, file read/edit, search, command
+execution, task history, and parts of MCP and checkpoints.
+
+For air-gapped use, the WebView2 Fixed Version Runtime, the Node runtime, SDK
+dependencies and NuGet packages are bundled into the VSIX or into local packages.
+
+## Repository layout
 
 ```text
 .
-├─ src/extension/           # Visual Studio VSIX host와 VS host adapters
-├─ src/sidecar/             # Node sidecar와 @cline/sdk 통합
-├─ src/shared/              # WebView와 sidecar가 공유하는 TypeScript
-├─ src/webview/             # React/Vite 기반 WebView UI
-├─ packaging/               # VS 17.0/17.12 전용 SDK, manifest, compatibility profile
-├─ assets/                  # 소스에서 사용하는 이미지와 정적 자산
-├─ artifacts/               # 생성 산출물; WebApp만 오프라인 패키징 스냅샷으로 추적
-├─ docs/                    # 아키텍처, 호환성, 폐쇄망 문서
-├─ scripts/                 # 빌드와 배포 보조 스크립트
-└─ vendor/                  # 로컬 NuGet과 선택적 WebView2 런타임
+├─ src/extension/           # Visual Studio VSIX host and VS host adapters
+├─ src/sidecar/             # Node sidecar and @cline/sdk integration
+├─ src/shared/              # TypeScript shared by the WebView and the sidecar
+├─ src/webview/             # React/Vite WebView UI
+├─ packaging/               # per-version SDK, manifest, compatibility profiles
+├─ assets/                  # images and static assets used from source
+├─ artifacts/               # build output; only WebApp is tracked
+├─ docs/                    # architecture, compatibility, air-gap notes
+├─ scripts/                 # build and deployment helpers
+└─ vendor/                  # local NuGet feed and optional WebView2 runtime
 ```
 
-`artifacts/WebApp/`은 생성물이지만 두 VSIX의 검토된 오프라인 패키징 입력으로 추적하는 예외입니다. 직접 편집하지 않으며 자세한 규칙은 [Generated artifact policy](docs/GeneratedArtifacts.md)를 따릅니다.
+`artifacts/WebApp/` is generated output, tracked as a deliberate exception because it is
+the reviewed offline-packaging input for both VSIX variants. Do not hand-edit it — see
+[Generated artifact policy](docs/GeneratedArtifacts.md).
 
-## 빌드 준비
+## Prerequisites
 
-필수 구성:
+- Visual Studio 2022 17.x with the **Visual Studio extension development** workload
+- .NET Framework 4.7.2 and 4.8 Developer Packs
+- Node.js 22+ (for development and building)
+- WebView2 Runtime, or the WebView2 Fixed Version Runtime
+- Air-gapped builds additionally need `vendor/LocalPackages/`, the WebView2 Fixed Runtime,
+  and the sidecar's `node_modules.zip` staged in advance
 
-- Visual Studio 2022 17.x
-- Visual Studio extension development 워크로드
-- .NET Framework 4.7.2 및 4.8 Developer Pack
-- Node.js 22 이상(개발/빌드용)
-- WebView2 Runtime 또는 WebView2 Fixed Version Runtime
-- 인터넷 연결이 없는 환경에서는 `vendor/LocalPackages/`, WebView2 Fixed Runtime, sidecar `node_modules.zip` 준비 필요
-
-NuGet 패키지를 로컬 캐시에 내려받으려면 인터넷이 되는 PC에서 다음을 실행합니다.
+To populate the local NuGet cache from a machine with internet access:
 
 ```powershell
 .\scripts\Download-Packages.ps1
 ```
 
-WebView2 Fixed Version Runtime을 VSIX에 포함하려면 다음 중 하나를 실행합니다.
+To bundle the WebView2 Fixed Version Runtime into the VSIX, use either form:
 
 ```powershell
 .\scripts\Bundle-WebView2Runtime.ps1 -SourceCab "D:\offline\Microsoft.WebView2.FixedVersionRuntime.<version>.x64.cab"
-```
-
-```powershell
 .\scripts\Bundle-WebView2Runtime.ps1 -SourceRuntime "D:\offline\Microsoft.WebView2.FixedVersionRuntime.<version>.x64"
 ```
 
-## 빌드
+## Building
 
-sidecar 빌드:
+Sidecar:
 
 ```powershell
 cd src/sidecar
@@ -69,7 +74,7 @@ npm install
 npm run build
 ```
 
-WebView UI 빌드:
+WebView UI:
 
 ```powershell
 cd src/webview
@@ -77,124 +82,160 @@ npm install
 npm run build
 ```
 
-VSIX 빌드:
+VSIX:
 
 ```powershell
 .\scripts\Build-VsixVariants.ps1 -Configuration Release
 ```
 
-하나의 공통 sidecar, WebView, C# host 소스에서 `17.0`과 `17.12` VSIX를 모두 생성합니다. 버전별 SDK, target framework, identity, 설치 범위는 `packaging/vs2022-17.0/`과 `packaging/vs2022-17.12/` profile에만 둡니다.
+This produces **both** the `17.0` and `17.12` VSIX from one common sidecar, WebView and
+C# host source tree. Everything version-specific — SDK, target framework, identity,
+install scope — lives only in the `packaging/vs2022-17.0/` and `packaging/vs2022-17.12/`
+profiles.
 
-빌드 결과는 일반적으로 다음 위치에 생성됩니다.
+Output normally lands at:
 
 ```text
 src/extension/bin/17.0/Release/VsClineAgent17.vsix
 src/extension/bin/17.12/Release/VsClineAgent.vsix
 ```
 
-## 실행
+## Running
 
-1. `VsClineAgent.vsix`를 설치합니다.
-2. Visual Studio 2022를 다시 시작합니다.
-3. 메뉴에서 `View > AI Agent` 도구 창을 엽니다.
-4. 설정에서 사용할 LLM provider와 모델을 지정합니다.
+1. Install `VsClineAgent.vsix`.
+2. Restart Visual Studio 2022.
+3. Open `View > AI Agent`.
+4. Pick an LLM provider and model in settings.
 
-설치된 VSIX를 실행할 때 사용자가 별도로 Node.js를 설치할 필요는 없습니다. VSIX는 sidecar용 Node 런타임과 SDK 의존성을 패키징해서 실행하는 것을 목표로 하며, Node.js 22 이상은 sidecar를 다시 빌드하거나 개발할 때 필요합니다.
+**End users do not need to install Node.js.** The VSIX packages and runs its own Node
+runtime and SDK dependencies for the sidecar; Node.js 22+ is only needed to rebuild or
+develop the sidecar.
 
-로컬 Ollama 예시:
+Local Ollama example:
 
 ```text
 Base URL: http://localhost:11434/v1
 Model: qwen3-coder:latest
 ```
 
-## 구현 상태
+## Implementation status
 
-### 구현됨
+### Working
 
-- Visual Studio VSIX 패키지와 Tool Window 등록
-- WebView2 기반 Cline UI 호스팅
-- Node sidecar 프로세스 실행과 종료 관리
-- named-pipe JSON-RPC 기반 C# host와 sidecar 통신
-- `@cline/sdk` 기반 ClineCore local backend 실행
-- SDK session 시작, 전송, 중단, 조회, 수정, 삭제
-- SDK message/history 읽기와 WebView 상태 hydration
-- SDK 이벤트를 WebView 메시지/부분 메시지로 정규화
-- 도구 승인 요청을 WebView 승인 UI로 연결
-- follow-up question UI와 사용자 응답 대기
-- Visual Studio workspace 기준 파일 읽기, 쓰기, 검색, 목록 조회
-- `.clineignore`를 고려한 자동 파일 검색/목록 처리
-- `apply_patch`/editor 계열 수정 결과 추적과 변경 카드 표시
-- Visual Studio diff 열기
-- 명령 실행 host adapter
-- reusable `cmd.exe` command session, command id, terminal id, UTF-8 codepage 설정
-- 명령 취소, 장기 실행 명령 감지, 최근/미수거 출력 조회
-- SDK settings 기반 rules, workflows, skills 목록/토글 일부
-- SDK checkpoint restore와 transcript-visible checkpoint compare metadata
-- MCP settings-file 기반 서버 등록, 목록, 연결, tool discovery, toggle, timeout, restart, delete 일부
-- WebView 초기 렌더를 위한 안전한 C# 초기 상태 제공
-- `%LOCALAPPDATA%\VsClineAgent\logs` 아래 상호작용 진단 로그 기록
-- 폐쇄망 배포를 위한 WebView2 Fixed Runtime 번들링 경로
-- sidecar Node 의존성을 `node_modules.zip`으로 패키징하고 최초 실행 시 로컬 확장
+- VSIX package and Tool Window registration
+- Cline UI hosted in WebView2
+- Node sidecar process start and shutdown management
+- named-pipe JSON-RPC between the C# host and the sidecar
+- ClineCore local backend on `@cline/sdk`
+- SDK session start, send, cancel, query, modify, delete
+- SDK message/history reads and WebView state hydration
+- SDK events normalised into WebView messages and partial messages
+- tool approval requests routed to the WebView approval UI
+- follow-up question UI with user-response waiting
+- file read, write, search and listing relative to the Visual Studio workspace
+- `.clineignore`-aware automatic file search and listing
+- change tracking and change cards for `apply_patch` / editor-family edits
+- opening Visual Studio diffs
+- command execution host adapter
+- reusable `cmd.exe` command session, command id, terminal id, UTF-8 codepage
+- command cancellation, long-running command detection, recent/uncollected output queries
+- partial rules, workflows and skills listing/toggling from SDK settings
+- SDK checkpoint restore and transcript-visible checkpoint compare metadata
+- MCP settings-file server registration, listing, connection, tool discovery, toggle,
+  timeout, restart and delete (partial)
+- safe C# initial state for the WebView's first render
+- interaction diagnostics under `%LOCALAPPDATA%\VsClineAgent\logs`
+- WebView2 Fixed Runtime bundling path for air-gapped deployment
+- sidecar Node dependencies packaged as `node_modules.zip`, expanded locally on first run
 
-### 부분 구현
+### Partial
 
-- 명령 실행: 실제 명령 실행과 출력 카드는 동작하지만 Visual Studio 터미널 pane과 완전 통합되지는 않았습니다.
-- 체크포인트: SDK restore 경로는 있으나 diff/review/undo parity는 제한적입니다.
-- MCP: settings-file 서버와 SDK tool 연결은 일부 지원하지만 marketplace 설치, OAuth callback, resource/prompt listing은 완전하지 않습니다.
-- Browser/web fetch: `fetch_web_content`는 기본 활성화되며 설정의 브라우저 도구 비활성화 옵션으로만 제어됩니다. 설정 화면은 현재 web fetch 사용 가능 여부, 비활성화 사유, Chrome DevTools 연결의 버전/탭 진단을 표시합니다. SDK 0.0.43 기본 도구에는 `webFetch`만 있으므로 Chrome debugging 기반 browser action adapter는 별도 구현을 사용합니다.
-- Provider/model catalog: Ollama, LM Studio, LiteLLM, OpenAI-compatible, OpenRouter, Requesty, Groq, Vercel AI Gateway 및 내부 OpenAI-compatible 엔드포인트는 모델 목록을 조회하고 기본 capability/pricing metadata를 표시할 수 있지만, provider 고유 catalog API와 OAuth 기반 provider 설정은 축소되어 있습니다.
-- Account/auth: 인증되지 않은 상태 snapshot, provider auth 버튼의 안전한 응답, SDK provider auth requirements metadata, 로컬/환경변수 provider credential 저장/상태/삭제 RPC, 설정 기반 provider authorization URL 실행, localhost OAuth callback 수신 bridge, 설정 기반 authorization-code token exchange와 SDK session credential 전달은 가능하지만, provider별 refresh/account signed-in propagation은 Visual Studio에서 별도 구현이 필요합니다.
-- Rules/workflows/skills: 설정 조회/토글은 일부 가능하지만 `skills` 실행 도구는 승인/실행 UX가 완성될 때까지 비활성화 상태입니다.
-- Worktree 서비스: sidecar git adapter가 list/create/switch/merge/delete를 처리하고, dirty/locked/prunable 상태와 변경 파일 요약, local branch checkout, local/remote base branch 선택, 다중 solution 선택, 현재/새 Visual Studio 창 전환을 지원합니다. 작업 중에는 Worktrees view 폴링을 멈춰 선택/상태 메시지가 덮이지 않게 했고, Per-worktree task routing과 깊은 conflict recovery는 아직 남아 있습니다.
-- Hooks/subagents/scheduled agents: `.clinerules/hooks` 및 `~/.cline/hooks`의 로컬 hook 파일은 WebView에서 생성/토글/삭제되고 task/resume/tool lifecycle에서 실행됩니다. `PreToolUse` hook JSON 응답으로 도구 실행 차단과 도구 입력 patch가 가능하고, Subagents 토글은 SDK spawn/team agent 설정으로 전달됩니다. Scheduled Agents 토글은 로컬 `.cline/cron` spec 기반 SDK workspace automation을 켭니다. 더 풍부한 upstream hook 응답 의미, scheduled-agent 관리 UX, subagent 실행 UX는 아직 남아 있습니다.
+- **Command execution** — commands run and output cards work, but this is not fully
+  integrated with the Visual Studio terminal pane.
+- **Checkpoints** — the SDK restore path exists; diff/review/undo parity is limited.
+- **MCP** — settings-file servers and SDK tool wiring are partly supported; marketplace
+  install, OAuth callback, and resource/prompt listing are not complete.
+- **Browser / web fetch** — `fetch_web_content` is on by default and can only be turned
+  off via the browser-tool setting. Settings show whether web fetch is available, why it
+  is disabled, and Chrome DevTools connection version/tab diagnostics. SDK 0.0.43 ships
+  only `webFetch` as a built-in, so the Chrome-debugging browser action adapter is a
+  separate implementation.
+- **Provider / model catalog** — Ollama, LM Studio, LiteLLM, OpenAI-compatible,
+  OpenRouter, Requesty, Groq, Vercel AI Gateway and internal OpenAI-compatible endpoints
+  can list models and show basic capability/pricing metadata; provider-specific catalog
+  APIs and OAuth-based provider setup are reduced.
+- **Account / auth** — unauthenticated state snapshots, safe provider-auth button
+  responses, SDK provider auth requirements metadata, local/env-var credential
+  store/status/delete RPCs, settings-driven authorization URL launch, a localhost OAuth
+  callback bridge, settings-driven authorization-code token exchange, and credential
+  hand-off to SDK sessions all work. Per-provider refresh and signed-in propagation still
+  need Visual Studio-specific work.
+- **Rules / workflows / skills** — settings query and toggle partly work; the `skills`
+  execution tool stays disabled until the approval/execution UX is finished.
+- **Worktree service** — the sidecar git adapter handles list/create/switch/merge/delete,
+  with dirty/locked/prunable state, changed-file summaries, local branch checkout,
+  local/remote base branch selection, multi-solution selection, and switching between the
+  current and a new Visual Studio window. Worktrees-view polling pauses during operations
+  so selection and status messages are not overwritten. Per-worktree task routing and deep
+  conflict recovery remain.
+- **Hooks / subagents / scheduled agents** — local hook files in `.clinerules/hooks` and
+  `~/.cline/hooks` can be created, toggled and deleted from the WebView, and run across
+  the task/resume/tool lifecycle. A `PreToolUse` hook's JSON response can block tool
+  execution and patch tool input. The Subagents toggle forwards to SDK spawn/team agent
+  settings, and Scheduled Agents enables SDK workspace automation from a local
+  `.cline/cron` spec. Richer upstream hook response semantics, scheduled-agent management
+  UX and subagent execution UX remain.
 
-### 미구현 또는 주요 남은 작업
+### Not implemented / main remaining work
 
-- Visual Studio 터미널 pane과의 first-class 통합
-- 장기 실행 명령에 대한 명시적 continue/attach action과 Visual Studio terminal pane 통합
-- 파일 변경 Review, Undo, Revert, multi-file review의 upstream 수준 parity
-- true checkpoint diff streams와 richer checkpoint review metadata
-- Chrome debugging adapter 기반 browser action, screenshots, tab lifecycle streaming
-- MCP marketplace catalog/install
+- first-class Visual Studio terminal pane integration
+- explicit continue/attach actions for long-running commands, wired to the terminal pane
+- upstream-level parity for file change Review, Undo, Revert and multi-file review
+- true checkpoint diff streams and richer checkpoint review metadata
+- Chrome-debugging browser actions, screenshots and tab lifecycle streaming
+- MCP marketplace catalog and install
 - MCP OAuth authenticate callback
-- MCP resource, resource-template, prompt listing
-- Visual Studio 호환 OAuth refresh 및 account login/logout flow
-- OpenAI Codex 등 OAuth-backed provider auth flow parity
-- provider/model catalog stream과 provider별 정밀 capability metadata
+- MCP resource, resource-template and prompt listing
+- Visual Studio-compatible OAuth refresh and account login/logout
+- auth flow parity for OAuth-backed providers such as OpenAI Codex
+- provider/model catalog streaming and precise per-provider capability metadata
 - worktree merge conflict abort/continue/recovery UX
-- solution이 없는 folder-only worktree 전환 처리와 worktree별 task/session routing
-- hooks JSON response 기반 고급 hook semantics와 validation 메시지
+- folder-only (solution-less) worktree switching, and per-worktree task/session routing
+- advanced hook semantics and validation messages from hook JSON responses
 - scheduled-agent spec/run management UX
-- plugin install/configuration surface
-- subagent/team 실행 상태와 승인 UX
+- plugin install and configuration surface
+- subagent/team execution status and approval UX
 
-## 런타임 경계
+## Runtime boundary
 
-C# VSIX가 담당하는 것:
+**The C# VSIX owns:**
 
-- Visual Studio 확장 package 초기화
-- Tool Window와 WebView2 호스팅
-- Node sidecar lifecycle 관리
+- extension package initialisation
+- the Tool Window and WebView2 hosting
+- Node sidecar lifecycle
 - named-pipe JSON-RPC transport
-- workspace, editor, command execution, diff, clipboard, storage, secrets 등 Visual Studio host adapter
-- WebView2 Runtime과 sidecar runtime 준비
+- Visual Studio host adapters — workspace, editor, command execution, diff, clipboard,
+  storage, secrets
+- preparing the WebView2 and sidecar runtimes
 
-Node sidecar와 `@cline/sdk`가 담당하는 것:
+**The Node sidecar and `@cline/sdk` own:**
 
 - ClineCore session lifecycle
-- agent loop와 tool semantics
-- streaming/event normalization
-- SDK tool approval flow
-- SDK settings, history, checkpoint, MCP manager 연동
-- WebView service/RPC routing
+- the agent loop and tool semantics
+- streaming and event normalisation
+- the SDK tool approval flow
+- SDK settings, history, checkpoints and the MCP manager
+- WebView service and RPC routing
 
-새 기능을 추가할 때 C#에 agent runtime을 다시 만들지 말고, 가능한 한 sidecar와 SDK/host adapter 경계에 추가해야 합니다.
+When adding a feature, **do not rebuild the agent runtime in C#.** Add it at the sidecar
+and SDK/host-adapter boundary wherever possible.
 
-## 참고 문서
+## Further reading
 
-- `docs/Vs2022SdkCoverage.md`: 현재 구현 상태, parity gap, 작업 우선순위
-- `docs/PortFidelityGaps.md`: 이전 gap 문서에서 현재 기준 문서로 가는 포인터
-- `docs/UpstreamBaseline.md`: upstream 기준 정보
-- `docs/AirGapBuild.md`: 폐쇄망 빌드와 설치 참고
-- `src/sidecar/README.md`: sidecar 개발 참고
+| Document | Contents |
+|---|---|
+| `docs/Vs2022SdkCoverage.md` | Current status, parity gaps, work priorities |
+| `docs/PortFidelityGaps.md` | Pointer from the older gap document to the current one |
+| `docs/UpstreamBaseline.md` | Upstream baseline information |
+| `docs/AirGapBuild.md` | Air-gapped build and installation notes |
+| `src/sidecar/README.md` | Sidecar development notes |
