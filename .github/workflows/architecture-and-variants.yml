@@ -1,0 +1,51 @@
+name: Architecture and VSIX variants
+
+on:
+  pull_request:
+  push:
+    branches: [main, master, agent/runtime-ui-architecture-baseline]
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+          cache-dependency-path: |
+            src/sidecar/package-lock.json
+            src/webview/package-lock.json
+
+      - name: Verify sidecar architecture and behavior
+        working-directory: src/sidecar
+        run: |
+          npm ci
+          npm run check
+          npm test
+          npm run build
+
+      - name: Verify passive WebView contracts and behavior
+        working-directory: src/webview
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Verify .NET host contracts
+        run: dotnet test .\tests\extension\VsClineAgent.Host.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+
+      - name: Build and validate both VSIX profiles
+        shell: pwsh
+        run: .\scripts\Build-VsixVariants.ps1 -Configuration Release -SkipFrontend
+
+      - name: Upload VSIX variants
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-variants
+          path: |
+            src/extension/bin/17.0/Release/VsClineAgent17.vsix
+            src/extension/bin/17.12/Release/VsClineAgent.vsix

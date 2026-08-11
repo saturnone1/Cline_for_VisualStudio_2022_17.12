@@ -1,0 +1,18 @@
+{
+	"vscode": {
+		"messageEncoding": "none",
+		"showNavbar": false,
+		"postMessageHandler": "vscode",
+		"togglePlanActKeys": "Meta+Shift+a",
+		"supportsTerminalMentions": true,
+		"rpcUnaryTimeoutMs": 120000
+	},
+	"standalone": {
+		"messageEncoding": "json",
+		"showNavbar": true,
+		"postMessageHandler": "standalone",
+		"togglePlanActKeys": "Meta+Shift+p",
+		"supportsTerminalMentions": false,
+		"rpcUnaryTimeoutMs": 120000
+	}
+}

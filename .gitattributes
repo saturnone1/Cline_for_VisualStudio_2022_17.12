@@ -1,0 +1,6 @@
+artifacts/WebApp/** -diff -text -whitespace linguist-generated=true
+contracts/generated/** linguist-generated=true
+src/extension/Host/Generated/** linguist-generated=true
+src/sidecar/src/application/dto/generated/** linguist-generated=true
+src/webview/src/services/generated/** linguist-generated=true
+src/shared/api.ts linguist-vendored=true

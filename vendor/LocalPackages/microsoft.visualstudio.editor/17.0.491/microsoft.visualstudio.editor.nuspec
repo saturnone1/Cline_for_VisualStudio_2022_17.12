@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.Editor</id>
+    <version>17.0.491</version>
+    <authors>Microsoft</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">LICENSE.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+    <description>Microsoft® Visual Studio® Editor Platform</description>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <repository type="git" commit="793f0a7fcb59716495ea6e29f1ad3d7745431542" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.VisualStudio.CoreUtility" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Language" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.Data" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.Logic" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.UI.Wpf" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Text.UI" version="17.0.491" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.GraphModel" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Interop" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.ProjectAggregator" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.RpcContracts" version="17.0.51" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Shell.15.0" version="17.0.31723.112" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.0.63" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.VisualStudio.Validation" version="17.0.28" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <frameworkAssemblies>
+      <frameworkAssembly assemblyName="PresentationCore" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="PresentationFramework" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.ComponentModel.Composition" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Core" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Drawing" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.IO" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Net.Http" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Net.WebSockets" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Runtime" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Algorithms" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Encoding" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.Primitives" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="System.Security.Cryptography.X509Certificates" targetFramework=".NETFramework4.7.2" />
+      <frameworkAssembly assemblyName="WindowsBase" targetFramework=".NETFramework4.7.2" />
+    </frameworkAssemblies>
+  </metadata>
+</package>

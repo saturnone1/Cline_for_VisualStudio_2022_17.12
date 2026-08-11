@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VsAssemblyName>VsClineAgent17</VsAssemblyName>
+    <VsTargetFrameworkVersion>v4.8</VsTargetFrameworkVersion>
+    <VsSdkPackageVersion>17.0.32112.339</VsSdkPackageVersion>
+    <VsSdkBuildToolsPackageVersion>17.0.5241</VsSdkBuildToolsPackageVersion>
+    <VsixManifestPath>$(MSBuildThisFileDirectory)source.extension.vsixmanifest</VsixManifestPath>
+    <VsPkgDefPath>$(MSBuildThisFileDirectory)VsClineAgent.pkgdef</VsPkgDefPath>
+    <VsVersionInfoPath>$(MSBuildThisFileDirectory)VisualStudioVersionInfo.cs</VsVersionInfoPath>
+  </PropertyGroup>
+</Project>

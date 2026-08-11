@@ -1,0 +1,3546 @@
+{
+  "$schema": "./webview-rpc.schema.json",
+  "schemaVersion": 3,
+  "protocolVersion": 1,
+  "shapes": {
+    "Empty": {
+      "fields": {}
+    },
+    "TaskHistoryQueryRequest": {
+      "fields": {
+        "favoritesOnly": {
+          "type": "boolean"
+        },
+        "searchQuery": {
+          "type": "string"
+        },
+        "sortBy": {
+          "type": "string",
+          "values": ["newest", "oldest", "mostTokens", "mostRelevant"]
+        },
+        "currentWorkspaceOnly": {
+          "type": "boolean"
+        },
+        "cursor": {
+          "type": "number"
+        },
+        "pageSize": {
+          "type": "number"
+        }
+      }
+    },
+    "TaskPromptRequest": {
+      "fields": {
+        "text": {
+          "type": "string"
+        },
+        "answerText": {
+          "type": "string"
+        },
+        "responseType": {
+          "type": "string"
+        },
+        "images": {
+          "type": "stringArray"
+        },
+        "files": {
+          "type": "stringArray"
+        },
+        "workspacePath": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "clientOperationId": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "StringListValueRequest": {
+      "fields": {
+        "value": {
+          "type": "stringArray",
+          "required": true
+        }
+      }
+    },
+    "TaskIdRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      }
+    },
+    "TaskFavoriteRequest": {
+      "fields": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "isFavorited": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    "TaskHistoryItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "ts": { "type": "number", "required": true },
+        "task": { "type": "string", "required": true },
+        "tokensIn": { "type": "number" },
+        "tokensOut": { "type": "number" },
+        "cacheWrites": { "type": "number" },
+        "cacheReads": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "isFavorited": { "type": "boolean" },
+        "size": { "type": "number" },
+        "cwdOnTaskInitialization": { "type": "string" },
+        "modelId": { "type": "string" }
+      },
+      "allowAdditionalFields": true
+    },
+    "TaskHistoryResponse": {
+      "fields": {
+        "tasks": {
+          "type": "objectArray",
+          "shape": "TaskHistoryItem",
+          "required": true
+        },
+        "nextCursor": {
+          "type": "number",
+          "required": true
+        },
+        "total": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "NumberValueResponse": {
+      "fields": {
+        "value": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "FlexibleObject": {
+      "fields": {},
+      "allowAdditionalFields": true
+    },
+    "TaskPartialMessageEvent": {
+      "fields": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "object",
+          "shape": "FlexibleObject",
+          "required": true
+        }
+      }
+    },
+    "BooleanValueResponse": {
+      "fields": {
+        "value": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "StringValueRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "line": {
+          "type": "number"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BooleanValueRequest": {
+      "fields": {
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "NumberValueRequest": {
+      "fields": {
+        "value": {
+          "type": "number"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "RelativePathsResponse": {
+      "fields": {
+        "values": {
+          "type": "stringArray"
+        },
+        "paths": {
+          "type": "stringArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "FileSelectionResponse": {
+      "fields": {
+        "values1": {
+          "type": "stringArray",
+          "required": true
+        },
+        "values2": {
+          "type": "stringArray",
+          "required": true
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "FileSearchResponse": {
+      "fields": {
+        "results": {
+          "type": "objectArray",
+          "required": true
+        },
+        "values": {
+          "type": "stringArray"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "FileCommitSearchResponse": {
+      "fields": {
+        "commits": {
+          "type": "objectArray",
+          "required": true
+        },
+        "values": {
+          "type": "stringArray"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "FileDiffRequest": {
+      "fields": {
+        "leftPath": {
+          "type": "string"
+        },
+        "rightPath": {
+          "type": "string"
+        },
+        "beforePath": {
+          "type": "string"
+        },
+        "afterPath": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "FileRevertRequest": {
+      "fields": {
+        "files": {
+          "type": "objectArray",
+          "required": true
+        }
+      }
+    },
+    "FileSelectRequest": {
+      "fields": {
+        "value": {
+          "type": "boolean"
+        },
+        "allowImages": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "RelativePathsRequest": {
+      "fields": {
+        "uris": {
+          "type": "stringArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "RuleFileRequest": {
+      "fields": {
+        "isGlobal": { "type": "boolean", "required": true },
+        "filename": { "type": "string" },
+        "rulePath": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    },
+    "CreateSkillRequest": {
+      "fields": {
+        "skillName": { "type": "string", "required": true },
+        "isGlobal": { "type": "boolean", "required": true }
+      }
+    },
+    "DeleteSkillRequest": {
+      "fields": {
+        "skillPath": { "type": "string", "required": true },
+        "isGlobal": { "type": "boolean", "required": true }
+      }
+    },
+    "FileSearchRequest": {
+      "fields": {
+        "query": {
+          "type": "string",
+          "required": true
+        },
+        "mentionsRequestId": {
+          "type": "string"
+        },
+        "selectedType": {
+          "type": "string",
+          "values": ["FILE", "FOLDER"]
+        },
+        "workspaceHint": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "TerminalTargetRequest": {
+      "fields": {
+        "terminalId": {
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "TerminalProfilesResponse": {
+      "fields": {
+        "profiles": {
+          "type": "objectArray",
+          "required": true
+        }
+      }
+    },
+    "McpAddServerRequest": {
+      "fields": {
+        "serverName": {
+          "type": "string",
+          "required": true
+        },
+        "serverUrl": {
+          "type": "string",
+          "required": true
+        },
+        "transportType": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpTargetRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "serverName": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpTimeoutRequest": {
+      "fields": {
+        "serverName": {
+          "type": "string",
+          "required": true
+        },
+        "timeout": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpToolApprovalRequest": {
+      "fields": {
+        "serverName": {
+          "type": "string",
+          "required": true
+        },
+        "toolNames": {
+          "type": "stringArray",
+          "required": true
+        },
+        "autoApprove": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpToggleRequest": {
+      "fields": {
+        "serverName": {
+          "type": "string",
+          "required": true
+        },
+        "disabled": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpServerItem": {
+      "fields": {
+        "name": { "type": "string", "required": true },
+        "config": { "type": "string", "required": true },
+        "status": { "type": "string", "required": true },
+        "error": { "type": "string", "required": true },
+        "tools": { "type": "objectArray", "required": true },
+        "resources": { "type": "objectArray", "required": true },
+        "resourceTemplates": { "type": "objectArray", "required": true },
+        "prompts": { "type": "objectArray", "required": true },
+        "disabled": { "type": "boolean", "required": true },
+        "timeout": { "type": "number" },
+        "oauthRequired": { "type": "boolean" },
+        "oauthAuthStatus": { "type": "string" }
+      },
+      "allowAdditionalFields": true
+    },
+    "McpServersResponse": {
+      "fields": {
+        "mcpServers": {
+          "type": "objectArray",
+          "shape": "McpServerItem",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ModeRequest": {
+      "fields": {
+        "mode": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ModeResponse": {
+      "fields": {
+        "value": {
+          "type": "boolean",
+          "required": true
+        },
+        "mode": {
+          "type": "string",
+          "values": ["plan", "act"],
+          "required": true
+        }
+      }
+    },
+    "TelemetryRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "telemetrySetting": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BannerRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "banner": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "TerminalTimeoutRequest": {
+      "fields": {
+        "value": {
+          "type": "number"
+        },
+        "timeout": {
+          "type": "number"
+        },
+        "timeoutMs": {
+          "type": "number"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ResetStateRequest": {
+      "fields": {
+        "global": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "StateStreamResponse": {
+      "fields": {
+        "stateJson": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ProviderAuthRequest": {
+      "fields": {
+        "provider": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "apiProvider": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string"
+        },
+        "credential": {
+          "type": "string"
+        },
+        "baseUrl": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "callbackUrl": {
+          "type": "string"
+        },
+        "redirectUrl": {
+          "type": "string"
+        },
+        "organizationId": {
+          "type": "string"
+        },
+        "clearBaseUrl": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "OrganizationRequest": {
+      "fields": {
+        "organizationId": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "OrganizationsResponse": {
+      "fields": {
+        "organizations": {
+          "type": "objectArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "AccountCreditsResponse": {
+      "fields": {
+        "credits": {
+          "type": "number",
+          "required": true
+        },
+        "balance": {
+          "type": "object",
+          "required": true
+        },
+        "value": {
+          "type": "number",
+          "required": true
+        },
+        "usageTransactions": {
+          "type": "objectArray",
+          "required": true
+        },
+        "paymentTransactions": {
+          "type": "objectArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "AccountAuthResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "authStatus": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "redirectUrl": {
+          "type": "string"
+        },
+        "isAuthenticated": {
+          "type": "boolean"
+        },
+        "hasCredential": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "object"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "AccountAuthStateResponse": {
+      "fields": {
+        "loggedIn": {
+          "type": "boolean"
+        },
+        "user": {
+          "type": "unknown"
+        },
+        "organizations": {
+          "type": "objectArray"
+        },
+        "activeOrganization": {
+          "type": "unknown"
+        },
+        "isAuthenticated": {
+          "type": "boolean"
+        },
+        "openAiCodexIsAuthenticated": {
+          "type": "boolean"
+        },
+        "authStatus": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserHostRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserActionRequest": {
+      "fields": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "browserSessionId": {
+          "type": "string"
+        },
+        "coordinate": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserPathResponse": {
+      "fields": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "isBundled": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserConnectionResponse": {
+      "fields": {
+        "isConnected": {
+          "type": "boolean",
+          "required": true
+        },
+        "isRemote": {
+          "type": "boolean",
+          "required": true
+        },
+        "host": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "browser": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "tabCount": {
+          "type": "number"
+        },
+        "activeTabTitle": {
+          "type": "string"
+        },
+        "activeTabUrl": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "webFetchEnabled": {
+          "type": "boolean"
+        },
+        "webFetchDisabledReason": {
+          "type": "string"
+        },
+        "browserToolUseDisabled": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserProbeResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserRelaunchResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "value": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserTabItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "webSocketDebuggerUrl": { "type": "string", "required": true }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserTabsResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean"
+        },
+        "tabs": {
+          "type": "objectArray",
+          "shape": "BrowserTabItem",
+          "required": true
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "BrowserActionResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "CheckpointTargetRequest": {
+      "fields": {
+        "checkpointRunCount": {
+          "type": "number"
+        },
+        "runCount": {
+          "type": "number"
+        },
+        "messageTs": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        },
+        "number": {
+          "type": "number"
+        },
+        "restoreType": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "CheckpointDiffResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "supported": {
+          "type": "boolean",
+          "required": true
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ModelCatalogRequest": {
+      "fields": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ModelCatalogResponse": {
+      "fields": {
+        "models": {
+          "type": "object",
+          "required": true
+        },
+        "values": {
+          "type": "objectArray",
+          "required": true
+        },
+        "items": {
+          "type": "objectArray",
+          "required": true
+        },
+        "modelIds": {
+          "type": "stringArray",
+          "required": true
+        },
+        "selectedId": {
+          "type": "string",
+          "required": true
+        },
+        "providerId": {
+          "type": "string",
+          "required": true
+        },
+        "source": {
+          "type": "string",
+          "required": true
+        },
+        "supported": {
+          "type": "boolean",
+          "required": true
+        },
+        "reduced": {
+          "type": "boolean",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        },
+        "error": {
+          "type": "string",
+          "required": true
+        },
+        "diagnostics": {
+          "type": "object",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "StringModelsResponse": {
+      "fields": {
+        "values": {
+          "type": "stringArray",
+          "required": true
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "OpenRouterKeyInfoResponse": {
+      "fields": {
+        "data": {
+          "type": "unknown",
+          "required": true
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "RecommendedModelsResponse": {
+      "fields": {
+        "recommended": {
+          "type": "objectArray",
+          "required": true
+        },
+        "free": {
+          "type": "objectArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "VsCodeLmModelsResponse": {
+      "fields": {
+        "models": {
+          "type": "objectArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "SapAiCoreModelsResponse": {
+      "fields": {
+        "deployments": {
+          "type": "objectArray",
+          "required": true
+        },
+        "orchestrationAvailable": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "PluginListResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "supported": {
+          "type": "boolean",
+          "required": true
+        },
+        "plugins": {
+          "type": "objectArray",
+          "required": true
+        },
+        "items": {
+          "type": "objectArray",
+          "required": true
+        },
+        "count": {
+          "type": "number",
+          "required": true
+        },
+        "workspaceRoot": {
+          "type": "string",
+          "required": true
+        },
+        "marketplaceEnabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "marketplaceInstallSupported": {
+          "type": "boolean",
+          "required": true
+        },
+        "marketplaceDisabledReason": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ScheduledAgentSpecRequest": {
+      "fields": {
+        "id": {
+          "type": "string"
+        },
+        "specId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "cron": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ScheduledAgentListResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "supported": {
+          "type": "boolean",
+          "required": true
+        },
+        "workspaceRoot": {
+          "type": "string",
+          "required": true
+        },
+        "specs": {
+          "type": "objectArray",
+          "required": true
+        },
+        "items": {
+          "type": "objectArray",
+          "required": true
+        },
+        "recentRuns": {
+          "type": "objectArray",
+          "required": true
+        },
+        "automationEnabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "source": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ScheduledAgentMutationResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "supported": {
+          "type": "boolean",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ShowWebviewResponse": {
+      "fields": {
+        "preserveEditorFocus": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "AddToInputResponse": {
+      "fields": {
+        "value": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "UrlRequest": {
+      "fields": {
+        "value": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "ImageUrlResponse": {
+      "fields": {
+        "isImage": {
+          "type": "boolean",
+          "required": true
+        },
+        "value": {
+          "type": "boolean",
+          "required": true
+        },
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "OpenGraphResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "siteName": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeCreateRequest": {
+      "fields": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "branch": {
+          "type": "string"
+        },
+        "branchName": {
+          "type": "string"
+        },
+        "baseBranch": {
+          "type": "string"
+        },
+        "createNewBranch": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeSwitchRequest": {
+      "fields": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "solutionPath": {
+          "type": "string"
+        },
+        "newWindow": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeDeleteRequest": {
+      "fields": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "deleteBranch": {
+          "type": "boolean"
+        },
+        "branchName": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeMergeRequest": {
+      "fields": {
+        "worktreePath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "targetBranch": {
+          "type": "string"
+        },
+        "deleteAfterMerge": {
+          "type": "boolean"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeRecoveryRequest": {
+      "fields": {
+        "action": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "targetWorktreePath": {
+          "type": "string"
+        },
+        "workspacePath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeIncludeRequest": {
+      "fields": {
+        "content": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeListResponse": {
+      "fields": {
+        "worktrees": {
+          "type": "objectArray",
+          "required": true
+        },
+        "items": {
+          "type": "objectArray",
+          "required": true
+        },
+        "isGitRepo": {
+          "type": "boolean",
+          "required": true
+        },
+        "isMultiRoot": {
+          "type": "boolean",
+          "required": true
+        },
+        "isSubfolder": {
+          "type": "boolean",
+          "required": true
+        },
+        "gitRootPath": {
+          "type": "string",
+          "required": true
+        },
+        "error": {
+          "type": "string",
+          "required": true
+        },
+        "errorKind": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeDefaultsResponse": {
+      "fields": {
+        "branch": {
+          "type": "string",
+          "required": true
+        },
+        "baseBranch": {
+          "type": "string",
+          "required": true
+        },
+        "currentBranch": {
+          "type": "string",
+          "required": true
+        },
+        "branches": {
+          "type": "stringArray",
+          "required": true
+        },
+        "baseBranches": {
+          "type": "stringArray",
+          "required": true
+        },
+        "cwd": {
+          "type": "string",
+          "required": true
+        },
+        "suggestedBranch": {
+          "type": "string",
+          "required": true
+        },
+        "suggestedPath": {
+          "type": "string",
+          "required": true
+        },
+        "recommendedPath": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeIncludeResponse": {
+      "fields": {
+        "enabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "included": {
+          "type": "boolean",
+          "required": true
+        },
+        "exists": {
+          "type": "boolean",
+          "required": true
+        },
+        "hasGitignore": {
+          "type": "boolean",
+          "required": true
+        },
+        "gitignoreContent": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeMutationResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeMergeResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        },
+        "hasConflicts": {
+          "type": "boolean",
+          "required": true
+        },
+        "conflictingFiles": {
+          "type": "stringArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    },
+    "WorktreeRecoveryResponse": {
+      "fields": {
+        "success": {
+          "type": "boolean",
+          "required": true
+        },
+        "action": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "required": true
+        },
+        "conflictingFiles": {
+          "type": "stringArray",
+          "required": true
+        }
+      },
+      "allowAdditionalFields": true
+    }
+  },
+  "operations": [
+    {
+      "service": "AccountService",
+      "method": "accountLoginClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "accountLogoutClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "clearProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "clearProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "completeOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "deleteProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getOAuthCallbackStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getOrganizationCredits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "OrganizationRequest",
+      "responseShape": "AccountCreditsResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderAuthRequirements",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderAuthStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderConfigFields",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderCredentialStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getProviderOAuthCallbackStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getRedirectUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getUserCredits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountCreditsResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "getUserOrganizations",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "OrganizationsResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "hicapAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "openAiCodexSignIn",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "openAiCodexSignOut",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "openrouterAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshOAuthCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "refreshProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "requestyAuthClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "saveOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "saveProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "saveProviderToken",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "setUserOrganization",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "OrganizationRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "storeProviderCredential",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "submitLimitIncreaseRequest",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "submitOAuthCallback",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "AccountService",
+      "method": "subscribeToAuthStatusUpdate",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountAuthStateResponse",
+      "route": "stream"
+    },
+    {
+      "service": "AutomationService",
+      "method": "deleteScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "AutomationService",
+      "method": "listScheduledAgents",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "ScheduledAgentListResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "AutomationService",
+      "method": "runScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "AutomationService",
+      "method": "saveScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "BrowserService",
+      "method": "captureScreenshot",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "BrowserActionRequest",
+      "responseShape": "BrowserActionResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "discoverBrowser",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BrowserProbeResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "executeBrowserAction",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "BrowserActionRequest",
+      "responseShape": "BrowserActionResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "getBrowserConnectionInfo",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BrowserConnectionResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "getDetectedChromePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BrowserPathResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "listBrowserTabs",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BrowserTabsResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "performBrowserAction",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "BrowserActionRequest",
+      "responseShape": "BrowserActionResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "relaunchChromeDebugMode",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BrowserRelaunchResponse",
+      "route": "browser"
+    },
+    {
+      "service": "BrowserService",
+      "method": "testBrowserConnection",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "BrowserHostRequest",
+      "responseShape": "BrowserProbeResponse",
+      "route": "browser"
+    },
+    {
+      "service": "CheckpointsService",
+      "method": "checkpointDiff",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "CheckpointTargetRequest",
+      "responseShape": "CheckpointDiffResponse",
+      "route": "checkpoint"
+    },
+    {
+      "service": "CheckpointsService",
+      "method": "checkpointRestore",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "CheckpointTargetRequest",
+      "responseShape": "BooleanValueResponse",
+      "route": "checkpoint"
+    },
+    {
+      "service": "FileService",
+      "method": "copyToClipboard",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "createHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "hook"
+    },
+    {
+      "service": "FileService",
+      "method": "createRuleFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "RuleFileRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "createSkillFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "CreateSkillRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "deleteHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "hook"
+    },
+    {
+      "service": "FileService",
+      "method": "deleteRuleFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "RuleFileRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "deleteSkillFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "DeleteSkillRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "getRelativePaths",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "RelativePathsRequest",
+      "responseShape": "RelativePathsResponse",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "ifFileExistsRelativePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "BooleanValueResponse",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openDiskConversationHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openFileRelativePath",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openFocusChainFile",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openImage",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openMention",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "openVsClineDiff",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FileDiffRequest",
+      "responseShape": "Empty",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "refreshHooks",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "FlexibleObject",
+      "route": "hook"
+    },
+    {
+      "service": "FileService",
+      "method": "refreshRules",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "refreshSkills",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "revertVsClineChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FileRevertRequest",
+      "responseShape": "FlexibleObject",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "searchCommits",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "FileCommitSearchResponse",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "searchFiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FileSearchRequest",
+      "responseShape": "FileSearchResponse",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "selectFiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FileSelectRequest",
+      "responseShape": "FileSelectionResponse",
+      "route": "file"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleAgentsRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleClineRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleCursorRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleHook",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "hook"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleSkill",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleWindsurfRule",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "FileService",
+      "method": "toggleWorkflow",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "instructionSettings"
+    },
+    {
+      "service": "McpService",
+      "method": "addRemoteMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpAddServerRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "authenticateMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpTargetRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "deleteMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpTargetRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "downloadMcp",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "getLatestMcpServers",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "openMcpSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "refreshMcpMarketplace",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "FlexibleObject",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "restartMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpTargetRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "subscribeToMcpMarketplaceCatalog",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "FlexibleObject",
+      "route": "stream"
+    },
+    {
+      "service": "McpService",
+      "method": "subscribeToMcpServers",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "McpServersResponse",
+      "route": "stream"
+    },
+    {
+      "service": "McpService",
+      "method": "toggleMcpServer",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpToggleRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "toggleToolAutoApprove",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpToolApprovalRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "McpService",
+      "method": "updateMcpTimeout",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "McpTimeoutRequest",
+      "responseShape": "McpServersResponse",
+      "route": "mcp"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getAihubmixModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getAskSageModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "StringModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getLmStudioModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "StringModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getOllamaModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "StringModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getOpenRouterKeyInfo",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "OpenRouterKeyInfoResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getSapAiCoreModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "SapAiCoreModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "getVsCodeLmModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "VsCodeLmModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshBasetenModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshClineModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshClineRecommendedModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "RecommendedModelsResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshGroqModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshHicapModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshHuggingFaceModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshLiteLlmModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOcaModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOpenAiModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshOpenRouterModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshRequestyModels",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "refreshVercelAiGatewayModelsRpc",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "modelCatalog"
+    },
+    {
+      "service": "ModelsService",
+      "method": "subscribeToLiteLlmModels",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "stream"
+    },
+    {
+      "service": "ModelsService",
+      "method": "subscribeToOpenRouterModels",
+      "kind": "serverStream",
+      "client": false,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "ModelCatalogRequest",
+      "responseShape": "ModelCatalogResponse",
+      "route": "stream"
+    },
+    {
+      "service": "ModelsService",
+      "method": "updateApiConfiguration",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "ModelsService",
+      "method": "updateApiConfigurationProto",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaAccountLoginClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaAccountLogoutClicked",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ProviderAuthRequest",
+      "responseShape": "AccountAuthResponse",
+      "route": "account"
+    },
+    {
+      "service": "OcaAccountService",
+      "method": "ocaSubscribeToAuthStatusUpdate",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "AccountAuthStateResponse",
+      "route": "stream"
+    },
+    {
+      "service": "PluginService",
+      "method": "getPluginConfigStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "PluginListResponse",
+      "route": "plugin"
+    },
+    {
+      "service": "PluginService",
+      "method": "listPlugins",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "PluginListResponse",
+      "route": "plugin"
+    },
+    {
+      "service": "PluginsService",
+      "method": "getPluginConfigStatus",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "PluginListResponse",
+      "route": "plugin"
+    },
+    {
+      "service": "PluginsService",
+      "method": "listPlugins",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "PluginListResponse",
+      "route": "plugin"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "createSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "deleteScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "deleteSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "listScheduledAgents",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "ScheduledAgentListResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "listSpecs",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "ScheduledAgentListResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "runScheduledAgent",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "runSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "saveSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "ScheduledAgentsService",
+      "method": "updateSpec",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "ScheduledAgentSpecRequest",
+      "responseShape": "ScheduledAgentMutationResponse",
+      "route": "scheduledAgent"
+    },
+    {
+      "service": "SlashService",
+      "method": "condense",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "timeoutMs": 0,
+      "route": "task"
+    },
+    {
+      "service": "SlashService",
+      "method": "reportBug",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "StateService",
+      "method": "captureOnboardingProgress",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "BooleanValueResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "dismissBanner",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "BannerRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "getAvailableTerminalProfiles",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "TerminalProfilesResponse",
+      "route": "terminal"
+    },
+    {
+      "service": "StateService",
+      "method": "installClineCli",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "BooleanValueResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "refreshRemoteConfig",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "BooleanValueResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "resetState",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ResetStateRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "setWelcomeViewCompleted",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "BooleanValueRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "subscribeToState",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "StateStreamResponse",
+      "route": "stream"
+    },
+    {
+      "service": "StateService",
+      "method": "testOtelConnection",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "BooleanValueResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "testPromptUploading",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "BooleanValueResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "toggleFavoriteModel",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringValueRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "togglePlanActModeProto",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "ModeRequest",
+      "responseShape": "ModeResponse",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateAutoApprovalSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateCliBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "NumberValueRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateInfoBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "NumberValueRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateModelBannerVersion",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "NumberValueRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateSettings",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateTelemetrySetting",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TelemetryRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "StateService",
+      "method": "updateTerminalConnectionTimeout",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TerminalTimeoutRequest",
+      "responseShape": "Empty",
+      "route": "settings"
+    },
+    {
+      "service": "TaskService",
+      "method": "askResponse",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TaskPromptRequest",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "cancelBackgroundCommand",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "TaskService",
+      "method": "cancelTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "clearTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "deleteAllTaskHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "deleteTasksWithIds",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "StringListValueRequest",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "explainChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "TaskService",
+      "method": "exportTaskWithId",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "TaskIdRequest",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "TaskService",
+      "method": "getTaskHistory",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TaskHistoryQueryRequest",
+      "responseShape": "TaskHistoryResponse",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "getTotalTasksSize",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "NumberValueResponse",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "newTask",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TaskPromptRequest",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "showTaskWithId",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TaskIdRequest",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TaskService",
+      "method": "taskCompletionViewChanges",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "TaskService",
+      "method": "taskFeedback",
+      "kind": "unary",
+      "client": true,
+      "sidecar": false,
+      "requestShape": "FlexibleObject",
+      "responseShape": "FlexibleObject"
+    },
+    {
+      "service": "TaskService",
+      "method": "toggleTaskFavorite",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "TaskFavoriteRequest",
+      "responseShape": "Empty",
+      "route": "task"
+    },
+    {
+      "service": "TerminalService",
+      "method": "attachTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "TerminalService",
+      "method": "continueTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "TerminalService",
+      "method": "openTerminalPanel",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "UiService",
+      "method": "attachTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "UiService",
+      "method": "continueTerminalCommand",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "UiService",
+      "method": "initializeWebview",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "uiWeb"
+    },
+    {
+      "service": "UiService",
+      "method": "onDidShowAnnouncement",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "BooleanValueResponse",
+      "route": "uiWeb"
+    },
+    {
+      "service": "UiService",
+      "method": "openTerminalPanel",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "TerminalTargetRequest",
+      "responseShape": "FlexibleObject",
+      "route": "terminal"
+    },
+    {
+      "service": "UiService",
+      "method": "openUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "UrlRequest",
+      "responseShape": "Empty",
+      "route": "uiWeb"
+    },
+    {
+      "service": "UiService",
+      "method": "openWalkthrough",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "uiWeb"
+    },
+    {
+      "service": "UiService",
+      "method": "setTerminalExecutionMode",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "uiWeb"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToAccountButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToAddToInput",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "AddToInputResponse",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToChatButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToHistoryButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToMcpButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToPartialMessage",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "TaskPartialMessageEvent",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToRelinquishControl",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToSettingsButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToShowWebview",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "ShowWebviewResponse",
+      "route": "stream"
+    },
+    {
+      "service": "UiService",
+      "method": "subscribeToWorktreesButtonClicked",
+      "kind": "serverStream",
+      "client": true,
+      "sidecar": true,
+      "fallback": "passive",
+      "requestShape": "Empty",
+      "responseShape": "Empty",
+      "route": "stream"
+    },
+    {
+      "service": "WebService",
+      "method": "checkIsImageUrl",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "UrlRequest",
+      "responseShape": "ImageUrlResponse",
+      "route": "uiWeb"
+    },
+    {
+      "service": "WebService",
+      "method": "fetchOpenGraphData",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "UrlRequest",
+      "responseShape": "OpenGraphResponse",
+      "route": "uiWeb"
+    },
+    {
+      "service": "WebService",
+      "method": "openInBrowser",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "UrlRequest",
+      "responseShape": "Empty",
+      "route": "uiWeb"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "createWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "WorktreeCreateRequest",
+      "responseShape": "WorktreeMutationResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "createWorktreeInclude",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "WorktreeIncludeRequest",
+      "responseShape": "WorktreeMutationResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "deleteWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "WorktreeDeleteRequest",
+      "responseShape": "WorktreeMutationResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "getWorktreeDefaults",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "WorktreeDefaultsResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "getWorktreeIncludeStatus",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "WorktreeIncludeResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "listWorktrees",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "Empty",
+      "responseShape": "WorktreeListResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "mergeRecovery",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "WorktreeRecoveryRequest",
+      "responseShape": "WorktreeRecoveryResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "mergeWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "WorktreeMergeRequest",
+      "responseShape": "WorktreeMergeResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "recoverMerge",
+      "kind": "unary",
+      "client": false,
+      "sidecar": true,
+      "requestShape": "WorktreeRecoveryRequest",
+      "responseShape": "WorktreeRecoveryResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "switchWorktree",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "WorktreeSwitchRequest",
+      "responseShape": "WorktreeMutationResponse",
+      "route": "worktree"
+    },
+    {
+      "service": "WorktreeService",
+      "method": "trackWorktreeViewOpened",
+      "kind": "unary",
+      "client": true,
+      "sidecar": true,
+      "requestShape": "FlexibleObject",
+      "responseShape": "Empty",
+      "route": "worktree"
+    }
+  ]
+}

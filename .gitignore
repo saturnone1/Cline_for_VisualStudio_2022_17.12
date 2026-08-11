@@ -1,0 +1,33 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet
+packages/
+*.nupkg
+
+# VSIX output
+*.vsix
+
+# Rider / JetBrains
+.idea/
+
+# macOS
+.DS_Store
+
+# Local porting references and oversized offline runtime bundle
+.upstream-cline/
+vendor/WebView2Runtime/
+downloads/
+
+# Generated sidecar/runtime artifacts
+src/sidecar/node_modules/
+src/sidecar/dist/
+src/webview/node_modules/
+src/webview/coverage/
+artifacts/.staging/
+artifacts/Sidecar/
+TestResults/

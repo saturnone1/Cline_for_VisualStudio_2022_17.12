@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VsTarget Condition="'$(VsTarget)' == ''">17.12</VsTarget>
+    <VsPackagingRoot>$(MSBuildProjectDirectory)\..\..\packaging</VsPackagingRoot>
+    <VsProfilePath>$(VsPackagingRoot)\vs2022-$(VsTarget)\Version.props</VsProfilePath>
+    <MSBuildProjectExtensionsPath>$(MSBuildProjectDirectory)\obj\$(VsTarget)\</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <Import Project="$(VsPackagingRoot)\ProductVersion.props" Condition="Exists('$(VsPackagingRoot)\ProductVersion.props')" />
+  <Import Project="$(VsProfilePath)" Condition="Exists('$(VsProfilePath)')" />
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <!-- WPF + C# project type GUIDs -->
+    <ProjectTypeGuids>{60DC8134-EBA5-43B8-BCC9-BB4BC16C2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <OutputType>Library</OutputType>
+    <RootNamespace>VsClineAgent</RootNamespace>
+    <AssemblyName>$(VsAssemblyName)</AssemblyName>
+    <TargetFrameworkVersion>$(VsTargetFrameworkVersion)</TargetFrameworkVersion>
+    <AssemblyVersion>$(ProductAssemblyVersion)</AssemblyVersion>
+    <FileVersion>$(ProductAssemblyVersion)</FileVersion>
+    <Version>$(ProductVersion)</Version>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- VSIX 생성 설정 -->
+    <GeneratePkgDefFile>false</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
+    <CreateVsixContainer>true</CreateVsixContainer>
+    <RepoRoot>$(MSBuildProjectDirectory)\..\..</RepoRoot>
+    <ArtifactsRoot>$(RepoRoot)\artifacts</ArtifactsRoot>
+    <AssetsRoot>$(RepoRoot)\assets</AssetsRoot>
+    <VendorRoot>$(RepoRoot)\vendor</VendorRoot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\$(VsTarget)\Debug\</OutputPath>
+    <IntermediateOutputPath>obj\$(VsTarget)\Debug\</IntermediateOutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\$(VsTarget)\Release\</OutputPath>
+    <IntermediateOutputPath>obj\$(VsTarget)\Release\</IntermediateOutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <!-- NuGet 패키지 참조 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="$(VsSdkPackageVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="$(VsSdkBuildToolsPackageVersion)" ExcludeAssets="build" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!-- BCL + WPF 어셈블리 참조 -->
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Design" />
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>$(VendorRoot)\LocalPackages\system.numerics.vectors\4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <!-- WPF (UseWPF 대신 명시적 참조) -->
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+
+  <!-- C# 소스 파일 -->
+  <ItemGroup>
+    <Compile Include="Commands\OpenChatWindowCommand.cs" />
+    <Compile Include="Guids.cs" />
+    <Compile Include="Host\NamedPipeJsonRpcClient.cs" />
+    <Compile Include="Host\BoundedUtf8LineReader.cs" />
+    <Compile Include="Host\InteractionLog.cs" />
+    <Compile Include="Host\InteractionCorrelation.cs" />
+    <Compile Include="Host\InteractionLogSanitizer.cs" />
+    <Compile Include="Host\PendingWebviewMessageBuffer.cs" />
+    <Compile Include="Host\SidecarRuntimeFingerprint.cs" />
+	<Compile Include="Host\SidecarRuntimeInstaller.cs" />
+    <Compile Include="Host\SidecarStartupConnector.cs" />
+    <Compile Include="Host\HostRpcRouter.cs" />
+    <Compile Include="Host\HostRpcAdapterFactory.cs" />
+    <Compile Include="Host\HostDiagnosticReport.cs" />
+    <Compile Include="Host\WebviewGrpcFallback.cs" />
+    <Compile Include="Host\Generated\WebviewRpcContract.cs" />
+    <Compile Include="Host\Generated\HostRpcContract.cs" />
+    <Compile Include="Host\WebviewBootstrapScript.cs" />
+    <Compile Include="Host\WebviewMessageQueue.cs" />
+	<Compile Include="Host\WebViewNavigationPolicy.cs" />
+	<Compile Include="Host\WebViewShortcutPolicy.cs" />
+	<Compile Include="Host\UiThemePreferenceStore.cs" />
+    <Compile Include="Host\VisualStudioUiThread.cs" />
+    <Compile Include="Host\VisualStudioOutputPaneWriter.cs" />
+    <Compile Include="Host\WebView2RuntimeResolver.cs" />
+    <Compile Include="Host\WebViewLoadingPresenter.cs" />
+    <Compile Include="Host\WebViewLifecycleMessage.cs" />
+    <Compile Include="Host\WebViewDiagnosticPolicy.cs" />
+    <Compile Include="Host\ToolWindowLifetime.cs" />
+    <Compile Include="Host\WindowsProcessJob.cs" />
+    <Compile Include="Host\Adapters\IHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\HealthHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\EnvironmentHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\EditorHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\FileSystemHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\TerminalHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\DiffHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\WorkspaceHostRpcAdapter.cs" />
+    <Compile Include="Host\Adapters\WebviewHostRpcAdapter.cs" />
+    <Compile Include="Host\SidecarProcess.cs" />
+    <Compile Include="Host\SidecarLifecycle.cs" />
+    <Compile Include="$(VsVersionInfoPath)">
+      <Link>Host\VisualStudioVersionInfo.cs</Link>
+    </Compile>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\ProductVersionAssemblyInfo.cs" />
+    <Compile Include="Services\CommandExecutionModels.cs" />
+    <Compile Include="Services\ICommandOutputWriter.cs" />
+    <Compile Include="Services\TerminalCommandPolicy.cs" />
+    <Compile Include="Services\VsCommandExecutionService.cs" />
+    <Compile Include="Services\VsEditorService.cs" />
+    <Compile Include="ToolWindows\ChatToolWindow.cs" />
+    <Compile Include="ToolWindows\ChatToolWindowControl.xaml.cs">
+      <DependentUpon>ChatToolWindowControl.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="VsClineAgentPackage.cs" />
+  </ItemGroup>
+
+  <Target Name="ValidateVsPackagingProfile" BeforeTargets="PrepareForBuild"
+          Condition="!Exists('$(VsProfilePath)') Or '$(VsAssemblyName)' == '' Or '$(VsixManifestPath)' == '' Or !Exists('$(VsPkgDefPath)')">
+    <Error Text="Unknown or incomplete VsTarget '$(VsTarget)'. Expected a profile at $(VsProfilePath)." />
+  </Target>
+
+  <!-- WPF XAML -->
+  <ItemGroup>
+    <Page Include="ToolWindows\ChatToolWindowControl.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <!-- VSCT (메뉴 커맨드) -->
+  <ItemGroup>
+    <VSCTCompile Include="VsClineAgentPackage.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+      <SubType>Designer</SubType>
+    </VSCTCompile>
+  </ItemGroup>
+
+  <!-- VSIX 매니페스트 -->
+  <ItemGroup>
+    <None Include="$(VsixManifestPath)">
+      <Link>source.extension.vsixmanifest</Link>
+      <SubType>Designer</SubType>
+    </None>
+    <Content Include="$(VsPkgDefPath)">
+      <Link>VsClineAgent.pkgdef</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="$(AssetsRoot)\extension\lig-ci-white.png">
+      <Link>Assets\lig-ci-white.png</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="$(AssetsRoot)\extension\lig-mark-white.png">
+      <Link>Assets\lig-mark-white.png</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
+  <!-- WebApp 콘텐츠 (VSIX에 포함) -->
+  <ItemGroup>
+    <Content Include="$(ArtifactsRoot)\WebApp\**">
+      <Link>WebApp\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="$(ArtifactsRoot)\Sidecar\node_modules.zip">
+      <Link>Sidecar\node_modules.zip</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="$(ArtifactsRoot)\Sidecar\node_modules.fingerprint">
+      <Link>Sidecar\node_modules.fingerprint</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
+  <!-- Air-gap deployment: optionally bundle a WebView2 Fixed Version Runtime -->
+  <ItemGroup Condition="Exists('$(VendorRoot)\WebView2Runtime')">
+    <Content Include="$(VendorRoot)\WebView2Runtime\**">
+      <Link>WebView2Runtime\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="PrepareSidecarRuntimeFallback" BeforeTargets="GetVsixSourceItems">
+    <RemoveDir Directories="$(ArtifactsRoot)\Sidecar\runtime" />
+    <MakeDir Directories="$(ArtifactsRoot)\Sidecar\runtime;$(ArtifactsRoot)\Sidecar\runtime\application;$(ArtifactsRoot)\Sidecar\runtime\bootstrap;$(ArtifactsRoot)\Sidecar\runtime\domain;$(ArtifactsRoot)\Sidecar\runtime\features;$(ArtifactsRoot)\Sidecar\runtime\infrastructure;$(ArtifactsRoot)\Sidecar\runtime\presentation" />
+    <Copy SourceFiles="$(ArtifactsRoot)\Sidecar\cline-sidecar.js" DestinationFiles="$(ArtifactsRoot)\Sidecar\runtime\cline-sidecar.js" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ArtifactsRoot)\Sidecar\node.exe" DestinationFiles="$(ArtifactsRoot)\Sidecar\runtime\node.exe" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <SidecarApplicationFiles Include="$(ArtifactsRoot)\Sidecar\application\**\*" />
+      <SidecarBootstrapFiles Include="$(ArtifactsRoot)\Sidecar\bootstrap\**\*" />
+      <SidecarDomainFiles Include="$(ArtifactsRoot)\Sidecar\domain\**\*" />
+      <SidecarFeatureFiles Include="$(ArtifactsRoot)\Sidecar\features\**\*" />
+      <SidecarInfrastructureFiles Include="$(ArtifactsRoot)\Sidecar\infrastructure\**\*" />
+      <SidecarPresentationFiles Include="$(ArtifactsRoot)\Sidecar\presentation\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SidecarApplicationFiles)" DestinationFiles="@(SidecarApplicationFiles->'$(ArtifactsRoot)\Sidecar\runtime\application\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarBootstrapFiles)" DestinationFiles="@(SidecarBootstrapFiles->'$(ArtifactsRoot)\Sidecar\runtime\bootstrap\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarDomainFiles)" DestinationFiles="@(SidecarDomainFiles->'$(ArtifactsRoot)\Sidecar\runtime\domain\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarFeatureFiles)" DestinationFiles="@(SidecarFeatureFiles->'$(ArtifactsRoot)\Sidecar\runtime\features\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarInfrastructureFiles)" DestinationFiles="@(SidecarInfrastructureFiles->'$(ArtifactsRoot)\Sidecar\runtime\infrastructure\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SidecarPresentationFiles)" DestinationFiles="@(SidecarPresentationFiles->'$(ArtifactsRoot)\Sidecar\runtime\presentation\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <SidecarRuntimeContent Include="$(ArtifactsRoot)\Sidecar\runtime\**\*" />
+      <Content Include="@(SidecarRuntimeContent)">
+        <Link>Sidecar\runtime\%(SidecarRuntimeContent.RecursiveDir)%(SidecarRuntimeContent.Filename)%(SidecarRuntimeContent.Extension)</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="IncludeManagedRuntimeDependencies" BeforeTargets="GetVsixSourceItems">
+    <ItemGroup>
+      <Content Include="$(OutputPath)Newtonsoft.Json.dll" Condition="Exists('$(OutputPath)Newtonsoft.Json.dll')">
+        <Link>Newtonsoft.Json.dll</Link>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+      <Content Include="$(OutputPath)System.Numerics.Vectors.dll" Condition="Exists('$(OutputPath)System.Numerics.Vectors.dll')">
+        <Link>System.Numerics.Vectors.dll</Link>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v18.0</VSToolsPath>
+    <VSToolsPath Condition="'$(VSToolsPath)' == '' And Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0')">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0</VSToolsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(NuGetPackageRoot)microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets')">$(NuGetPackageRoot)microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
+    <VsSdkBuildToolsTargetsPath Condition="'$(VsSdkBuildToolsTargetsPath)' == '' And Exists('$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets')">$(UserProfile)\.nuget\packages\microsoft.vssdk.buildtools\$(VsSdkBuildToolsPackageVersion)\tools\vssdk\Microsoft.VsSDK.targets</VsSdkBuildToolsTargetsPath>
+  </PropertyGroup>
+  <!-- VSSDK 빌드 타겟: VS 설치 경로 또는 NuGet 패키지에서 임포트 -->
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
+          Condition="'$(VSToolsPath)' != '' And Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+  <Import Project="$(VsSdkBuildToolsTargetsPath)"
+          Condition="!Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets') And '$(VsSdkBuildToolsTargetsPath)' != '' And Exists('$(VsSdkBuildToolsTargetsPath)')" />
+</Project>

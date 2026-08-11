@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Microsoft.VisualStudio.CoreUtility</id>
+    <version>17.0.491</version>
+    <authors>Microsoft</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">LICENSE.txt</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>PackageIcon.png</icon>
+    <projectUrl>https://aka.ms/vsextensibility</projectUrl>
+    <description>Microsoft® Visual Studio® Editor Platform</description>
+    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+    <repository type="git" commit="793f0a7fcb59716495ea6e29f1ad3d7745431542" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.7.2">
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.0.63" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="5.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.ComponentModel.Composition" version="4.5.0" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.VisualStudio.Threading" version="17.0.63" exclude="Build,Analyzers" />
+        <dependency id="System.Collections.Immutable" version="5.0.0" exclude="Build,Analyzers" />
+        <dependency id="System.ComponentModel.Composition" version="4.5.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

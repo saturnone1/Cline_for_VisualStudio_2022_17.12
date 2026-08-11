@@ -1,0 +1,15 @@
+const assert = require("node:assert/strict")
+const test = require("node:test")
+const { ApprovalCoordinator } = require("../dist/features/approvals/ApprovalCoordinator")
+
+test("approval coordinator owns pending, response, and supersede lifecycle", async () => {
+	const approvals = new ApprovalCoordinator()
+	const first = approvals.request()
+	assert.equal(approvals.hasPending, true)
+	const second = approvals.request()
+	assert.deepEqual(await first, { approved: false, reason: "Superseded by a newer LIG VS tool approval request." })
+	const respond = approvals.take()
+	respond({ approved: true, reason: "approved" })
+	assert.deepEqual(await second, { approved: true, reason: "approved" })
+	assert.equal(approvals.hasPending, false)
+})
